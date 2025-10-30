@@ -355,7 +355,7 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            className="w-full justify-between font-normal"
+            className="justify-between font-normal min-w-[200px]"
           >
             {selectedModelData ? (
               <div className="flex items-center gap-2 truncate">

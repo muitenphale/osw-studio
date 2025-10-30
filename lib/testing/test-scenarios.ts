@@ -49,7 +49,6 @@ const basicHTMLTemplate = `<!DOCTYPE html>
         <p>This is a test application for validating code generation.</p>
     </main>
     <script>
-        // console.log('App loaded');
     </script>
 </body>
 </html>`;
@@ -83,7 +82,6 @@ document.addEventListener('DOMContentLoaded', function() {
     navLinks.forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
-            // console.log('Navigating to:', this.getAttribute('href'));
         });
     });
 });`;

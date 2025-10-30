@@ -19,7 +19,6 @@ If you make something with the app I would be thrilled if you could share what y
 
 ## Key Features
 
-- **Agentic coding**: Agent autonomously handles file operations, edits code, and manages project structure
 - **Dual modes**: Chat mode for read-only exploration and planning, Code mode for full implementation
 - **Multi-provider AI**: Works with Ollama, LM Studio, OpenRouter (200+ models), OpenAI, Anthropic Claude, Google Gemini, Groq, and SambaNova
 - **Development environment**: Monaco editor with multi-tab support, live preview with hot reload, file explorer
@@ -91,10 +90,11 @@ If you make something with the app I would be thrilled if you could share what y
 
 ## How It Works
 
-The agent interacts with the project through `shell` and `json_patch` tools operating on a virtual file system in your browser. The limited number of tools was a conscious choice to reduce "tool stuffing" while leaning on the strong sh/bash capabilities of most modern models:
+The agent interacts with your project through 3 core tools operating on a virtual file system in your browser:
 
-- **VFS commands**: The agent uses CLI commands (`ls`, `cat`, `grep`, `mkdir`, `rm`, `mv`, `cp`) on the in-browser file system
+- **VFS commands**: The agent uses shell-like commands (`ls`, `cat`, `grep`, `mkdir`, `rm`, `mv`, `cp`) on the in-browser file system
 - **File editing**: Changes are applied through `json_patch` with precise string operations
+- **Self-evaluation**: The `evaluation` tool allows the agent to assess task completion and decide whether to continue
 - **Command validation**: Commands are validated before execution
 - **Checkpoints**: State is saved after each operation for rollback
 - **Rate limiting**: Automatic retry with exponential backoff

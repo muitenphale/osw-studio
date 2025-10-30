@@ -8,19 +8,14 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { ArrowLeft, Send, Loader2, RotateCcw, MessageSquare, FolderTree, Code2, Eye, ChevronDown, ChevronUp, Settings, Trash2, Save, Info, X } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
-import { Orchestrator } from '@/lib/llm/orchestrator';
+import { MultiAgentOrchestrator } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager } from '@/lib/config/storage';
 import { useCostSettings } from '@/lib/hooks/use-cost-settings';
 import { getProvider } from '@/lib/llm/providers/registry';
 import { toast } from 'sonner';
-import { conversationState } from '@/lib/llm/conversation-state';
-import { ConversationConverter } from '@/lib/llm/conversation-converter-simple';
-import { buildShellSystemPrompt } from '@/lib/llm/system-prompt';
+import { debugEventsState } from '@/lib/llm/debug-events-state';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -32,60 +27,20 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-
 import { checkpointManager } from '@/lib/vfs/checkpoint';
 import { saveManager } from '@/lib/vfs/save-manager';
-import { TaskProgressDisplay, TaskStep } from '@/components/task-progress';
-import { AssistantMessage } from '@/components/assistant-message';
-import { MarkdownRenderer } from '@/components/markdown-renderer';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { ModelSettingsPanel } from '@/components/settings/model-settings';
 import { SettingsPanel } from '@/components/settings';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
 import { FocusContextPayload } from '@/lib/preview/types';
-
-interface ToolMessageItem {
-  id: string;
-  type: 'message' | 'tool' | 'divider' | 'thinking';
-  content?: string;
-  name?: string;
-  parameters?: any;
-  result?: any;
-  status?: 'pending' | 'executing' | 'completed' | 'failed';
-  title?: string;
-  subtitle?: string;
-}
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  checkpointId?: string;
-  isTask?: boolean;
-  taskSteps?: TaskStep[];
-  taskTitle?: string;
-  toolCalls?: Array<{
-    name: string;
-    parameters?: any;
-    result?: any;
-    status?: 'pending' | 'executing' | 'completed' | 'failed';
-  }>;
-  toolMessages?: ToolMessageItem[];
-  cost?: number;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    provider?: string;
-    model?: string;
-  };
-}
+import { DebugPanel, DebugEvent } from '@/components/debug-panel';
+import { ChatPanel } from '@/components/chat-panel';
 
 interface WorkspaceProps {
   project: Project;
@@ -94,24 +49,13 @@ interface WorkspaceProps {
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
-/**
- * Helper function to safely clone a message for state updates.
- * Deep clones toolMessages array to prevent mutation issues.
- */
-function cloneMessageForUpdate(message: Message): Message {
-  return {
-    ...message,
-    toolMessages: (message.toolMessages || []).map(item => ({ ...item }))
-  };
-}
-
 export function Workspace({ project, onBack }: WorkspaceProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [currentOrchestrator, setCurrentOrchestrator] = useState<Orchestrator | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [activeMobilePanel, setActiveMobilePanel] = useState<'assistant' | 'files' | 'editor' | 'preview'>('preview');
+  const [currentOrchestrator, setCurrentOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
+  const [persistedOrchestrator, setPersistedOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
+  const [activeMobilePanel, setActiveMobilePanel] = useState<'chat' | 'files' | 'editor' | 'preview'>('preview');
   const [isDirty, setIsDirty] = useState(false);
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
@@ -124,52 +68,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     return false;
   });
   const lastFocusSignatureRef = useRef<{ signature: string; timestamp: number } | null>(null);
-  const currentAssistantIdx = useRef<number | null>(null);
-  const idCounterRef = useRef(0);
   const previewRef = useRef<MultipagePreviewHandle>(null);
-  const makeId = useCallback((): string => {
-    try {
-      const anyCrypto = (globalThis as any)?.crypto;
-      if (anyCrypto && typeof anyCrypto.randomUUID === 'function') {
-        return anyCrypto.randomUUID();
-      }
-    } catch {}
-    const id = `${Date.now()}_${idCounterRef.current}`;
-    idCounterRef.current += 1;
-    return id;
-  }, []);
-  const ensureStreamingAssistant = useCallback((arr: Message[]): { arr: Message[]; idx: number } => {
-    // Check if current index is valid for this array
-    if (currentAssistantIdx.current != null && 
-        currentAssistantIdx.current >= 0 && 
-        currentAssistantIdx.current < arr.length && 
-        arr[currentAssistantIdx.current] && 
-        arr[currentAssistantIdx.current].role === 'assistant' &&
-        !arr[currentAssistantIdx.current].checkpointId) {
-      // Valid streaming assistant exists
-      return { arr, idx: currentAssistantIdx.current };
-    }
-    
-    // Need to create or find a streaming assistant
-    const last = arr[arr.length - 1];
-    const needsNewAssistant = !last ||
-      last.role !== 'assistant' ||
-      Boolean(last.checkpointId) ||
-      Boolean((last as any).isTask);
-
-    if (needsNewAssistant) {
-      const msg: Message = { id: makeId(), role: 'assistant', content: '', toolMessages: [] } as any;
-      const next = [...arr, msg];
-      currentAssistantIdx.current = next.length - 1;
-      return { arr: next, idx: currentAssistantIdx.current };
-    } else {
-      // Reuse the last assistant message
-      currentAssistantIdx.current = arr.length - 1;
-      return { arr, idx: currentAssistantIdx.current };
-    }
-  }, [makeId]);
+  const retryTriggerRef = useRef<boolean>(false);
   const [initialCheckpointId, setInitialCheckpointId] = useState<string | null>(null);
-  const [expandedTasks, setExpandedTasks] = useState<Set<number>>(new Set());
   const [currentModel, setCurrentModel] = useState(configManager.getDefaultModel());
   const [showDesktopSettings, setShowDesktopSettings] = useState(false);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
@@ -178,34 +79,101 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
   const isTourLockingInput = tourRunning && tourStep !== 'wrap-up';
-  
-  // Get cost settings for conditional display  
+
+  // Get cost settings for conditional display
   const { shouldShowCosts } = useCostSettings();
   
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const isAutoScrollEnabled = useRef(true);
-  const isUserScrolling = useRef(false);
-  
-  const [showAssistant, setShowAssistant] = useState(true);
-  const [showFiles, setShowFiles] = useState(true);
-  const [showEditor, setShowEditor] = useState(false);
-  const [showPreview, setShowPreview] = useState(true);
+  const [showChat, setShowChat] = useState(true);    // Column 1: Chat v2 (event-driven)
+  const [showFiles, setShowFiles] = useState(true);      // Column 2: File explorer
+  const [showEditor, setShowEditor] = useState(false);   // Column 3: Monaco editor
+  const [showPreview, setShowPreview] = useState(true);  // Column 4: Live preview
+  const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 5: Debug events
+
+  // Debug events state
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const debugIdCounter = useRef(0);
+  const saveDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounced save function to persist events array to IndexedDB
+  const debouncedSaveEvents = useCallback((events: DebugEvent[]) => {
+    if (saveDebounceTimer.current) {
+      clearTimeout(saveDebounceTimer.current);
+    }
+    saveDebounceTimer.current = setTimeout(() => {
+      debugEventsState.saveEvents(project.id, events).catch(error => {
+        logger.error('Failed to persist debug events:', error);
+      });
+    }, 500); // Save after 500ms of inactivity
+  }, [project.id]);
+
+  const addDebugEvent = useCallback(async (event: string, data: any) => {
+    setDebugEvents(prev => {
+      const shouldCoalesce = event === 'assistant_delta' || event === 'tool_param_delta';
+
+      let newEvents: DebugEvent[];
+
+      // Check if we can coalesce with the last event
+      if (shouldCoalesce && prev.length > 0) {
+        const lastEvent = prev[prev.length - 1];
+
+        // Same event type - coalesce
+        if (lastEvent.event === event) {
+          // Accumulate data in 'all' array format
+          const updatedEvent = {
+            ...lastEvent,
+            timestamp: Date.now(),
+            version: (lastEvent.version || 1) + 1, // Increment version
+            count: (lastEvent.count || 1) + 1,
+            data: {
+              all: lastEvent.data.all
+                ? [...lastEvent.data.all, data]
+                : [lastEvent.data, data]
+            }
+          };
+
+          // Return new array with updated last event (triggers React re-render)
+          newEvents = [...prev.slice(0, -1), updatedEvent];
+          debouncedSaveEvents(newEvents);
+          return newEvents;
+        }
+      }
+
+      // Different event type or first event - add new
+      const debugEvent = {
+        id: `${Date.now()}-${debugIdCounter.current++}`,
+        timestamp: Date.now(),
+        event,
+        data,
+        count: 1,
+        version: 1
+      };
+
+      newEvents = [...prev, debugEvent];
+      debouncedSaveEvents(newEvents);
+      return newEvents;
+    });
+  }, [project.id, debouncedSaveEvents]);
+
+  const clearDebugEvents = useCallback(async () => {
+    setDebugEvents([]);
+    await debugEventsState.clearEvents(project.id);
+    // Clear orchestrator to reset conversation history
+    setPersistedOrchestrator(null);
+  }, [project.id]);
   
   const getDefaultSizes = () => {
-    const visiblePanels = [showAssistant, showFiles, showEditor, showPreview].filter(Boolean).length;
-    
-    if (visiblePanels === 4) {
-      return { assistant: 25, files: 15, editor: 35, preview: 25 };
+    const visiblePanels = [showChat, showFiles, showEditor, showPreview, showDebugPanel].filter(Boolean).length;
+
+    if (visiblePanels === 5) {
+      return { chat: 20, files: 15, editor: 25, preview: 20, debug: 20 };
+    } else if (visiblePanels === 4) {
+      return { chat: 25, files: 15, editor: 35, preview: 25, debug: 0 };
     } else if (visiblePanels === 3) {
-      if (!showAssistant) return { assistant: 0, files: 20, editor: 40, preview: 40 };
-      if (!showFiles) return { assistant: 30, files: 0, editor: 40, preview: 30 };
-      if (!showEditor) return { assistant: 33, files: 20, editor: 0, preview: 47 };
-      if (!showPreview) return { assistant: 30, files: 20, editor: 50, preview: 0 };
+      return { chat: 33, files: 33, editor: 33, preview: 33, debug: 0 };
     } else if (visiblePanels === 2) {
-      return { assistant: 50, files: 50, editor: 50, preview: 50 };
+      return { chat: 50, files: 50, editor: 50, preview: 50, debug: 0 };
     }
-    return { assistant: 100, files: 100, editor: 100, preview: 100 };
+    return { chat: 100, files: 100, editor: 100, preview: 100, debug: 0 };
   };
   
   const defaultSizes = getDefaultSizes();
@@ -378,55 +346,20 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         setIsDirty(saveManager.isDirty(project.id));
 
         logger.debug(`[Workspace] Initializing workspace for project: ${project.id}`);
-        const existingConversation = await conversationState.getConversation(project.id);
-        if (!isMounted) return;
-        logger.debug(`[Workspace] Loaded conversation state:`, {
-          messageCount: existingConversation.messages.length,
-          lastUpdated: existingConversation.lastUpdated,
-          version: existingConversation.version
-        });
 
-        if (existingConversation.messages.length > 0) {
-          logger.debug(`[Workspace] Converting ${existingConversation.messages.length} orchestrator messages to UI format`);
-
-          const nonSystemMessages = existingConversation.messages.filter(m => m.role !== 'system');
-          if (nonSystemMessages.length === 0) {
-            logger.warn(`[Workspace] Conversation contains only system messages - clearing`);
-            await conversationState.clearConversation(project.id);
-            if (!isMounted) return;
-            logger.debug(`[Workspace] No existing conversation found - starting fresh`);
-            return;
-          }
-
-          const uiMessages = ConversationConverter.convertToUIMessages(existingConversation.messages);
-          const filteredMessages = uiMessages.filter(m => m.id && m.role) as Message[];
-
-          logger.debug(`[Workspace] Conversion result:`, {
-            originalCount: existingConversation.messages.length,
-            convertedCount: uiMessages.length,
-            filteredCount: filteredMessages.length,
-            messageTypes: existingConversation.messages.map(m => m.role),
-            convertedTypes: uiMessages.map(m => m.role)
-          });
-
+        // Load debug events from IndexedDB
+        try {
+          const savedEvents = await debugEventsState.loadEvents(project.id);
           if (!isMounted) return;
-          setMessages(filteredMessages);
-
-          await conversationState.recordConversationBreak(project.id, {
-            type: 'page_refresh',
-            timestamp: new Date().toISOString(),
-            description: 'Page refreshed, conversation restored'
-          });
-
-          await conversationState.addBreakContextMessage(project.id, {
-            type: 'page_refresh',
-            timestamp: new Date().toISOString(),
-            description: 'Page refreshed, conversation restored'
-          });
-
-          logger.debug(`[Workspace] Restored conversation with ${filteredMessages.length} UI messages displayed`);
-        } else {
-          logger.debug(`[Workspace] No existing conversation found - starting fresh`);
+          if (savedEvents.length > 0) {
+            setDebugEvents(savedEvents);
+            logger.debug(`[Workspace] Restored ${savedEvents.length} debug events`);
+          } else {
+            logger.debug(`[Workspace] No saved debug events found`);
+          }
+        } catch (error) {
+          if (!isMounted) return;
+          logger.error('Failed to load debug events:', error);
         }
       } catch (error) {
         if (!isMounted) return;
@@ -486,74 +419,10 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setGenerating(tourStep === 'workspace-edit');
 
     const handler = (event: GuidedTourTranscriptEvent) => {
-      if (event.role === 'user') {
-        setMessages(prev => [...prev, { id: makeId(), role: 'user', content: event.content }]);
-        return;
-      }
-
-      if (event.role === 'assistant') {
-        setMessages(prev => {
-          const { arr, idx } = ensureStreamingAssistant([...prev]);
-          const base = arr[idx];
-          const nextContent = base.content ? `${base.content}\n\n${event.content}` : event.content;
-          arr[idx] = {
-            ...base,
-            content: nextContent,
-            toolMessages: base.toolMessages ?? [],
-            checkpointId: event.checkpointId ?? base.checkpointId,
-          };
-          return arr;
-        });
-        if (event.tone === 'success') {
-          setGenerating(false);
-        }
-        return;
-      }
-
-      if (event.role === 'tool') {
-        setMessages(prev => {
-          const { arr, idx } = ensureStreamingAssistant([...prev]);
-          const base = arr[idx];
-          const toolMessages = [...(base.toolMessages ?? [])];
-          
-          // Parse the command to match the expected format
-          let toolName = event.name;
-          let parameters: any = {};
-          
-          if (event.name === 'shell' && event.command) {
-            // Extract the actual command name from the command string
-            const parts = event.command.trim().split(/\s+/);
-            if (parts.length > 0) {
-              // Create the cmd array format expected by assistant-message
-              parameters = { cmd: parts };
-            } else {
-              parameters = { command: event.command };
-            }
-          } else if (event.name === 'json_patch') {
-            // Use json_patch as the tool name
-            toolName = 'json_patch';
-            parameters = { command: event.command };
-          } else {
-            parameters = { command: event.command };
-          }
-          
-          toolMessages.push({
-            id: makeId(),
-            type: 'tool',
-            name: toolName,
-            parameters,
-            result: event.output,
-            status: 'completed',
-          } as ToolMessageItem);
-          arr[idx] = { ...base, toolMessages };
-          return arr;
-        });
-        return;
-      }
-
+      // Tour events now handled by debug events only
+      // No need to manipulate messages state
       if (event.role === 'clear' && event.action === 'conversation') {
-        currentAssistantIdx.current = null;
-        setMessages([]);
+        clearDebugEvents();
         return;
       }
     };
@@ -563,52 +432,12 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     return () => {
       setWorkspaceHandler(null);
     };
-  }, [tourRunning, tourStep, setWorkspaceHandler, ensureStreamingAssistant, makeId]);
+  }, [tourRunning, tourStep, setWorkspaceHandler, clearDebugEvents]);
 
+  // Clear orchestrator when project or chat mode changes
   useEffect(() => {
-    if (isAutoScrollEnabled.current && messagesContainerRef.current) {
-      // Use direct scrollTop for instant, jank-free scrolling during streaming
-      const container = messagesContainerRef.current;
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [messages]);
-
-  // Improve autoscroll reliability with a sentinel observer
-  useEffect(() => {
-    const root = messagesContainerRef.current;
-    const target = messagesEndRef.current;
-    if (!root || !target) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        const atBottom = entry.isIntersecting || entry.intersectionRatio > 0.5;
-        isAutoScrollEnabled.current = atBottom;
-        if (atBottom) isUserScrolling.current = false;
-      },
-      { root, threshold: [0, 0.5, 1] }
-    );
-    obs.observe(target);
-    return () => {
-      obs.disconnect();
-    };
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    if (!messagesContainerRef.current) return;
-    
-    const container = messagesContainerRef.current;
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    
-    if (distanceFromBottom < 100) {
-      isAutoScrollEnabled.current = true;
-      isUserScrolling.current = false;
-    } else {
-      if (!generating) {
-        isAutoScrollEnabled.current = false;
-        isUserScrolling.current = true;
-      }
-    }
-  }, [generating]);
+    setPersistedOrchestrator(null);
+  }, [project.id, chatMode]);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)
@@ -676,15 +505,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
       setLastSavedAt(latestProject.lastSavedAt ?? new Date(checkpoint.timestamp));
       setInitialCheckpointId(checkpoint.id);
-      const timestamp = new Date().toISOString();
-      const breakInfo = {
-        type: 'manual_save' as const,
-        timestamp,
-        checkpointId: checkpoint.id,
-        description: 'Manual save'
-      };
-      await conversationState.recordConversationBreak(project.id, breakInfo);
-      await conversationState.addBreakContextMessage(project.id, breakInfo);
       toast.success('Project saved');
     } catch (error) {
       logger.error('Failed to save project', error);
@@ -720,29 +540,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         logger.warn(`[Workspace] Checkpoint ${checkpointId} no longer exists`);
         return;
       }
-      
+
       const success = await saveManager.runWithSuppressedDirty(project.id, () =>
         checkpointManager.restoreCheckpoint(checkpointId)
       );
       if (success) {
         toast.success(`Restored to: ${description || 'checkpoint'}`);
         handleFilesChange();
-        
-        // Record the checkpoint restoration
-        await conversationState.recordConversationBreak(project.id, {
-          type: 'checkpoint_restore',
-          timestamp: new Date().toISOString(),
-          checkpointId,
-          description: description || 'checkpoint'
-        });
-        
-        // Add context message for the LLM about the restoration
-        await conversationState.addBreakContextMessage(project.id, {
-          type: 'checkpoint_restore',
-          timestamp: new Date().toISOString(),
-          checkpointId,
-          description: description || 'checkpoint'
-        });
 
         const savedId = saveManager.getSavedCheckpointId(project.id);
         if (savedId && savedId === checkpointId) {
@@ -752,18 +556,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         } else {
           saveManager.markDirty(project.id);
         }
-
-        // Add UI message for user feedback
-        setMessages(prev => [...prev, {
-          id: makeId(),
-          role: 'assistant',
-          content: `Restored to checkpoint: ${description || 'previous state'}`,
-          checkpointId
-        }]);
-        
-        // Persist the updated conversation
-        const orchestratorMessages = ConversationConverter.convertToOrchestratorMessages(messages);
-        await conversationState.updateConversation(project.id, orchestratorMessages);
       } else {
         toast.error('Failed to restore checkpoint');
       }
@@ -771,9 +563,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       logger.error('Error restoring checkpoint:', error);
       toast.error('Failed to restore checkpoint');
     }
-  }, [handleFilesChange, messages, project.id]);
+  }, [handleFilesChange, project.id]);
 
-  const handleRetry = useCallback(async (checkpointId: string, messageIndex: number) => {
+  const handleRetry = useCallback(async (checkpointId: string) => {
     try {
       // First check if checkpoint exists
       const exists = await checkpointManager.checkpointExists(checkpointId);
@@ -782,22 +574,49 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         logger.warn(`[Workspace] Checkpoint ${checkpointId} no longer exists`);
         return;
       }
-      
-      // Find the user message that preceded this assistant message
-      let userMessage = null;
-      for (let i = messageIndex - 1; i >= 0; i--) {
-        if (messages[i].role === 'user') {
-          userMessage = messages[i];
+
+      // Find the user message associated with this checkpoint
+      // Search backwards from the checkpoint to find the most recent user message
+      let userMessageContent = null;
+      const checkpointEventIndex = debugEvents.findIndex(
+        e => e.event === 'checkpoint_created' && e.data?.checkpointId === checkpointId
+      );
+
+      if (checkpointEventIndex >= 0) {
+        // Search backwards from checkpoint event to find user message (in conversation_message events)
+        for (let i = checkpointEventIndex - 1; i >= 0; i--) {
+          if (debugEvents[i].event === 'conversation_message' &&
+              debugEvents[i].data?.message?.role === 'user') {
+            userMessageContent = debugEvents[i].data.message.content;
+            break;
+          }
+        }
+      }
+
+      if (!userMessageContent) {
+        toast.error('Cannot find original user message to retry');
+        logger.warn('[Workspace] No user message found before checkpoint');
+        return;
+      }
+
+      // Find the user message event index to truncate debug events
+      let userMessageIndex = -1;
+      for (let i = checkpointEventIndex - 1; i >= 0; i--) {
+        if (debugEvents[i].event === 'conversation_message' &&
+            debugEvents[i].data?.message?.role === 'user' &&
+            debugEvents[i].data.message.content === userMessageContent) {
+          userMessageIndex = i;
           break;
         }
       }
-      
-      if (!userMessage) {
-        toast.error('Cannot find original user message to retry');
+
+      if (userMessageIndex === -1) {
+        toast.error('Cannot find user message event to truncate');
+        logger.warn('[Workspace] User message event not found in debug events');
         return;
       }
-      
-      // Restore the checkpoint first
+
+      // Restore the checkpoint
       const success = await saveManager.runWithSuppressedDirty(project.id, () =>
         checkpointManager.restoreCheckpoint(checkpointId)
       );
@@ -814,50 +633,31 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       } else {
         saveManager.markDirty(project.id);
       }
-      
-      // Record the retry action
-      await conversationState.recordConversationBreak(project.id, {
-        type: 'retry',
-        timestamp: new Date().toISOString(),
-        checkpointId,
-        description: `Retrying: "${userMessage.content.substring(0, 50)}..."`
-      });
-      
-      const messagesBeforeRetry = messages.slice(0, messageIndex - 1);
-      setMessages(messagesBeforeRetry);
-      
-      // Update conversation state with truncated messages
-      const orchestratorMessages = ConversationConverter.convertToOrchestratorMessages(messagesBeforeRetry);
-      await conversationState.updateConversation(project.id, orchestratorMessages);
-      
-      // Add context message about the retry (for the LLM)
-      await conversationState.addBreakContextMessage(project.id, {
-        type: 'retry',
-        timestamp: new Date().toISOString(),
-        checkpointId,
-        description: `Retrying after restoring to checkpoint`
-      });
-      
-      // Show success message briefly
+
+      // Truncate debug events to remove assistant response and all subsequent events
+      // Keep events up to and including the user message
+      const truncatedEvents = debugEvents.slice(0, userMessageIndex + 1);
+      setDebugEvents(truncatedEvents);
+      await debugEventsState.truncateEvents(project.id, truncatedEvents);
+
+      // Clear the persisted orchestrator to force fresh conversation rebuild
+      setPersistedOrchestrator(null);
+
       toast.success('Restored checkpoint and retrying...');
       handleFilesChange();
-      
-      // Set the prompt and trigger retry
-      setPrompt(userMessage.content);
-      
-      // Trigger a click event on the generate button after a brief delay to ensure state update
-      setTimeout(() => {
-        const generateButton = document.querySelector('[data-retry-trigger="true"]') as HTMLButtonElement;
-        if (generateButton) {
-          generateButton.click();
-        }
-      }, 100);
-      
+
+      // Set the prompt to the original user message
+      setPrompt(userMessageContent);
+
+      // Set the retry trigger ref to initiate generation
+      // This will be picked up by the useEffect watching the prompt
+      retryTriggerRef.current = true;
+
     } catch (error) {
       logger.error('Error during retry:', error);
       toast.error('Failed to retry');
     }
-  }, [messages, handleFilesChange, project.id]);
+  }, [handleFilesChange, project.id, debugEvents, setPrompt]);
 
   
   const handleGenerate = async () => {
@@ -875,13 +675,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     const currentProvider = configManager.getSelectedProvider();
     const providerConfig = getProvider(currentProvider);
     const apiKey = configManager.getApiKey();
-    
+
     // Only require API key for providers that need it
     if (providerConfig.apiKeyRequired && !apiKey) {
       toast.error(`Please set your ${providerConfig.name} API key in settings`);
       return;
     }
-    
+
     // For local providers, check if they have models available
     if (providerConfig.isLocal) {
       const currentModel = configManager.getProviderModel(currentProvider);
@@ -897,11 +697,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       const useSeparateChatModel = localStorage.getItem(`osw-studio-use-separate-chat-model-${currentProvider}`) === 'true';
       if (useSeparateChatModel) {
         if (chatMode) {
-          // Use chat model if available
           const chatModel = localStorage.getItem(`osw-studio-chat-model-${currentProvider}`);
           if (chatModel) modelToUse = chatModel;
         } else {
-          // Use code model if available
           const codeModel = localStorage.getItem(`osw-studio-code-model-${currentProvider}`);
           if (codeModel) modelToUse = codeModel;
         }
@@ -914,465 +712,81 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       return;
     }
 
-    isAutoScrollEnabled.current = true;
-    isUserScrolling.current = false;
-
     setGenerating(true);
-    const messageContent = focusContext 
+    const messageContent = focusContext
       ? `${formatFocusContextBlock(focusContext)}\n\n${trimmedPrompt}`
       : trimmedPrompt;
 
-    const userMessage = { id: makeId(), role: 'user' as const, content: messageContent } as Message;
-    setMessages(prev => [...prev, userMessage]);
+    // Note: User message will be added by orchestrator via conversation_message event
+    // No need to manually add user_message event here to avoid duplication
 
     try {
-      // Prepare a dedicated assistant bubble for streaming
-      currentAssistantIdx.current = null;
-      setMessages(prev => ensureStreamingAssistant([...prev]).arr);
+      // Reuse existing orchestrator or create new one
+      let orchestrator = persistedOrchestrator;
 
-      // Get existing conversation for context
-      const existingConversation = await conversationState.getConversationMessages(project.id, 50); // Max 50 messages for context
-      
-      // Validate UI/Context synchronization
-      const currentUIMessages = messages.length;
-      const contextMessages = existingConversation.filter(m => m.role === 'user' || m.role === 'assistant').length;
-      
-      logger.debug(`[Workspace] Context validation:`, {
-        uiMessages: currentUIMessages,
-        contextMessages: contextMessages,
-        totalContextIncludingSystem: existingConversation.length,
-        contextTypes: existingConversation.map(m => m.role)
-      });
-      
-      // If there's a mismatch, this indicates the ghost conversation bug
-      if (currentUIMessages === 0 && contextMessages > 0) {
-        logger.warn(`[Workspace] GHOST CONVERSATION DETECTED: UI has ${currentUIMessages} messages but context has ${contextMessages} messages!`);
-        logger.warn(`[Workspace] This causes the LLM to continue previous conversations that the user cannot see.`);
-        logger.warn(`[Workspace] Clearing context to match UI state...`);
-        
-        // Clear the conversation to fix the mismatch
-        await conversationState.clearConversation(project.id);
-        // Re-fetch the now-empty conversation
-        existingConversation.length = 0;
-      }
-      
-      // Get file tree for system prompt context
-      let fileTree: string | undefined;
-      try {
-        const files = await vfs.listDirectory(project.id, '/');
-        if (files.length > 0) {
-          fileTree = files.map(f => f.path).join('\n');
+      // Create new orchestrator if:
+      // 1. No existing orchestrator
+      // 2. Chat mode changed (not implemented yet - would need to store mode)
+      // 3. Model changed (not implemented yet - would need to store model)
+      if (!orchestrator) {
+        orchestrator = new MultiAgentOrchestrator(
+          project.id,
+          'orchestrator',
+          addDebugEvent,
+          { chatMode, model: modelToUse }
+        );
+
+        // Extract and restore conversation history from debug events
+        const conversationMessages = debugEvents
+          .filter(event => event.event === 'conversation_message')
+          .map(event => event.data.message);
+
+        if (conversationMessages.length > 0) {
+          orchestrator.importConversation(conversationMessages);
+          logger.debug(`[Workspace] Restored ${conversationMessages.length} conversation messages from debug events`);
         }
-      } catch {
-        // Ignore errors getting file tree
+
+        setPersistedOrchestrator(orchestrator);
       }
 
-      const systemPrompt = buildShellSystemPrompt(fileTree, chatMode);
-      
-      const currentMessages = await new Promise<Message[]>(resolve => {
-        setMessages(prev => {
-          resolve(prev);
-          return prev;
-        });
+      // Store orchestrator reference for stop functionality
+      setCurrentOrchestrator(orchestrator);
+
+      // Execute - orchestrator handles conversation history internally
+      const result = await orchestrator.execute(messageContent);
+
+      logger.debug('[Workspace] Orchestrator result:', {
+        success: result.success,
+        summary: result.summary,
+        totalCost: result.totalCost
       });
-      
-      // Prepare conversation with system prompt and context
-      const conversationForOrchestrator = ConversationConverter.prepareConversationForOrchestrator(
-        currentMessages, // Current UI messages including the new user message
-        {
-          maxMessages: 50,
-          includeSystemPrompt: true,
-          systemPrompt
-        }
-      );
 
-      const orchestrator = new Orchestrator(
-        project.id,
-        conversationForOrchestrator,
-        (message, step) => {
-          if (message === 'assistant_delta' && ((step as any)?.text || (step as any)?.snapshot)) {
-            const deltaText = (step as any).text as string | undefined;
-            const snapshot = (step as any).snapshot as string | undefined;
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              if (idx < 0 || idx >= arr.length || !arr[idx]) {
-                logger.error('[assistant_delta] Invalid index or missing message:', { idx, arrayLength: arr.length });
-                return prev; // Don't update if index is invalid
-              }
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              let tms = msg.toolMessages as ToolMessageItem[];
-
-              // Remove thinking indicator when content starts arriving
-              tms = tms.filter(item => item.type !== 'thinking');
-
-              // Check if we need to create a new message item or continue existing one
-              // If there are tools after the last message, we're starting a new response
-              const lastMessageIdx = tms.findLastIndex(t => t.type === 'message');
-              const hasToolsAfterLastMessage = lastMessageIdx >= 0 &&
-                tms.slice(lastMessageIdx + 1).some(t => t.type === 'tool');
-
-              if (tms.length === 0 || tms[tms.length - 1].type !== 'message' || hasToolsAfterLastMessage) {
-                tms.push({ id: makeId(), type: 'message', content: '' });
-              }
-
-              const current = tms[tms.length - 1];
-              const updatedMessage = { ...current };
-              if (snapshot !== undefined) {
-                updatedMessage.content = snapshot;
-              } else if (deltaText) {
-                updatedMessage.content = (updatedMessage.content || '') + deltaText;
-              }
-              tms[tms.length - 1] = updatedMessage;
-
-              msg.toolMessages = tms;
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'toolCalls' && (step as any)?.toolCalls) {
-            const calls = (step as any).toolCalls as any[];
-            logger.debug(`[Workspace] Received ${calls.length} tool calls`, {
-              calls: calls.map(c => ({
-                id: c.id,
-                name: c.function?.name,
-                hasArgs: !!c.function?.arguments,
-                argsLength: c.function?.arguments?.length
-              }))
-            });
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              let tms = msg.toolMessages as ToolMessageItem[];
-
-              // Remove thinking indicator when tools start arriving
-              tms = tms.filter(item => item.type !== 'thinking');
-              for (let i = 0; i < calls.length; i++) {
-                const c = calls[i];
-                const toolId = c.id || makeId(); // Use API tool ID if available
-                const name = c.function?.name || c.name || '';
-
-                // Check if this tool already exists (from early notification)
-                const existingToolIndex = tms.findIndex(t => t.type === 'tool' && t.id === toolId);
-
-                if (existingToolIndex >= 0) {
-                  // Update existing tool with complete parameters
-                  let parameters;
-                  try {
-                    parameters = c.function ? JSON.parse(c.function.arguments || '{}') : c.parameters;
-                  } catch {
-                    parameters = c.function ? { arguments: c.function.arguments } : c.parameters;
-                  }
-                  tms[existingToolIndex] = {
-                    ...tms[existingToolIndex],
-                    name: name || tms[existingToolIndex].name,
-                    parameters: parameters,
-                  };
-                } else {
-                  // Add new tool
-                  let parameters;
-                  try {
-                    parameters = c.function ? JSON.parse(c.function.arguments || '{}') : c.parameters;
-                  } catch {
-                    parameters = c.function ? { arguments: c.function.arguments } : c.parameters;
-                  }
-                  tms.push({
-                    id: toolId,
-                    type: 'tool',
-                    name: name,
-                    parameters: parameters,
-                    status: 'pending',
-                    result: null
-                  } as ToolMessageItem);
-                }
-              }
-              msg.toolMessages = tms;
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'tool_param_delta' && (step as any)?.toolId) {
-            const { toolId, partialArguments } = step as any;
-            logger.debug(`[Workspace] Received tool_param_delta for ${toolId}`, {
-              argsLength: partialArguments?.length,
-              preview: partialArguments?.substring(0, 100)
-            });
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              const tms = msg.toolMessages as ToolMessageItem[];
-
-              // Find the tool by ID and update its parameters
-              for (let i = tms.length - 1; i >= 0; i--) {
-                if (tms[i].type === 'tool' && tms[i].id === toolId) {
-                  // Try to parse partial JSON, show raw if incomplete
-                  let parsedParams;
-                  try {
-                    parsedParams = JSON.parse(partialArguments);
-                  } catch {
-                    // JSON is incomplete, store raw for now
-                    parsedParams = { _partial: partialArguments };
-                  }
-                  tms[i] = { ...tms[i], parameters: parsedParams };
-                  break;
-                }
-              }
-
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'usage' && (step as any)?.usage) {
-            setMessages(prev => {
-              if (currentAssistantIdx.current == null) return prev;
-              const arr = [...prev];
-              const base = arr[currentAssistantIdx.current];
-              arr[currentAssistantIdx.current] = {
-                ...base,
-                cost: (step as any).totalCost,
-                usage: (step as any).usage,
-              } as any;
-              return arr;
-            });
-          }
-          if (message === 'retry' && (step as any)?.reason) {
-            const { reason, attempt, maxAttempts } = step as any;
-            logger.debug(`[Workspace] Received retry notification: ${reason} (${attempt}/${maxAttempts})`);
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              (msg.toolMessages as ToolMessageItem[]).push({
-                id: makeId(),
-                type: 'divider',
-                title: `⚠️ ${reason} (Retry ${attempt}/${maxAttempts})`
-              });
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'thinking') {
-            logger.debug(`[Workspace] Received thinking notification`);
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              const tms = msg.toolMessages as ToolMessageItem[];
-
-              // Remove any existing thinking indicator first
-              const filtered = tms.filter(item => item.type !== 'thinking');
-
-              // Add new thinking indicator at the end
-              filtered.push({
-                id: makeId(),
-                type: 'thinking' as any
-              });
-
-              msg.toolMessages = filtered;
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'evaluation' && (step as any)?.summary) {
-            const summary = (step as any).summary as string;
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              (msg.toolMessages as ToolMessageItem[]).push({ id: makeId(), type: 'message', content: summary });
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'divider') {
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              (msg.toolMessages as ToolMessageItem[]).push({ id: makeId(), type: 'divider', title: (step as any)?.title || 'Section' });
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'tool_result' && step) {
-            const { toolIndex, result } = step as any;
-            logger.debug(`[Workspace] Received tool result for tool ${toolIndex}`, { resultPreview: typeof result === 'string' ? result.substring(0, 100) : result });
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              const tms = msg.toolMessages as ToolMessageItem[];
-
-              // Find the Nth tool (where N = toolIndex) and update its result
-              let toolCount = 0;
-              for (let i = 0; i < tms.length; i++) {
-                if (tms[i].type === 'tool') {
-                  if (toolCount === toolIndex) {
-                    tms[i] = { ...tms[i], result: result };
-                    break;
-                  }
-                  toolCount++;
-                }
-              }
-
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-          if (message === 'tool_status' && step) {
-            const { toolIndex, status, result, error } = step as any;
-            setMessages(prev => {
-              let { arr, idx } = ensureStreamingAssistant([...prev]);
-              const base = arr[idx];
-              const msg = cloneMessageForUpdate(base) as any;
-              const tms = msg.toolMessages as ToolMessageItem[];
-
-              // Find the Nth tool (where N = toolIndex) and update its status
-              let toolCount = 0;
-              for (let i = 0; i < tms.length; i++) {
-                if (tms[i].type === 'tool') {
-                  if (toolCount === toolIndex) {
-                    tms[i] = {
-                      ...tms[i],
-                      status: status,
-                      result: result || error || tms[i].result
-                    };
-                    break;
-                  }
-                  toolCount++;
-                }
-              }
-
-              msg.toolMessages = tms;
-              arr[idx] = msg;
-              return arr;
-            });
-          }
-        },
-        { chatMode, model: modelToUse }
-      );
-
-        // Store orchestrator reference for stop functionality
-        setCurrentOrchestrator(orchestrator);
-
-        const result = await orchestrator.execute(messageContent);
-
-        logger.debug('[Workspace] Orchestrator result:', {
-          success: result.success,
-          stepsCompleted: result.stepsCompleted,
-          summaryPreview: result.summary?.substring(0, 100),
-          hasCost: !!result.totalCost,
-          hasUsage: !!result.usageInfo
+      if (result.success) {
+        handleFilesChange();
+        toast.success('Task completed');
+      } else {
+        toast.error(result.summary || 'Generation failed', {
+          duration: 5000,
+          position: 'bottom-center'
         });
+      }
 
-        // Attach checkpoint and usage to the current streamed assistant message
-        setMessages(prev => {
-          if (currentAssistantIdx.current == null) return prev;
-          const arr = [...prev];
-          const base = arr[currentAssistantIdx.current];
-          arr[currentAssistantIdx.current] = {
-            ...base,
-            checkpointId: result.checkpointId,
-            cost: result.totalCost,
-            usage: result.usageInfo,
-          } as any;
-          return arr;
-        });
-
-        if (result.success) {
-          handleFilesChange();
-        } else {
-          // Handle failure case - show error and persist in message
-          toast.error(result.summary || 'Generation failed', {
-            duration: 5000,
-            position: 'bottom-center'
-          });
-
-          // Add error message to toolMessages and remove thinking indicator
-          setMessages(prev => {
-            const updated = [...prev];
-            if (currentAssistantIdx.current !== null &&
-                currentAssistantIdx.current >= 0 &&
-                currentAssistantIdx.current < updated.length) {
-              const assistantMsg = updated[currentAssistantIdx.current];
-              if (assistantMsg && assistantMsg.toolMessages) {
-                updated[currentAssistantIdx.current] = {
-                  ...assistantMsg,
-                  toolMessages: [
-                    ...assistantMsg.toolMessages.filter(
-                      (item: ToolMessageItem) => item.type !== 'thinking'
-                    ),
-                    {
-                      id: makeId(),
-                      type: 'divider',
-                      title: result.summary || 'Generation failed',
-                      subtitle: 'Error'
-                    } as ToolMessageItem
-                  ]
-                };
-              }
-            }
-            return updated;
-          });
-        }
-
-        // Persist the updated conversation to IndexedDB after generation
-        const finalMessages = await new Promise<Message[]>((resolve) => {
-          setMessages(prev => {
-            resolve(prev);
-            return prev;
-          });
-        });
-
-        const orchestratorMessages = ConversationConverter.convertToOrchestratorMessages(finalMessages);
-        await conversationState.updateConversation(project.id, orchestratorMessages);
-        
-        setPrompt('');
+      setPrompt('');
+      if (focusContext) {
+        setFocusContext(null);
+      }
     } catch (error) {
       logger.error('Generation error:', error);
-
-      // Show toast notification
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate';
       toast.error(errorMessage, {
         duration: 5000,
         position: 'bottom-center'
       });
-
-      // Remove "Thinking..." indicator and add error message
-      setMessages(prev => {
-        const updated = [...prev];
-
-        // Remove thinking indicator from the last assistant message if it exists
-        if (currentAssistantIdx.current !== null &&
-            currentAssistantIdx.current >= 0 &&
-            currentAssistantIdx.current < updated.length) {
-          const assistantMsg = updated[currentAssistantIdx.current];
-          if (assistantMsg && assistantMsg.toolMessages) {
-            // Create new object to ensure React detects the change
-            updated[currentAssistantIdx.current] = {
-              ...assistantMsg,
-              toolMessages: assistantMsg.toolMessages.filter(
-                (item: ToolMessageItem) => item.type !== 'thinking'
-              )
-            };
-          }
-        }
-
-        // Add error message
-        updated.push({
-          id: makeId(),
-          role: 'assistant',
-          content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-        } as any);
-
-        return updated;
-      });
     } finally {
       setGenerating(false);
+      // Don't clear currentOrchestrator - only used for stop functionality
+      // The persisted orchestrator maintains conversation history
       setCurrentOrchestrator(null);
-      currentAssistantIdx.current = null;
     }
   };
 
@@ -1382,6 +796,18 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       toast.info('Generation stopped');
     }
   }, [currentOrchestrator]);
+
+  // Watch for retry trigger and execute generation
+  useEffect(() => {
+    if (retryTriggerRef.current && prompt.trim()) {
+      // Use setTimeout to ensure the prompt state has fully updated
+      setTimeout(() => {
+        handleGenerate();
+        // Reset the retry flag after generation starts
+        retryTriggerRef.current = false;
+      }, 50);
+    }
+  }, [prompt]);
 
   const headerActions: HeaderAction[] = [
     {
@@ -1487,41 +913,41 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
               <TooltipTrigger asChild>
                 <button
                   className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
-                    showAssistant 
-                      ? 'shadow-sm' 
+                    showChat
+                      ? 'shadow-sm'
                       : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
                   }`}
                   style={{
-                    backgroundColor: showAssistant ? 'var(--button-assistant-active)' : undefined,
-                    color: showAssistant ? 'white' : undefined
+                    backgroundColor: showChat ? 'var(--button-assistant-active)' : undefined,
+                    color: showChat ? 'white' : undefined
                   }}
-                  onClick={() => setShowAssistant(!showAssistant)}
+                  onClick={() => setShowChat(!showChat)}
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent 
-                side="right" 
+              <TooltipContent
+                side="right"
                 className="border-0"
-                style={{ 
-                  backgroundColor: 'var(--button-assistant-active)', 
+                style={{
+                  backgroundColor: '#ff6b35',
                   color: 'white'
                 }}
                 arrowStyle={{
-                  backgroundColor: 'var(--button-assistant-active)',
-                  fill: 'var(--button-assistant-active)'
+                  backgroundColor: '#ff6b35',
+                  fill: '#ff6b35'
                 }}
               >
                 <p>Chat</p>
               </TooltipContent>
             </Tooltip>
-            
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
-                    showFiles 
-                      ? 'shadow-sm' 
+                    showFiles
+                      ? 'shadow-sm'
                       : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
                   }`}
                   style={{
@@ -1533,11 +959,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   <FolderTree className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent 
-                side="right" 
+              <TooltipContent
+                side="right"
                 className="border-0"
-                style={{ 
-                  backgroundColor: 'var(--button-files-active)', 
+                style={{
+                  backgroundColor: 'var(--button-files-active)',
                   color: 'white'
                 }}
                 arrowStyle={{
@@ -1586,8 +1012,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
               <TooltipTrigger asChild>
                 <button
                   className={`h-5 w-5 mx-1 rounded-sm flex items-center justify-center transition-all ${
-                    showPreview 
-                      ? 'shadow-sm' 
+                    showPreview
+                      ? 'shadow-sm'
                       : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
                   }`}
                   style={{
@@ -1599,11 +1025,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   <Eye className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent 
-                side="right" 
+              <TooltipContent
+                side="right"
                 className="border-0"
-                style={{ 
-                  backgroundColor: 'var(--button-preview-active)', 
+                style={{
+                  backgroundColor: 'var(--button-preview-active)',
                   color: 'white'
                 }}
                 arrowStyle={{
@@ -1614,309 +1040,71 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 <p>Preview</p>
               </TooltipContent>
             </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
+                    showDebugPanel
+                      ? 'bg-foreground shadow-sm'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  style={{
+                    color: showDebugPanel ? 'var(--background)' : undefined
+                  }}
+                  onClick={() => setShowDebugPanel(!showDebugPanel)}
+                >
+                  <Bug className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="border-0 bg-foreground text-background"
+                arrowStyle={{
+                  backgroundColor: 'var(--foreground)',
+                  fill: 'var(--foreground)'
+                }}
+              >
+                <p>Debug Events</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
           
           {/* Main content area */}
           <div className="flex-1 p-2 overflow-hidden" data-tour-id="workspace-panels">
           <ResizablePanelGroup direction="horizontal" autoSaveId="workspace-layout">
-            {/* Column 1: AI Assistant */}
-            {showAssistant && (
+            {/* Column 1: Chat Panel */}
+            {showChat && (
               <ResizablePanel
-                id="assistant"
+                id="chat"
                 order={1}
-                defaultSize={defaultSizes.assistant}
+                defaultSize={defaultSizes.chat}
                 minSize={15}
               >
-                <div
-                  className="h-full flex flex-col border border-border rounded-lg shadow-sm overflow-hidden relative"
-                  style={{ background: `linear-gradient(var(--panel-assistant-tint), var(--panel-assistant-tint)), var(--card)`, minWidth: '240px' }}
-                  data-tour-id="assistant-panel"
-                >
-                      <div className="p-3 border-b bg-muted/80 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <MessageSquare 
-                            className="h-4 w-4 md:hidden" 
-                            style={{ color: 'var(--button-assistant-active)' }} 
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowAssistant(false)}
-                            aria-label="Hide chat"
-                            className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
-                          >
-                            <MessageSquare 
-                              className="h-4 w-4 transition-opacity group-hover:opacity-0" 
-                              style={{ color: 'var(--button-assistant-active)' }} 
-                            />
-                            <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-                          </button>
-                          <h3 className="text-sm font-medium">Chat</h3>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={async () => {
-                            logger.debug(`[Workspace] Clearing chat - UI has ${messages.length} messages`);
-                            
-                            // Clear UI state first
-                            setMessages([]);
-                            
-                            // Clear persistent conversation state
-                            await conversationState.clearConversation(project.id);
-                            
-                            // Verify clearing worked
-                            const verifyConversation = await conversationState.getConversationMessages(project.id);
-                            if (verifyConversation.length > 0) {
-                              logger.error(`[Workspace] Clear failed! Still has ${verifyConversation.length} messages in storage`);
-                            } else {
-                              logger.debug(`[Workspace] Successfully cleared all conversation data for project ${project.id}`);
-                            }
-                          }}
-                          className="h-5 w-5 p-0"
-                          title="Clear chat"
-                          data-tour-id="clear-chat-button"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      
-                      {/* Messages */}
-                      <div 
-                        ref={messagesContainerRef}
-                        onScroll={handleScroll}
-                        className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col"
-                        data-tour-id="checkpoint-panel"
-                      >
-                        {messages.length === 0 ? (
-                          <div className="flex-1 flex items-center justify-center">
-                            <div className="text-center space-y-3">
-                              <MessageSquare className="h-12 w-12 mx-auto opacity-50 text-muted-foreground" />
-                              <div className="space-y-1">
-                                <p className="text-base font-medium text-foreground">Ready to build</p>
-                                <p className="text-sm text-muted-foreground">Describe what you want to create or change</p>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          messages.map((msg, i) => {
-                            
-                            if (msg.isTask && msg.taskSteps) {
-                              return (
-                                <div key={msg.id} className="bg-card border border-border p-3 rounded-lg text-sm">
-                                  <TaskProgressDisplay
-                                    title={msg.taskTitle || 'Task Progress'}
-                                    steps={msg.taskSteps}
-                                    checkpointId={msg.checkpointId}
-                                    onRestore={(id) => handleRestoreCheckpoint(id, 'task checkpoint')}
-                                    isSavedCheckpoint={msg.checkpointId === initialCheckpointId}
-                                    expanded={expandedTasks.has(i)}
-                                    onToggleExpand={() => {
-                                      const newExpanded = new Set(expandedTasks);
-                                      if (newExpanded.has(i)) {
-                                        newExpanded.delete(i);
-                                      } else {
-                                        newExpanded.add(i);
-                                      }
-                                      setExpandedTasks(newExpanded);
-                                    }}
-                                  />
-                                </div>
-                              );
-                            }
-                            
-                            if (msg.role === 'assistant') {
-                              // Render AssistantMessage for any assistant message:
-                              // - Has toolMessages/toolCalls
-                              // - Empty (for "Thinking..." indicator)
-                              const hasTools = (
-                                ((msg as any).toolMessages && (msg as any).toolMessages.length > 0) ||
-                                ((msg as any).toolCalls && (msg as any).toolCalls.length > 0)
-                              );
-                              const isEmpty = !msg.content?.trim() && !hasTools;
-
-                              if (hasTools || isEmpty) {
-                              return (
-                                <div key={msg.id} className="bg-card border border-border p-3 rounded-lg text-sm mr-2">
-                                  <div className="mb-2">
-                                    <p className="font-medium">AI</p>
-                                  </div>
-                                  <AssistantMessage
-                                    content={msg.content}
-                                    toolCalls={(msg as any).toolCalls}
-                                    toolMessages={(msg as any).toolMessages}
-                                    checkpointId={msg.checkpointId}
-                                    onRestore={msg.checkpointId ? (id) => handleRestoreCheckpoint(id, 'checkpoint') : undefined}
-                                    onRetry={msg.checkpointId ? (id) => handleRetry(id, i) : undefined}
-                                    isSavedCheckpoint={msg.checkpointId === initialCheckpointId}
-                                    isExecuting={generating}
-                                    cost={(msg as any).cost}
-                                    usage={(msg as any).usage}
-                                  />
-                                </div>
-                              );
-                              }
-                            }
-
-                            return (
-                              <div
-                                key={msg.id}
-                                className={`p-3 rounded-lg text-sm ${
-                                  msg.role === 'user' 
-                                    ? 'bg-muted/50 ml-8' 
-                                    : 'bg-card border border-border mr-2'
-                                }`}
-                              >
-                                <div className="mb-1">
-                                  <p className="font-medium">
-                                    {msg.role === 'user' ? 'You' : 'AI'}
-                                  </p>
-                                </div>
-                                <MarkdownRenderer content={msg.content} />
-                              </div>
-                            );
-                          })
-                        )}
-                        {/* Invisible anchor for scrolling to bottom */}
-                        <div ref={messagesEndRef} />
-                      </div>
-
-                      {/* Input */}
-                      <div className="p-3 space-y-2">
-                        {focusContextHint}
-                        {/* Input Area */}
-                        <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
-                          <div className="relative flex bg-card rounded-lg transition-all">
-                            <Textarea
-                              value={prompt}
-                              onChange={(e) => setPrompt(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (isTourLockingInput) {
-                                  return;
-                                }
-                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                  e.preventDefault();
-                                  handleGenerate();
-                                }
-                              }}
-                              placeholder="Describe what you want to build..."
-                              className="flex-1 px-3 py-2 bg-transparent border-0 resize-none focus:outline-none text-sm placeholder:text-muted-foreground text-foreground"
-                              rows={3}
-                              disabled={generating || isTourLockingInput}
-                            />
-                            <div className="flex flex-col p-2 gap-2">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    onClick={generating ? handleStop : handleGenerate}
-                                    disabled={isTourLockingInput ? !generating : (!generating && !prompt.trim())}
-                                    size="sm"
-                                    className="flex items-center gap-2"
-                                    data-retry-trigger="true"
-                                  >
-                                    {generating ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        Stop
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Send className="h-4 w-4" />
-                                        Send
-                                      </>
-                                    )}
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="left">
-                                  <div className="space-y-1">
-                                    <p className="text-xs">
-                                      <kbd className="text-xs bg-primary-foreground text-primary px-1 py-0.5 rounded">Ctrl/Cmd+Enter</kbd> to send
-                                    </p>
-                                    <p className="text-xs">
-                                      <kbd className="text-xs bg-primary-foreground text-primary px-1 py-0.5 rounded">Enter</kbd> for newline
-                                    </p>
-                                  </div>
-                                </TooltipContent>
-                              </Tooltip>
-                              {prompt.length > 0 && (
-                                <div className="px-3 py-1.5 bg-muted text-muted-foreground rounded-md text-xs text-center">
-                                  {prompt.length} chars
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* Footer */}
-                          <div className="border-t border-border bg-muted/50 px-2 py-2">
-                            <div className="flex items-center justify-between gap-2">
-                              {/* Model selector and settings combined */}
-                              <Popover open={showDesktopSettings} onOpenChange={setShowDesktopSettings}>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 text-xs"
-                                    data-tour-id="provider-settings-trigger"
-                                  >
-                                    <span>{getModelDisplayName(currentModel)}</span>
-                                    {showDesktopSettings ? (
-                                      <ChevronDown className="h-3 w-3 ml-1" />
-                                    ) : (
-                                      <ChevronUp className="h-3 w-3 ml-1" />
-                                    )}
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-96" align="start">
-                                  <ModelSettingsPanel
-                                    onClose={() => setShowDesktopSettings(false)}
-                                    onModelChange={(modelId) => setCurrentModel(modelId)}
-                                  />
-                                </PopoverContent>
-                              </Popover>
-
-                              {/* Chat/Code toggle */}
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <ToggleGroup
-                                    type="single"
-                                    value={chatMode ? 'chat' : 'code'}
-                                    onValueChange={(value) => {
-                                      if (value) setChatMode(value === 'chat');
-                                    }}
-                                    className="h-7"
-                                  >
-                                    <ToggleGroupItem
-                                      value="chat"
-                                      className="h-7 text-xs px-2"
-                                      style={chatMode ? { backgroundColor: 'var(--button-assistant-active)', color: 'white' } : undefined}
-                                    >
-                                      <MessageSquare className="h-3 w-3 mr-1" />
-                                      Chat
-                                    </ToggleGroupItem>
-                                    <ToggleGroupItem value="code" className="h-7 text-xs px-2 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
-                                      <Code2 className="h-3 w-3 mr-1" />
-                                      Code
-                                    </ToggleGroupItem>
-                                  </ToggleGroup>
-                                </TooltipTrigger>
-                                <TooltipContent side="top">
-                                  <div className="space-y-1">
-                                    <p className="text-xs">
-                                      <kbd className="text-xs bg-primary-foreground text-primary px-1 py-0.5 rounded">Chat</kbd> Conversational interactions and explanations
-                                    </p>
-                                    <p className="text-xs">
-                                      <kbd className="text-xs bg-primary-foreground text-primary px-1 py-0.5 rounded">Code</kbd> Full development with tool execution
-                                    </p>
-                                  </div>
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                </ResizablePanel>
+                <ChatPanel
+                  events={debugEvents}
+                  onRestore={handleRestoreCheckpoint}
+                  onRetry={handleRetry}
+                  prompt={prompt}
+                  setPrompt={setPrompt}
+                  generating={generating}
+                  onGenerate={handleGenerate}
+                  onStop={handleStop}
+                  focusContext={focusContext}
+                  setFocusContext={setFocusContext}
+                  focusPreviewSnippet={focusPreviewSnippet}
+                  chatMode={chatMode}
+                  setChatMode={setChatMode}
+                  currentModel={currentModel}
+                  setCurrentModel={setCurrentModel}
+                  getModelDisplayName={getModelDisplayName}
+                  isTourLockingInput={isTourLockingInput}
+                  onClearChat={clearDebugEvents}
+                  onClose={() => setShowChat(false)}
+                />
+              </ResizablePanel>
             )}
-            {showAssistant && (showFiles || showEditor || showPreview) && (
+            {showChat && (showFiles || showEditor || showPreview || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
@@ -1982,6 +1170,21 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     </div>
                 </ResizablePanel>
             )}
+
+            {showPreview && showDebugPanel && <ResizableHandle withHandle />}
+
+            {/* Column 5: Debug Panel */}
+            {showDebugPanel && (
+              <ResizablePanel
+                id="debug"
+                order={5}
+                defaultSize={defaultSizes.debug}
+                minSize={15}
+              >
+                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} />
+              </ResizablePanel>
+            )}
+
           </ResizablePanelGroup>
           </div>
         </div>
@@ -1990,230 +1193,27 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         <div className="flex md:hidden flex-1 overflow-hidden bg-background flex-col">
           {/* Single active panel */}
           <div className="flex-1 p-2 pb-16 overflow-hidden">
-            {activeMobilePanel === 'assistant' && (
-              <div className="h-full flex flex-col border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(var(--panel-assistant-tint), var(--panel-assistant-tint)), var(--card)` }}>
-                <div className="p-3 border-b bg-muted/80 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4" style={{ color: 'var(--button-assistant-active)' }} />
-                    <h3 className="text-sm font-medium">Chat</h3>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={async () => {
-                      logger.debug(`[Workspace] Clearing chat - UI has ${messages.length} messages`);
-                      setMessages([]);
-                      await conversationState.clearConversation(project.id);
-                    }}
-                    className="h-5 w-5 p-0"
-                    title="Clear chat"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-                
-                {/* Messages */}
-                <div 
-                  ref={messagesContainerRef}
-                  onScroll={handleScroll}
-                  className="flex-1 overflow-auto p-2 space-y-2"
-                >
-                  {messages.map((msg, i) => {
-                    if (msg.isTask && msg.taskSteps) {
-                      return (
-                        <div key={msg.id} className="border border-border rounded-lg p-3 bg-card">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="font-medium text-sm">Task Progress</p>
-                            {msg.checkpointId && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleRestoreCheckpoint(msg.checkpointId!, 'checkpoint')}
-                                className="h-6 px-2 text-xs"
-                                title="Restore to this checkpoint"
-                              >
-                                <RotateCcw className="h-3 w-3 mr-1" />
-                                Restore
-                              </Button>
-                            )}
-                          </div>
-                          <AssistantMessage
-                            content={msg.content}
-                            toolCalls={(msg as any).toolCalls}
-                            toolMessages={(msg as any).toolMessages}
-                            checkpointId={msg.checkpointId}
-                            onRestore={msg.checkpointId ? (id) => handleRestoreCheckpoint(id, 'checkpoint') : undefined}
-                            onRetry={msg.checkpointId ? (id) => handleRetry(id, i) : undefined}
-                            isSavedCheckpoint={msg.checkpointId === initialCheckpointId}
-                            isExecuting={generating}
-                            cost={(msg as any).cost}
-                            usage={(msg as any).usage}
-                          />
-                        </div>
-                      );
-                    }
-                    
-                    // Handle assistant messages with tool calls/messages (streaming support)
-                    if (
-                      msg.role === 'assistant' && (
-                        (msg as any).toolMessages && (msg as any).toolMessages.length > 0 ||
-                        (msg as any).toolCalls && (msg as any).toolCalls.length > 0
-                      )
-                    ) {
-                      return (
-                        <div key={msg.id} className="bg-card border border-border p-3 rounded-lg text-sm mr-2">
-                          <div className="mb-2">
-                            <p className="font-medium">AI</p>
-                          </div>
-                          <AssistantMessage
-                            content={msg.content}
-                            toolCalls={(msg as any).toolCalls}
-                            toolMessages={(msg as any).toolMessages}
-                            checkpointId={msg.checkpointId}
-                            onRestore={msg.checkpointId ? (id) => handleRestoreCheckpoint(id, 'checkpoint') : undefined}
-                            onRetry={msg.checkpointId ? (id) => handleRetry(id, i) : undefined}
-                            isSavedCheckpoint={msg.checkpointId === initialCheckpointId}
-                            isExecuting={generating}
-                            cost={(msg as any).cost}
-                            usage={(msg as any).usage}
-                          />
-                        </div>
-                      );
-                    }
-                    
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`p-3 rounded-lg text-sm ${
-                          msg.role === 'user' 
-                            ? 'bg-muted/50 ml-8' 
-                            : 'bg-card border border-border mr-2'
-                        }`}
-                      >
-                        <div className="mb-1">
-                          <p className="font-medium">
-                            {msg.role === 'user' ? 'You' : 'AI'}
-                          </p>
-                        </div>
-                        <MarkdownRenderer content={msg.content} />
-                      </div>
-                    );
-                  })}
-                  <div ref={messagesEndRef} />
-                </div>
-
-                {/* Input */}
-                <div className="p-3 space-y-2">
-                  {focusContextHint}
-                  <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
-                    <div className="relative flex bg-card rounded-lg transition-all">
-                      <Textarea
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (isTourLockingInput) {
-                            return;
-                          }
-                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                            e.preventDefault();
-                            handleGenerate();
-                          }
-                        }}
-                        placeholder="Describe what you want to build..."
-                        className="flex-1 px-3 py-2 bg-transparent border-0 resize-none focus:outline-none text-sm placeholder:text-muted-foreground text-foreground"
-                        rows={3}
-                        disabled={generating || isTourLockingInput}
-                      />
-                      <div className="flex flex-col p-2 gap-2">
-                        <Button
-                          onClick={generating ? handleStop : handleGenerate}
-                          disabled={isTourLockingInput ? !generating : (!generating && !prompt.trim())}
-                          size="sm"
-                          className="flex items-center gap-2"
-                        >
-                          {generating ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Stop
-                            </>
-                          ) : (
-                            <>
-                              <Send className="h-4 w-4" />
-                              Send
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    {/* Footer */}
-                    <div className="border-t border-border bg-muted/50 px-2 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <Popover open={showMobileSettings} onOpenChange={setShowMobileSettings}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs"
-                              data-tour-id="provider-settings-trigger"
-                            >
-                              <span>{getModelDisplayName(currentModel)}</span>
-                              {showMobileSettings ? (
-                                <ChevronDown className="h-3 w-3 ml-1" />
-                              ) : (
-                                <ChevronUp className="h-3 w-3 ml-1" />
-                              )}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[calc(100vw-2rem)]" align="start">
-                            <ModelSettingsPanel
-                              onClose={() => setShowMobileSettings(false)}
-                              onModelChange={(modelId) => setCurrentModel(modelId)}
-                            />
-                          </PopoverContent>
-                        </Popover>
-
-                        {/* Chat/Code toggle */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <ToggleGroup
-                              type="single"
-                              value={chatMode ? 'chat' : 'code'}
-                              onValueChange={(value) => {
-                                if (value) setChatMode(value === 'chat');
-                              }}
-                              className="h-7"
-                            >
-                              <ToggleGroupItem
-                                value="chat"
-                                className="h-7 text-xs px-2"
-                                style={chatMode ? { backgroundColor: 'var(--button-assistant-active)', color: 'white' } : undefined}
-                              >
-                                <MessageSquare className="h-3 w-3 mr-1" />
-                                Chat
-                              </ToggleGroupItem>
-                              <ToggleGroupItem value="code" className="h-7 text-xs px-2 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
-                                <Code2 className="h-3 w-3 mr-1" />
-                                Code
-                              </ToggleGroupItem>
-                            </ToggleGroup>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            <div className="space-y-1">
-                              <p className="text-xs">
-                                <kbd className="text-xs bg-primary-foreground text-primary px-1 py-0.5 rounded">Chat</kbd> Conversational interactions and explanations
-                              </p>
-                              <p className="text-xs">
-                                <kbd className="text-xs bg-primary-foreground text-primary px-1 py-0.5 rounded">Code</kbd> Full development with tool execution
-                              </p>
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            {activeMobilePanel === 'chat' && (
+              <ChatPanel
+                events={debugEvents}
+                onRestore={handleRestoreCheckpoint}
+                onRetry={handleRetry}
+                prompt={prompt}
+                setPrompt={setPrompt}
+                generating={generating}
+                onGenerate={handleGenerate}
+                onStop={handleStop}
+                focusContext={focusContext}
+                setFocusContext={setFocusContext}
+                focusPreviewSnippet={focusPreviewSnippet}
+                chatMode={chatMode}
+                setChatMode={setChatMode}
+                currentModel={currentModel}
+                setCurrentModel={setCurrentModel}
+                getModelDisplayName={getModelDisplayName}
+                isTourLockingInput={isTourLockingInput}
+                onClearChat={clearDebugEvents}
+              />
             )}
 
             {activeMobilePanel === 'files' && (
@@ -2255,14 +1255,14 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
             <div className="flex justify-center items-center p-2 gap-2">
               <button
                 className={`flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
-                  activeMobilePanel === 'assistant'
+                  activeMobilePanel === 'chat'
                     ? 'text-white'
                     : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
                 }`}
                 style={{
-                  backgroundColor: activeMobilePanel === 'assistant' ? 'var(--button-assistant-active)' : undefined,
+                  backgroundColor: activeMobilePanel === 'chat' ? 'var(--button-assistant-active)' : undefined,
                 }}
-                onClick={() => setActiveMobilePanel('assistant')}
+                onClick={() => setActiveMobilePanel('chat')}
               >
                 <MessageSquare className="h-4 w-4" />
               </button>
@@ -2312,6 +1312,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           </div>
         </div>
       </div>
+
       <GuidedTourOverlay location="workspace" />
       <GuidedTourOverlay location="settings" />
     </TooltipProvider>

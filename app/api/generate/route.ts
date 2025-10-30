@@ -6,7 +6,7 @@ import { LLMMessage, ToolDefinition } from '@/lib/llm/types';
 export async function POST(request: NextRequest) {
   try {
     const { prompt, apiKey, model, tools, context, messages, tool_choice, provider, max_tokens } = await request.json();
-    
+
     const selectedProvider: ProviderId = provider || 'openrouter';
     const providerConfig = getProvider(selectedProvider);
     

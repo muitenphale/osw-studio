@@ -142,14 +142,67 @@ async function vfsShellExecute(
         return { stdout: truncate(lines.join('\n')), stderr: '', exitCode: 0 };
       }
       case 'cat': {
-        const path = normalizePath(args[0]);
-        if (!path) return { stdout: '', stderr: 'cat: missing file path', exitCode: 2 };
-        if (path.startsWith('/-')) return { stdout: '', stderr: 'cat: invalid path (looks like an option). Use: cat /path/to/file', exitCode: 2 };
-        const file = await vfs.readFile(projectId, path);
-        if (typeof file.content !== 'string') {
-          return { stdout: '', stderr: `cat: ${path}: binary or non-text file`, exitCode: 1 };
+        // Support up to 5 files at once
+        const MAX_FILES = 5;
+        const filePaths = args.filter(a => a && !a.startsWith('-')).map(p => normalizePath(p));
+
+        if (filePaths.length === 0) {
+          return { stdout: '', stderr: 'cat: missing file path', exitCode: 2 };
         }
-        return { stdout: truncate(file.content), stderr: '', exitCode: 0 };
+
+        if (filePaths.length > MAX_FILES) {
+          return {
+            stdout: '',
+            stderr: `cat: too many files. You requested ${filePaths.length} files, but cat supports a maximum of ${MAX_FILES} files at a time. Please split into multiple cat calls.`,
+            exitCode: 2
+          };
+        }
+
+        const outputs: string[] = [];
+        let hadError = false;
+        let errorMessages: string[] = [];
+
+        for (const path of filePaths) {
+          if (!path) {
+            errorMessages.push('cat: invalid path');
+            hadError = true;
+            continue;
+          }
+
+          if (path.startsWith('/-')) {
+            errorMessages.push(`cat: invalid path "${path}" (looks like an option)`);
+            hadError = true;
+            continue;
+          }
+
+          try {
+            const file = await vfs.readFile(projectId, path);
+            if (typeof file.content !== 'string') {
+              errorMessages.push(`cat: ${path}: binary or non-text file`);
+              hadError = true;
+            } else {
+              // For multiple files, add a header
+              if (filePaths.length > 1) {
+                outputs.push(`=== ${path} ===\n${file.content}`);
+              } else {
+                outputs.push(file.content);
+              }
+            }
+          } catch (error) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            errorMessages.push(`cat: ${path}: ${errMsg}`);
+            hadError = true;
+          }
+        }
+
+        const stdout = outputs.join('\n\n');
+        const stderr = errorMessages.join('\n');
+
+        return {
+          stdout: truncate(stdout),
+          stderr,
+          exitCode: hadError ? 1 : 0
+        };
       }
       case 'head': {
         // head [-n lines] <file>
@@ -225,7 +278,28 @@ async function vfsShellExecute(
         }
         const pattern = fargs[0];
         const path = normalizePath(fargs[1]) || '/';
-        if (!pattern) return { stdout: '', stderr: 'grep: missing pattern', exitCode: 2 };
+        if (!pattern) {
+          return {
+            stdout: '',
+            stderr: `grep: missing pattern
+
+Usage: grep [FLAGS] PATTERN [PATH]
+
+Supported flags:
+  -n  Show line numbers
+  -i  Case insensitive search
+  -F  Treat pattern as literal string (not regex)
+
+Examples:
+  {"cmd": ["grep", "searchterm", "/path"]}
+  {"cmd": ["grep", "-n", "pattern", "/file.txt"]}
+  {"cmd": ["grep", "-i", "TODO", "/"]}
+  {"cmd": ["grep", "-F", "exact.string", "/src"]}
+
+Note: grep always searches recursively. For context around matches, use rg (ripgrep) instead.`,
+            exitCode: 2
+          };
+        }
 
         // Create regex - escape special chars if -F flag is used
         let regex: RegExp;
@@ -280,7 +354,30 @@ async function vfsShellExecute(
         }
         const pattern = fargs[0];
         const path = normalizePath(fargs[1]) || '/';
-        if (!pattern) return { stdout: '', stderr: 'rg: missing pattern', exitCode: 2 };
+        if (!pattern) {
+          return {
+            stdout: '',
+            stderr: `rg: missing pattern
+
+Usage: rg [FLAGS] PATTERN [PATH]
+
+Supported flags:
+  -C NUM  Show NUM lines of context (before and after)
+  -A NUM  Show NUM lines after each match
+  -B NUM  Show NUM lines before each match
+  -i      Case insensitive search
+  -n      Show line numbers (enabled by default)
+
+Examples:
+  {"cmd": ["rg", "searchterm", "/"]}
+  {"cmd": ["rg", "-C", "3", "pattern", "/"]}
+  {"cmd": ["rg", "-A", "5", "-B", "2", "function", "/src"]}
+  {"cmd": ["rg", "-i", "todo", "/"]}
+
+Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
+            exitCode: 2
+          };
+        }
 
         const regex = new RegExp(pattern, flags.i ? 'i' : '');
         const entries = await vfs.getAllFilesAndDirectories(projectId);
@@ -334,60 +431,118 @@ async function vfsShellExecute(
         return { stdout: truncate(outLines.join('\n')), stderr: '', exitCode: 0 };
       }
       case 'find': {
-        // Supported: find <path> -name <pattern>; tolerate -maxdepth and -type flags
+        // Supported: find <path> [-type f|d] [-name <pattern>] [-maxdepth <depth>]
         let rootArg: string | undefined;
         let pattern: string | undefined;
+        let typeFilter: 'f' | 'd' | undefined;
+
         for (let i = 0; i < args.length; i++) {
           const a = args[i];
           if (!a) continue;
           if (a === '-name') { pattern = args[i + 1]; i++; continue; }
-          if (a === '-maxdepth' || a === '-type') { i++; continue; }
+          if (a === '-type') {
+            const typeVal = args[i + 1];
+            if (typeVal === 'f' || typeVal === 'd') {
+              typeFilter = typeVal;
+            }
+            i++;
+            continue;
+          }
+          if (a === '-maxdepth') { i++; continue; }
           if (!a.startsWith('-') && !rootArg) rootArg = a;
         }
+
         const root = normalizePath(rootArg) || '/';
         const entries = await vfs.getAllFilesAndDirectories(projectId);
         const prefix = root === '/' ? '/' : (root.endsWith('/') ? root : root + '/');
         const toGlob = (s: string) => new RegExp('^' + s.replace(/[.+^${}()|\[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
         const regex = pattern ? toGlob(pattern) : null;
+
         const res = entries
           .filter((e: any) => e.path === root || e.path.startsWith(prefix))
+          .filter((e: any) => {
+            // Filter by type if specified
+            if (typeFilter === 'f') {
+              return !('type' in e) || e.type !== 'directory';
+            }
+            if (typeFilter === 'd') {
+              return 'type' in e && e.type === 'directory';
+            }
+            return true; // No type filter, include all
+          })
           .map((e: any) => e.path)
           .filter(p => (regex ? regex.test(p.split('/').pop() || p) : true))
           .sort();
+
         return { stdout: truncate(res.join('\n')), stderr: '', exitCode: 0 };
       }
       case 'mkdir': {
-        // Support: mkdir -p <path>
+        // Support: mkdir [-p] <path1> <path2> ... (multiple paths like real bash)
         const hasP = args.includes('-p');
-        const raw = args[hasP ? args.indexOf('-p') + 1 : 0];
-        const path = normalizePath(raw);
-        if (!path) return { stdout: '', stderr: 'mkdir: missing path', exitCode: 2 };
-        if (hasP) {
-          await ensureDirectory(vfs, projectId, path);
-        } else {
-          await vfs.createDirectory(projectId, path);
-        }
-        return { stdout: '', stderr: '', exitCode: 0 };
-      }
-      case 'touch': {
-        // touch <file> - create empty file or update timestamp
-        const path = normalizePath(args[0]);
-        if (!path) return { stdout: '', stderr: 'touch: missing file path', exitCode: 2 };
+        const paths = args.filter(a => a && a !== '-p').map(p => normalizePath(p));
 
-        try {
-          // Check if file exists
-          await vfs.readFile(projectId, path);
-          // File exists, just return success (we don't update timestamps)
-          return { stdout: '', stderr: '', exitCode: 0 };
-        } catch {
-          // File doesn't exist, create it with empty content
+        if (paths.length === 0) {
+          return { stdout: '', stderr: 'mkdir: missing operand', exitCode: 2 };
+        }
+
+        let hadError = false;
+        const errors: string[] = [];
+
+        for (const path of paths) {
+          if (!path) continue;
+
           try {
-            await vfs.createFile(projectId, path, '');
-            return { stdout: '', stderr: '', exitCode: 0 };
+            if (hasP) {
+              await ensureDirectory(vfs, projectId, path);
+            } else {
+              await vfs.createDirectory(projectId, path);
+            }
           } catch (e: any) {
-            return { stdout: '', stderr: `touch: ${path}: ${e?.message || 'cannot create file'}`, exitCode: 1 };
+            hadError = true;
+            errors.push(`mkdir: cannot create directory '${path}': ${e?.message || 'unknown error'}`);
           }
         }
+
+        return {
+          stdout: '',
+          stderr: errors.join('\n'),
+          exitCode: hadError ? 1 : 0
+        };
+      }
+      case 'touch': {
+        // touch <file1> <file2> ... - create empty files or update timestamp (multiple files like real bash)
+        const paths = args.filter(a => a && !a.startsWith('-')).map(p => normalizePath(p));
+
+        if (paths.length === 0) {
+          return { stdout: '', stderr: 'touch: missing file operand', exitCode: 2 };
+        }
+
+        let hadError = false;
+        const errors: string[] = [];
+
+        for (const path of paths) {
+          if (!path) continue;
+
+          try {
+            // Check if file exists
+            await vfs.readFile(projectId, path);
+            // File exists, just continue (we don't update timestamps)
+          } catch {
+            // File doesn't exist, create it with empty content
+            try {
+              await vfs.createFile(projectId, path, '');
+            } catch (e: any) {
+              hadError = true;
+              errors.push(`touch: cannot touch '${path}': ${e?.message || 'cannot create file'}`);
+            }
+          }
+        }
+
+        return {
+          stdout: '',
+          stderr: errors.join('\n'),
+          exitCode: hadError ? 1 : 0
+        };
       }
       case 'rm': {
         // Enhanced rm command: rm [-rfv] <file/dir...>

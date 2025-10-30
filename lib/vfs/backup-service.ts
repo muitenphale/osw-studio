@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import { Project, VirtualFile } from './types';
-import { ConversationState } from '@/lib/llm/conversation-state';
 import { Checkpoint } from './checkpoint';
 import { logger } from '@/lib/utils';
 
@@ -13,7 +12,7 @@ export interface BackupData {
       files: VirtualFile[];
       fileTree: unknown[];
     };
-    conversations: ConversationState[];
+    conversations: any[]; // Legacy field for backward compat
     checkpoints: Checkpoint[];
   };
   metadata: {

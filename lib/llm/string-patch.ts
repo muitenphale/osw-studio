@@ -23,13 +23,18 @@ export async function execStringPatch(
   operations: StringPatchOperation[]
 ): Promise<StringPatchResult> {
   const warnings: string[] = [];
-  
-  if (!filePath || !filePath.startsWith('/')) {
+
+  if (!filePath) {
     return {
       applied: false,
-      summary: 'Invalid file path',
-      warnings: ['File path must be absolute and start with /']
+      summary: 'Missing file path',
+      warnings: ['File path is required']
     };
+  }
+
+  // Auto-prepend / if missing (accept both relative and absolute paths)
+  if (!filePath.startsWith('/')) {
+    filePath = '/' + filePath;
   }
 
   // Detect stringified operations (common LLM serialization error)

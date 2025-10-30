@@ -141,7 +141,7 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
         <div>
           <Label htmlFor="provider">AI Provider</Label>
           <Select value={selectedProvider} onValueChange={handleProviderChange}>
-            <SelectTrigger id="provider" className="w-full mt-2 !h-fit">
+            <SelectTrigger id="provider" className="mt-2 !h-fit">
               <SelectValue placeholder="Select a provider">
                 {selectedProvider && (
                   <div className="flex flex-col text-left">

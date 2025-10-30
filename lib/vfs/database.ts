@@ -1,7 +1,7 @@
 import { Project, VirtualFile, FileTreeNode, CustomTemplate } from './types';
 
 const DB_NAME = 'osw-studio-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export class VFSDatabase {
   private db: IDBDatabase | null = null;
@@ -59,6 +59,13 @@ export class VFSDatabase {
           const templateStore = db.createObjectStore('customTemplates', { keyPath: 'id' });
           templateStore.createIndex('name', 'name', { unique: false });
           templateStore.createIndex('importedAt', 'importedAt', { unique: false });
+        }
+
+        // Debug Events object store
+        if (!db.objectStoreNames.contains('debugEvents')) {
+          const debugEventsStore = db.createObjectStore('debugEvents', { keyPath: 'id' });
+          debugEventsStore.createIndex('projectId', 'projectId', { unique: false });
+          debugEventsStore.createIndex('timestamp', 'timestamp', { unique: false });
         }
       };
     });

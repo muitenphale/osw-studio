@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.14.0 - 2025-10-23
+- Event-driven chat architecture replacing message-based system
+- Real-time event streaming with chronological display and improved UI responsiveness
+- Chat panel with event-driven UI, per-batch tool tracking, green color scheme, and hover-transition close button
+- Debug panel with real-time event monitoring, automatic event coalescing, filtering, auto-scroll, and improved close interaction
+- Debug event persistence: debounced IndexedDB writes prevent duplicates during rapid streaming
+- IndexedDB schema v3: added `debugEvents` object store for persistent debug event storage
+- Mobile workspace updated to use event-driven chat architecture
+- Refactored architecture: modular tool and agent systems with declarative tool registry
+- Enhanced error messages: comprehensive usage hints for shell commands to improve LLM self-correction
+- Handlebars partial subdirectory support: organize templates in `/templates/components/`, `/templates/partials/`, etc. with automatic multi-name registration
+- Fixed file explorer not refreshing after `json_patch` operations
+- Enhanced system prompt with improved Handlebars templating guidance: workflow-first approach, 3-step tutorial, working examples, and common LLM anti-patterns
+- Added platform constraints to system prompt: emphasizes static-only websites, Handlebars is build-time not runtime, automatic routing
+
 ## v1.13.4 - 2025-10-19
 - Enhanced Handlebars with `limit` helper for displaying subset of array items
 - Improved json_patch error messages to detect and guide LLMs when operations are incorrectly stringified

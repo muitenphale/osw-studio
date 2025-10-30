@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Orchestrator } from '@/lib/llm/orchestrator';
+import { MultiAgentOrchestrator } from '@/lib/llm/multi-agent-orchestrator';
 import { testScenarios } from '@/lib/testing/test-scenarios';
 import { ArrowLeft, Play, CheckCircle, XCircle, Clock, RefreshCw, ChevronDown, ChevronUp, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -39,7 +39,7 @@ export default function TestGenerationPage() {
     }))
   );
   const [runningTest, setRunningTest] = useState<string | null>(null);
-  const [orchestratorInstances, setOrchestratorInstances] = useState<Map<string, Orchestrator>>(new Map());
+  const [orchestratorInstances, setOrchestratorInstances] = useState<Map<string, MultiAgentOrchestrator>>(new Map());
   const [generationOutputs, setGenerationOutputs] = useState<Map<string, string>>(new Map());
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
   const generationOutputRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -86,14 +86,14 @@ export default function TestGenerationPage() {
 
     try {
       const projectId = `test-${Date.now()}`;
-      const orchestrator = new Orchestrator(
+      const orchestrator = new MultiAgentOrchestrator(
         projectId,
-        undefined, // No existing conversation
+        'orchestrator',
         (message, step) => {
           if (message === 'assistant_delta' && ((step as any)?.text || (step as any)?.snapshot)) {
             const deltaText = (step as any).text as string | undefined;
             const snapshot = (step as any).snapshot as string | undefined;
-            
+
             setGenerationOutputs(prev => {
               const newMap = new Map(prev);
               if (snapshot !== undefined) {
@@ -104,14 +104,14 @@ export default function TestGenerationPage() {
               }
               return newMap;
             });
-            
+
             // Also update the test result for persistence
-            setTestResults(prev => prev.map(result => 
-              result.id === scenarioId 
+            setTestResults(prev => prev.map(result =>
+              result.id === scenarioId
                 ? { ...result, generationOutput: snapshot || (result.generationOutput || '') + (deltaText || '') }
                 : result
             ));
-            
+
             // Auto-scroll to bottom of generation output
             setTimeout(() => {
               const outputElement = generationOutputRefs.current.get(scenarioId);
@@ -120,7 +120,8 @@ export default function TestGenerationPage() {
               }
             }, 0);
           }
-        }
+        },
+        { chatMode: false }
       );
       
       // Store orchestrator instance for potential stopping
@@ -132,8 +133,8 @@ export default function TestGenerationPage() {
       
       const result = await orchestrator.execute(scenario.prompt);
 
-      setTestResults(prev => prev.map(testResult => 
-        testResult.id === scenarioId 
+      setTestResults(prev => prev.map(testResult =>
+        testResult.id === scenarioId
           ? {
               ...testResult,
               status: result.success ? 'success' : 'failed',
@@ -141,7 +142,7 @@ export default function TestGenerationPage() {
               errors: result.success ? undefined : [result.summary],
               details: result.summary,
               filesModified: [],
-              toolCalls: result.stepsCompleted || 0
+              toolCalls: result.conversation?.length || 0
             }
           : testResult
       ));

@@ -80,10 +80,14 @@ export class VirtualFileSystem {
       };
 
       await this.db.createFile(file);
-      
+
       await this.updateFileTree(projectId, path, 'create');
       saveManager.markDirty(projectId);
-      
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
+
       return file;
     } catch (error) {
       throw error;
@@ -158,12 +162,13 @@ export class VirtualFileSystem {
 
       await this.db.updateFile(file);
       saveManager.markDirty(projectId);
-      
+
       if (typeof window !== 'undefined') {
         const detail = { projectId, path };
         window.dispatchEvent(new CustomEvent('fileContentChanged', { detail }));
+        window.dispatchEvent(new Event('filesChanged'));
       }
-      
+
       return file;
     } catch (error) {
       throw error;
@@ -949,6 +954,10 @@ export class VirtualFileSystem {
       
       parentNode.children = children;
       await this.db.updateTreeNode(parentNode);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
     }
   }
 }

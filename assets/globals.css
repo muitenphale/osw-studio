@@ -92,7 +92,7 @@
   --project-background-tint: oklch(0.65 0.18 40 / 0.015); /* Very subtle orange tint */
   
   /* Sidebar button active colors - Light mode */
-  --button-assistant-active: oklch(0.65 0.2 145); /* Green */
+  --button-assistant-active: oklch(0.65 0.2 145); /* Green (chat) */
   --button-files-active: oklch(0.6 0.15 220); /* Blue */
   --button-editor-active: oklch(0.55 0.18 285); /* Purple */
   --button-preview-active: oklch(0.7 0.2 45); /* Orange */
@@ -147,7 +147,7 @@
   --project-background-tint: oklch(0.65 0.18 40 / 0.02); /* Very subtle orange tint */
   
   /* Sidebar button active colors - Dark mode */
-  --button-assistant-active: oklch(0.65 0.2 145); /* Green */
+  --button-assistant-active: oklch(0.65 0.2 145); /* Green (chat) */
   --button-files-active: oklch(0.6 0.15 220); /* Blue */
   --button-editor-active: oklch(0.55 0.18 285); /* Purple */
   --button-preview-active: oklch(0.7 0.2 45); /* Orange */

@@ -77,29 +77,46 @@ export class VirtualServer {
     if (this.partialsRegistered) {
       return;
     }
-    
+
     try {
-      // Look for templates in /templates directory
-      const templateFiles = await this.vfs.listDirectory(this.projectId, '/templates');
-      
-      
+      // Get ALL files in the project
+      const allItems = await this.vfs.getAllFilesAndDirectories(this.projectId);
+
+      // Filter for files only (not directories) and handlebars files in /templates directory
+      const templateFiles = allItems.filter((item): item is VirtualFile =>
+        'content' in item &&
+        item.path.startsWith('/templates/') &&
+        (item.path.endsWith('.hbs') || item.path.endsWith('.handlebars'))
+      );
+
       for (const file of templateFiles) {
-        if (file.type === 'template' || file.path.endsWith('.hbs') || file.path.endsWith('.handlebars')) {
-          // More robust partial name extraction
-          let partialName = file.name
-            .replace(/\.hbs$/, '')
-            .replace(/\.handlebars$/, '');
-          
-          // Remove any leading path components if they exist in the name
-          if (partialName.includes('/')) {
-            partialName = partialName.split('/').pop() || partialName;
-          }
-          
-          const content = file.content as string;
-          this.handlebars.registerPartial(partialName, content);
+        const content = file.content as string;
+
+        // Extract path relative to /templates/
+        // e.g., /templates/components/header.hbs → components/header
+        const relativePath = file.path
+          .replace(/^\/templates\//, '')
+          .replace(/\.hbs$/, '')
+          .replace(/\.handlebars$/, '');
+
+        // Register with multiple names for maximum compatibility:
+
+        // 1. Full relative path: components/header
+        this.handlebars.registerPartial(relativePath, content);
+
+        // 2. Just filename: header (for backwards compatibility)
+        const filename = relativePath.split('/').pop();
+        if (filename) {
+          this.handlebars.registerPartial(filename, content);
+        }
+
+        // 3. Dash-separated variant: components-header (some LLMs prefer this)
+        if (relativePath.includes('/')) {
+          const dashName = relativePath.replace(/\//g, '-');
+          this.handlebars.registerPartial(dashName, content);
         }
       }
-      
+
       this.partialsRegistered = true;
     } catch (error) {
       // Templates directory might not exist, which is fine
@@ -540,7 +557,7 @@ export class VirtualServer {
         // Register error stub for missing partial
         const errorStub = `<div style="border: 2px solid #f99; background: #fee; padding: 1rem; margin: 1rem 0; border-radius: 4px; font-family: monospace;">
   <strong style="color: #c33;">⚠️ Missing partial: "${partialName}"</strong>
-  <p style="margin: 0.5rem 0 0 0; font-size: 0.9em;">Check /templates/${partialName}.hbs exists</p>
+  <p style="margin: 0.5rem 0 0 0; font-size: 0.9em;">Create file in /templates/ directory (e.g., /templates/${partialName}.hbs or /templates/components/${partialName}.hbs)</p>
 </div>`;
         this.handlebars.registerPartial(partialName, errorStub);
       }
