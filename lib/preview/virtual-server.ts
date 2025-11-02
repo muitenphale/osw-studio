@@ -746,9 +746,14 @@ export class VirtualServer {
       path = '/' + path;
     }
 
-    if (!path.includes('.') && !path.endsWith('/')) {
-      const htmlPath = path + '.html';
-      return htmlPath;
+    // If path ends with /, it's a directory - look for index.html
+    if (path.endsWith('/')) {
+      return path + 'index.html';
+    }
+
+    // If no extension, assume HTML file
+    if (!path.includes('.')) {
+      return path + '.html';
     }
 
     return path;

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.14.1 - 2025-11-02
+- Fixed Cmd/Ctrl+S triggering project save when Monaco editor has focus (now lets Monaco handle file saves internally)
+- Enhanced directory-based routing: paths ending with `/` now correctly resolve to `index.html` (e.g., `/about/` → `/about/index.html`)
+- Added fallback routing logic: `/about` tries `/about.html` first, then `/about/index.html` as fallback
+- Updated system prompt documentation to clarify directory index resolution and clean URL support
+- Smart JSON repair for truncated tool calls: auto-repairs and executes safe operations (rewrite), fails gracefully with guidance for unsafe operations (update/replace_entity)
+- Removed duplicate naive JSON repair from streaming parser to prevent malformed JSON
+- Fixed LLM message rendering: normalizes excessive whitespace in LLM output that caused ReactMarkdown to incorrectly render plain text as indented code blocks
+- Fixed guided tour compatibility with v1.14.0 event-driven architecture: tour events now properly convert to debug events for ChatPanel display
+- Enhanced guided tour reliability: always creates fresh "Example Studios (Tour)" demo project with correct file structure
+- Improved tour UX: automatically navigates to project page after completion when demo project is deleted (if other projects exist)
+
 ## v1.14.0 - 2025-10-23
 - Event-driven chat architecture replacing message-based system
 - Real-time event streaming with chronological display and improved UI responsiveness

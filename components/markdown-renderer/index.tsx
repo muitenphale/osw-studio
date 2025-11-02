@@ -3,13 +3,18 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
+import { normalizeContent } from './content-normalizer';
 
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  skipNormalization?: boolean;
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, className, skipNormalization = false }: MarkdownRendererProps) {
+  // Normalize content to fix common LLM formatting issues
+  const processedContent = skipNormalization ? content : normalizeContent(content);
+
   return (
     <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)}>
       <ReactMarkdown
@@ -18,17 +23,27 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
         h2: ({ children }) => <h2 className="text-lg font-semibold mb-2 mt-3">{children}</h2>,
         h3: ({ children }) => <h3 className="text-base font-semibold mb-1 mt-2">{children}</h3>,
         h4: ({ children }) => <h4 className="text-sm font-semibold mb-1 mt-2">{children}</h4>,
-        
+
         p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-        
+
         ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
         li: ({ children }) => <li className="text-sm">{children}</li>,
-        
+
+        pre: ({ children, ...props }) => {
+          // Handle indented code blocks (4+ spaces) from ReactMarkdown
+          // These should render as regular text, not code blocks
+          return (
+            <pre className="p-3 rounded-md bg-muted overflow-x-auto mb-2" {...props}>
+              {children}
+            </pre>
+          );
+        },
+
         code: ({ className, children, ...props }) => {
           const match = /language-(\w+)/.exec(className || '');
           const isInline = !match;
-          
+
           if (isInline) {
             return (
               <code className="px-1.5 py-0.5 rounded bg-muted font-mono text-xs" {...props}>
@@ -36,13 +51,12 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
               </code>
             );
           }
-          
+
+          // Fenced code block with language
           return (
-            <pre className="p-3 rounded-md bg-muted overflow-x-auto mb-2">
-              <code className="font-mono text-xs">
-                {children}
-              </code>
-            </pre>
+            <code className="font-mono text-xs" {...props}>
+              {children}
+            </code>
           );
         },
         
@@ -76,7 +90,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
         td: ({ children }) => <td className="px-2 py-1 text-xs">{children}</td>,
       }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );

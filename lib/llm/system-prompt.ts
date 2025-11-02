@@ -117,9 +117,20 @@ HANDLEBARS IS BUILD-TIME, NOT RUNTIME:
 
 ROUTING IS AUTOMATIC:
 • Navigation works with standard HTML links: <a href="/about.html">About</a>
+• Supports directory-based routing: /about/ → /about/index.html
+• You can organize pages either way:
+  - Direct: /about.html
+  - Directory: /about/index.html (accessed as /about/ or /about)
 • DO NOT create routing logic (no History API, hash routing, or SPA routers)
 • DO NOT write JavaScript to handle page navigation
 • Create separate .html files for each page - the preview handles routing
+
+DIRECTORY INDEX RESOLUTION:
+• When a path ends with / or has no extension, the system tries:
+  1. Direct file: /about → /about.html
+  2. Directory index: /about → /about/index.html (fallback)
+• This allows clean URLs and organized file structures
+• Example: /products/ automatically serves /products/index.html
 
 WHAT YOU CAN BUILD:
 • Multi-page websites with .html files

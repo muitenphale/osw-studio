@@ -26,6 +26,7 @@ export function MultiTabEditor({ projectId, onFilesChange: _onFilesChange, onClo
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const savingPathsRef = React.useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setMounted(true);
@@ -47,33 +48,73 @@ export function MultiTabEditor({ projectId, onFilesChange: _onFilesChange, onClo
   useEffect(() => {
     const handleFilesChanged = async (event: CustomEvent) => {
       if (event.detail?.fromEditor) return;
-      
-      setOpenFiles(prev => {
-        const updateFiles = async () => {
-          const updatedFiles = new Map<string, OpenFile>();
-          
-          for (const [path, openFile] of prev.entries()) {
-            try {
-              await vfs.init();
-              const freshFile = await vfs.readFile(projectId, path);
-              updatedFiles.set(path, {
-                file: freshFile,
-                content: openFile.modified ? openFile.content : freshFile.content as string,
-                modified: openFile.modified
-              });
-            } catch {
+
+      // Process updates asynchronously
+      const updateFiles = async () => {
+        // Capture current state
+        setOpenFiles(prev => {
+          const processingSnapshot = prev;
+
+          // Run async updates
+          (async () => {
+            const updatedFiles = new Map<string, OpenFile>();
+
+            for (const [path, openFile] of processingSnapshot.entries()) {
+              // If this file is currently being saved, keep it unchanged
+              if (savingPathsRef.current.has(path)) {
+                updatedFiles.set(path, openFile);
+                continue;
+              }
+
+              // If file is modified in editor, keep editor content
+              if (openFile.modified) {
+                try {
+                  await vfs.init();
+                  const freshFile = await vfs.readFile(projectId, path);
+                  updatedFiles.set(path, {
+                    file: freshFile,
+                    content: openFile.content,
+                    modified: true
+                  });
+                } catch {
+                  updatedFiles.set(path, openFile);
+                }
+                continue;
+              }
+
+              // File not modified, update from VFS
+              try {
+                await vfs.init();
+                const freshFile = await vfs.readFile(projectId, path);
+                updatedFiles.set(path, {
+                  file: freshFile,
+                  content: freshFile.content as string,
+                  modified: false
+                });
+              } catch {
+                updatedFiles.set(path, openFile);
+              }
             }
-          }
-          setOpenFiles(updatedFiles);
-        };
-        
-        updateFiles();
-        return prev;
-      });
+
+            // Only apply updates if no files are being saved
+            const hasFilesBeingSaved = Array.from(updatedFiles.keys()).some(path =>
+              savingPathsRef.current.has(path)
+            );
+
+            if (!hasFilesBeingSaved) {
+              setOpenFiles(updatedFiles);
+            }
+          })();
+
+          return prev;
+        });
+      };
+
+      updateFiles();
     };
 
     window.addEventListener('filesChanged', handleFilesChanged as unknown as EventListener);
-    
+
     return () => {
       window.removeEventListener('filesChanged', handleFilesChanged as unknown as EventListener);
     };
@@ -121,7 +162,7 @@ export function MultiTabEditor({ projectId, onFilesChange: _onFilesChange, onClo
 
   const handleContentChange = useCallback((value: string | undefined, path: string) => {
     if (value === undefined) return;
-    
+
     const fileType = getFileType(path);
     if (fileType.type !== 'text') return;
 
@@ -129,10 +170,11 @@ export function MultiTabEditor({ projectId, onFilesChange: _onFilesChange, onClo
       const next = new Map(prev);
       const file = next.get(path);
       if (file) {
+        const isModified = file.content !== value;
         next.set(path, {
           ...file,
           content: value,
-          modified: file.file.content !== value
+          modified: isModified
         });
       }
       return next;
@@ -143,10 +185,13 @@ export function MultiTabEditor({ projectId, onFilesChange: _onFilesChange, onClo
     const openFile = openFiles.get(path);
     if (!openFile || !openFile.modified) return;
 
+    // Mark this path as being saved
+    savingPathsRef.current.add(path);
+
     try {
       await vfs.init();
       const updatedFile = await vfs.updateFile(projectId, path, openFile.content);
-      
+
       setOpenFiles(prev => {
         const next = new Map(prev);
         next.set(path, {
@@ -156,12 +201,13 @@ export function MultiTabEditor({ projectId, onFilesChange: _onFilesChange, onClo
         });
         return next;
       });
-
-      window.dispatchEvent(new CustomEvent('fileContentChanged', { 
-        detail: { path, projectId } 
-      }));
     } catch (error) {
       logger.error('Failed to save file:', error);
+    } finally {
+      // Remove from saving paths after a short delay to ensure all handlers have processed
+      setTimeout(() => {
+        savingPathsRef.current.delete(path);
+      }, 100);
     }
   }, [openFiles, projectId]);
 

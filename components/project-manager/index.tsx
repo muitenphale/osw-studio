@@ -100,7 +100,7 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
   const [currentView, setCurrentView] = useState<PageView>('projects');
-  const { state: tourState, setProjectList, start: startTour } = useGuidedTour();
+  const { state: tourState, setProjectList, start: startTour, setTourDemoProjectId } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
@@ -193,11 +193,23 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
 
   const handleStartTour = async () => {
     try {
-      // Check if we have any projects, if not create a demo project first
-      if (projects.length === 0) {
-        await createDemoProject();
-      }
+      // Always create a fresh demo project for the tour to ensure correct file structure
+      const tourDemo = await vfs.createProject(
+        'Example Studios (Tour)',
+        'Demo project for guided tour'
+      );
+      await createProjectFromTemplate(vfs, tourDemo.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+
+      // Store the demo project ID in tour context
+      setTourDemoProjectId(tourDemo.id);
+
+      // Reload projects to show the new demo
+      await reloadProjects();
+
+      // Start the tour
       startTour();
+
+      logger.info('[Tour] Created tour demo project:', tourDemo.id);
     } catch (error) {
       logger.error('Failed to prepare for tour:', error);
       toast.error('Failed to start tour - could not create demo project');
@@ -619,7 +631,7 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
                   </div>
 
                   {/* New Project */}
-                  <Button onClick={() => setCreateDialogOpen(true)} size="sm" className="gap-2">
+                  <Button onClick={() => setCreateDialogOpen(true)} size="sm" className="gap-2" data-tour-id="new-project-button">
                     <Plus className="h-4 w-4" />
                     <span>New</span>
                   </Button>

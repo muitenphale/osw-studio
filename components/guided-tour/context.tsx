@@ -49,6 +49,7 @@ interface GuidedTourContextValue {
   setActiveProjectId: (projectId: string | null) => void;
   setTranscript: React.Dispatch<React.SetStateAction<GuidedTourTranscriptEvent[]>>;
   setWorkspaceHandler: (handler: GuidedTourEventHandler | null) => void;
+  setTourDemoProjectId: (projectId: string | null) => void;
 }
 
 const GuidedTourContext = createContext<GuidedTourContextValue | null>(null);
@@ -68,6 +69,7 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
   const [isBusy, setIsBusy] = useState(false);
   const [projectList, setProjectList] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [tourDemoProjectId, setTourDemoProjectId] = useState<string | null>(null);
   const [workspaceData, setWorkspaceData] = useState<TourWorkspaceData>({
     projectId: null,
     preCheckpointId: null,
@@ -120,7 +122,7 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
     workspaceDataRef.current = workspaceData;
   }, [workspaceData]);
 
-  const completeTour = useCallback((mode: 'finish' | 'skip' = 'finish') => {
+  const completeTour = useCallback(async (mode: 'finish' | 'skip' = 'finish') => {
     const currentData = workspaceDataRef.current;
     if (currentData.projectId && currentData.preCheckpointId && currentData.postCheckpointId) {
       saveManager
@@ -136,6 +138,30 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
           console.error('[GuidedTour] Failed to restore baseline during cleanup', error);
         });
     }
+
+    // Smart cleanup: Remove tour demo project if other projects exist
+    if (tourDemoProjectId) {
+      try {
+        // Check if there are other projects besides the tour demo
+        const otherProjects = projectList.filter(p => p.id !== tourDemoProjectId);
+
+        if (otherProjects.length > 0) {
+          // Delete the tour demo project since user has other projects
+          const { vfs } = await import('@/lib/vfs');
+          await vfs.init();
+          await vfs.deleteProject(tourDemoProjectId);
+
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('projectsChanged'));
+            // Navigate back to project page after deleting
+            window.dispatchEvent(new CustomEvent('tour-navigate-home'));
+          }
+        }
+      } catch (error) {
+        console.error('[GuidedTour] Failed to cleanup tour demo project', error);
+      }
+    }
+
     resetWorkspaceData();
     setTranscript([]);
     setStepIndex(0);
@@ -144,7 +170,7 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
     configManager.setHasSeenTour(true);
     demoAbortController.current?.abort();
     workspaceHandlerRef.current = null;
-  }, [resetWorkspaceData]);
+  }, [resetWorkspaceData, tourDemoProjectId, projectList]);
 
   const skip = useCallback(() => {
     completeTour('skip');
@@ -157,10 +183,20 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
         completeTour();
         return index;
       }
+
+      // Auto-navigate to tour demo project when entering workspace
+      const nextStep = GUIDED_TOUR_STEPS[nextIndex];
+      if (nextStep?.location === 'workspace' && tourDemoProjectId) {
+        // Delay slightly to ensure smooth transition
+        setTimeout(() => {
+          setActiveProjectId(tourDemoProjectId);
+        }, 100);
+      }
+
       setStepKey((key) => key + 1);
       return nextIndex;
     });
-  }, [completeTour]);
+  }, [completeTour, tourDemoProjectId]);
 
   const previous = useCallback(() => {
     setStepIndex((index) => {
@@ -368,6 +404,7 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
       setActiveProjectId,
       setTranscript,
       setWorkspaceHandler,
+      setTourDemoProjectId,
     }),
     [status, stepIndex, stepKey, currentStep, transcript, isBusy, projectList, start, skip, next, previous, setWorkspaceHandler]
   );

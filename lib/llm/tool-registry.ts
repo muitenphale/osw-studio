@@ -8,6 +8,13 @@ import { vfs, VirtualFileSystem } from '@/lib/vfs';
 import { vfsShell } from '@/lib/vfs/cli-shell';
 import { execStringPatch } from './string-patch';
 import { logger } from '../utils';
+import {
+  isJSONTruncationError,
+  attemptJSONRepair,
+  analyzeOperationType,
+  generateContinuationMessage,
+  generateUnsafeOperationError
+} from './json-repair';
 
 export type ToolId = 'shell' | 'json_patch' | 'evaluation';
 
@@ -394,6 +401,66 @@ For large file rewrites, ensure:
       return await tool.executor.execute(projectId, args, context);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check if this is a JSON truncation error - attempt smart repair
+      if (isJSONTruncationError(error)) {
+        logger.warn(`[ToolRegistry] JSON truncation detected for ${toolId}, attempting repair...`);
+
+        const repairResult = attemptJSONRepair(toolCall.function.arguments);
+
+        if (repairResult.success) {
+          // Successfully repaired JSON - check if it's safe to execute
+          if (toolId === 'json_patch') {
+            const operations = repairResult.repaired?.operations;
+
+            if (Array.isArray(operations) && operations.length > 0) {
+              const safety = analyzeOperationType(operations);
+
+              if (safety === 'safe') {
+                // Safe to execute - these are rewrite operations that can be continued
+                logger.info(`[ToolRegistry] Auto-executing repaired ${toolId} (safe operations)`);
+
+                try {
+                  const result = await tool.executor.execute(projectId, repairResult.repaired, context);
+
+                  // Return success with continuation message
+                  return generateContinuationMessage(
+                    result,
+                    repairResult.repaired.file_path || 'unknown',
+                    operations,
+                    repairResult.originalLength
+                  );
+                } catch (execError) {
+                  const execMessage = execError instanceof Error ? execError.message : String(execError);
+                  logger.error(`[ToolRegistry] Repaired ${toolId} execution failed:`, execMessage);
+                  return `Error: Repaired JSON execution failed: ${execMessage}`;
+                }
+              } else if (safety === 'unsafe') {
+                // Unsafe operations - don't execute, provide helpful error
+                logger.warn(`[ToolRegistry] Repaired ${toolId} contains unsafe operations, not executing`);
+                return generateUnsafeOperationError(operations, repairResult.originalLength);
+              }
+            }
+          }
+
+          // For other tools or unknown safety, log but don't execute
+          logger.warn(`[ToolRegistry] Repaired ${toolId} but safety unknown, not executing`);
+          return `Error: ${errorMessage}\n\nNote: JSON repair succeeded but operation type is unclear. Please split into smaller operations.`;
+        } else {
+          // Repair failed - provide helpful error message
+          logger.error(`[ToolRegistry] JSON repair failed for ${toolId}:`, repairResult.error);
+          return `Error: ${errorMessage}
+
+JSON repair attempt failed. The tool call was likely truncated due to max_tokens limit.
+
+💡 Solution: Split into smaller operations
+• Each operation should be <2KB (~500 tokens)
+• Use multiple sequential tool calls
+• For large files, break into logical sections`;
+        }
+      }
+
+      // Not a truncation error - return regular error
       logger.error(`Tool execution error (${toolId}):`, errorMessage);
       return `Error: ${errorMessage}`;
     }

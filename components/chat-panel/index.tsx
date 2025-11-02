@@ -104,6 +104,18 @@ export function ChatPanel({
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const isScrollingProgrammatically = useRef(false);
 
+  // Listen for tour event to open provider settings
+  useEffect(() => {
+    const handleTourOpenSettings = () => {
+      setShowMobileSettings(true);
+    };
+
+    window.addEventListener('tour-open-provider-settings', handleTourOpenSettings);
+    return () => {
+      window.removeEventListener('tour-open-provider-settings', handleTourOpenSettings);
+    };
+  }, []);
+
   // Track state for incremental processing
   const lastProcessedIndexRef = useRef(0);
   const lastEventVersionsRef = useRef<Map<string, number>>(new Map());
@@ -502,7 +514,7 @@ export function ChatPanel({
   ) : null;
 
   return (
-    <div className="h-full flex flex-col bg-card border border-border rounded-lg overflow-hidden">
+    <div className="h-full flex flex-col bg-card border border-border rounded-lg overflow-hidden" data-tour-id="assistant-panel">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-border bg-muted/30 shrink-0">
         <div className="flex items-center gap-2">
@@ -536,6 +548,7 @@ export function ChatPanel({
               onClick={onClearChat}
               className="h-7 px-2 hover:bg-muted"
               title="Clear chat"
+              data-tour-id="clear-chat-button"
             >
               <Trash2 className="h-3 w-3" />
             </Button>
@@ -616,6 +629,7 @@ export function ChatPanel({
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
+                    data-tour-id="provider-settings-trigger"
                   >
                     <span>{getModelDisplayName(currentModel)}</span>
                     {showMobileSettings ? (
@@ -625,7 +639,7 @@ export function ChatPanel({
                     )}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[36rem] max-w-[calc(100vw-2rem)]" align="start">
+                <PopoverContent className="w-[36rem] max-w-[calc(100vw-2rem)]" align="start" data-tour-id="provider-settings-popup">
                   <ModelSettingsPanel
                     onClose={() => setShowMobileSettings(false)}
                     onModelChange={(modelId) => setCurrentModel(modelId)}

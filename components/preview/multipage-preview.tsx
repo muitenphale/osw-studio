@@ -297,7 +297,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   const loadPage = (path: string, compiled?: CompiledProject) => {
     const projectToUse = compiled || compiledProjectRef.current || compiledProject;
-    
+
     if (!projectToUse) {
       logger.warn('No compiled project available');
       return;
@@ -308,7 +308,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     } else {
       postMessageToIframe({ type: 'selector-toggle', active: false });
     }
-    
+
     if (!iframeRef.current || !iframeReady) {
       pendingLoadPath.current = path;
       return;
@@ -318,19 +318,31 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     if (!normalizedPath.startsWith('/')) {
       normalizedPath = '/' + normalizedPath;
     }
-    
+
     const route = projectToUse.routes.find(r => r.path === normalizedPath);
     let filePath: string;
     if (route) {
       filePath = route.file;
     } else if (normalizedPath === '/') {
       filePath = '/index.html';
+    } else if (normalizedPath.endsWith('/')) {
+      // Directory path - look for index.html
+      filePath = normalizedPath + 'index.html';
     } else {
       filePath = normalizedPath + '.html';
     }
-    
-    const htmlFile = projectToUse.files.find(f => f.path === filePath);
-    
+
+    let htmlFile = projectToUse.files.find(f => f.path === filePath);
+
+    // If not found and path doesn't end with /, try directory index as fallback
+    if (!htmlFile && !normalizedPath.endsWith('/')) {
+      const dirIndexPath = normalizedPath + '/index.html';
+      htmlFile = projectToUse.files.find(f => f.path === dirIndexPath);
+      if (htmlFile) {
+        filePath = dirIndexPath;
+      }
+    }
+
     if (!htmlFile) {
       setError(`Page not found: ${path}`);
       const indexFile = projectToUse.files.find(f => f.path === '/index.html' || f.path === 'index.html');

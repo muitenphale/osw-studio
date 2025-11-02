@@ -23,6 +23,16 @@ function HomeInner() {
   }, [selectedProject, setActiveProjectId]);
 
   useEffect(() => {
+    const handleTourNavigateHome = () => {
+      setSelectedProject(null);
+    };
+    window.addEventListener('tour-navigate-home', handleTourNavigateHome);
+    return () => {
+      window.removeEventListener('tour-navigate-home', handleTourNavigateHome);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isTourRunning) {
       return;
     }

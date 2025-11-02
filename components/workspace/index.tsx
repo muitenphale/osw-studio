@@ -401,8 +401,16 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
 
     if (tourStep === 'provider-settings') {
+      // Open the provider settings popup in the chat panel
+      // This will be controlled by the ChatPanel's showMobileSettings state
+      // We trigger it by dispatching a custom event
       setShowDesktopSettings(true);
       setShowMobileSettings(true);
+
+      // Trigger the ChatPanel to open its settings popover
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tour-open-provider-settings'));
+      }
     } else {
       setShowDesktopSettings(false);
       setShowMobileSettings(false);
@@ -416,14 +424,85 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       return;
     }
 
-    setGenerating(tourStep === 'workspace-edit');
+    // Set generating state based on tour busy state
+    setGenerating(tourStep === 'workspace-edit' && tourState.isBusy);
 
-    const handler = (event: GuidedTourTranscriptEvent) => {
-      // Tour events now handled by debug events only
-      // No need to manipulate messages state
+    const handler = async (event: GuidedTourTranscriptEvent) => {
+      // Convert tour events to debug events for ChatPanel display
       if (event.role === 'clear' && event.action === 'conversation') {
-        clearDebugEvents();
+        await clearDebugEvents();
         return;
+      }
+
+      if (event.role === 'user') {
+        // User message → conversation_message event
+        await addDebugEvent('conversation_message', {
+          message: {
+            role: 'user',
+            content: event.content
+          }
+        });
+      } else if (event.role === 'assistant') {
+        // Assistant message → conversation_message event
+        const message: any = {
+          role: 'assistant',
+          content: event.content
+        };
+
+        // Store checkpoint ID in UI metadata if present
+        if (event.checkpointId) {
+          message.ui_metadata = {
+            checkpointId: event.checkpointId
+          };
+        }
+
+        await addDebugEvent('conversation_message', { message });
+
+        // Emit checkpoint_created event if checkpoint ID is present
+        if (event.checkpointId) {
+          await addDebugEvent('checkpoint_created', {
+            checkpointId: event.checkpointId,
+            description: `Tour checkpoint: ${event.content.substring(0, 60)}`
+          });
+        }
+      } else if (event.role === 'tool') {
+        // Tool call → simulate tool execution sequence
+        // 1. Tool call initiated
+        const toolCall = {
+          id: `tour-tool-${Date.now()}`,
+          function: {
+            name: event.name,
+            arguments: JSON.stringify({ command: event.command })
+          }
+        };
+
+        await addDebugEvent('toolCalls', {
+          toolCalls: [toolCall]
+        });
+
+        // 2. Tool status (executing)
+        await addDebugEvent('tool_status', {
+          toolId: toolCall.id,
+          name: event.name,
+          status: 'executing'
+        });
+
+        // 3. Tool result
+        await addDebugEvent('tool_result', {
+          toolId: toolCall.id,
+          name: event.name,
+          result: event.output,
+          status: 'completed'
+        });
+
+        // 4. Tool message in conversation
+        await addDebugEvent('conversation_message', {
+          message: {
+            role: 'tool',
+            content: event.output,
+            tool_call_id: toolCall.id
+          }
+        });
       }
     };
 
@@ -432,7 +511,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     return () => {
       setWorkspaceHandler(null);
     };
-  }, [tourRunning, tourStep, setWorkspaceHandler, clearDebugEvents]);
+  }, [tourRunning, tourStep, tourState.isBusy, setWorkspaceHandler, clearDebugEvents, addDebugEvent]);
 
   // Clear orchestrator when project or chat mode changes
   useEffect(() => {
@@ -521,6 +600,16 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       if (!modifierPressed) return;
 
       if (event.key.toLowerCase() === 's') {
+        // Check if Monaco editor has focus - if so, let Monaco handle the save
+        const activeElement = document.activeElement;
+        const isMonacoFocused = activeElement?.closest('.monaco-editor') !== null;
+
+        if (isMonacoFocused) {
+          // Monaco editor will handle file save
+          return;
+        }
+
+        // Otherwise, save the project
         event.preventDefault();
         handleSave();
       }

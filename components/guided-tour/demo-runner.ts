@@ -84,7 +84,22 @@ export async function runGuidedDemoEdit({
     updatedCss: null,
   };
 
-  const cssFile = await vfs.readFile(projectId, '/styles/main.css');
+  // Verify the CSS file exists before attempting to read it
+  let cssFile;
+  try {
+    cssFile = await vfs.readFile(projectId, '/styles/main.css');
+  } catch (error) {
+    console.error('[GuidedTour] Demo CSS file not found, attempting fallback:', error);
+
+    // Try to wait a bit and retry once (async file system initialization)
+    await wait(500, signal);
+    try {
+      cssFile = await vfs.readFile(projectId, '/styles/main.css');
+    } catch (retryError) {
+      throw new Error('Demo project CSS file not found at /styles/main.css. This project may not have the expected demo structure.');
+    }
+  }
+
   const cssContent = typeof cssFile.content === 'string' ? cssFile.content : '';
   result.originalCss = cssContent;
 

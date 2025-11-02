@@ -263,30 +263,8 @@ export async function parseStreamingResponse(
     }
   }
 
-  // Validate and fix tool calls
-  const toolCallsArray = Object.values(toolCallsById).map((toolCall) => {
-    if (toolCall.function?.arguments) {
-      try {
-        JSON.parse(toolCall.function.arguments);
-      } catch {
-        if (DEBUG_TOOL_STREAM) logger.warn('Incomplete tool arguments, attempting to fix');
-        const args = toolCall.function.arguments;
-        const openBraces = (args.match(/{/g) || []).length;
-        const closeBraces = (args.match(/}/g) || []).length;
-        const openBrackets = (args.match(/\[/g) || []).length;
-        const closeBrackets = (args.match(/]/g) || []).length;
-
-        let suffix = '';
-        for (let i = 0; i < openBrackets - closeBrackets; i++) suffix += ']';
-        for (let i = 0; i < openBraces - closeBraces; i++) suffix += '}';
-
-        if (suffix) {
-          toolCall.function.arguments = args + suffix;
-        }
-      }
-    }
-    return toolCall;
-  });
+  // Pass tool calls as-is - let tool-registry handle JSON repair with smart strategies
+  const toolCallsArray = Object.values(toolCallsById);
 
   return { content, toolCalls: toolCallsArray, usage: usageInfo };
 }
