@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.15.0 - 2025-11-04
+- Added Agent Skills System (Anthropic-inspired, compatible with prompt-only skills) with integrated Skills tab (Projects | Templates | Skills)
+- Global enable/disable toggle for entire skills system with per-skill enable/disable controls
+- Built-in skills: OSW Workflow (comprehensive website building guide), Handlebars Advanced, Accessibility (WCAG 2.1 AA)
+- Create custom skills with markdown-based editor (YAML frontmatter + content, follows Anthropic SKILL.md convention)
+- Import/export skills as .md files or .zip archives
+- Skills automatically injected into AI system prompt when enabled (prompt-only approach)
+- Expandable/collapsible skill cards with content preview
+- Dual-mode skills editor (form view + raw markdown view)
+- Moved hidden files toggle from file explorer header to right-click context menu
+- Hidden files now only show enabled skills in `/.skills/` folder
+- AI interacts with transient files (skills, temp files) via shell commands
+
 ## v1.14.1 - 2025-11-02
 - Fixed Cmd/Ctrl+S triggering project save when Monaco editor has focus (now lets Monaco handle file saves internally)
 - Enhanced directory-based routing: paths ending with `/` now correctly resolve to `index.html` (e.g., `/about/` → `/about/index.html`)

@@ -53,6 +53,8 @@ export interface VirtualFile {
   metadata: {
     isEntry?: boolean;
     dependencies?: string[];
+    isTransient?: boolean;
+    isBuiltIn?: boolean;
   };
 }
 

@@ -24,7 +24,8 @@ import {
   Info,
   TestTube,
   Github,
-  LayoutTemplate
+  LayoutTemplate,
+  Sparkles
 } from 'lucide-react';
 import { AppHeader, HeaderAction, ViewTab } from '@/components/ui/app-header';
 import {
@@ -64,6 +65,7 @@ import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { configManager } from '@/lib/config/storage';
 import { TemplateExportDialog } from '@/components/templates/template-export-dialog';
 import { TemplateManager } from '@/components/template-manager';
+import { SkillsManager } from '@/components/skills/SkillsManager';
 
 interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
@@ -71,7 +73,7 @@ interface ProjectManagerProps {
 
 type SortOption = 'updated' | 'created' | 'name' | 'size';
 type ViewMode = 'grid' | 'list';
-type PageView = 'projects' | 'templates';
+type PageView = 'projects' | 'templates' | 'skills';
 
 export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
   const router = useRouter();
@@ -499,8 +501,8 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
         Guided Tour
       </Button>
       
-      <Button 
-        variant="outline" 
+      <Button
+        variant="outline"
         size="sm"
         onClick={() => router.push('/test-generation')}
         className="w-full justify-start"
@@ -508,9 +510,9 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
         <TestTube className="mr-2 h-4 w-4" />
         Model Tester
       </Button>
-      
-      <Button 
-        variant="outline" 
+
+      <Button
+        variant="outline"
         size="sm"
         onClick={() => setAboutModalOpen(true)}
         className="w-full justify-start"
@@ -557,7 +559,8 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
         leftText="Open Source Web Studio"
         viewTabs={[
           { id: 'projects', label: 'Projects', icon: FolderOpen },
-          { id: 'templates', label: 'Templates', icon: LayoutTemplate }
+          { id: 'templates', label: 'Templates', icon: LayoutTemplate },
+          { id: 'skills', label: 'Skills', icon: Sparkles }
         ]}
         activeViewTab={currentView}
         onViewTabChange={(tabId) => setCurrentView(tabId as PageView)}
@@ -567,6 +570,8 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
       <main className="flex-1 min-h-0 overflow-auto">
         {currentView === 'templates' ? (
           <TemplateManager onProjectCreated={handleProjectCreatedFromTemplate} />
+        ) : currentView === 'skills' ? (
+          <SkillsManager />
         ) : (
           <div className="h-full flex flex-col">
             {/* Toolbar */}

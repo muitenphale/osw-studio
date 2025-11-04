@@ -81,11 +81,11 @@ async function vfsShellExecute(
         const recursive = flags.has('-R') || flags.has('-r');
         const path = normalizePath(paths[0]) || '/';
         if (!recursive) {
-          const files = await vfs.listDirectory(projectId, path);
+          const files = await vfs.listDirectory(projectId, path, { includeTransient: true });
           const lines = files.map(f => f.path).sort().join('\n');
           return { stdout: truncate(lines), stderr: '', exitCode: 0 };
         } else {
-          const entries = await vfs.getAllFilesAndDirectories(projectId);
+          const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
           const prefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
           const res = entries
             .filter((e: any) => e.path === path || e.path.startsWith(prefix))
@@ -110,7 +110,7 @@ async function vfsShellExecute(
         }
 
         const path = normalizePath(targetPath) || '/';
-        const entries = await vfs.getAllFilesAndDirectories(projectId);
+        const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
         const prefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
 
         // Filter entries under the target path
@@ -311,7 +311,7 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
           regex = new RegExp(pattern, flags.i ? 'i' : '');
         }
 
-        const entries = await vfs.getAllFilesAndDirectories(projectId);
+        const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
         const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
         const outLines: string[] = [];
         for (const e of entries) {
@@ -380,7 +380,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
 
         const regex = new RegExp(pattern, flags.i ? 'i' : '');
-        const entries = await vfs.getAllFilesAndDirectories(projectId);
+        const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
         const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
         const outLines: string[] = [];
 
@@ -453,7 +453,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
 
         const root = normalizePath(rootArg) || '/';
-        const entries = await vfs.getAllFilesAndDirectories(projectId);
+        const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
         const prefix = root === '/' ? '/' : (root.endsWith('/') ? root : root + '/');
         const toGlob = (s: string) => new RegExp('^' + s.replace(/[.+^${}()|\[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
         const regex = pattern ? toGlob(pattern) : null;
@@ -642,7 +642,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
             return { stdout: '', stderr: 'cp: -r required for directories', exitCode: 1 };
           }
           // Directory copy: copy all files under src prefix
-          const entries = await vfs.getAllFilesAndDirectories(projectId);
+          const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
           const srcPrefix = src.endsWith('/') ? src : src + '/';
           for (const e2 of entries) {
             if ('type' in e2 && e2.type === 'directory') continue;

@@ -2,22 +2,24 @@ import { v4 as uuidv4 } from 'uuid';
 import JSZip from 'jszip';
 import { VFSDatabase } from './database';
 import { logger } from '@/lib/utils';
-import { 
-  Project, 
-  VirtualFile, 
-  FileTreeNode, 
-  getFileTypeFromPath, 
+import {
+  Project,
+  VirtualFile,
+  FileTreeNode,
+  getFileTypeFromPath,
   getSpecificMimeType,
   FILE_SIZE_LIMITS,
   isFileSupported,
-  PatchOperation 
+  PatchOperation
 } from './types';
 import { saveManager } from './save-manager';
 import { VirtualServer } from '@/lib/preview/virtual-server';
+import { skillsService } from './skills';
 
 export class VirtualFileSystem {
   private db: VFSDatabase;
   private initialized = false;
+  private transientFiles: Map<string, VirtualFile> = new Map();
 
   constructor() {
     this.db = new VFSDatabase();
@@ -26,7 +28,62 @@ export class VirtualFileSystem {
   async init(): Promise<void> {
     if (!this.initialized) {
       await this.db.init();
+      await this.mountTransientSkills();
       this.initialized = true;
+    }
+  }
+
+  /**
+   * Mount skills as transient files at /.skills/
+   */
+  private async mountTransientSkills(): Promise<void> {
+    try {
+      const skills = await skillsService.getAllSkills();
+
+      for (const skill of skills) {
+        const path = `/.skills/${skill.id}.md`;
+        const transientFile: VirtualFile = {
+          id: `transient-skill-${skill.id}`,
+          projectId: 'transient', // Not associated with any project
+          path,
+          name: `${skill.id}.md`,
+          type: 'text',
+          content: skill.content,
+          mimeType: 'text/markdown',
+          size: new Blob([skill.content]).size,
+          createdAt: skill.createdAt,
+          updatedAt: skill.updatedAt,
+          metadata: {
+            isTransient: true,
+            isBuiltIn: skill.isBuiltIn
+          }
+        };
+
+        this.transientFiles.set(path, transientFile);
+      }
+
+      logger.info(`[VFS] Mounted ${this.transientFiles.size} transient skill files`);
+    } catch (error) {
+      logger.error('[VFS] Failed to mount transient skills', error);
+    }
+  }
+
+  /**
+   * Check if a path is transient (starts with /.)
+   */
+  private isTransientPath(path: string): boolean {
+    return path.startsWith('/.');
+  }
+
+  /**
+   * Reload transient skills (call after adding/updating/deleting skills)
+   */
+  async reloadTransientSkills(): Promise<void> {
+    this.transientFiles.clear();
+    await this.mountTransientSkills();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('filesChanged'));
     }
   }
 
@@ -96,39 +153,53 @@ export class VirtualFileSystem {
 
   async readFile(projectId: string, path: string): Promise<VirtualFile> {
     this.ensureInitialized();
-    
+
     // Validate inputs
     if (!projectId || typeof projectId !== 'string') {
       logger.error('VFS: Invalid projectId for readFile', { projectId, path });
       throw new Error('Invalid projectId provided');
     }
-    
+
     if (!path || typeof path !== 'string') {
       logger.error('VFS: Invalid path for readFile', { projectId, path });
       throw new Error('Invalid file path provided');
     }
-    
+
     // Clean path of any trailing newlines or escape sequences
     const cleanPath = path.replace(/\\n$|\\r$|\n$|\r$/, '').trim();
-    
+
     if (!cleanPath) {
       logger.error('VFS: Empty path after cleaning for readFile', { projectId, originalPath: path, cleanPath });
       throw new Error('Empty file path after cleaning');
     }
-    
+
+    // Check transient files first (for /.skills/, /.agents/, etc.)
+    if (this.isTransientPath(cleanPath)) {
+      const transientFile = this.transientFiles.get(cleanPath);
+      if (transientFile) {
+        return transientFile;
+      }
+      throw new Error(`Transient file not found: ${cleanPath}`);
+    }
+
     const file = await this.db.getFile(projectId, cleanPath);
     if (!file) {
       logger.error('VFS: File not found for read', { projectId, path: cleanPath, originalPath: path });
       throw new Error(`File not found: ${cleanPath}`);
     }
-    
+
     return file;
   }
 
   async fileExists(projectId: string, path: string): Promise<boolean> {
     this.ensureInitialized();
-    
+
     try {
+      // Check transient files first
+      if (this.isTransientPath(path)) {
+        return this.transientFiles.has(path);
+      }
+
       const file = await this.db.getFile(projectId, path);
       return !!file;
     } catch {
@@ -242,30 +313,39 @@ export class VirtualFileSystem {
       }
   }
 
-  async listDirectory(projectId: string, path: string): Promise<VirtualFile[]> {
+  async listDirectory(projectId: string, path: string, options?: { includeTransient?: boolean }): Promise<VirtualFile[]> {
     this.ensureInitialized();
-    
+
     const allFiles = await this.db.listFiles(projectId);
-    
+
+    let files: VirtualFile[];
     if (path === '/') {
-      return allFiles;
+      files = allFiles;
+    } else {
+      files = allFiles.filter(file => {
+        const filePath = file.path;
+        const dirPath = path.endsWith('/') ? path : path + '/';
+        return filePath.startsWith(dirPath) &&
+               filePath.slice(dirPath.length).indexOf('/') === -1;
+      });
     }
-    
-    return allFiles.filter(file => {
-      const filePath = file.path;
-      const dirPath = path.endsWith('/') ? path : path + '/';
-      return filePath.startsWith(dirPath) && 
-             filePath.slice(dirPath.length).indexOf('/') === -1;
-    });
+
+    // Include transient files if requested and listing root directory
+    if (options?.includeTransient && path === '/') {
+      const transientFilesArray = Array.from(this.transientFiles.values());
+      files = [...files, ...transientFilesArray];
+    }
+
+    return files;
   }
 
-  async getAllFilesAndDirectories(projectId: string): Promise<Array<VirtualFile | { path: string; name: string; type: 'directory' }>> {
+  async getAllFilesAndDirectories(projectId: string, options?: { includeTransient?: boolean }): Promise<Array<VirtualFile | { path: string; name: string; type: 'directory' }>> {
     this.ensureInitialized();
-    
+
     const allFiles = await this.db.listFiles(projectId);
-    
+
     const treeNodes = await this.db.getAllTreeNodes(projectId);
-    
+
     const directories = treeNodes
       .filter(node => node.type === 'directory')
       .map(node => ({
@@ -273,8 +353,16 @@ export class VirtualFileSystem {
         name: node.path.split('/').filter(Boolean).pop() || node.path,
         type: 'directory' as const
       }));
-    
-    return [...allFiles, ...directories];
+
+    let result: Array<VirtualFile | { path: string; name: string; type: 'directory' }> = [...allFiles, ...directories];
+
+    // Include transient files if requested
+    if (options?.includeTransient) {
+      const transientFilesArray = Array.from(this.transientFiles.values());
+      result = [...result, ...transientFilesArray];
+    }
+
+    return result;
   }
 
   async deleteDirectory(projectId: string, path: string): Promise<void> {

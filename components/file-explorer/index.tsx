@@ -4,17 +4,19 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { VirtualFile, isFileSupported, FILE_SIZE_LIMITS, getFileTypeFromPath } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { logger, cn } from '@/lib/utils';
-import { 
-  ChevronRight, 
-  ChevronDown, 
-  File, 
-  Folder, 
+import {
+  ChevronRight,
+  ChevronDown,
+  File,
+  Folder,
   FolderOpen,
   FolderTree,
   Upload,
   Image,
   Video,
-  X
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -49,19 +51,45 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [draggedItem, setDraggedItem] = useState<FileTreeItem | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFiles = useCallback(async () => {
     try {
       await vfs.init();
+      // Get regular files and directories
       const allItems = await vfs.getAllFilesAndDirectories(projectId);
+
+      // Add all transient files if showHidden is true
+      if (showHidden) {
+        const transientFiles = await vfs.listDirectory(projectId, '/', { includeTransient: true });
+        const transientOnly = transientFiles.filter(f => f.path.startsWith('/.'));
+
+        // Get enabled skills to filter /.skills/ folder
+        const { skillsService } = await import('@/lib/vfs/skills');
+        const enabledSkills = await skillsService.getEnabledSkills();
+        const enabledSkillPaths = new Set(enabledSkills.map(s => `/.skills/${s.id}.md`));
+
+        // Filter transient files: include all non-skill files, but only enabled skills
+        const filteredTransient = transientOnly.filter(file => {
+          // If it's in /.skills/, only include if it's enabled
+          if (file.path.startsWith('/.skills/')) {
+            return enabledSkillPaths.has(file.path);
+          }
+          // Include all other transient files
+          return true;
+        });
+
+        allItems.push(...filteredTransient);
+      }
+
       const projectFiles = allItems.filter(item => item.type !== 'directory') as VirtualFile[];
       setFiles(projectFiles);
-      setFileTree(buildFileTree(allItems));
+      setFileTree(buildFileTree(allItems, showHidden));
     } catch (error) {
       logger.error('Failed to load files:', error);
     }
-  }, [projectId]);
+  }, [projectId, showHidden]);
 
   useEffect(() => {
     loadFiles();
@@ -77,11 +105,14 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
     };
   }, [projectId, loadFiles]);
 
-  const buildFileTree = (items: Array<VirtualFile | { path: string; name: string; type: 'directory' }>): FileTreeItem[] => {
+  const buildFileTree = (items: Array<VirtualFile | { path: string; name: string; type: 'directory' }>, includeHidden: boolean): FileTreeItem[] => {
+    // Filter out hidden files/directories unless includeHidden is true
+    const filteredItems = includeHidden ? items : items.filter(item => !item.path.startsWith('/.'));
+
     const tree: FileTreeItem[] = [];
     const dirMap = new Map<string, FileTreeItem>();
 
-    items.forEach(item => {
+    filteredItems.forEach(item => {
       if (item.type === 'directory') {
         const parts = item.path.split('/').filter(Boolean);
         const dirItem: FileTreeItem = {
@@ -94,7 +125,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
       }
     });
 
-    items.forEach(item => {
+    filteredItems.forEach(item => {
       if (item.type !== 'directory') {
         const parts = item.path.split('/').filter(Boolean);
         let currentPath = '';
@@ -657,6 +688,10 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
           <ContextMenuItem onClick={() => fileInputRef.current?.click()}>
             <Upload className="mr-2 h-4 w-4" />
             Upload Files
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => setShowHidden(!showHidden)}>
+            {showHidden ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
+            {showHidden ? 'Hide Hidden Files' : 'Show Hidden Files'}
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>

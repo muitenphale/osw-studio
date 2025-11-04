@@ -77,7 +77,7 @@ export class LLMClient {
     }
 
     const messages: LLMMessage[] = [
-      { role: 'system', content: buildShellSystemPrompt(context?.fileTree) },
+      { role: 'system', content: await buildShellSystemPrompt(context?.fileTree) },
       {
         role: 'user',
         content: prompt
@@ -103,7 +103,7 @@ export class LLMClient {
     }
 
     const messages: LLMMessage[] = [
-      { role: 'system', content: buildShellSystemPrompt(context?.fileTree) },
+      { role: 'system', content: await buildShellSystemPrompt(context?.fileTree) },
       {
         role: 'user',
         content: prompt

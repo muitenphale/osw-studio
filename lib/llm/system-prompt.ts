@@ -1,11 +1,13 @@
-export function buildShellSystemPrompt(fileTree?: string, chatMode?: boolean): string {
+import { skillsService } from '@/lib/vfs/skills';
+
+export async function buildShellSystemPrompt(fileTree?: string, chatMode?: boolean): Promise<string> {
   if (chatMode) {
     return buildChatModePrompt(fileTree);
   }
-  return buildCodeModePrompt(fileTree);
+  return await buildCodeModePrompt(fileTree);
 }
 
-function buildChatModePrompt(fileTree?: string): string {
+async function buildChatModePrompt(fileTree?: string): Promise<string> {
   let prompt = `You are an AI assistant that helps users with their coding projects. You work in a sandboxed virtual file system.
 
 🔒 CHAT MODE - READ-ONLY EXPLORATION AND PLANNING
@@ -92,13 +94,24 @@ Important Notes:
 - Focus on exploration, analysis, and planning - no file modifications
 `;
 
+  // Add skills section
+  const skillsMetadata = await skillsService.getEnabledSkillsMetadata();
+  if (skillsMetadata.length > 0) {
+    prompt += `\n\nAVAILABLE SKILLS:\n`;
+    prompt += `You have access to specialized knowledge files. Read them when relevant to your task:\n\n`;
+    for (const skill of skillsMetadata) {
+      prompt += `- ${skill.path}: ${skill.description}\n`;
+    }
+    prompt += `\nTo use a skill, read it with: cat ${skillsMetadata[0].path.replace(/[^/]+\.md$/, '<skill-name>.md')}\n`;
+  }
+
   if (fileTree) {
     prompt += `\n\n${fileTree}`;
   }
   return prompt;
 }
 
-function buildCodeModePrompt(fileTree?: string): string {
+async function buildCodeModePrompt(fileTree?: string): Promise<string> {
   let prompt = `You are an AI assistant that helps users with their coding projects. You work in a sandboxed virtual file system.
 
 🚨 PLATFORM CONSTRAINTS - READ THIS FIRST:
@@ -783,6 +796,17 @@ Nested Data Access:
 {{! Debug data structures }}
 <pre>{{json data}}</pre>
 `;
+
+  // Add skills section
+  const skillsMetadata = await skillsService.getEnabledSkillsMetadata();
+  if (skillsMetadata.length > 0) {
+    prompt += `\n\nAVAILABLE SKILLS:\n`;
+    prompt += `You have access to specialized knowledge files. Read them when relevant to your task:\n\n`;
+    for (const skill of skillsMetadata) {
+      prompt += `- ${skill.path}: ${skill.description}\n`;
+    }
+    prompt += `\nTo use a skill, read it with: cat ${skillsMetadata[0].path.replace(/[^/]+\.md$/, '<skill-name>.md')}\n`;
+  }
 
   if (fileTree) {
     prompt += `\n\n${fileTree}`;
