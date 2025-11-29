@@ -128,12 +128,16 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 ## Model Recommendations
 
 ### ✅ Recommended Models (Tool Calling)
-- **Kimi K2** - Good balance of speed and quality
-- **GLM4.5 & air** - Fast and reliable
-- **gpt-oss-120b & 20b** - Strong reasoning capabilities
-- **Qwen3 series** - Excellent for code generation
-- **DeepSeek v3.1 / R1** - Great for complex tasks
-- **SOTA models** - Google Gemini, OpenAI GPT-4/5, Grok, Claude, Llama
+- **Gemini 3** - Good pricing, speed and quality, best value currently
+- **Haiku 4.5** - Reasonable pricing, speed and quality
+- **GLM4.6, GLM4.5 & air** - Fast, reliable and cheap, among SOTA for webdev
+- **Grok Code Fast 1** - Good balance of speed, quality and price
+- **Kimi K2** - Good balance of speed, quality and price
+- **gpt-oss-120b & 20b** - Strong agentic capabilities
+- **Qwen3 series** - Some models perform better than others, but functional across the board
+- **DeepSeek v3.2, v3.1 and R1** - Can handle most tasks, but not optimized for this use case
+- **Claude Sonnet 4.5 & Opus 4.5** - Good, but can rack up a large bill quickly (Gemini 3 is much better value)
+- **SOTA models** - Generally SOTA models will perform, but come with a higher pricing
 
 ### ⚠️ Models Without Tool Calling (JSON Parsing Fallback)
 - DeepSeek V3, Qwen2.5, Gemma3, Mistral-small, Granite 3.x, Llama4 Maverick/Scout
@@ -216,7 +220,7 @@ npm run dev
 ## Architecture
 
 ```
-/components/        # React UI components (workspace, editor, preview)
+/components/       # React UI components (workspace, editor, preview)
 /lib/vfs/          # Virtual file system with checkpoints
 /lib/llm/          # AI orchestration, tool execution, providers
 /app/api/          # API routes (generation, models, validation)
@@ -285,8 +289,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 ## 🙏 Credits
 
 **Original Inspiration:**
-- [@enzostvs](https://github.com/enzostvs) - DeepSite v2 (original fork source)
-- [@victor](https://github.com/victor) - Early collaboration
+- [@enzostvs](https://github.com/enzostvs) & [@victor](https://github.com/victor) - DeepSite v2 (original fork source)
 - [Hugging Face](https://huggingface.co) - Hosting platform
 
 **Technical Inspiration:**
