@@ -407,6 +407,11 @@ export function ChatPanel({
             };
           }
           break;
+
+        case 'stopped':
+          // Remove thinking indicator when generation is stopped
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'thinking');
+          break;
       }
     }
 

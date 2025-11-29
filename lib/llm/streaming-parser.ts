@@ -7,10 +7,24 @@ import { ToolCall, UsageInfo } from './types';
 import { logger } from '../utils';
 import { VirtualFile } from '@/lib/vfs';
 
+// Reasoning detail block from OpenRouter (for Gemini thinking models)
+export interface ReasoningDetail {
+  type: string;
+  text?: string;
+  summary?: string;
+  signature?: string;
+  id?: string;
+  format?: string;
+  index?: number;
+}
+
 export interface StreamResponse {
   content?: string;
   toolCalls?: ToolCall[];
   usage?: UsageInfo;
+  wasTruncated?: boolean;   // True if response was cut off due to max_tokens
+  finishReason?: string;    // The actual finish reason from the API
+  reasoningDetails?: ReasoningDetail[];  // Gemini reasoning blocks with signatures
 }
 
 export interface StreamParserOptions {
@@ -41,6 +55,9 @@ export async function parseStreamingResponse(
   let currentToolCall: Partial<ToolCall> | null = null;
   let toolCallBuffer = '';
   let usageInfo: UsageInfo | undefined;
+  let wasTruncated = false;
+  let lastFinishReason: string | undefined;
+  let reasoningDetails: ReasoningDetail[] = [];  // For Gemini thinking models
 
   const DEBUG_TOOL_STREAM = process.env.NEXT_PUBLIC_DEBUG_TOOL_STREAM === '1';
 
@@ -78,6 +95,16 @@ export async function parseStreamingResponse(
 
             if (provider === 'anthropic') {
               // Handle Anthropic streaming format
+              // Check for Anthropic stop reasons
+              if (json.type === 'message_delta' && json.delta?.stop_reason) {
+                lastFinishReason = json.delta.stop_reason;
+                // 'max_tokens' is Anthropic's equivalent of 'length'
+                if (json.delta.stop_reason === 'max_tokens') {
+                  wasTruncated = true;
+                  logger.warn('[StreamParser] Response truncated due to max_tokens limit (Anthropic)');
+                }
+              }
+
               if (json.type === 'content_block_delta' && json.delta?.text_delta?.text) {
                 const piece = json.delta.text_delta.text as string;
                 content += piece;
@@ -133,7 +160,17 @@ export async function parseStreamingResponse(
               const delta = json.choices?.[0]?.delta;
               const finishReason = json.choices?.[0]?.finish_reason;
 
-              if (finishReason === 'stop' || finishReason === 'tool_calls') {
+              // Track finish reason for truncation detection
+              if (finishReason) {
+                lastFinishReason = finishReason;
+                // 'length' means max_tokens was hit - response was truncated
+                if (finishReason === 'length') {
+                  wasTruncated = true;
+                  logger.warn('[StreamParser] Response truncated due to max_tokens limit');
+                }
+              }
+
+              if (finishReason === 'stop' || finishReason === 'tool_calls' || finishReason === 'length') {
                 if (currentToolCall && toolCallBuffer && currentToolCall.function && currentToolCall.id) {
                   currentToolCall.function.arguments = toolCallBuffer;
                   toolCallsById[currentToolCall.id] = currentToolCall as ToolCall;
@@ -152,6 +189,28 @@ export async function parseStreamingResponse(
                 const piece = String(delta.content);
                 content += piece;
                 if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece, snapshot: content });
+              }
+
+              // Capture reasoning_details for Gemini thinking models (OpenRouter format)
+              // These contain signatures that MUST be preserved for multi-turn tool use
+              if (delta?.reasoning_details && Array.isArray(delta.reasoning_details)) {
+                for (const rd of delta.reasoning_details) {
+                  // Merge or append reasoning details
+                  const existingIdx = reasoningDetails.findIndex(
+                    (existing) => existing.id && existing.id === rd.id
+                  );
+                  if (existingIdx >= 0) {
+                    // Update existing (append text if streaming)
+                    if (rd.text) {
+                      reasoningDetails[existingIdx].text = (reasoningDetails[existingIdx].text || '') + rd.text;
+                    }
+                    if (rd.signature) {
+                      reasoningDetails[existingIdx].signature = rd.signature;
+                    }
+                  } else {
+                    reasoningDetails.push(rd as ReasoningDetail);
+                  }
+                }
               }
 
               if (delta?.tool_calls) {
@@ -266,7 +325,14 @@ export async function parseStreamingResponse(
   // Pass tool calls as-is - let tool-registry handle JSON repair with smart strategies
   const toolCallsArray = Object.values(toolCallsById);
 
-  return { content, toolCalls: toolCallsArray, usage: usageInfo };
+  return {
+    content,
+    toolCalls: toolCallsArray,
+    usage: usageInfo,
+    wasTruncated,
+    finishReason: lastFinishReason,
+    reasoningDetails: reasoningDetails.length > 0 ? reasoningDetails : undefined
+  };
 }
 
 /**

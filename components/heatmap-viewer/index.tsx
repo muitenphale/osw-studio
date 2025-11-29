@@ -1,0 +1,415 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
+
+interface HeatmapPoint {
+  x: number;
+  y: number;
+  scrollY: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  documentHeight: number;
+  elementSelector?: string;
+  timestamp: string;
+}
+
+interface ClickHeatmapData {
+  type: 'click';
+  page: string;
+  sampleSize: number;
+  points: HeatmapPoint[];
+}
+
+interface ScrollHeatmapData {
+  type: 'scroll';
+  page: string;
+  sampleSize: number;
+  depthDistribution: Record<number, number>;
+  rawData: Array<{
+    scrollDepth: number;
+    timeOnPage: number;
+    timestamp: string;
+  }>;
+}
+
+type HeatmapData = ClickHeatmapData | ScrollHeatmapData;
+
+interface HeatmapViewerProps {
+  siteId: string;
+  pages: string[]; // Available pages to select from
+}
+
+export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
+  const [selectedPage, setSelectedPage] = useState<string>(pages[0] || '/');
+  const [deviceFilter, setDeviceFilter] = useState<'all' | 'mobile' | 'tablet' | 'desktop'>('all');
+  const [data, setData] = useState<HeatmapData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [screenshotLoading, setScreenshotLoading] = useState(false);
+  const [screenshotDataUrl, setScreenshotDataUrl] = useState<string | null>(null);
+  // Cache screenshots by page to avoid re-capturing
+  const [screenshotCache, setScreenshotCache] = useState<Record<string, string>>({});
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Fetch heatmap data
+  const fetchHeatmapData = async () => {
+    if (!selectedPage) return;
+
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: selectedPage,
+        type: 'click',
+      });
+
+      if (deviceFilter !== 'all') {
+        params.set('device', deviceFilter);
+      }
+
+      const response = await fetch(`/api/analytics/${siteId}/heatmap?${params}`);
+      if (!response.ok) throw new Error('Failed to fetch heatmap data');
+
+      const heatmapData: HeatmapData = await response.json();
+      setData(heatmapData);
+    } catch (error) {
+      console.error('Failed to fetch heatmap data:', error);
+      toast.error('Failed to load heatmap data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load data when page or device filter changes
+  useEffect(() => {
+    fetchHeatmapData();
+
+    // Check if we have a cached screenshot for this page and device
+    const cacheKey = `${selectedPage}-${deviceFilter}`;
+    if (screenshotCache[cacheKey]) {
+      setScreenshotDataUrl(screenshotCache[cacheKey]);
+    } else {
+      setScreenshotDataUrl(null);
+    }
+  }, [selectedPage, deviceFilter, siteId]);
+
+  // Capture screenshot - use same approach as thumbnail capture
+  const captureScreenshot = async () => {
+    if (!iframeRef.current) return;
+
+    setScreenshotLoading(true);
+    try {
+      // Dynamically import screenshot utility
+      const { captureIframeScreenshot } = await import('@/lib/utils/screenshot');
+
+      const iframe = iframeRef.current;
+
+      // Determine capture dimensions based on device filter
+      let captureWidth = 1280;
+      let captureHeight = 720;
+
+      if (deviceFilter === 'mobile') {
+        captureWidth = 375;
+        captureHeight = 667; // iPhone SE size
+      } else if (deviceFilter === 'tablet') {
+        captureWidth = 768;
+        captureHeight = 1024; // iPad size
+      }
+      // 'all' and 'desktop' use default 1280x720
+
+      console.log('[Heatmap Screenshot] Starting capture');
+      console.log('[Heatmap Screenshot] Selected page:', selectedPage);
+      console.log('[Heatmap Screenshot] Device filter:', deviceFilter);
+      console.log('[Heatmap Screenshot] Capture dimensions:', captureWidth, 'x', captureHeight);
+
+      // Set iframe size to match capture dimensions
+      iframe.style.width = `${captureWidth}px`;
+      iframe.style.height = `${captureHeight}px`;
+
+      // Load the published page URL directly (same as thumbnail capture)
+      // This avoids CORS issues since it's same-origin
+      iframe.src = selectedPage;
+
+      console.log('[Heatmap Screenshot] Set iframe.src to:', selectedPage);
+
+      // Wait for iframe to fully load
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
+
+        iframe.onload = () => {
+          clearTimeout(timeout);
+          console.log('[Heatmap Screenshot] Iframe loaded successfully');
+          resolve(null);
+        };
+
+        iframe.onerror = () => {
+          clearTimeout(timeout);
+          console.error('[Heatmap Screenshot] Iframe failed to load');
+          reject(new Error('Failed to load page'));
+        };
+      });
+
+      // Wait for any dynamic content to render (match thumbnail behavior)
+      await new Promise(r => setTimeout(r, 500));
+
+      console.log('[Heatmap Screenshot] Calling captureIframeScreenshot');
+
+      // Capture screenshot at device-specific dimensions
+      const dataUrl = await captureIframeScreenshot(iframe, captureWidth, captureHeight);
+
+      console.log('[Heatmap Screenshot] Screenshot result:', dataUrl ? 'Success' : 'Failed');
+
+      if (dataUrl) {
+        setScreenshotDataUrl(dataUrl);
+        // Cache the screenshot for this page and device
+        const cacheKey = `${selectedPage}-${deviceFilter}`;
+        setScreenshotCache(prev => ({ ...prev, [cacheKey]: dataUrl }));
+      } else {
+        toast.error('Failed to capture screenshot');
+      }
+    } catch (error) {
+      console.error('[Heatmap Screenshot] Error:', error);
+      toast.error('Failed to capture page screenshot');
+    } finally {
+      setScreenshotLoading(false);
+    }
+  };
+
+  // Render click heatmap on canvas with screenshot background
+  useEffect(() => {
+    console.log('[Heatmap Render] Effect triggered:', {
+      hasCanvas: !!canvasRef.current,
+      hasData: !!data,
+      dataType: data?.type,
+      dataPointCount: data?.type === 'click' ? data.points.length : 0,
+      hasScreenshot: !!screenshotDataUrl
+    });
+
+    if (!canvasRef.current || !data || data.type !== 'click' || !screenshotDataUrl) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    console.log('[Heatmap Render] Starting render with', data.points.length, 'raw points');
+    console.log('[Heatmap Render] Sample raw point:', data.points[0]);
+
+    // Load screenshot image
+    const img = new Image();
+    img.onload = () => {
+      // Set canvas size to screenshot size
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      console.log('[Heatmap Render] Canvas size set to:', canvas.width, 'x', canvas.height);
+
+      // Draw screenshot as background
+      ctx.drawImage(img, 0, 0);
+
+      // Calculate absolute Y positions and scale to screenshot dimensions
+      // Screenshot is always 640px wide, so we need to scale click coordinates
+      const screenshotWidth = canvas.width; // Should be 640
+
+      const transformedPoints = data.points.map((point) => {
+        // Scale factor based on viewport width where click was recorded vs screenshot width
+        const scale = screenshotWidth / point.viewportWidth;
+
+        // Handle missing or invalid scrollY with fallback to 0
+        const scrollY = Number.isFinite(point.scrollY) ? point.scrollY : 0;
+
+        return {
+          x: point.x * scale,
+          y: (point.y + scrollY) * scale, // Absolute Y position, scaled
+          viewportWidth: point.viewportWidth,
+          scale, // Store for debugging
+          raw: point, // Keep raw for debugging
+        };
+      });
+
+      console.log('[Heatmap Render] Transformed points sample:', transformedPoints.slice(0, 3));
+
+      const points = transformedPoints
+        // Filter out invalid coordinates (NaN, Infinity, negative, etc.)
+        .filter((point) => {
+          const valid =
+            Number.isFinite(point.x) &&
+            Number.isFinite(point.y) &&
+            point.x >= 0 &&
+            point.y >= 0 &&
+            point.x <= canvas.width &&
+            point.y <= canvas.height;
+          if (!valid) {
+            console.warn('[Heatmap Render] Filtering out invalid point:', {
+              transformed: { x: point.x, y: point.y },
+              raw: point.raw,
+              canvasSize: { width: canvas.width, height: canvas.height }
+            });
+          }
+          return valid;
+        });
+
+      console.log('[Heatmap Render] After filtering:', points.length, 'valid points out of', data.points.length, 'total');
+      console.log('[Heatmap Render] Rendering on canvas:', canvas.width, 'x', canvas.height);
+
+      // Draw heatmap using radial gradients
+      points.forEach((point, index) => {
+        // Scale radius too
+        const radius = 40 * point.scale;
+
+        if (index < 3) {
+          console.log('[Heatmap Render] Drawing point', index, ':', {
+            x: point.x,
+            y: point.y,
+            radius,
+            scale: point.scale
+          });
+        }
+
+        const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
+        gradient.addColorStop(0, 'rgba(255, 0, 0, 0.7)');
+        gradient.addColorStop(0.5, 'rgba(255, 165, 0, 0.5)');
+        gradient.addColorStop(1, 'rgba(255, 255, 0, 0)');
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
+      });
+
+      console.log('[Heatmap Render] Finished drawing', points.length, 'points');
+    };
+    img.src = screenshotDataUrl;
+  }, [data, screenshotDataUrl]);
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="flex gap-4 items-end flex-wrap">
+        <div className="min-w-48">
+          <Label htmlFor="page-select">Page</Label>
+          <Select value={selectedPage} onValueChange={setSelectedPage}>
+            <SelectTrigger id="page-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {pages.map((page) => (
+                <SelectItem key={page} value={page}>
+                  {page}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="min-w-36">
+          <Label htmlFor="device-select">Device</Label>
+          <Select value={deviceFilter} onValueChange={(value) => setDeviceFilter(value as any)}>
+            <SelectTrigger id="device-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Devices</SelectItem>
+              <SelectItem value="mobile">Mobile</SelectItem>
+              <SelectItem value="tablet">Tablet</SelectItem>
+              <SelectItem value="desktop">Desktop</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button onClick={fetchHeatmapData} disabled={loading}>
+          {loading ? 'Loading...' : 'Refresh'}
+        </Button>
+      </div>
+
+      {/* Sample Size */}
+      {data && (
+        <div className="text-sm text-muted-foreground">
+          Sample size: <span className="font-medium">{data.sampleSize.toLocaleString()}</span> interactions
+        </div>
+      )}
+
+      {/* Visualization */}
+      {loading && (
+        <div className="flex items-center justify-center h-96 border rounded-lg">
+          <p className="text-muted-foreground">Loading heatmap data...</p>
+        </div>
+      )}
+
+      {!loading && data && data.type === 'click' && (
+        <div className="border rounded-lg overflow-hidden">
+          {!screenshotDataUrl && !screenshotLoading && (
+            <div className="p-8 text-center">
+              <p className="text-muted-foreground mb-4">Capture a screenshot of the page to visualize click heatmap</p>
+              <Button onClick={captureScreenshot}>Capture Page Screenshot</Button>
+            </div>
+          )}
+
+          {screenshotLoading && (
+            <div className="p-8 text-center">
+              <p className="text-muted-foreground">Capturing screenshot...</p>
+            </div>
+          )}
+
+          {screenshotDataUrl && (
+            <>
+              <div className="bg-muted/30 p-4 overflow-auto" style={{ maxHeight: '70vh' }}>
+                <canvas
+                  ref={canvasRef}
+                  className="mx-auto"
+                  style={{ maxWidth: '100%', height: 'auto' }}
+                />
+              </div>
+
+              <div className="p-4 bg-muted text-sm border-t">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium mb-2">Click Heatmap Legend:</p>
+                    <div className="flex gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-red-500/70" />
+                        <span>High activity</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-orange-500/50" />
+                        <span>Medium activity</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-yellow-500/20" />
+                        <span>Low activity</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <Button variant="outline" size="sm" onClick={captureScreenshot}>
+                      Recapture
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Hidden iframe for screenshot capture - positioned off-screen with dynamic dimensions */}
+          <iframe
+            ref={iframeRef}
+            style={{
+              position: 'fixed',
+              top: '-10000px',
+              left: '-10000px',
+              border: 'none'
+              // Width and height set dynamically in captureScreenshot()
+            }}
+            title="Page for screenshot"
+          />
+        </div>
+      )}
+
+      {!loading && !data && (
+        <div className="flex items-center justify-center h-96 border rounded-lg">
+          <p className="text-muted-foreground">No heatmap data available</p>
+        </div>
+      )}
+    </div>
+  );
+}

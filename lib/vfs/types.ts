@@ -12,6 +12,9 @@ export interface Project {
   lastSavedAt?: Date | null;
   previewImage?: string; // base64 data URL of project preview
   previewUpdatedAt?: Date; // when the preview was last captured
+  lastSyncedAt?: Date | null; // Server mode: when project was last synced with server
+  serverUpdatedAt?: Date | null; // Server mode: cached server's updatedAt timestamp
+  syncStatus?: 'synced' | 'syncing' | 'error' | 'never-synced'; // Server mode: current sync state
   costTracking?: {
     totalCost: number;
     providerBreakdown: Record<string, {
@@ -37,6 +40,141 @@ export interface Project {
       correction?: boolean;
     }>;
   };
+}
+
+// Site - Published version of a project
+export interface Site {
+  // Identity
+  id: string;
+  projectId: string;
+  name: string;
+  slug?: string;
+  enabled: boolean;
+
+  // Publishing configuration
+  underConstruction: boolean;
+  customDomain?: string;
+  headScripts: ScriptConfig[];
+  bodyScripts: ScriptConfig[];
+  cdnLinks: CdnConfig[];
+  analytics: AnalyticsConfig;
+  seo: SeoConfig;
+  compliance: ComplianceConfig;
+
+  // State tracking
+  settingsVersion: number;
+  lastPublishedVersion?: number;
+
+  // Preview
+  previewImage?: string; // base64 data URL of site screenshot
+  previewUpdatedAt?: Date;
+
+  // Metadata
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt?: Date | null;
+}
+
+// Legacy: Publish Settings (kept for backward compatibility during transition)
+export interface PublishSettings {
+  // Status
+  enabled: boolean;
+  underConstruction: boolean;
+  customDomain?: string;
+
+  // Scripts & Resources
+  headScripts: ScriptConfig[];
+  bodyScripts: ScriptConfig[];
+  cdnLinks: CdnConfig[];
+
+  // Analytics
+  analytics: AnalyticsConfig;
+
+  // SEO
+  seo: SeoConfig;
+
+  // Compliance
+  compliance: ComplianceConfig;
+
+  // State tracking
+  settingsVersion: number;
+  lastPublishedVersion?: number;
+}
+
+export interface ScriptConfig {
+  id: string;
+  name: string;
+  content: string;
+  type: 'inline' | 'external';
+  src?: string; // URL for external scripts
+  async?: boolean;
+  defer?: boolean;
+  enabled: boolean;
+}
+
+export interface CdnConfig {
+  id: string;
+  name: string;
+  url: string;
+  type: 'css' | 'js';
+  integrity?: string;
+  crossorigin?: 'anonymous' | 'use-credentials';
+  enabled: boolean;
+}
+
+export interface AnalyticsConfig {
+  enabled: boolean;
+  provider: 'builtin' | 'gtm' | 'ga4' | 'plausible' | 'custom';
+  trackingId?: string;
+  customScript?: string;
+  privacyMode: boolean;
+
+  // Enhanced analytics features (toggleable)
+  features?: {
+    basicTracking?: boolean;       // Pageviews, referrers (always enabled if analytics on)
+    heatmaps?: boolean;             // Click/scroll heatmaps (heavy data)
+    sessionRecording?: boolean;     // Journey tracking
+    performanceMetrics?: boolean;   // Core Web Vitals, load times
+    engagementTracking?: boolean;   // Time on page, scroll depth
+    customEvents?: boolean;         // Goal/conversion tracking
+  };
+
+  // Data retention settings (in days)
+  retention?: {
+    pageviews?: number;    // Default: 90 days
+    interactions?: number; // Default: 30 days (heatmap data)
+    sessions?: number;     // Default: 60 days
+  };
+
+  // Analytics token (for secure tracking)
+  token?: string;
+  tokenGeneratedAt?: string;
+}
+
+export interface SeoConfig {
+  title?: string;
+  description?: string;
+  keywords?: string[];
+  ogImage?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  twitterCard?: 'summary' | 'summary_large_image';
+  canonical?: string;
+  noIndex?: boolean;
+  noFollow?: boolean;
+}
+
+export interface ComplianceConfig {
+  enabled: boolean;
+  bannerPosition: 'top' | 'bottom';
+  bannerStyle: 'bar' | 'modal' | 'corner';
+  message: string;
+  acceptButtonText: string;
+  declineButtonText: string;
+  privacyPolicyUrl?: string;
+  cookiePolicyUrl?: string;
+  mode: 'opt-in' | 'opt-out';
+  blockAnalytics: boolean;
 }
 
 export interface VirtualFile {

@@ -84,7 +84,7 @@ class CheckpointManager {
    * Get shared database connection from VFS
    */
   private getDB(): IDBDatabase {
-    return (vfs as any).db.getDatabase();
+    return vfs.getDatabase();
   }
   
   /**

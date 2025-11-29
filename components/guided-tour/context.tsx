@@ -37,6 +37,7 @@ interface GuidedTourState {
   transcript: GuidedTourTranscriptEvent[];
   isBusy: boolean;
   projectList: Project[];
+  tourDemoProjectId: string | null;
 }
 
 interface GuidedTourContextValue {
@@ -102,13 +103,57 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
     clearConversationRunKey.current = null;
   }, []);
 
-  const start = useCallback(() => {
-    if (status === 'running') return;
-    setStatus('running');
-    setStepIndex(0);
-    setStepKey((key) => key + 1);
-    setTranscript([]);
-    resetWorkspaceData();
+  const start = useCallback(async () => {
+    // Allow restarting the tour from any state
+    if (status === 'running') {
+      setStatus('idle');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    try {
+      // Create a fresh demo project for the tour
+      const { vfs } = await import('@/lib/vfs');
+      const { createProjectFromTemplate } = await import('@/lib/vfs/project-templates');
+      const { DEMO_PROJECT_TEMPLATE } = await import('@/lib/vfs/project-templates');
+
+      await vfs.init();
+
+      const tourDemo = await vfs.createProject(
+        'Example Studios (Tour)',
+        'Demo project for guided tour'
+      );
+      await createProjectFromTemplate(vfs, tourDemo.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+
+      // Store the demo project ID
+      setTourDemoProjectId(tourDemo.id);
+
+      // Get updated project list directly from VFS and update context
+      const allProjects = await vfs.listProjects();
+      setProjectList(allProjects);
+
+      // Also dispatch event to update ProjectManager UI
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('projectsChanged'));
+      }
+
+      // Wait a bit to ensure state updates propagate
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Start the tour
+      setStatus('running');
+      setStepIndex(0);
+      setStepKey((key) => key + 1);
+      setTranscript([]);
+      resetWorkspaceData();
+    } catch (error) {
+      console.error('[Tour] Failed to create demo project:', error);
+      // Still start the tour even if demo creation fails
+      setStatus('running');
+      setStepIndex(0);
+      setStepKey((key) => key + 1);
+      setTranscript([]);
+      resetWorkspaceData();
+    }
   }, [resetWorkspaceData, status]);
 
   const setWorkspaceHandler = useCallback((handler: GuidedTourEventHandler | null) => {
@@ -142,13 +187,16 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
     // Smart cleanup: Remove tour demo project if other projects exist
     if (tourDemoProjectId) {
       try {
+        // Fetch fresh project list from VFS to ensure we have current state
+        const { vfs } = await import('@/lib/vfs');
+        await vfs.init();
+        const allProjects = await vfs.listProjects();
+
         // Check if there are other projects besides the tour demo
-        const otherProjects = projectList.filter(p => p.id !== tourDemoProjectId);
+        const otherProjects = allProjects.filter(p => p.id !== tourDemoProjectId);
 
         if (otherProjects.length > 0) {
           // Delete the tour demo project since user has other projects
-          const { vfs } = await import('@/lib/vfs');
-          await vfs.init();
           await vfs.deleteProject(tourDemoProjectId);
 
           if (typeof window !== 'undefined') {
@@ -393,6 +441,7 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
         transcript,
         isBusy,
         projectList,
+        tourDemoProjectId,
       },
       start,
       skip,
@@ -406,7 +455,7 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
       setWorkspaceHandler,
       setTourDemoProjectId,
     }),
-    [status, stepIndex, stepKey, currentStep, transcript, isBusy, projectList, start, skip, next, previous, setWorkspaceHandler]
+    [status, stepIndex, stepKey, currentStep, transcript, isBusy, projectList, tourDemoProjectId, start, skip, next, previous, setWorkspaceHandler]
   );
 
   return (

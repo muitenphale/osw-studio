@@ -35,7 +35,6 @@ export interface ToolResult {
   error?: string;
 }
 
-
 export interface FileContext {
   projectId: string;
   fileTree?: string;
@@ -43,11 +42,23 @@ export interface FileContext {
   openFile?: string;
 }
 
+// Reasoning detail from OpenRouter (Gemini thinking models)
+export interface ReasoningDetail {
+  type: string;
+  text?: string;
+  summary?: string;
+  signature?: string;
+  id?: string;
+  format?: string;
+  index?: number;
+}
+
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
 }
 
 export interface OpenRouterConfig {

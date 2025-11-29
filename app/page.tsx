@@ -1,99 +1,34 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { Project } from '@/lib/vfs/types';
-import { ProjectManager } from '@/components/project-manager';
-import { Workspace } from '@/components/workspace';
-import { GuidedTourProvider, useGuidedTour } from '@/components/guided-tour/context';
-import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { StudioApp } from '@/components/studio-app';
 
-function HomeInner() {
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const { state, setActiveProjectId } = useGuidedTour();
-
-  const stepId = state.currentStep?.id;
-  const isTourRunning = state.status === 'running';
-
-  useEffect(() => {
-    if (selectedProject) {
-      setActiveProjectId(selectedProject.id);
-    } else {
-      setActiveProjectId(null);
-    }
-  }, [selectedProject, setActiveProjectId]);
-
-  useEffect(() => {
-    const handleTourNavigateHome = () => {
-      setSelectedProject(null);
-    };
-    window.addEventListener('tour-navigate-home', handleTourNavigateHome);
-    return () => {
-      window.removeEventListener('tour-navigate-home', handleTourNavigateHome);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTourRunning) {
-      return;
-    }
-    if (!stepId) {
-      return;
-    }
-
-    if (
-      stepId === 'welcome' ||
-      stepId === 'projects-overview' ||
-      stepId === 'create-project' ||
-      stepId === 'project-controls' ||
-      stepId === 'edit-project'
-    ) {
-      if (selectedProject) {
-        setSelectedProject(null);
-      }
-      return;
-    }
-
-    if (
-      stepId === 'workspace-overview' ||
-      stepId === 'workspace-edit' ||
-      stepId === 'workspace-checkpoint' ||
-      stepId === 'provider-settings' ||
-      stepId === 'wrap-up'
-    ) {
-      if (!selectedProject && state.projectList.length > 0) {
-        setSelectedProject(state.projectList[0]);
-      }
-    }
-  }, [isTourRunning, stepId, selectedProject, state.projectList]);
-
-  const content = useMemo(() => {
-    if (selectedProject) {
-      return (
-        <Workspace
-          project={selectedProject}
-          onBack={() => setSelectedProject(null)}
-        />
-      );
-    }
-    return (
-      <ProjectManager
-        onProjectSelect={setSelectedProject}
-      />
-    );
-  }, [selectedProject]);
-
-  return (
-    <>
-      {content}
-      <GuidedTourOverlay location="global" />
-    </>
-  );
-}
-
+/**
+ * Root page
+ *
+ * Browser mode: Renders the StudioApp (single-page app)
+ * Server mode: Redirects to /admin/projects (studio is at /admin/*)
+ */
 export default function Home() {
-  return (
-    <GuidedTourProvider>
-      <HomeInner />
-    </GuidedTourProvider>
-  );
+  const router = useRouter();
+  const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+
+  useEffect(() => {
+    if (isServerMode) {
+      router.push('/admin/projects');
+    }
+  }, [isServerMode, router]);
+
+  // In Server mode, show loading while redirecting
+  if (isServerMode) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
+        <p className="text-zinc-400">Redirecting to admin...</p>
+      </div>
+    );
+  }
+
+  // Browser mode: render the studio app
+  return <StudioApp />;
 }

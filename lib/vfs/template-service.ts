@@ -233,9 +233,10 @@ export class TemplateService {
    * Generate a thumbnail from a project preview (placeholder for now)
    */
   async generateThumbnail(projectId: string): Promise<string | undefined> {
-    // TODO: Implement actual thumbnail generation from preview
+    // NOTE: Thumbnail generation from preview requires html2canvas in browser context
+    // This would need to be moved to client-side or implemented via puppeteer/playwright
     // For now, return undefined to indicate no thumbnail
-    logger.info('[TemplateService] Thumbnail generation not yet implemented');
+    logger.debug('[TemplateService] Thumbnail generation not yet implemented');
     return undefined;
   }
 

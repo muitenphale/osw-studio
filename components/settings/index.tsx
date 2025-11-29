@@ -30,9 +30,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [importProgress, setImportProgress] = useState(0);
   const [importMessage, setImportMessage] = useState('');
   const [openSections, setOpenSections] = useState({
-    application: true,  // Default open
-    costTracking: false,
-    dataManagement: false
+    application: true,
+    costTracking: true,
+    dataManagement: true
   });
 
   useEffect(() => {

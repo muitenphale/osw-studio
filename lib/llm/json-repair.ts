@@ -15,6 +15,127 @@ export interface JSONRepairResult {
 
 export type OperationSafety = 'safe' | 'unsafe' | 'unknown';
 
+export interface PartialContentExtraction {
+  success: boolean;
+  content?: string;
+  filePath?: string;
+  operationType?: string;
+  error?: string;
+}
+
+/**
+ * Extract partial content from truncated JSON for continuation
+ * Even if JSON repair fails, we can often salvage the content string
+ * for buffering and continuation.
+ */
+export function extractPartialContent(truncatedJSON: string): PartialContentExtraction {
+  // Try to extract file_path
+  const filePathMatch = truncatedJSON.match(/"file_path"\s*:\s*"([^"]+)"/);
+  const filePath = filePathMatch?.[1];
+
+  // Try to extract operation type
+  const typeMatch = truncatedJSON.match(/"type"\s*:\s*"(rewrite|update|replace_entity)"/);
+  const operationType = typeMatch?.[1];
+
+  // For rewrite operations, extract the content even if truncated
+  if (operationType === 'rewrite') {
+    // Look for "content": " and extract everything after
+    const contentStartMatch = truncatedJSON.match(/"content"\s*:\s*"/);
+    if (contentStartMatch) {
+      const contentStartIndex = truncatedJSON.indexOf(contentStartMatch[0]) + contentStartMatch[0].length;
+      let content = truncatedJSON.slice(contentStartIndex);
+
+      // Remove trailing incomplete escape sequences
+      // e.g., ends with \ or \u or \u0 etc.
+      content = content.replace(/\\(?:[^"\\\/bfnrt]|u[0-9a-fA-F]{0,3})?$/, '');
+
+      // Check if content ends with a closing quote (complete string)
+      const lastQuoteIndex = content.lastIndexOf('"');
+      if (lastQuoteIndex > 0) {
+        // Check if the quote is not escaped
+        let escapeCount = 0;
+        for (let i = lastQuoteIndex - 1; i >= 0 && content[i] === '\\'; i--) {
+          escapeCount++;
+        }
+        if (escapeCount % 2 === 0) {
+          // This is an unescaped quote - content is complete up to this point
+          content = content.slice(0, lastQuoteIndex);
+        }
+      }
+
+      // Unescape JSON strings
+      try {
+        // Try to parse as a JSON string for proper unescaping
+        content = JSON.parse(`"${content}"`);
+      } catch {
+        // Manual unescape for common sequences if JSON.parse fails
+        content = content
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, '\\');
+      }
+
+      if (content.length > 0) {
+        return {
+          success: true,
+          content,
+          filePath,
+          operationType
+        };
+      }
+    }
+  }
+
+  // For update operations, try to extract newStr (but mark as unsafe for auto-continue)
+  if (operationType === 'update') {
+    const newStrMatch = truncatedJSON.match(/"newStr"\s*:\s*"([\s\S]*?)(?:"|$)/);
+    if (newStrMatch) {
+      return {
+        success: false,
+        filePath,
+        operationType,
+        error: 'Update operations cannot be safely continued - oldStr matching would fail'
+      };
+    }
+  }
+
+  // For replace_entity operations, similar issue
+  if (operationType === 'replace_entity') {
+    return {
+      success: false,
+      filePath,
+      operationType,
+      error: 'Replace entity operations cannot be safely continued - selector matching would fail'
+    };
+  }
+
+  return {
+    success: false,
+    filePath,
+    operationType,
+    error: 'Could not extract content from truncated JSON'
+  };
+}
+
+/**
+ * Get the last N characters of content as a continuation marker
+ * Used to help the LLM know where to continue from
+ */
+export function getContinuationMarker(content: string, chars: number = 100): string {
+  if (content.length <= chars) {
+    return content;
+  }
+  // Try to find a good break point (newline)
+  const lastSection = content.slice(-chars);
+  const newlineIndex = lastSection.indexOf('\n');
+  if (newlineIndex > 0) {
+    return lastSection.slice(newlineIndex + 1);
+  }
+  return lastSection;
+}
+
 /**
  * Check if an error is a JSON truncation error
  */

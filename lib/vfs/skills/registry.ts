@@ -4,7 +4,8 @@
  */
 
 import { BuiltInSkillDefinition } from './types';
-import { OSW_WORKFLOW_SKILL } from './built-in/osw-workflow';
+import { OSW_PLANNING_SKILL } from './built-in/osw-planning';
+import { OSW_ONE_SHOT_SKILL } from './built-in/osw-one-shot';
 import { HANDLEBARS_ADVANCED_SKILL } from './built-in/handlebars-advanced';
 import { ACCESSIBILITY_SKILL } from './built-in/accessibility';
 
@@ -14,8 +15,12 @@ import { ACCESSIBILITY_SKILL } from './built-in/accessibility';
  */
 export const BUILT_IN_SKILLS: BuiltInSkillDefinition[] = [
   {
-    id: 'osw-workflow',
-    content: OSW_WORKFLOW_SKILL
+    id: 'osw-planning',
+    content: OSW_PLANNING_SKILL
+  },
+  {
+    id: 'osw-one-shot',
+    content: OSW_ONE_SHOT_SKILL
   },
   {
     id: 'handlebars-advanced',

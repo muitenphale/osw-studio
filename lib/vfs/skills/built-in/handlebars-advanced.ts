@@ -5,7 +5,7 @@
 
 export const HANDLEBARS_ADVANCED_SKILL = String.raw`---
 name: handlebars-advanced
-description: Advanced Handlebars templating patterns for complex data structures, helpers, and partials in OSW Studio static sites
+description: Read when using Handlebars templates, partials, or data.json. Covers helpers, loops, conditionals, and advanced data patterns.
 ---
 
 # Advanced Handlebars Patterns

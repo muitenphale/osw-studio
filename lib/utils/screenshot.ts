@@ -5,19 +5,114 @@ import { logger } from '@/lib/utils';
  * Captures a screenshot of an iframe's content at desktop resolution
  * @param iframe The iframe element to capture
  * @param captureWidth Capture width (default: 1280 - HD desktop)
- * @param captureHeight Capture height (default: 720 - HD desktop)
+ * @param captureHeight Capture height (default: 720 - HD desktop, only used if fullPage=false)
  * @param outputWidth Output width after scaling (default: 640)
  * @param outputHeight Output height after scaling (default: 360)
  * @param quality JPEG quality 0-1 (default: 0.8)
+ * @param fullPage Capture full page height vs viewport only (default: true)
  * @returns Base64 data URL of the screenshot, or null if capture fails
  */
+/**
+ * Internal function to attempt screenshot capture
+ */
+async function attemptCapture(
+  iframeDoc: Document,
+  captureWidth: number,
+  captureHeight: number,
+  fullPage: boolean
+): Promise<HTMLCanvasElement> {
+  // Determine capture height based on mode
+  let effectiveHeight: number;
+
+  if (fullPage) {
+    // Get actual document height for full-page capture
+    effectiveHeight = Math.max(
+      iframeDoc.body.scrollHeight,
+      iframeDoc.body.offsetHeight,
+      iframeDoc.documentElement.clientHeight,
+      iframeDoc.documentElement.scrollHeight,
+      iframeDoc.documentElement.offsetHeight
+    );
+    logger.debug('[Screenshot] Full-page mode: document height =', effectiveHeight);
+  } else {
+    // Use viewport height for initial view capture
+    effectiveHeight = captureHeight;
+    logger.debug('[Screenshot] Viewport-only mode: using height =', effectiveHeight);
+  }
+
+  logger.debug('[Screenshot] Capture dimensions:', captureWidth, 'x', effectiveHeight);
+
+  return Promise.race([
+    html2canvas(iframeDoc.body, {
+        width: captureWidth,
+        height: effectiveHeight,
+        scale: 1,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        windowWidth: captureWidth,
+        windowHeight: effectiveHeight,
+        scrollX: 0,
+        scrollY: 0,
+        imageTimeout: 3000,
+        backgroundColor: '#ffffff',
+        removeContainer: true,
+        // Clean up problematic elements in the cloned document
+        onclone: (clonedDoc) => {
+          // Remove external stylesheets that cause CORS errors
+          const externalLinks = clonedDoc.querySelectorAll('link[rel="stylesheet"]');
+          externalLinks.forEach((link) => {
+            const href = link.getAttribute('href');
+            if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+              link.remove();
+            }
+          });
+
+          // Remove ALL gradient backgrounds (not just ones with "gradient" in class name)
+          // Tailwind gradients can cause "non-finite" errors in html2canvas
+          const allElements = clonedDoc.querySelectorAll('*');
+
+          // CRITICAL: Use cloned document's window for getComputedStyle, not parent window
+          const clonedWindow = clonedDoc.defaultView;
+          if (!clonedWindow) {
+            return;
+          }
+
+          allElements.forEach((el: Element) => {
+            const htmlEl = el as HTMLElement;
+            // Read styles from CLONED document's context
+            const computedStyle = clonedWindow.getComputedStyle(htmlEl);
+            const bg = computedStyle.backgroundImage;
+
+            // Check if element has a gradient background
+            if (bg && (bg.includes('gradient') || bg.includes('linear-gradient') || bg.includes('radial-gradient'))) {
+              // Replace gradient with solid color from gradient's first color if possible
+              // or use a neutral fallback
+              const bgColor = computedStyle.backgroundColor;
+              htmlEl.style.backgroundImage = 'none';
+              if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+                htmlEl.style.backgroundColor = bgColor;
+              } else {
+                htmlEl.style.backgroundColor = '#64748b'; // slate-500 as neutral fallback
+              }
+            }
+          });
+        }
+      }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('html2canvas timeout after 4 seconds')), 4000)
+    )
+  ]);
+}
+
 export async function captureIframeScreenshot(
   iframe: HTMLIFrameElement,
   captureWidth: number = 1280,
   captureHeight: number = 720,
   outputWidth: number = 640,
   outputHeight: number = 360,
-  quality: number = 0.8
+  quality: number = 0.8,
+  fullPage: boolean = true
 ): Promise<string | null> {
   try {
     // Get the iframe's document
@@ -28,33 +123,30 @@ export async function captureIframeScreenshot(
       return null;
     }
 
-    // Capture the iframe content at desktop resolution using html2canvas with timeout
-    const canvas = await Promise.race([
-      html2canvas(iframeDoc.body, {
-        width: captureWidth,
-        height: captureHeight,
-        scale: 1,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        windowWidth: captureWidth,
-        windowHeight: captureHeight,
-        scrollX: 0,
-        scrollY: 0,
-        // Add more options to prevent hanging
-        imageTimeout: 3000,
-        backgroundColor: null,
-        removeContainer: true
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('html2canvas timeout after 4 seconds')), 4000)
-      )
-    ]);
+    // Attempt capture with automatic retry on gradient errors
+    let canvas: HTMLCanvasElement;
+    try {
+      canvas = await attemptCapture(iframeDoc, captureWidth, captureHeight, fullPage);
+    } catch (firstError) {
+      // Check if this is a gradient-related error
+      const errorMsg = String(firstError);
+      if (errorMsg.includes('non-finite') || errorMsg.includes('addColorStop') || errorMsg.includes('CanvasGradient')) {
+        // Wait a bit for styles to stabilize further
+        await new Promise(resolve => setTimeout(resolve, 500));
+        canvas = await attemptCapture(iframeDoc, captureWidth, captureHeight, fullPage);
+      } else {
+        // Not a gradient error, rethrow
+        throw firstError;
+      }
+    }
 
-    // Scale down the captured image for efficient storage
+    // Scale down the captured image maintaining aspect ratio
+    const aspectRatio = canvas.height / canvas.width;
+    const scaledHeight = Math.round(outputWidth * aspectRatio);
+
     const scaledCanvas = document.createElement('canvas');
     scaledCanvas.width = outputWidth;
-    scaledCanvas.height = outputHeight;
+    scaledCanvas.height = scaledHeight;
     const ctx = scaledCanvas.getContext('2d');
 
     if (!ctx) {
@@ -62,8 +154,8 @@ export async function captureIframeScreenshot(
       return null;
     }
 
-    // Draw the captured image scaled down
-    ctx.drawImage(canvas, 0, 0, outputWidth, outputHeight);
+    // Draw the captured image scaled down maintaining aspect ratio
+    ctx.drawImage(canvas, 0, 0, outputWidth, scaledHeight);
 
     // Convert scaled canvas to base64 JPEG
     const dataUrl = scaledCanvas.toDataURL('image/jpeg', quality);

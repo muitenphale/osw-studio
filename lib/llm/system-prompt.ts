@@ -97,16 +97,34 @@ Important Notes:
   // Add skills section
   const skillsMetadata = await skillsService.getEnabledSkillsMetadata();
   if (skillsMetadata.length > 0) {
-    prompt += `\n\nAVAILABLE SKILLS:\n`;
-    prompt += `You have access to specialized knowledge files. Read them when relevant to your task:\n\n`;
+    prompt += `\n\n📚 SKILLS - READ BEFORE BUILDING:\n`;
+    prompt += `Skills contain best practices and patterns. CHECK the relevant skill BEFORE starting work:\n\n`;
     for (const skill of skillsMetadata) {
       prompt += `- ${skill.path}: ${skill.description}\n`;
     }
-    prompt += `\nTo use a skill, read it with: cat ${skillsMetadata[0].path.replace(/[^/]+\.md$/, '<skill-name>.md')}\n`;
+    prompt += `\n⚡ WORKFLOW: When a skill matches your task, run: cat /.skills/<skill-name>.md FIRST, then proceed.\n`;
   }
 
-  if (fileTree) {
-    prompt += `\n\n${fileTree}`;
+  // Build combined project structure with skills
+  if (fileTree || skillsMetadata.length > 0) {
+    prompt += `\n\nProject Structure:\n`;
+
+    // Add skills directory first (as a top-level entry)
+    if (skillsMetadata.length > 0) {
+      prompt += `├── .skills/\n`;
+      skillsMetadata.forEach((skill, index) => {
+        const isLast = index === skillsMetadata.length - 1;
+        const connector = isLast ? '└── ' : '├── ';
+        const filename = skill.path.split('/').pop();
+        prompt += `│   ${connector}${filename}\n`;
+      });
+    }
+
+    // Add project files (strip "Project Structure:\n" header if present)
+    if (fileTree) {
+      const treeContent = fileTree.replace(/^Project Structure:\n/, '');
+      prompt += treeContent;
+    }
   }
   return prompt;
 }
@@ -238,16 +256,41 @@ File Editing with json_patch:
 2. Study the exact content to identify unique strings for replacement
 3. Use the json_patch tool with precise string operations
 
-⚠️ TOKEN LIMITS FOR LARGE FILE CREATION:
+⚠️ TOKEN LIMITS - PROGRESSIVE FILE BUILDING:
 - Your output is limited to ~4000 tokens (~16,000 characters)
-- Creating large files (500+ lines of CSS/HTML/JS) in one REWRITE operation will FAIL with truncated JSON
-- **Solution**: Break large files into multiple smaller operations:
-  - Create file with basic structure first (headers, skeleton)
-  - Add sections incrementally using UPDATE operations
-  - Or create multiple smaller module files instead of one massive file
-- Example: Instead of 1000-line style.css, create style.css (base), components.css, layout.css, utilities.css
+- Large files (500+ lines) in one REWRITE will hit this limit and get truncated
+- The system can auto-continue truncated operations, but prevention is better
 
-The json_patch tool uses simple JSON operations for reliable file editing:
+**LARGE FILE STRATEGY - BUILD PROGRESSIVELY:**
+
+When creating files >200 lines, use this approach:
+
+STEP 1: Create skeleton structure first (small REWRITE)
+Example for CSS:
+{"file_path": "/styles/main.css", "operations": [{"type": "rewrite", "content": "/* ==========================================================================\\n   Main Stylesheet\\n   ========================================================================== */\\n\\n/* Base Styles */\\n\\n/* Layout */\\n\\n/* Components */\\n\\n/* Utilities */\\n"}]}
+
+STEP 2: Fill sections with UPDATE operations
+{"file_path": "/styles/main.css", "operations": [{"type": "update", "oldStr": "/* Base Styles */\\n", "newStr": "/* Base Styles */\\n\\n*, *::before, *::after { box-sizing: border-box; }\\nhtml { font-size: 16px; }\\nbody { margin: 0; font-family: system-ui, sans-serif; }\\n"}]}
+
+**TOKEN BUDGETS PER OPERATION:**
+- REWRITE: Keep content under 2000 characters (~500 tokens)
+- UPDATE: Keep oldStr + newStr combined under 1500 characters
+
+**ALTERNATIVE: Split into multiple files**
+Instead of one 1000-line style.css, create:
+- /styles/base.css (reset, typography)
+- /styles/layout.css (grid, containers)
+- /styles/components.css (buttons, cards)
+- /styles/utilities.css (helpers)
+
+Then import all in your HTML:
+<link rel="stylesheet" href="/styles/base.css">
+<link rel="stylesheet" href="/styles/layout.css">
+<!-- etc. -->
+
+The json_patch tool uses simple JSON operations for reliable file editing.
+
+⚠️ CRITICAL: Make ONE json_patch call per response. Do NOT batch multiple file operations in a single response - this causes truncation errors. Write one file, wait for confirmation, then write the next.
 
 Operation Types:
 1. UPDATE: Replace exact strings (oldStr must be unique in file)
@@ -800,16 +843,34 @@ Nested Data Access:
   // Add skills section
   const skillsMetadata = await skillsService.getEnabledSkillsMetadata();
   if (skillsMetadata.length > 0) {
-    prompt += `\n\nAVAILABLE SKILLS:\n`;
-    prompt += `You have access to specialized knowledge files. Read them when relevant to your task:\n\n`;
+    prompt += `\n\n📚 SKILLS - READ BEFORE BUILDING:\n`;
+    prompt += `Skills contain best practices and patterns. CHECK the relevant skill BEFORE starting work:\n\n`;
     for (const skill of skillsMetadata) {
       prompt += `- ${skill.path}: ${skill.description}\n`;
     }
-    prompt += `\nTo use a skill, read it with: cat ${skillsMetadata[0].path.replace(/[^/]+\.md$/, '<skill-name>.md')}\n`;
+    prompt += `\n⚡ WORKFLOW: When a skill matches your task, run: cat /.skills/<skill-name>.md FIRST, then proceed.\n`;
   }
 
-  if (fileTree) {
-    prompt += `\n\n${fileTree}`;
+  // Build combined project structure with skills
+  if (fileTree || skillsMetadata.length > 0) {
+    prompt += `\n\nProject Structure:\n`;
+
+    // Add skills directory first (as a top-level entry)
+    if (skillsMetadata.length > 0) {
+      prompt += `├── .skills/\n`;
+      skillsMetadata.forEach((skill, index) => {
+        const isLast = index === skillsMetadata.length - 1;
+        const connector = isLast ? '└── ' : '├── ';
+        const filename = skill.path.split('/').pop();
+        prompt += `│   ${connector}${filename}\n`;
+      });
+    }
+
+    // Add project files (strip "Project Structure:\n" header if present)
+    if (fileTree) {
+      const treeContent = fileTree.replace(/^Project Structure:\n/, '');
+      prompt += treeContent;
+    }
   }
   return prompt;
 }

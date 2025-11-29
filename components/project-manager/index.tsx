@@ -16,18 +16,14 @@ import {
   Plus,
   FolderOpen,
   Upload,
-  Settings,
   Search,
   LayoutGrid,
   List,
   ArrowUpDown,
   Info,
   TestTube,
-  Github,
-  LayoutTemplate,
-  Sparkles
+  Github
 } from 'lucide-react';
-import { AppHeader, HeaderAction, ViewTab } from '@/components/ui/app-header';
 import {
   Dialog,
   DialogContent,
@@ -59,23 +55,21 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { SettingsPanel } from '@/components/settings';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { configManager } from '@/lib/config/storage';
 import { TemplateExportDialog } from '@/components/templates/template-export-dialog';
-import { TemplateManager } from '@/components/template-manager';
-import { SkillsManager } from '@/components/skills/SkillsManager';
 
 interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
+  hideHeader?: boolean; // Hide header when used in PageLayout
+  hideFooter?: boolean; // Hide footer when used in PageLayout
 }
 
 type SortOption = 'updated' | 'created' | 'name' | 'size';
 type ViewMode = 'grid' | 'list';
-type PageView = 'projects' | 'templates' | 'skills';
 
-export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
+export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false }: ProjectManagerProps) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,7 +95,6 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
-  const [currentView, setCurrentView] = useState<PageView>('projects');
   const { state: tourState, setProjectList, start: startTour, setTourDemoProjectId } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
@@ -131,6 +124,29 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
 
     try {
       await vfs.init();
+
+      // TEMPORARILY DISABLED: Auto-pull causing 500 errors and spam
+      // TODO: Re-enable after fixing server sync issues
+      // Auto-pull from server in background (non-blocking)
+      // if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
+      //   // Don't await - let it run in background
+      //   import('@/lib/vfs/auto-sync').then(({ autoPullAllProjects }) => {
+      //     autoPullAllProjects().then((result) => {
+      //       if (result.pulled > 0) {
+      //         // Reload projects to show updated data
+      //         vfs.listProjects().then((updatedList) => {
+      //           const sorted = updatedList.sort((a, b) =>
+      //             b.updatedAt.getTime() - a.updatedAt.getTime()
+      //           );
+      //           setProjects(sorted);
+      //           setProjectList(sorted);
+      //           toast.success(`Synced ${result.pulled} project(s) from server`);
+      //         });
+      //       }
+      //     });
+      //   });
+      // }
+
       const projectList = await vfs.listProjects();
       const sorted = projectList.sort((a, b) =>
         b.updatedAt.getTime() - a.updatedAt.getTime()
@@ -451,129 +467,11 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
     );
   }
 
-  const headerActions: HeaderAction[] = [];
-  
-  // Desktop-only settings button
-  const desktopSettingsButton = (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="icon" className="h-8 w-8">
-          <Settings className="h-4 w-4" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-96" align="end">
-        <SettingsPanel />
-      </PopoverContent>
-    </Popover>
-  );
-
-  const mobileMenuContent = (
-    <div className="flex flex-col gap-2">
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full justify-start"
-          >
-            <Settings className="mr-2 h-4 w-4" />
-            Settings
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[calc(100vw-2rem)]" align="start">
-          <SettingsPanel />
-        </PopoverContent>
-      </Popover>
-      
-      {/* Divider */}
-      <div className="border-t my-2" />
-      
-      {/* Footer buttons moved to mobile menu */}
-      <Button 
-        variant="outline" 
-        size="sm"
-        onClick={handleStartTour}
-        disabled={tourRunning}
-        className="w-full justify-start"
-        data-tour-id="footer-guided-tour"
-      >
-        <Info className="mr-2 h-4 w-4" />
-        Guided Tour
-      </Button>
-      
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => router.push('/test-generation')}
-        className="w-full justify-start"
-      >
-        <TestTube className="mr-2 h-4 w-4" />
-        Model Tester
-      </Button>
-
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setAboutModalOpen(true)}
-        className="w-full justify-start"
-      >
-        <Info className="mr-2 h-4 w-4" />
-        About OSW Studio
-      </Button>
-      
-      <Button 
-        variant="outline" 
-        size="sm"
-        asChild
-        className="w-full justify-start"
-      >
-        <a
-          href="https://github.com/o-stahl/osw-studio"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Github className="mr-2 h-4 w-4" />
-          GitHub
-        </a>
-      </Button>
-    </div>
-  );
-
-  const handleProjectCreatedFromTemplate = async (projectId: string) => {
-    await reloadProjects();
-    const project = await vfs.getProject(projectId);
-    if (project) {
-      setCurrentView('projects');
-      onProjectSelect(project);
-    }
-  };
-
   return (
     <div className="flex flex-col h-[100dvh]" style={{ background: `linear-gradient(var(--project-background-tint), var(--project-background-tint)), var(--background)` }}>
-      {/* Header */}
-      <AppHeader
-        onLogoClick={() => setAboutModalOpen(true)}
-        actions={headerActions}
-        mobileMenuContent={mobileMenuContent}
-        desktopOnlyContent={desktopSettingsButton}
-        leftText="Open Source Web Studio"
-        viewTabs={[
-          { id: 'projects', label: 'Projects', icon: FolderOpen },
-          { id: 'templates', label: 'Templates', icon: LayoutTemplate },
-          { id: 'skills', label: 'Skills', icon: Sparkles }
-        ]}
-        activeViewTab={currentView}
-        onViewTabChange={(tabId) => setCurrentView(tabId as PageView)}
-      />
-      
       {/* Main Content */}
       <main className="flex-1 min-h-0 overflow-auto">
-        {currentView === 'templates' ? (
-          <TemplateManager onProjectCreated={handleProjectCreatedFromTemplate} />
-        ) : currentView === 'skills' ? (
-          <SkillsManager />
-        ) : (
-          <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col">
             {/* Toolbar */}
             <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
               <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3" data-tour-id="projects-actions">
@@ -701,7 +599,11 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
                           onDuplicate={duplicateProject}
                           onPreview={setPreviewProject}
                           onExportAsTemplate={setTemplateExportProject}
-                          onUpdate={(updatedProject) => {
+                          onUpdate={async (updatedProject) => {
+                            // Update IndexedDB to persist changes
+                            await vfs.updateProject(updatedProject);
+
+                            // Update React state
                             setProjects(projects.map(p =>
                               p.id === updatedProject.id ? updatedProject : p
                             ));
@@ -717,57 +619,58 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
               </div>
             </div>
           </div>
-        )}
       </main>
 
       {/* Footer with Navigation Buttons - Hidden on mobile */}
-      <footer className="hidden md:block border-t bg-card/50 py-3 px-6">
-        <div className="flex justify-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleStartTour}
-            disabled={tourRunning}
-            data-tour-id="footer-guided-tour"
-          >
-            <Info className="mr-2 h-4 w-4" />
-            Guided Tour
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => router.push('/test-generation')}
-          >
-            <TestTube className="mr-2 h-4 w-4" />
-            Model Tester
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAboutModalOpen(true)}
-          >
-            <Info className="mr-2 h-4 w-4" />
-            About OSW Studio
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            asChild
-          >
-            <a
-              href="https://github.com/o-stahl/osw-studio"
-              target="_blank"
-              rel="noopener noreferrer"
+      {!hideFooter && (
+        <footer className="hidden md:block border-t bg-card/50 py-3 px-6">
+          <div className="flex justify-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleStartTour}
+              disabled={tourRunning}
+              data-tour-id="footer-guided-tour"
             >
-              <Github className="mr-2 h-4 w-4" />
-              GitHub
-            </a>
-          </Button>
-        </div>
-      </footer>
+              <Info className="mr-2 h-4 w-4" />
+              Guided Tour
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push('/test-generation')}
+            >
+              <TestTube className="mr-2 h-4 w-4" />
+              Model Tester
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAboutModalOpen(true)}
+            >
+              <Info className="mr-2 h-4 w-4" />
+              About OSW Studio
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+            >
+              <a
+                href="https://github.com/o-stahl/osw-studio"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Github className="mr-2 h-4 w-4" />
+                GitHub
+              </a>
+            </Button>
+          </div>
+        </footer>
+      )}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Create New Project</DialogTitle>
             <DialogDescription>
@@ -889,6 +792,7 @@ export function ProjectManager({ onProjectSelect }: ProjectManagerProps) {
         open={aboutModalOpen}
         onOpenChange={setAboutModalOpen}
       />
+
       <GuidedTourOverlay location="project-manager" />
     </div>
   );

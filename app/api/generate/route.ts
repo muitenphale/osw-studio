@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ProviderId } from '@/lib/llm/providers/types';
 import { getProvider } from '@/lib/llm/providers/registry';
 import { LLMMessage, ToolDefinition } from '@/lib/llm/types';
+import { logger } from '@/lib/utils';
 
 export async function POST(request: NextRequest) {
   try {
@@ -184,14 +185,14 @@ Habits:
       // Validate tools to ensure all required fields are present
       const validTools = tools.filter((tool: { name?: string; description?: string; parameters?: unknown }) => {
         if (!tool.name || tool.name.trim() === '') {
-          console.error('[API] Tool missing required "name" field:', tool);
+          logger.error('[API] Tool missing required "name" field:', tool);
           return false;
         }
         if (!tool.description) {
-          console.warn('[API] Tool missing "description" field:', tool.name);
+          logger.warn('[API] Tool missing "description" field:', tool.name);
         }
         if (!tool.parameters) {
-          console.warn('[API] Tool missing "parameters" field:', tool.name);
+          logger.warn('[API] Tool missing "parameters" field:', tool.name);
         }
         return true;
       });
@@ -252,6 +253,14 @@ Habits:
       requestBody.temperature = 0.7;
     }
 
+    // Enable reasoning for Gemini thinking models (required for tool use)
+    // This provides reasoning_details with signatures that must be preserved
+    const modelName = model || '';
+    if (modelName.includes('gemini') && (modelName.includes('thinking') || modelName.includes('2.5') || modelName.includes('3-pro'))) {
+      requestBody.reasoning = {
+        max_tokens: 4096
+      };
+    }
 
     const response = await fetch(apiEndpoint, {
       method: 'POST',
@@ -266,14 +275,35 @@ Habits:
       let cleanError = errorText;
       try {
         const parsed = JSON.parse(errorText);
+        // OpenRouter nested error structure: { error: { message: "...", metadata: { raw: "..." } } }
         if (parsed.error?.message) {
-          // Extract the inner message: "Key limit exceeded. Manage it using..."
           cleanError = parsed.error.message;
+          // Check for more detailed error in metadata.raw (OpenRouter provider errors)
+          if (parsed.error.metadata?.raw) {
+            try {
+              const rawError = JSON.parse(parsed.error.metadata.raw);
+              if (rawError.error?.message) {
+                cleanError = `${parsed.error.message}: ${rawError.error.message}`;
+              }
+            } catch {
+              // raw isn't JSON, append as-is if it adds info
+              if (parsed.error.metadata.raw !== parsed.error.message) {
+                cleanError = `${parsed.error.message} (${parsed.error.metadata.raw})`;
+              }
+            }
+          }
+          // Also check for provider_name in metadata
+          if (parsed.error.metadata?.provider_name) {
+            cleanError = `[${parsed.error.metadata.provider_name}] ${cleanError}`;
+          }
         } else if (typeof parsed.error === 'string') {
           cleanError = parsed.error;
         }
+        // Log full error for debugging
+        logger.error('[API] Provider error details:', JSON.stringify(parsed, null, 2));
       } catch {
         // Not JSON, use raw text as-is
+        logger.error('[API] Provider error (raw):', errorText);
       }
 
       const headers: Record<string, string> = {};
@@ -348,12 +378,10 @@ You can make multiple tool calls in a single response. Always include the tool_c
           'X-Tool-Fallback': 'json-parsing'
         };
 
-
         return new Response(fallbackResponse.body, {
           headers: fallbackHeaders,
         });
       }
-
 
       return NextResponse.json(
         { error: `${providerConfig.name} API error: ${cleanError}` },

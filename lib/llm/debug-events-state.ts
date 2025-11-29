@@ -41,7 +41,7 @@ export class DebugEventsStateManager {
    */
   private async getDB(): Promise<IDBDatabase> {
     const { vfs } = await import('@/lib/vfs');
-    return (vfs as any).db.getDatabase();
+    return vfs.getDatabase();
   }
 
   /**

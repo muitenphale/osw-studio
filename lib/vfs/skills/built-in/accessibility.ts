@@ -5,7 +5,7 @@
 
 export const ACCESSIBILITY_SKILL = String.raw`---
 name: accessibility
-description: Web accessibility guidelines for WCAG 2.1 AA compliance in static HTML/CSS/JS projects
+description: Read when user mentions accessibility, a11y, WCAG, or when building forms and navigation. Covers semantic HTML, ARIA, and focus management.
 ---
 
 # Web Accessibility Best Practices

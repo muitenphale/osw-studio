@@ -1,5 +1,54 @@
 # Changelog
 
+## v1.16.0 - 2025-11-23
+- **Server Mode (Optional)**: PostgreSQL-backed deployment mode for persistent storage and multi-device access
+  - Browser Mode remains the default (IndexedDB, client-side only, no backend required)
+  - Server Mode adds PostgreSQL persistence, admin authentication, and sites publishing
+  - Automatic database setup (no manual migrations)
+  - Bookmarkable URLs for all pages (`/admin/projects`, `/admin/sites`, etc.)
+  - Admin login with password protection (24-hour sessions)
+- **Published Sites Management**: Create and host static sites directly from your projects
+  - New dedicated "Sites" view with search, sort, and filtering
+  - Publish projects to live URLs with one click
+  - 6 configuration tabs: General, Scripts, CDN, Analytics, SEO, Compliance
+  - Custom domain support with automatic HTTPS URLs
+  - "Under Construction" mode with placeholder page
+  - Status badges: "Live", "Pending Changes", "Under Construction", "Compliance Enabled"
+  - Copy site URL to clipboard from context menu
+  - Automatic sitemap.xml and robots.txt generation
+- **Compliance/Cookie Consent**: GDPR-ready cookie consent banners
+  - Opt-in or opt-out consent modes
+  - Customizable position (6 locations), button style (pill/rounded/square), and text
+  - Privacy policy and cookie policy links
+  - Dark mode support and responsive design
+- **Sites Publishing Features**: Configure published sites with advanced options
+  - Inject custom scripts (head/body) for analytics, tracking, or functionality
+  - Add external CDN resources (stylesheets, scripts)
+  - Privacy-focused analytics (no cookies, IP anonymization, LocalStorage consent)
+  - SEO metadata (title, description, keywords, Open Graph, Twitter Cards)
+- **UI/UX Improvements**:
+  - Sites view matches modern Projects/Templates/Skills layout
+  - Improved modal sizing for better readability
+  - Sidebar no longer shifts content when unpinned
+  - Site cards display thumbnails, status badges, and quick actions
+  - Analytics dashboard shows page views, unique visitors, and referrers
+- **Performance**: Sites view loads in <3 seconds for 50 projects
+- **Documentation**: Comprehensive docs added for all features (12 guides including Server Mode, Sites Publishing, Deployment, Architecture, and more)
+  - Fixed version display showing "-" instead of version number
+  - Fixed compliance settings not persisting
+  - Fixed site thumbnails not updating
+  - Fixed analytics tracking issues
+- **Gemini Thinking Model Support**: Full compatibility with Gemini 2.5 Flash, 2.5 Pro, and 3 Pro thinking models via OpenRouter
+  - Automatic `reasoning_details` preservation for multi-turn tool use conversations
+  - Enables reliable function calling with thinking models (previously failed with 400 errors)
+- **Skills System Enhancements**: Reorganized built-in skills for better AI guidance
+  - Split `osw-workflow` into focused skills: `osw-planning` (multi-page site planning) and `osw-one-shot` (landing page generation)
+  - Improved skill descriptions to be more action-oriented
+  - Skills now appear in Project Structure shown to AI (previously only listed separately)
+- **Debug Panel Improvements**: Enhanced debugging experience
+  - The mini terminal can be used to test out or perform VFS operations 
+  - Easier troubleshooting of AI file operations
+
 ## v1.15.0 - 2025-11-04
 - Added Agent Skills System (Anthropic-inspired, compatible with prompt-only skills) with integrated Skills tab (Projects | Templates | Skills)
 - Global enable/disable toggle for entire skills system with per-skill enable/disable controls

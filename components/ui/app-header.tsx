@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Logo } from '@/components/ui/logo';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Menu } from 'lucide-react';
 
 export interface HeaderAction {
   id: string;
@@ -38,6 +38,11 @@ interface AppHeaderProps {
   viewTabs?: ViewTab[]; // View tabs for switching between sections
   activeViewTab?: string; // Currently active view tab
   onViewTabChange?: (tabId: string) => void; // Callback when view tab changes
+  hideLogo?: boolean; // Hide the logo button (for use with sidebar)
+  showMobileMenu?: boolean; // Show hamburger menu button on mobile (for sidebar)
+  onMobileMenuClick?: () => void; // Callback when hamburger is clicked
+  hideActionsOnMobile?: boolean; // Hide all actions on mobile (actions in sidebar instead)
+  pageName?: string; // Page name to show in center on mobile (when showMobileMenu is true)
 }
 
 export function AppHeader({
@@ -53,29 +58,44 @@ export function AppHeader({
   mobileVisibleActions = [],
   viewTabs,
   activeViewTab,
-  onViewTabChange
+  onViewTabChange,
+  hideLogo = false,
+  showMobileMenu = false,
+  onMobileMenuClick,
+  hideActionsOnMobile = false,
+  pageName
 }: AppHeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Split actions into mobile-visible and dropdown-only
   const mobileVisibleActionsSet = new Set(mobileVisibleActions);
-  const visibleOnMobile = actions.filter(a => mobileVisibleActionsSet.has(a.id));
-  const dropdownOnlyActions = actions.filter(a => !mobileVisibleActionsSet.has(a.id));
+  const visibleOnMobile = hideActionsOnMobile ? [] : actions.filter(a => mobileVisibleActionsSet.has(a.id));
+  const dropdownOnlyActions = hideActionsOnMobile ? [] : actions.filter(a => !mobileVisibleActionsSet.has(a.id));
 
   return (
     <div className={`border-b bg-card shadow-sm relative z-20 ${className}`}>
       <div className="px-3 py-2 flex items-center justify-between">
-        {/* Left side - Logo + text (desktop), Logo only (mobile) */}
-        <button 
-          onClick={onLogoClick}
-          className="flex items-center gap-2 p-1 pr-2 hover:ring-1 hover:ring-border rounded-sm transition-all"
-        >
-          <Logo width={24} height={24} />
-          {/* Show leftText next to logo on desktop only */}
-          {leftText && <span className="font-semibold text-lg hidden md:inline">{leftText}</span>}
-        </button>
+        {/* Left side - Logo + pageName (mobile when showMobileMenu is true) */}
+        {showMobileMenu && (
+          <div className="md:hidden flex items-center gap-3">
+            <Logo width={24} height={24} />
+            {pageName && <span className="text-sm font-semibold">{pageName}</span>}
+          </div>
+        )}
 
-        {/* Center - View tabs or leftText/title */}
+        {/* Left side - Logo + text (desktop), empty (mobile with sidebar) */}
+        {!hideLogo && !showMobileMenu && (
+          <button
+            onClick={onLogoClick}
+            className="flex items-center gap-2 p-1 pr-2 hover:ring-1 hover:ring-border rounded-sm transition-all"
+          >
+            <Logo width={24} height={24} />
+            {/* Show leftText next to logo on desktop only */}
+            {leftText && <span className="font-semibold text-lg hidden md:inline">{leftText}</span>}
+          </button>
+        )}
+
+        {/* Center - View tabs or leftText/title (desktop only now) */}
         <div className="flex items-center gap-2 flex-1 justify-center md:justify-start md:ml-6">
           {viewTabs && viewTabs.length > 0 ? (
             /* Show view tabs as pill toggle */
@@ -97,8 +117,8 @@ export function AppHeader({
                 </Button>
               ))}
             </div>
-          ) : leftText ? (
-            /* Show leftText in center on mobile */
+          ) : leftText && !showMobileMenu ? (
+            /* Show leftText in center on mobile (only when not using sidebar) */
             <h1 className="text-lg font-semibold md:hidden">{leftText}</h1>
           ) : title ? (
             <>
@@ -175,6 +195,18 @@ export function AppHeader({
               ) : (
                 <ChevronDown className="h-4 w-4" />
               )}
+            </Button>
+          )}
+
+          {/* Mobile hamburger menu (on right side) */}
+          {showMobileMenu && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onMobileMenuClick}
+              className="md:hidden h-8 w-8"
+            >
+              <Menu className="h-5 w-5" />
             </Button>
           )}
         </div>

@@ -619,7 +619,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  
   const handleRestoreCheckpoint = useCallback(async (checkpointId: string, description?: string) => {
     try {
       // First check if checkpoint exists
@@ -748,7 +747,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
   }, [handleFilesChange, project.id, debugEvents, setPrompt]);
 
-  
   const handleGenerate = async () => {
     if (isTourLockingInput) {
       return;
@@ -867,6 +865,10 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     } catch (error) {
       logger.error('Generation error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate';
+
+      // Emit error event to clear thinking indicator in chat panel
+      addDebugEvent('error', { message: errorMessage });
+
       toast.error(errorMessage, {
         duration: 5000,
         position: 'bottom-center'
@@ -928,7 +930,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       dataTourId: 'discard-changes-button'
     });
   }
-
 
   // Add desktop-only settings button
   const desktopSettingsButton = (
@@ -1019,12 +1020,12 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 side="right"
                 className="border-0"
                 style={{
-                  backgroundColor: '#ff6b35',
+                  backgroundColor: 'var(--button-assistant-active)',
                   color: 'white'
                 }}
                 arrowStyle={{
-                  backgroundColor: '#ff6b35',
-                  fill: '#ff6b35'
+                  backgroundColor: 'var(--button-assistant-active)',
+                  fill: 'var(--button-assistant-active)'
                 }}
               >
                 <p>Chat</p>
@@ -1270,7 +1271,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 defaultSize={defaultSizes.debug}
                 minSize={15}
               >
-                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} />
+                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} projectId={project.id} />
               </ResizablePanel>
             )}
 

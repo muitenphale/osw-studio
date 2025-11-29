@@ -13,8 +13,8 @@ export function Logo({ width = 64, height = 64, className }: LogoProps) {
       className={className}
       dangerouslySetInnerHTML={{
         __html: `<svg version="1.0" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 256 256" preserveAspectRatio="xMidYMid meet">
-<rect x="0" y="0" width="256" height="256" rx="20" ry="20" fill="#000000"/>
-<g transform="translate(0,256) scale(0.0476,-0.0476)" fill="#ffffff" stroke="none">
+<rect x="0" y="0" width="256" height="256" rx="20" ry="20" fill="#ffffff"/>
+<g transform="translate(0,256) scale(0.0476,-0.0476)" fill="#000000" stroke="none">
 <path d="M725 4825 c-50 -18 -100 -71 -114 -122 -15 -54 -15 -1573 0 -1628 16
 -55 44 -92 89 -115 38 -19 62 -20 855 -20 781 0 817 1 853 19 46 23 67 46 87
 94 13 32 15 138 15 830 0 566 -3 804 -11 828 -16 45 -55 87 -104 110 -38 18

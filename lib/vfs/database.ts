@@ -1,7 +1,7 @@
 import { Project, VirtualFile, FileTreeNode, CustomTemplate } from './types';
 
 const DB_NAME = 'osw-studio-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4; // Incremented to add skills store
 
 export class VFSDatabase {
   private db: IDBDatabase | null = null;
@@ -59,6 +59,13 @@ export class VFSDatabase {
           const templateStore = db.createObjectStore('customTemplates', { keyPath: 'id' });
           templateStore.createIndex('name', 'name', { unique: false });
           templateStore.createIndex('importedAt', 'importedAt', { unique: false });
+        }
+
+        // Custom Skills object store (migrated from localStorage)
+        if (!db.objectStoreNames.contains('skills')) {
+          const skillsStore = db.createObjectStore('skills', { keyPath: 'id' });
+          skillsStore.createIndex('name', 'name', { unique: false });
+          skillsStore.createIndex('isBuiltIn', 'isBuiltIn', { unique: false });
         }
 
         // Debug Events object store

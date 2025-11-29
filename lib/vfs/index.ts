@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import JSZip from 'jszip';
-import { VFSDatabase } from './database';
 import { logger } from '@/lib/utils';
 import {
   Project,
@@ -15,22 +14,37 @@ import {
 import { saveManager } from './save-manager';
 import { VirtualServer } from '@/lib/preview/virtual-server';
 import { skillsService } from './skills';
+import { StorageAdapter } from './adapters/types';
+import { createClientAdapter } from './adapters/factory';
+import { IndexedDBAdapter } from './adapters/indexeddb-adapter';
 
 export class VirtualFileSystem {
-  private db: VFSDatabase;
+  private adapter: StorageAdapter;
   private initialized = false;
   private transientFiles: Map<string, VirtualFile> = new Map();
+  private syncTimeouts: Map<string, NodeJS.Timeout> = new Map(); // Debounce sync calls
 
   constructor() {
-    this.db = new VFSDatabase();
+    this.adapter = createClientAdapter();
   }
 
   async init(): Promise<void> {
     if (!this.initialized) {
-      await this.db.init();
+      await this.adapter.init();
       await this.mountTransientSkills();
       this.initialized = true;
     }
+  }
+
+  /**
+   * Get direct database access for checkpoint and conversation managers
+   * Only works with IndexedDBAdapter
+   */
+  getDatabase(): IDBDatabase {
+    if (!(this.adapter instanceof IndexedDBAdapter)) {
+      throw new Error('Direct database access only available with IndexedDBAdapter');
+    }
+    return this.adapter.getDatabase();
   }
 
   /**
@@ -38,7 +52,7 @@ export class VirtualFileSystem {
    */
   private async mountTransientSkills(): Promise<void> {
     try {
-      const skills = await skillsService.getAllSkills();
+      const skills = await skillsService.getEnabledSkills();
 
       for (const skill of skills) {
         const path = `/.skills/${skill.id}.md`;
@@ -93,6 +107,37 @@ export class VirtualFileSystem {
     }
   }
 
+  /**
+   * Trigger auto-sync in background (debounced)
+   * Only runs in Server Mode and in browser environment
+   */
+  private triggerAutoSync(projectId: string) {
+    // Only sync in browser and Server Mode
+    if (typeof window === 'undefined' || process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
+      return;
+    }
+
+    // Clear existing timeout for this project (debounce)
+    const existingTimeout = this.syncTimeouts.get(projectId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    // Schedule sync after 2 seconds of inactivity
+    const timeout = setTimeout(async () => {
+      try {
+        const { autoSyncProject } = await import('./auto-sync');
+        await autoSyncProject(projectId);
+      } catch (error) {
+        logger.error(`[VFS] Auto-sync failed for project ${projectId}:`, error);
+      } finally {
+        this.syncTimeouts.delete(projectId);
+      }
+    }, 2000);
+
+    this.syncTimeouts.set(projectId, timeout);
+  }
+
 
   async createFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {
     this.ensureInitialized();
@@ -102,7 +147,7 @@ export class VirtualFileSystem {
       const cleanPath = path.replace(/\\n$|\\r$|\n$|\r$/, '').trim();
       path = cleanPath;
       
-      const existing = await this.db.getFile(projectId, path);
+      const existing = await this.adapter.getFile(projectId, path);
       if (existing) {
         logger.error('VFS: File already exists', { projectId, path });
         throw new Error(`File already exists: ${path}`);
@@ -113,7 +158,7 @@ export class VirtualFileSystem {
       }
 
       const type = getFileTypeFromPath(path);
-      
+
       const size = content instanceof ArrayBuffer ? content.byteLength : new Blob([content]).size;
       const sizeLimit = FILE_SIZE_LIMITS[type];
       if (size > sizeLimit) {
@@ -136,7 +181,7 @@ export class VirtualFileSystem {
         }
       };
 
-      await this.db.createFile(file);
+      await this.adapter.createFile(file);
 
       await this.updateFileTree(projectId, path, 'create');
       saveManager.markDirty(projectId);
@@ -182,7 +227,7 @@ export class VirtualFileSystem {
       throw new Error(`Transient file not found: ${cleanPath}`);
     }
 
-    const file = await this.db.getFile(projectId, cleanPath);
+    const file = await this.adapter.getFile(projectId, cleanPath);
     if (!file) {
       logger.error('VFS: File not found for read', { projectId, path: cleanPath, originalPath: path });
       throw new Error(`File not found: ${cleanPath}`);
@@ -200,7 +245,7 @@ export class VirtualFileSystem {
         return this.transientFiles.has(path);
       }
 
-      const file = await this.db.getFile(projectId, path);
+      const file = await this.adapter.getFile(projectId, path);
       return !!file;
     } catch {
       return false;
@@ -221,7 +266,7 @@ export class VirtualFileSystem {
       // Use cleaned path for lookup
       path = cleanPath;
       
-      const file = await this.db.getFile(projectId, path);
+      const file = await this.adapter.getFile(projectId, path);
       if (!file) {
         logger.error('VFS: File not found for update', { projectId, path });
         throw new Error(`File not found: ${path}`);
@@ -231,7 +276,7 @@ export class VirtualFileSystem {
       file.size = content instanceof ArrayBuffer ? content.byteLength : new Blob([content]).size;
       file.updatedAt = new Date();
 
-      await this.db.updateFile(file);
+      await this.adapter.updateFile(file);
       saveManager.markDirty(projectId);
 
       if (typeof window !== 'undefined') {
@@ -269,12 +314,11 @@ export class VirtualFileSystem {
 
   async deleteFile(projectId: string, path: string): Promise<void> {
     this.ensureInitialized();
-    
+
     try {
-      await this.db.deleteFile(projectId, path);
+      await this.adapter.deleteFile(projectId, path);
       await this.updateFileTree(projectId, path, 'delete');
       saveManager.markDirty(projectId);
-      
     } catch (error) {
       throw error;
     }
@@ -291,7 +335,7 @@ export class VirtualFileSystem {
   async createDirectory(projectId: string, path: string): Promise<void> {
     this.ensureInitialized();
     
-    const existing = await this.db.getTreeNode(projectId, path);
+    const existing = await this.adapter.getTreeNode(projectId, path);
     if (existing) {
       return;
     }
@@ -305,7 +349,7 @@ export class VirtualFileSystem {
       children: []
     };
 
-      await this.db.createTreeNode(node);
+      await this.adapter.createTreeNode(node);
       saveManager.markDirty(projectId);
       
       if (typeof window !== 'undefined') {
@@ -316,7 +360,7 @@ export class VirtualFileSystem {
   async listDirectory(projectId: string, path: string, options?: { includeTransient?: boolean }): Promise<VirtualFile[]> {
     this.ensureInitialized();
 
-    const allFiles = await this.db.listFiles(projectId);
+    const allFiles = await this.adapter.listFiles(projectId);
 
     let files: VirtualFile[];
     if (path === '/') {
@@ -330,10 +374,22 @@ export class VirtualFileSystem {
       });
     }
 
-    // Include transient files if requested and listing root directory
-    if (options?.includeTransient && path === '/') {
+    // Include transient files if requested
+    if (options?.includeTransient) {
       const transientFilesArray = Array.from(this.transientFiles.values());
-      files = [...files, ...transientFilesArray];
+
+      if (path === '/') {
+        // Root: include all transient files
+        files = [...files, ...transientFilesArray];
+      } else {
+        // Subdirectory: filter transient files by path
+        const dirPath = path.endsWith('/') ? path : path + '/';
+        const matchingTransient = transientFilesArray.filter(file => {
+          return file.path.startsWith(dirPath) &&
+                 file.path.slice(dirPath.length).indexOf('/') === -1;
+        });
+        files = [...files, ...matchingTransient];
+      }
     }
 
     return files;
@@ -342,9 +398,9 @@ export class VirtualFileSystem {
   async getAllFilesAndDirectories(projectId: string, options?: { includeTransient?: boolean }): Promise<Array<VirtualFile | { path: string; name: string; type: 'directory' }>> {
     this.ensureInitialized();
 
-    const allFiles = await this.db.listFiles(projectId);
+    const allFiles = await this.adapter.listFiles(projectId);
 
-    const treeNodes = await this.db.getAllTreeNodes(projectId);
+    const treeNodes = await this.adapter.getAllTreeNodes(projectId);
 
     const directories = treeNodes
       .filter(node => node.type === 'directory')
@@ -368,7 +424,7 @@ export class VirtualFileSystem {
   async deleteDirectory(projectId: string, path: string): Promise<void> {
     this.ensureInitialized();
     
-    const allFiles = await this.db.listFiles(projectId);
+    const allFiles = await this.adapter.listFiles(projectId);
     const dirPath = path.endsWith('/') ? path : path + '/';
     
     for (const file of allFiles) {
@@ -377,7 +433,7 @@ export class VirtualFileSystem {
       }
     }
     
-    await this.db.deleteTreeNode(projectId, path);
+    await this.adapter.deleteTreeNode(projectId, path);
     saveManager.markDirty(projectId);
     
     if (typeof window !== 'undefined') {
@@ -388,9 +444,9 @@ export class VirtualFileSystem {
   async renameDirectory(projectId: string, oldPath: string, newPath: string): Promise<void> {
     this.ensureInitialized();
     
-    const oldNode = await this.db.getTreeNode(projectId, oldPath);
+    const oldNode = await this.adapter.getTreeNode(projectId, oldPath);
     if (oldNode) {
-      await this.db.deleteTreeNode(projectId, oldPath);
+      await this.adapter.deleteTreeNode(projectId, oldPath);
       
       const newNode: FileTreeNode = {
         id: uuidv4(),
@@ -400,14 +456,14 @@ export class VirtualFileSystem {
         parentPath: this.getParentPath(newPath),
         children: oldNode.children
       };
-      await this.db.createTreeNode(newNode);
+      await this.adapter.createTreeNode(newNode);
       saveManager.markDirty(projectId);
     }
     
     const oldDirPath = oldPath.endsWith('/') ? oldPath : oldPath + '/';
     const newDirPath = newPath.endsWith('/') ? newPath : newPath + '/';
     
-    const allFiles = await this.db.listFiles(projectId);
+    const allFiles = await this.adapter.listFiles(projectId);
     const filesToMove = allFiles.filter(file => file.path.startsWith(oldDirPath));
     
     for (const file of filesToMove) {
@@ -416,7 +472,7 @@ export class VirtualFileSystem {
       await this.renameFile(projectId, file.path, newFilePath);
     }
     
-    const allTreeNodes = await this.db.getAllTreeNodes(projectId);
+    const allTreeNodes = await this.adapter.getAllTreeNodes(projectId);
     const subdirNodes = allTreeNodes.filter(node => 
       node.type === 'directory' && 
       node.path.startsWith(oldDirPath) &&
@@ -427,7 +483,7 @@ export class VirtualFileSystem {
       const relativePath = node.path.substring(oldDirPath.length);
       const newSubdirPath = newDirPath + relativePath;
       
-      await this.db.deleteTreeNode(projectId, node.path);
+      await this.adapter.deleteTreeNode(projectId, node.path);
       const newNode: FileTreeNode = {
         id: uuidv4(),
         projectId,
@@ -436,7 +492,7 @@ export class VirtualFileSystem {
         parentPath: this.getParentPath(newSubdirPath),
         children: node.children
       };
-      await this.db.createTreeNode(newNode);
+      await this.adapter.createTreeNode(newNode);
     }
     
     if (typeof window !== 'undefined') {
@@ -447,7 +503,7 @@ export class VirtualFileSystem {
   async moveFile(projectId: string, oldPath: string, newPath: string): Promise<VirtualFile> {
     this.ensureInitialized();
     
-    const existing = await this.db.getFile(projectId, newPath);
+    const existing = await this.adapter.getFile(projectId, newPath);
     if (existing) {
       throw new Error(`File already exists at destination: ${newPath}`);
     }
@@ -499,7 +555,7 @@ export class VirtualFileSystem {
         }
       };
 
-      await this.db.createProject(project);
+      await this.adapter.createProject(project);
       
       const rootNode: FileTreeNode = {
         id: uuidv4(),
@@ -510,7 +566,7 @@ export class VirtualFileSystem {
         children: []
       };
       
-      await this.db.createTreeNode(rootNode);
+      await this.adapter.createTreeNode(rootNode);
       
       return project;
     } catch (error) {
@@ -521,7 +577,7 @@ export class VirtualFileSystem {
   async getProject(id: string): Promise<Project> {
     this.ensureInitialized();
     
-    const project = await this.db.getProject(id);
+    const project = await this.adapter.getProject(id);
     if (!project) {
       throw new Error(`Project not found: ${id}`);
     }
@@ -529,11 +585,14 @@ export class VirtualFileSystem {
     return project;
   }
 
-  async updateProject(project: Project): Promise<void> {
+  async updateProject(project: Project, skipSync = false): Promise<void> {
     this.ensureInitialized();
-    
+
     project.updatedAt = new Date();
-    await this.db.updateProject(project);
+    await this.adapter.updateProject(project);
+
+    // Note: skipSync parameter kept for backward compatibility but no longer used
+    // Auto-sync is now only triggered explicitly from saveManager.save()
   }
 
   async updateProjectCost(
@@ -674,19 +733,25 @@ export class VirtualFileSystem {
   async deleteProject(id: string): Promise<void> {
     this.ensureInitialized();
     
-    await this.db.deleteProject(id);
+    await this.adapter.deleteProject(id);
   }
 
   async listProjects(): Promise<Project[]> {
     this.ensureInitialized();
-    
-    return await this.db.listProjects();
+
+    return await this.adapter.listProjects();
+  }
+
+  async listFiles(projectId: string): Promise<VirtualFile[]> {
+    this.ensureInitialized();
+
+    return await this.adapter.listFiles(projectId);
   }
 
   async getFileTree(projectId: string): Promise<FileTreeNode | null> {
     this.ensureInitialized();
     
-    return await this.db.getTreeNode(projectId, '/');
+    return await this.adapter.getTreeNode(projectId, '/');
   }
 
   async searchFiles(
@@ -701,7 +766,7 @@ export class VirtualFileSystem {
   ): Promise<VirtualFile[]> {
     this.ensureInitialized();
     
-    const allFiles = await this.db.listFiles(projectId);
+    const allFiles = await this.adapter.listFiles(projectId);
     const { 
       regex = false, 
       fileType, 
@@ -748,7 +813,7 @@ export class VirtualFileSystem {
   ): Promise<Array<{ file: VirtualFile; matches: Array<{ line: number; text: string }> }>> {
     this.ensureInitialized();
     
-    const allFiles = await this.db.listFiles(projectId);
+    const allFiles = await this.adapter.listFiles(projectId);
     const results: Array<{ file: VirtualFile; matches: Array<{ line: number; text: string }> }> = [];
     
     const patterns: RegExp[] = [];
@@ -820,7 +885,7 @@ export class VirtualFileSystem {
   }> {
     this.ensureInitialized();
     
-    const file = await this.db.getFile(projectId, path);
+    const file = await this.adapter.getFile(projectId, path);
     if (!file) {
       throw new Error(`File not found: ${path}`);
     }
@@ -841,7 +906,7 @@ export class VirtualFileSystem {
   async getProjectSize(projectId: string): Promise<number> {
     this.ensureInitialized();
     
-    const files = await this.db.listFiles(projectId);
+    const files = await this.adapter.listFiles(projectId);
     return files.reduce((total, file) => total + file.size, 0);
   }
 
@@ -853,7 +918,7 @@ export class VirtualFileSystem {
   }> {
     this.ensureInitialized();
     
-    const files = await this.db.listFiles(projectId);
+    const files = await this.adapter.listFiles(projectId);
     
     let totalSize = 0;
     const fileTypes: Record<string, number> = {};
@@ -886,7 +951,7 @@ export class VirtualFileSystem {
     this.ensureInitialized();
     
     const project = await this.getProject(projectId);
-    const files = await this.db.listFiles(projectId);
+    const files = await this.adapter.listFiles(projectId);
     
     return { project, files };
   }
@@ -924,7 +989,7 @@ export class VirtualFileSystem {
       logger.warn('Failed to compile Handlebars templates during export, falling back to raw files:', error);
       
       // Fallback to original behavior if Handlebars compilation fails
-      const files = await this.db.listFiles(projectId);
+      const files = await this.adapter.listFiles(projectId);
       
       for (const file of files) {
         const zipPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
@@ -976,7 +1041,7 @@ export class VirtualFileSystem {
     this.ensureInitialized();
     
     const originalProject = await this.getProject(projectId);
-    const files = await this.db.listFiles(projectId);
+    const files = await this.adapter.listFiles(projectId);
     
     const newName = `${originalProject.name} (Copy)`.slice(0, 50);
     const newProject = await this.createProject(
@@ -1021,11 +1086,11 @@ export class VirtualFileSystem {
     const parentPath = this.getParentPath(path);
     if (parentPath === null) return;
     
-    let parentNode = await this.db.getTreeNode(projectId, parentPath);
+    let parentNode = await this.adapter.getTreeNode(projectId, parentPath);
     
     if (!parentNode && operation === 'create') {
       await this.createDirectory(projectId, parentPath);
-      parentNode = await this.db.getTreeNode(projectId, parentPath);
+      parentNode = await this.adapter.getTreeNode(projectId, parentPath);
     }
     
     if (parentNode) {
@@ -1041,7 +1106,7 @@ export class VirtualFileSystem {
       }
       
       parentNode.children = children;
-      await this.db.updateTreeNode(parentNode);
+      await this.adapter.updateTreeNode(parentNode);
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('filesChanged'));

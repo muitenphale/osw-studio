@@ -17,15 +17,224 @@ import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
 import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from './pricing-cache';
 import { fetchAvailableModels } from './models-api';
-import { parseStreamingResponse, buildFileTree } from './streaming-parser';
+import { parseStreamingResponse, buildFileTree, StreamResponse, ReasoningDetail } from './streaming-parser';
+import { extractPartialContent, getContinuationMarker, PartialContentExtraction } from './json-repair';
+import { buildShellSystemPrompt } from './system-prompt';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Context for continuing a truncated file operation
+ */
+interface ContinuationContext {
+  toolCallId: string;
+  toolName: string;
+  filePath: string;
+  operationType: string;
+  partialContent: string;
+  attemptCount: number;
+  startedAt: number;
+}
+
+/**
+ * Handles continuation of truncated file operations
+ * Buffers partial content until all chunks are received, then writes final file
+ */
+class ContinuationHandler {
+  private maxContinuationAttempts = 3;
+  private contentBuffer: Map<string, string> = new Map();  // filePath -> accumulated content
+  private activeContinuations: Map<string, ContinuationContext> = new Map();  // filePath -> context
+  private onProgress?: (event: string, data?: unknown) => void;
+
+  constructor(onProgress?: (event: string, data?: unknown) => void) {
+    this.onProgress = onProgress;
+  }
+
+  /**
+   * Check if truncation was detected and we need to continue
+   */
+  detectNeedsContinuation(
+    toolCall: { function: { name: string; arguments: string }; id: string },
+    wasTruncated: boolean,
+    parseError?: Error
+  ): { needsContinuation: boolean; extraction?: PartialContentExtraction } {
+    if (!wasTruncated && !parseError) {
+      return { needsContinuation: false };
+    }
+
+    // Only json_patch operations can be continued
+    if (toolCall.function.name !== 'json_patch') {
+      return { needsContinuation: false };
+    }
+
+    // Try to extract partial content
+    const extraction = extractPartialContent(toolCall.function.arguments);
+
+    // Only rewrite operations can be safely continued
+    if (extraction.success && extraction.operationType === 'rewrite') {
+      return { needsContinuation: true, extraction };
+    }
+
+    return { needsContinuation: false, extraction };
+  }
+
+  /**
+   * Start or continue buffering content for a file
+   */
+  bufferContent(filePath: string, content: string, toolCallId: string): ContinuationContext {
+    let context = this.activeContinuations.get(filePath);
+
+    if (context) {
+      // Append to existing buffer
+      const existingContent = this.contentBuffer.get(filePath) || '';
+      this.contentBuffer.set(filePath, existingContent + content);
+      context.attemptCount++;
+      context.toolCallId = toolCallId;
+
+      this.onProgress?.('chunk_progress', {
+        type: 'chunk_complete',
+        filePath,
+        message: `Chunk ${context.attemptCount} buffered, continuing...`,
+        chunkNumber: context.attemptCount
+      });
+    } else {
+      // Start new continuation
+      context = {
+        toolCallId,
+        toolName: 'json_patch',
+        filePath,
+        operationType: 'rewrite',
+        partialContent: content,
+        attemptCount: 1,
+        startedAt: Date.now()
+      };
+      this.activeContinuations.set(filePath, context);
+      this.contentBuffer.set(filePath, content);
+
+      this.onProgress?.('chunk_progress', {
+        type: 'large_file_detected',
+        filePath,
+        message: 'Large file detected, writing in chunks...',
+        chunkNumber: 1
+      });
+    }
+
+    return context;
+  }
+
+  /**
+   * Check if we've exceeded max continuation attempts
+   */
+  hasExceededMaxAttempts(filePath: string): boolean {
+    const context = this.activeContinuations.get(filePath);
+    return context ? context.attemptCount >= this.maxContinuationAttempts : false;
+  }
+
+  /**
+   * Generate a continuation prompt for the LLM
+   */
+  generateContinuationPrompt(filePath: string): string {
+    const context = this.activeContinuations.get(filePath);
+    const bufferedContent = this.contentBuffer.get(filePath) || '';
+
+    if (!context) {
+      return '';
+    }
+
+    const marker = getContinuationMarker(bufferedContent, 200);
+
+    return `The previous file operation for "${filePath}" was truncated due to max_tokens limit.
+
+**Current buffered content ends with:**
+\`\`\`
+...${marker}
+\`\`\`
+
+**IMPORTANT:** Continue writing the file content from EXACTLY where it left off.
+- Do NOT repeat any content that was already written
+- Do NOT add any extra spacing or newlines at the start
+- Start your content directly after: "${marker.slice(-50)}"
+
+Use this json_patch to continue:
+{
+  "file_path": "${filePath}",
+  "operations": [{"type": "rewrite", "content": "...remaining content starting from where you left off..."}]
+}
+
+Note: Your response will be automatically appended to the buffered content. Only write the NEW content.`;
+  }
+
+  /**
+   * Finalize a file by combining all buffered chunks
+   * Returns the complete content ready to write
+   */
+  finalizeFile(filePath: string): { content: string; totalChunks: number } | null {
+    const context = this.activeContinuations.get(filePath);
+    const content = this.contentBuffer.get(filePath);
+
+    if (!context || !content) {
+      return null;
+    }
+
+    const totalChunks = context.attemptCount;
+
+    // Clean up
+    this.activeContinuations.delete(filePath);
+    this.contentBuffer.delete(filePath);
+
+    this.onProgress?.('chunk_progress', {
+      type: 'file_complete',
+      filePath,
+      message: 'File assembled successfully',
+      totalChunks
+    });
+
+    return { content, totalChunks };
+  }
+
+  /**
+   * Abort continuation and clean up
+   */
+  abortContinuation(filePath: string): void {
+    this.activeContinuations.delete(filePath);
+    this.contentBuffer.delete(filePath);
+
+    this.onProgress?.('chunk_progress', {
+      type: 'file_aborted',
+      filePath,
+      message: 'File operation aborted due to max continuation attempts'
+    });
+  }
+
+  /**
+   * Check if there's an active continuation for a file
+   */
+  hasContinuation(filePath: string): boolean {
+    return this.activeContinuations.has(filePath);
+  }
+
+  /**
+   * Get the current buffered content for a file
+   */
+  getBufferedContent(filePath: string): string | undefined {
+    return this.contentBuffer.get(filePath);
+  }
+
+  /**
+   * Check if a tool call is a continuation (not an original call)
+   */
+  isContinuationCall(filePath: string): boolean {
+    const context = this.activeContinuations.get(filePath);
+    return context ? context.attemptCount > 1 : false;
+  }
+}
 
 export interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
   // UI metadata for session recovery
   ui_metadata?: {
     checkpointId?: string;
@@ -81,6 +290,7 @@ export class MultiAgentOrchestrator {
   private duplicateToolCallCount: number = 0; // Track consecutive duplicates
   private evaluationRequested = false; // Track if we requested evaluation
   private lastEvaluationResult: { should_continue: boolean } | null = null; // Track evaluation result
+  private continuationHandler: ContinuationHandler; // Handles truncated file operations
 
   constructor(
     projectId: string,
@@ -92,6 +302,7 @@ export class MultiAgentOrchestrator {
     this.onProgress = onProgress;
     this.chatMode = options?.chatMode ?? false;
     this.model = options?.model;
+    this.continuationHandler = new ContinuationHandler(onProgress);
 
     // Get root agent (default to orchestrator)
     const agent = agentRegistry.get(agentType);
@@ -168,11 +379,8 @@ export class MultiAgentOrchestrator {
         // Ignore errors getting file tree
       }
 
-      // Build system prompt
-      let systemPrompt = this.rootAgent.systemPrompt;
-      if (fileTreeStr) {
-        systemPrompt += `\n\n${fileTreeStr}`;
-      }
+      // Build system prompt (includes skills dynamically)
+      const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode);
 
       // Initialize conversation with system prompt
       this.addMessage(this.currentConversationId, {
@@ -236,6 +444,7 @@ export class MultiAgentOrchestrator {
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       if (this.stopped) {
         logger.info('[MultiAgentOrchestrator] Loop stopped by user');
+        this.onProgress?.('stopped', { reason: 'user' });
         break;
       }
 
@@ -294,23 +503,37 @@ export class MultiAgentOrchestrator {
         break;
       }
 
-      // Execute tool calls
-      const toolResults = await this.executeToolCalls(
+      // Execute tool calls (pass wasTruncated for continuation handling)
+      const { results: toolResults, continuationNeeded, continuationFilePath } = await this.executeToolCalls(
         response.toolCalls,
         conversationId,
-        agent
+        agent,
+        response.wasTruncated
       );
 
-      // Add assistant message with tool calls
+      // Add assistant message with tool calls and reasoning_details (for Gemini)
       this.addMessage(conversationId, {
         role: 'assistant',
         content: response.content || '',
-        tool_calls: response.toolCalls
+        tool_calls: response.toolCalls,
+        ...(response.reasoningDetails && { reasoning_details: response.reasoningDetails })
       });
 
       // Add tool results
       for (const result of toolResults) {
         this.addMessage(conversationId, result);
+      }
+
+      // If continuation is needed, inject a continuation prompt
+      if (continuationNeeded && continuationFilePath) {
+        const continuationPrompt = this.continuationHandler.generateContinuationPrompt(continuationFilePath);
+        this.addMessage(conversationId, {
+          role: 'user',
+          content: continuationPrompt
+        });
+        logger.info(`[MultiAgentOrchestrator] Continuation needed for ${continuationFilePath}, injecting prompt`);
+        // Continue loop to get continuation response
+        continue;
       }
     }
 
@@ -325,10 +548,13 @@ export class MultiAgentOrchestrator {
   private async executeToolCalls(
     toolCalls: ToolCall[],
     conversationId: string,
-    agent: Agent
-  ): Promise<AgentMessage[]> {
+    agent: Agent,
+    wasTruncated?: boolean
+  ): Promise<{ results: AgentMessage[]; continuationNeeded: boolean; continuationFilePath?: string }> {
     const results: AgentMessage[] = [];
     const conversation = this.conversations.get(conversationId)!;
+    let continuationNeeded = false;
+    let continuationFilePath: string | undefined;
 
     for (let toolIndex = 0; toolIndex < toolCalls.length; toolIndex++) {
       const toolCall = toolCalls[toolIndex];
@@ -356,9 +582,34 @@ export class MultiAgentOrchestrator {
         continue;
       }
 
-      // Loop detection - check for consecutive duplicate tool calls
+      // Skip loop detection for continuation calls AND truncated tool calls
+      // When we're continuing a large file, the tool calls may look similar but are intentional
+      // When tool calls are truncated, they look identical but aren't real loops
+      let skipLoopDetection = false;
+      if (toolId === 'json_patch') {
+        try {
+          const args = JSON.parse(toolCall.function.arguments);
+          const filePath = args.file_path;
+          if (filePath && this.continuationHandler.isContinuationCall(filePath)) {
+            skipLoopDetection = true;
+            logger.info(`[MultiAgentOrchestrator] Skipping loop detection for continuation call: ${filePath}`);
+          }
+        } catch {
+          // Can't parse - JSON is truncated/malformed
+          // Skip loop detection since truncated calls look identical but aren't real loops
+          skipLoopDetection = true;
+          const extraction = extractPartialContent(toolCall.function.arguments);
+          if (extraction.filePath) {
+            logger.info(`[MultiAgentOrchestrator] Skipping loop detection for truncated tool call: ${extraction.filePath}`);
+          } else {
+            logger.info(`[MultiAgentOrchestrator] Skipping loop detection for unparseable tool call`);
+          }
+        }
+      }
+
+      // Loop detection - check for consecutive duplicate tool calls (skip for continuations and truncated calls)
       const currentSignature = this.getToolCallSignature(toolCall);
-      if (this.lastToolCallSignature === currentSignature) {
+      if (!skipLoopDetection && this.lastToolCallSignature === currentSignature) {
         // Loop detected - increment counter
         this.duplicateToolCallCount++;
         logger.warn(`[MultiAgentOrchestrator] Loop detected: consecutive duplicate tool call #${this.duplicateToolCallCount} - ${currentSignature}`);
@@ -431,7 +682,110 @@ Please revise your approach.`;
       };
 
       try {
-        // Execute tool
+        // Check if this is a continuation response for json_patch
+        let filePath: string | undefined;
+        if (toolId === 'json_patch') {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            filePath = args.file_path;
+          } catch {
+            // If we can't parse, try to extract from truncated JSON
+            const extraction = extractPartialContent(toolCall.function.arguments);
+            filePath = extraction.filePath;
+          }
+        }
+
+        // If there's an active continuation and this is a continuation response
+        if (filePath && this.continuationHandler.hasContinuation(filePath)) {
+          // This is a continuation response - we need to handle it specially
+          // Check if response was truncated again
+          if (wasTruncated) {
+            const extraction = extractPartialContent(toolCall.function.arguments);
+            if (extraction.success && extraction.content) {
+              // Still truncated - buffer and continue
+              if (this.continuationHandler.hasExceededMaxAttempts(filePath)) {
+                this.continuationHandler.abortContinuation(filePath);
+                results.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: `Error: File operation for "${filePath}" failed after max continuation attempts.`
+                });
+                this.onProgress?.('tool_status', {
+                  toolIndex,
+                  status: 'failed',
+                  error: `Max continuation attempts exceeded for ${filePath}`
+                });
+                continue;
+              }
+
+              this.continuationHandler.bufferContent(filePath, extraction.content, toolCall.id);
+              continuationNeeded = true;
+              continuationFilePath = filePath;
+
+              results.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `Continuation chunk buffered for "${filePath}". More content needed...`
+              });
+
+              this.onProgress?.('tool_status', {
+                toolIndex,
+                status: 'continuing',
+                message: `Additional chunk buffered for ${filePath}`
+              });
+
+              break; // Wait for next continuation
+            }
+          } else {
+            // Not truncated - this chunk completes the file
+            // Extract the content from this final chunk
+            try {
+              const args = JSON.parse(toolCall.function.arguments);
+              if (args.operations?.[0]?.type === 'rewrite' && args.operations[0].content) {
+                // Append final content to buffer
+                const existingContent = this.continuationHandler.getBufferedContent(filePath) || '';
+                const finalContent = existingContent + args.operations[0].content;
+
+                // Finalize the continuation
+                const finalized = this.continuationHandler.finalizeFile(filePath);
+
+                // Write the complete file using VFS
+                // Check if file exists to determine create vs update
+                let fileExists = false;
+                try {
+                  await vfs.readFile(this.projectId, filePath);
+                  fileExists = true;
+                } catch {
+                  fileExists = false;
+                }
+
+                if (fileExists) {
+                  await vfs.updateFile(this.projectId, filePath, finalContent);
+                } else {
+                  await vfs.createFile(this.projectId, filePath, finalContent);
+                }
+
+                results.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: `File "${filePath}" written successfully (assembled from ${finalized?.totalChunks || 1} chunks)`
+                });
+
+                this.onProgress?.('tool_status', {
+                  toolIndex,
+                  status: 'completed',
+                  result: `File assembled from ${finalized?.totalChunks || 1} chunks`
+                });
+
+                continue;
+              }
+            } catch {
+              // Fall through to normal execution
+            }
+          }
+        }
+
+        // Execute tool normally
         const result = await toolRegistry.execute(toolCall, this.projectId, context);
 
         // Capture evaluation result if this was an evaluation tool call
@@ -474,6 +828,88 @@ Please revise your approach.`;
         // Checkpoints are now only created at task completion boundaries
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // Check if this is a truncation error that we can continue from
+        if (wasTruncated && toolCall.function.name === 'json_patch') {
+          const { needsContinuation, extraction } = this.continuationHandler.detectNeedsContinuation(
+            toolCall,
+            true,
+            error instanceof Error ? error : new Error(errorMessage)
+          );
+
+          if (needsContinuation && extraction?.success && extraction.content && extraction.filePath) {
+            // Check if we've exceeded max attempts
+            if (this.continuationHandler.hasExceededMaxAttempts(extraction.filePath)) {
+              this.continuationHandler.abortContinuation(extraction.filePath);
+              results.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `Error: File operation for "${extraction.filePath}" failed after max continuation attempts. ${errorMessage}`
+              });
+              this.onProgress?.('tool_status', {
+                toolIndex,
+                status: 'failed',
+                error: `Max continuation attempts exceeded for ${extraction.filePath}`
+              });
+            } else {
+              // Buffer the partial content
+              this.continuationHandler.bufferContent(extraction.filePath, extraction.content, toolCall.id);
+
+              // Signal that continuation is needed
+              continuationNeeded = true;
+              continuationFilePath = extraction.filePath;
+
+              results.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `Partial content buffered for "${extraction.filePath}". Continuation in progress...`
+              });
+
+              this.onProgress?.('tool_status', {
+                toolIndex,
+                status: 'continuing',
+                message: `Buffering content for ${extraction.filePath}, requesting continuation...`
+              });
+
+              // Don't process more tool calls in this batch - wait for continuation
+              break;
+            }
+            continue;
+          } else if (extraction?.filePath) {
+            // We have a file path but couldn't extract content - truncation was too severe
+            // Provide helpful guidance to retry with smaller operations
+            const filePath = extraction.filePath;
+            results.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: `Error: Tool call for "${filePath}" was truncated before content could be captured (max_tokens limit hit).
+
+⚠️ IMPORTANT: Your response was cut off at the token limit. The json_patch tool call was incomplete.
+
+To fix this, please:
+1. Use ONLY ONE tool call per response (don't batch multiple file operations)
+2. For large files like CSS, split into multiple smaller operations:
+   - First: Create file with basic structure
+   - Then: Add sections incrementally with UPDATE operations
+3. Keep each operation under 2000 characters
+
+Example approach for ${filePath}:
+\`\`\`
+// Step 1: Create skeleton
+json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content": "/* Base styles */\\n\\n/* Layout */\\n\\n/* Components */\\n\\n/* Utilities */"}]}
+
+// Step 2: Fill in sections with UPDATE operations
+\`\`\``
+            });
+            this.onProgress?.('tool_status', {
+              toolIndex,
+              status: 'failed',
+              error: `Tool call truncated for ${filePath} - retry with smaller operations`
+            });
+            continue;
+          }
+        }
+
         results.push({
           role: 'tool',
           tool_call_id: toolCall.id,
@@ -489,7 +925,7 @@ Please revise your approach.`;
       }
     }
 
-    return results;
+    return { results, continuationNeeded, continuationFilePath };
   }
 
   /**
@@ -498,7 +934,7 @@ Please revise your approach.`;
   private async streamLLMResponse(
     messages: AgentMessage[],
     agent: Agent
-  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo }> {
+  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; wasTruncated?: boolean; finishReason?: string; reasoningDetails?: ReasoningDetail[] }> {
     const { provider, apiKey, model } = this.getProviderConfig();
     await this.ensurePricing(provider, model);
 
@@ -520,6 +956,7 @@ Please revise your approach.`;
       model,
       provider,
       tools,
+      max_tokens: 16384,
       ...(tools && tools.length > 0 && { tool_choice: 'auto' })
     };
 
@@ -571,7 +1008,6 @@ Please revise your approach.`;
     this.conversations.set(id, conversation);
     return id;
   }
-
 
   /**
    * Record auto checkpoint
@@ -711,7 +1147,7 @@ Please revise your approach.`;
     response: Response,
     provider: string,
     model: string
-  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo }> {
+  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; wasTruncated?: boolean; finishReason?: string; reasoningDetails?: ReasoningDetail[] }> {
     const result = await parseStreamingResponse(response, {
       provider,
       model,
