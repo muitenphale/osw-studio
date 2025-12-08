@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X } from 'lucide-react';
+import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X, Brain } from 'lucide-react';
 import { DebugEvent } from '@/components/debug-panel';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
@@ -52,7 +52,7 @@ interface ToolCall {
 
 interface TurnItem {
   id: string;
-  type: 'thinking' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user';
+  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error';
   timestamp: number;
   data: any;
 }
@@ -154,7 +154,7 @@ export function ChatPanel({
 
     // Check if last event is a streaming event that was updated
     const lastEvent = events[events.length - 1];
-    const isStreamingEvent = lastEvent && (lastEvent.event === 'assistant_delta' || lastEvent.event === 'tool_param_delta');
+    const isStreamingEvent = lastEvent && (lastEvent.event === 'assistant_delta' || lastEvent.event === 'tool_param_delta' || lastEvent.event === 'reasoning_delta');
     const lastEventVersion = lastEventVersionsRef.current.get(lastEvent?.id || '');
     const eventWasUpdated = isStreamingEvent && lastEvent.version && lastEventVersion !== lastEvent.version;
 
@@ -176,13 +176,79 @@ export function ChatPanel({
 
     for (const event of eventsToProcess) {
       switch (event.event) {
-        case 'thinking':
+        case 'waiting':
+          // Waiting for first token from LLM
           state.currentTurn.items.push({
             id: `item-${state.itemIdCounter++}`,
-            type: 'thinking',
+            type: 'waiting',
             timestamp: event.timestamp,
             data: null
           });
+          break;
+
+        case 'reasoning_start':
+          // Reasoning/thinking has started - remove waiting indicator
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
+          break;
+
+        case 'reasoning_delta':
+          // Handle reasoning tokens (from Anthropic extended thinking, DeepSeek, Gemini, etc.)
+          // When coalesced, data.all contains array of {text, snapshot} objects
+          //
+          // IMPORTANT: Different providers handle snapshots differently:
+          // - Gemini: snapshot is cumulative (contains full text so far)
+          // - DeepSeek: snapshot equals text (NOT cumulative, need to concatenate)
+          // - Anthropic: snapshot is cumulative
+          //
+          // Strategy: Check if last snapshot looks cumulative (longer than individual text).
+          // If not, concatenate all text fields to build the full reasoning.
+          const reasoningDeltaItems = event.data?.all || [event.data];
+
+          // Find the last reasoning item
+          let lastReasoningItem = state.currentTurn.items.findLast(item => item.type === 'reasoning');
+
+          // Get the final snapshot from the last item
+          const lastDelta = reasoningDeltaItems[reasoningDeltaItems.length - 1];
+          const lastSnapshot = lastDelta?.snapshot;
+          const lastText = lastDelta?.text;
+
+          // Determine if snapshots are cumulative or not
+          // If the last snapshot equals the last text, snapshots are NOT cumulative (DeepSeek behavior)
+          // In that case, we need to concatenate all text fields
+          let finalContent: string;
+
+          if (reasoningDeltaItems.length > 1 && lastSnapshot === lastText) {
+            // Non-cumulative snapshots (DeepSeek) - concatenate all text fields
+            // and append to existing reasoning content
+            const newText = reasoningDeltaItems.map((d: any) => d?.text || '').join('');
+            const existingContent = lastReasoningItem?.data || '';
+            finalContent = existingContent + newText;
+          } else {
+            // Cumulative snapshots (Gemini, Anthropic) - use the last snapshot directly
+            finalContent = lastSnapshot || lastText || '';
+          }
+
+          if (finalContent) {
+            if (lastReasoningItem) {
+              lastReasoningItem.data = finalContent;
+            } else {
+              lastReasoningItem = {
+                id: `item-${state.itemIdCounter++}`,
+                type: 'reasoning',
+                timestamp: event.timestamp,
+                data: finalContent
+              };
+              state.currentTurn.items.push(lastReasoningItem);
+            }
+          }
+
+          // Remove waiting indicator when reasoning arrives
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
+          break;
+
+        case 'reasoning_complete':
+          // Reasoning is complete - nothing special to do, just ensure waiting is removed
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
         case 'toolCalls':
@@ -222,8 +288,8 @@ export function ChatPanel({
           // Increment batch counter for next toolCalls event
           state.currentToolBatch++;
 
-          // Remove thinking indicator when tools arrive
-          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'thinking');
+          // Remove waiting indicator when tools arrive
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
         case 'tool_status':
@@ -317,7 +383,7 @@ export function ChatPanel({
           }
 
           // Remove thinking indicator when text arrives
-          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'thinking');
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
         case 'plan_message':
@@ -356,9 +422,12 @@ export function ChatPanel({
               break;
             }
 
+            // Check if this is a synthetic error message (auto-injected by orchestrator)
+            const isSyntheticError = message.ui_metadata?.isSyntheticError === true;
+
             state.currentTurn.items.push({
               id: `item-${state.itemIdCounter++}`,
-              type: 'user',
+              type: isSyntheticError ? 'synthetic_error' : 'user',
               timestamp: event.timestamp,
               data: message.content || ''
             });
@@ -384,11 +453,13 @@ export function ChatPanel({
             data: event.data
           });
           // Remove thinking indicator when error arrives
-          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'thinking');
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
         case 'usage':
           state.currentTurn.usage = event.data;
+          // Remove thinking indicator when usage arrives (marks end of LLM response)
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
         case 'checkpoint_created':
@@ -410,7 +481,7 @@ export function ChatPanel({
 
         case 'stopped':
           // Remove thinking indicator when generation is stopped
-          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'thinking');
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
       }
     }
@@ -691,14 +762,25 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
       {/* Render items in chronological order */}
       {turn.items.map((item) => {
         switch (item.type) {
-          case 'thinking':
+          case 'waiting':
             return (
               <div key={item.id} className="bg-muted/30 rounded-md p-2 opacity-70">
                 <div className="flex items-center gap-2 px-1">
                   <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
-                  <span className="text-xs text-muted-foreground">Thinking...</span>
+                  <span className="text-xs text-muted-foreground">Waiting for response...</span>
                 </div>
               </div>
+            );
+
+          case 'reasoning':
+            return (
+              <ReasoningDisplay
+                key={item.id}
+                itemId={item.id}
+                content={item.data}
+                isExpanded={expandedItems.has(item.id)}
+                onToggle={() => onToggleExpanded(item.id)}
+              />
             );
 
           case 'plan':
@@ -762,6 +844,19 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
               </div>
             );
 
+          case 'synthetic_error':
+            // Auto-injected error message (e.g., malformed tool call correction)
+            // Style it like a collapsible tool call
+            return (
+              <SyntheticErrorDisplay
+                key={item.id}
+                itemId={item.id}
+                content={item.data}
+                isExpanded={expandedItems.has(item.id)}
+                onToggle={() => onToggleExpanded(item.id)}
+              />
+            );
+
           case 'error':
             return (
               <div key={item.id} className="text-sm bg-destructive/10 border border-destructive/20 px-3 py-2 rounded">
@@ -805,7 +900,7 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
           )}
 
           {/* Checkpoint actions */}
-          {turn.checkpointId && (onRestore || onRetry) && (
+          {turn.checkpointId && (
             <div className="flex items-center gap-1">
               {onRestore && (
                 <Button
@@ -825,7 +920,7 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
                   variant="ghost"
                   onClick={() => onRetry(turn.checkpointId!)}
                   className="h-6 px-2 text-xs"
-                  title="Retry from this checkpoint"
+                  title="Restore files and retry from this checkpoint"
                 >
                   <RefreshCw className="h-3 w-3 mr-1" />
                   Retry
@@ -919,6 +1014,87 @@ function ToolDisplay({ itemId, tool, isExpanded, onToggle }: ToolDisplayProps) {
               </pre>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SyntheticErrorDisplayProps {
+  itemId: string;
+  content: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}
+
+function SyntheticErrorDisplay({ itemId, content, isExpanded, onToggle }: SyntheticErrorDisplayProps) {
+  return (
+    <div className={`bg-amber-500/10 rounded-md transition-all ${isExpanded ? 'p-2' : 'p-1.5'}`}>
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 w-full text-left hover:bg-amber-500/20 rounded px-1"
+      >
+        <div className="flex items-center gap-1.5">
+          <RefreshCw className="h-3 w-3 text-amber-600" />
+          <span className="text-xs font-mono">Auto-correction</span>
+        </div>
+        <div className="ml-auto">
+          <CheckCircle className="h-3 w-3 text-amber-600" />
+        </div>
+      </button>
+
+      {/* Expanded view */}
+      {isExpanded && (
+        <div className="mt-2 px-2">
+          <pre className="text-xs bg-muted/50 p-2 rounded overflow-x-auto whitespace-pre-wrap">
+            {content}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ReasoningDisplayProps {
+  itemId: string;
+  content: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}
+
+function ReasoningDisplay({ itemId, content, isExpanded, onToggle }: ReasoningDisplayProps) {
+  // Extract first line for preview, clean up common prefixes
+  const lines = (content || '').split('\n').filter(l => l.trim());
+  const preview = lines[0]?.substring(0, 60) || 'Reasoning...';
+  const isStreaming = !content || content.length < 20; // Short content might still be streaming
+
+  return (
+    <div className="bg-violet-500/10 rounded-md transition-all p-1.5 border border-violet-500/20">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 w-full text-left hover:bg-violet-500/20 rounded px-1"
+      >
+        <div className="flex items-center gap-1.5">
+          {isStreaming ? (
+            <Loader2 className="h-3 w-3 animate-spin text-violet-500" />
+          ) : (
+            <Brain className="h-3 w-3 text-violet-500" />
+          )}
+          <span className="text-xs font-mono">reasoning</span>
+        </div>
+        <code className="text-xs text-muted-foreground truncate flex-1">
+          {isStreaming ? 'Thinking...' : preview}
+        </code>
+        <div className="ml-auto">
+          <ChevronRight className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="mt-2 px-2">
+          <div className="text-xs bg-muted/50 p-2 rounded overflow-x-auto max-h-64 overflow-y-auto">
+            <MarkdownRenderer content={content || 'Thinking...'} />
+          </div>
         </div>
       )}
     </div>

@@ -20,6 +20,7 @@ export interface ProviderModel {
   maxTokens?: number;
   supportsFunctions?: boolean;
   supportsVision?: boolean;
+  supportsReasoning?: boolean;  // Model supports toggleable reasoning (thinking tokens)
   pricing?: {
     input: number;  // per 1M tokens
     output: number; // per 1M tokens

@@ -55,6 +55,7 @@ export interface AppSettings {
   lastSeenVersion?: string;
   modelCache?: Partial<Record<ProviderId, ModelCacheEntry>>;
   modelPricing?: Partial<Record<ProviderId, Record<string, ProviderPricingEntry>>>;
+  reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
 }
 
 class ConfigManager {
@@ -501,6 +502,26 @@ class ConfigManager {
   isCacheValid(provider: ProviderId): boolean {
     const cache = this.getCachedModels(provider);
     return cache !== null;
+  }
+
+  // Reasoning toggle management
+  getReasoningEnabled(modelId: string): boolean {
+    const settings = this.getSettings();
+    return settings.reasoningEnabled?.[modelId] ?? false;
+  }
+
+  setReasoningEnabled(modelId: string, enabled: boolean): void {
+    const settings = this.getSettings();
+    const reasoningEnabled = { ...(settings.reasoningEnabled || {}) };
+    reasoningEnabled[modelId] = enabled;
+    this.setSetting('reasoningEnabled', reasoningEnabled);
+
+    // Broadcast the change
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('osw-studio-reasoning-changed', {
+        detail: { modelId, enabled }
+      }));
+    }
   }
 }
 

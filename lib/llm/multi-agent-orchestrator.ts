@@ -24,6 +24,80 @@ import { buildShellSystemPrompt } from './system-prompt';
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Detect if content contains malformed tool calls written as text/markdown
+ * instead of proper function calling invocations.
+ *
+ * This specifically looks for patterns where the model writes out tool call
+ * syntax as text rather than using the function calling API.
+ */
+function detectMalformedToolCalls(content: string): boolean {
+  if (!content) return false;
+
+  // Only detect when the ENTIRE response or a significant portion appears to be
+  // an attempt to "write" a tool call as text. Look for patterns at line start
+  // or as standalone statements.
+  const patterns = [
+    // Markdown code block with shell/bash
+    /```(?:shell|bash|sh)\s*\n[\s\S]*?\n```/,
+    // Line starting with shell{"cmd" (no leading text explanation)
+    /^shell\s*\{\s*["']?cmd["']?\s*:/m,
+    // Line starting with shell[ for array format
+    /^shell\s*\[\s*["']/m,
+    // JSON code block with cmd
+    /```json\s*\n\s*\{\s*["']?cmd["']?\s*:/,
+    // json_patch tool written as text (common with DeepSeek)
+    /^json_patch\s*\{/m,
+    /json_patch\s*\{\s*["']?file_path["']?\s*:/,
+    // evaluation tool written as text
+    /^evaluation\s*\{/m,
+  ];
+
+  // Check if ANY pattern matches
+  const hasPattern = patterns.some(p => p.test(content));
+  if (!hasPattern) return false;
+
+  // Additional heuristic: if the content is SHORT and mostly just the tool call
+  // pattern, it's likely a malformed tool call. If there's substantial text
+  // around it (explanation), it might be intentional documentation.
+  const trimmed = content.trim();
+
+  // If the entire content is just a short tool-call-like pattern, flag it
+  if (trimmed.length < 200) {
+    return true;
+  }
+
+  // For longer content, only flag if the pattern appears at the very end
+  // (model explaining then "calling" the tool as text)
+  const endsWithToolPattern = /shell\s*\{\s*["']?cmd["']?\s*:.*\}\s*$/.test(trimmed) ||
+                               /```(?:shell|bash|sh)\s*\n[\s\S]*?\n```\s*$/.test(trimmed) ||
+                               /json_patch\s*\{[\s\S]*\}\s*$/.test(trimmed);
+
+  return endsWithToolPattern;
+}
+
+const MALFORMED_TOOL_CALL_ERROR = `⛔ CRITICAL ERROR: You wrote a tool call as TEXT instead of invoking it.
+
+This is WRONG - you wrote text like:
+  shell{"cmd": "..."}
+  json_patch{"file_path": "..."}
+  \`\`\`shell
+  command
+  \`\`\`
+
+This is RIGHT - invoke tools directly via function calling:
+  Call shell tool with parameter cmd="your command"
+  Call json_patch tool with parameters file_path, operations
+
+You MUST use function calling. DO NOT write tool syntax as text.
+STOP writing text. START invoking tools. Try again NOW.`;
+
+const MALFORMED_TOOL_CALL_PERSISTENT_REMINDER = `
+
+⚠️ REMINDER: You have been writing tool calls as text instead of invoking them.
+EVERY time you want to use a tool, you MUST invoke it via function calling.
+DO NOT write shell{"cmd":...} or json_patch{...} as text - INVOKE the tools directly.`;
+
+/**
  * Context for continuing a truncated file operation
  */
 interface ContinuationContext {
@@ -240,6 +314,7 @@ export interface AgentMessage {
     checkpointId?: string;
     cost?: number;
     usage?: UsageInfo;
+    isSyntheticError?: boolean;  // True if this is an auto-injected error message (e.g., malformed tool call correction)
   };
 }
 
@@ -290,6 +365,10 @@ export class MultiAgentOrchestrator {
   private duplicateToolCallCount: number = 0; // Track consecutive duplicates
   private evaluationRequested = false; // Track if we requested evaluation
   private lastEvaluationResult: { should_continue: boolean } | null = null; // Track evaluation result
+  private malformedToolCallRetries = 0; // Track consecutive retries for malformed tool call detection
+  private totalMalformedToolCalls = 0; // Track total malformed calls in session (doesn't reset)
+  private readonly maxMalformedRetries = 2; // Max consecutive retries before allowing through
+  private readonly malformedThresholdForReminder = 3; // After this many total failures, add persistent reminder
   private continuationHandler: ContinuationHandler; // Handles truncated file operations
 
   constructor(
@@ -455,13 +534,60 @@ export class MultiAgentOrchestrator {
         agent: agent.type
       });
 
-      // Get LLM response
-      this.onProgress?.('thinking', {});
+      // Get LLM response - emit 'waiting' to show we're waiting for first token
+      // Note: actual reasoning tokens are handled via 'reasoning_delta' events from streaming-parser
+      this.onProgress?.('waiting', {});
 
       const response = await this.streamLLMResponse(
         conversation.messages,
         agent
       );
+
+      // Check for malformed tool calls (model wrote tool syntax as text instead of invoking)
+      if (response.content && (!response.toolCalls || response.toolCalls.length === 0)) {
+        if (detectMalformedToolCalls(response.content)) {
+          this.malformedToolCallRetries++;
+          this.totalMalformedToolCalls++;
+          logger.warn(`[MultiAgentOrchestrator] Detected malformed tool call in text (consecutive: ${this.malformedToolCallRetries}/${this.maxMalformedRetries}, total: ${this.totalMalformedToolCalls})`);
+
+          // Only retry if under the consecutive limit
+          if (this.malformedToolCallRetries <= this.maxMalformedRetries) {
+            // Add the malformed response to conversation
+            this.addMessage(conversationId, {
+              role: 'assistant',
+              content: response.content
+            });
+
+            // Build error message - add persistent reminder if many total failures
+            let errorMessage = MALFORMED_TOOL_CALL_ERROR;
+            if (this.totalMalformedToolCalls >= this.malformedThresholdForReminder) {
+              errorMessage += MALFORMED_TOOL_CALL_PERSISTENT_REMINDER;
+            }
+
+            // Add synthetic error to help model self-correct
+            this.addMessage(conversationId, {
+              role: 'user',
+              content: errorMessage,
+              ui_metadata: {
+                isSyntheticError: true
+              }
+            });
+
+            // Emit progress event so UI knows what happened
+            this.onProgress?.('malformed_tool_call', {
+              retry: this.malformedToolCallRetries,
+              maxRetries: this.maxMalformedRetries,
+              totalFailures: this.totalMalformedToolCalls
+            });
+
+            continue; // Retry the loop
+          }
+          // If over consecutive limit, fall through and let it proceed (model may still produce useful text)
+        }
+      } else if (response.toolCalls && response.toolCalls.length > 0) {
+        // Reset CONSECUTIVE counter on successful tool calls (but not total)
+        this.malformedToolCallRetries = 0;
+      }
 
       // No tool calls - LLM wants to finish
       if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -945,10 +1071,26 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
       : '/api/generate';
 
     // Strip ui_metadata from messages
-    const sanitizedMessages = messages.map(msg => {
+    let sanitizedMessages = messages.map(msg => {
       const { ui_metadata, ...rest } = msg;
       return rest;
     });
+
+    // If model has been failing to use function calling, inject a reminder into the system message
+    if (this.totalMalformedToolCalls >= this.malformedThresholdForReminder && sanitizedMessages.length > 0) {
+      sanitizedMessages = sanitizedMessages.map((msg, idx) => {
+        if (idx === 0 && msg.role === 'system') {
+          return {
+            ...msg,
+            content: msg.content + MALFORMED_TOOL_CALL_PERSISTENT_REMINDER
+          };
+        }
+        return msg;
+      });
+    }
+
+    // Check if reasoning is enabled for this model
+    const reasoningEnabled = configManager.getReasoningEnabled(model);
 
     const requestBody = {
       messages: sanitizedMessages,
@@ -957,7 +1099,8 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
       provider,
       tools,
       max_tokens: 16384,
-      ...(tools && tools.length > 0 && { tool_choice: 'auto' })
+      ...(tools && tools.length > 0 && { tool_choice: 'auto' }),
+      ...(reasoningEnabled && { reasoning: { enabled: true } })
     };
 
     const response = await this.fetchWithRetry(

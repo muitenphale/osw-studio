@@ -6,6 +6,31 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.17.0
+
+### Reasoning Token Support
+
+See what the AI is thinking! Models with reasoning capabilities now display their thought process in a collapsible "reasoning" block in the chat panel.
+
+- **Anthropic extended thinking** - Claude models with thinking enabled
+- **DeepSeek Reasoner** - DeepSeek's reasoning model
+- **Gemini thinking models** - Gemini 2.5 Flash/Pro with thinking
+
+### Reasoning Toggle
+
+Enable or disable reasoning on a per-model basis directly from the model selector. The toggle appears for models that support it.
+
+### Malformed Tool Call Detection
+
+The AI now auto-detects when a model accidentally writes tool syntax as text instead of properly invoking functions, and automatically prompts it to retry correctly.
+
+### UI Improvements
+
+- Renamed "Thinking..." indicator to "Waiting for response..." for clarity
+- Fixed indicator sometimes persisting after the response completed
+
+---
+
 ## v1.16.0
 
 ### Server Mode

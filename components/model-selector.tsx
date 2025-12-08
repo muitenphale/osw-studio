@@ -6,22 +6,24 @@ import { Badge } from '@/components/ui/badge';
 import { logger, cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { 
-  Loader2, 
-  Sparkles, 
-  Zap, 
-  Brain, 
-  Server, 
-  Cloud, 
+import {
+  Loader2,
+  Sparkles,
+  Zap,
+  Brain,
+  Server,
+  Cloud,
   Cpu,
   ChevronDown,
   Search,
-  X
+  X,
+  Lightbulb
 } from 'lucide-react';
 import { configManager } from '@/lib/config/storage';
 import { ProviderId, ProviderModel } from '@/lib/llm/providers/types';
@@ -51,6 +53,7 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [needsApiKey, setNeedsApiKey] = useState(false);
+  const [reasoningEnabled, setReasoningEnabled] = useState(false);
   
   const getModelName = (model: ProviderModel) => {
     return model.name;
@@ -150,6 +153,7 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
             maxTokens: model.top_provider?.max_completion_tokens,
             supportsFunctions: model.supported_parameters?.includes('tools'),
             supportsVision: model.architecture?.input_modalities?.includes('image'),
+            supportsReasoning: model.supported_parameters?.includes('reasoning'),
             pricing
           };
 
@@ -274,7 +278,23 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
     onChange?.(modelId);
     setOpen(false);
     setSearchQuery('');
+    // Load reasoning state for the new model
+    setReasoningEnabled(configManager.getReasoningEnabled(modelId));
   };
+
+  const handleReasoningToggle = (enabled: boolean) => {
+    setReasoningEnabled(enabled);
+    if (selectedModel) {
+      configManager.setReasoningEnabled(selectedModel, enabled);
+    }
+  };
+
+  // Sync reasoning state when selected model changes
+  useEffect(() => {
+    if (selectedModel) {
+      setReasoningEnabled(configManager.getReasoningEnabled(selectedModel));
+    }
+  }, [selectedModel]);
 
   const getModelIcon = (model: ProviderModel) => {
     const id = model.id.toLowerCase();
@@ -455,8 +475,8 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
           {/* Pricing info */}
           <div className="font-medium mb-1">
             {selectedModelData.pricing ? (
-              selectedModelData.pricing.input === 0 && selectedModelData.pricing.output === 0 ? 
-                'Free' : 
+              selectedModelData.pricing.input === 0 && selectedModelData.pricing.output === 0 ?
+                'Free' :
                 `Input: ${formatModelPrice(selectedModelData.pricing.input)}/K • Output: ${formatModelPrice(selectedModelData.pricing.output)}/K`
             ) : (
               'Pricing varies by provider'
@@ -466,6 +486,27 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
           {selectedModelData.description && (
             <div>{selectedModelData.description}</div>
           )}
+        </div>
+      )}
+      {/* Reasoning toggle for models that support it */}
+      {selectedModelData?.supportsReasoning && (
+        <div className="mt-3 flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 border">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-amber-500" />
+            <div>
+              <Label htmlFor="reasoning-toggle" className="text-sm font-medium cursor-pointer">
+                Enable Reasoning
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Show step-by-step thinking process
+              </p>
+            </div>
+          </div>
+          <Switch
+            id="reasoning-toggle"
+            checked={reasoningEnabled}
+            onCheckedChange={handleReasoningToggle}
+          />
         </div>
       )}
     </div>

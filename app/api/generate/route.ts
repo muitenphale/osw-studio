@@ -6,7 +6,7 @@ import { logger } from '@/lib/utils';
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey, model, tools, context, messages, tool_choice, provider, max_tokens } = await request.json();
+    const { prompt, apiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning } = await request.json();
 
     const selectedProvider: ProviderId = provider || 'openrouter';
     const providerConfig = getProvider(selectedProvider);
@@ -253,12 +253,30 @@ Habits:
       requestBody.temperature = 0.7;
     }
 
-    // Enable reasoning for Gemini thinking models (required for tool use)
+    // Enable reasoning for models that support it
     // This provides reasoning_details with signatures that must be preserved
     const modelName = model || '';
+
+    // Gemini thinking models need reasoning with max_tokens
     if (modelName.includes('gemini') && (modelName.includes('thinking') || modelName.includes('2.5') || modelName.includes('3-pro'))) {
       requestBody.reasoning = {
         max_tokens: 4096
+      };
+    }
+
+    // Handle client-requested reasoning (for models that support toggleable reasoning)
+    if (reasoning && selectedProvider === 'openrouter') {
+      requestBody.reasoning = reasoning;
+    }
+
+    // DeepSeek V3.2+ models - some providers (e.g., AtlasCloud) may have issues with tool calling
+    // Route to DeepSeek's native API for better reliability
+    const isDeepSeekV3_2 = modelName.includes('deepseek') && modelName.includes('v3.2');
+    if (selectedProvider === 'openrouter' && isDeepSeekV3_2) {
+      // Use provider routing to prefer DeepSeek's native endpoint
+      requestBody.provider = {
+        order: ['DeepSeek'],  // Provider name from endpoints API
+        allow_fallbacks: true
       };
     }
 

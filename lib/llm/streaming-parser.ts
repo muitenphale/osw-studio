@@ -20,6 +20,7 @@ export interface ReasoningDetail {
 
 export interface StreamResponse {
   content?: string;
+  reasoning?: string;       // Accumulated reasoning/thinking content
   toolCalls?: ToolCall[];
   usage?: UsageInfo;
   wasTruncated?: boolean;   // True if response was cut off due to max_tokens
@@ -51,6 +52,7 @@ export async function parseStreamingResponse(
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
+  let reasoning = '';  // Separate buffer for reasoning/thinking tokens
   const toolCallsById: Record<string, ToolCall> = {};
   let currentToolCall: Partial<ToolCall> | null = null;
   let toolCallBuffer = '';
@@ -61,9 +63,10 @@ export async function parseStreamingResponse(
 
   const DEBUG_TOOL_STREAM = process.env.NEXT_PUBLIC_DEBUG_TOOL_STREAM === '1';
 
-  // For Anthropic: track partial JSON building
+  // For Anthropic: track partial JSON building and thinking blocks
   const anthropicToolBuffers: Record<string, string> = {};
   const contentBlockIndexToToolId: Record<number, string> = {};
+  let anthropicThinkingBlockIndex: number | null = null;  // Track active thinking block
 
   try {
     while (true) {
@@ -105,7 +108,24 @@ export async function parseStreamingResponse(
                 }
               }
 
-              if (json.type === 'content_block_delta' && json.delta?.text_delta?.text) {
+              // Handle Anthropic extended thinking (thinking content blocks)
+              if (json.type === 'content_block_start' && json.content_block?.type === 'thinking') {
+                anthropicThinkingBlockIndex = json.index;
+                if (!suppressAssistantDelta) {
+                  onProgress?.('reasoning_start', {});
+                }
+              } else if (json.type === 'content_block_delta' && json.delta?.type === 'thinking_delta') {
+                const piece = json.delta.thinking as string;
+                reasoning += piece;
+                if (!suppressAssistantDelta) {
+                  onProgress?.('reasoning_delta', { text: piece, snapshot: reasoning });
+                }
+              } else if (json.type === 'content_block_stop' && json.index === anthropicThinkingBlockIndex) {
+                anthropicThinkingBlockIndex = null;
+                if (!suppressAssistantDelta) {
+                  onProgress?.('reasoning_complete', { reasoning });
+                }
+              } else if (json.type === 'content_block_delta' && json.delta?.text_delta?.text) {
                 const piece = json.delta.text_delta.text as string;
                 content += piece;
                 if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece, snapshot: content });
@@ -179,10 +199,17 @@ export async function parseStreamingResponse(
                 }
               }
 
+              // Handle DeepSeek/Qwen delta.reasoning (separate from content)
+              // When DeepSeek is accessed via OpenRouter, both delta.reasoning AND
+              // delta.reasoning_details may be present - we only want to emit once
+              let handledReasoningDelta = false;
               if (delta?.reasoning && !delta?.content && !delta?.tool_calls) {
                 const reasoningPiece = String(delta.reasoning);
-                content += reasoningPiece;
-                if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: reasoningPiece, snapshot: content });
+                reasoning += reasoningPiece;
+                if (!suppressAssistantDelta) {
+                  onProgress?.('reasoning_delta', { text: reasoningPiece, snapshot: reasoning });
+                }
+                handledReasoningDelta = true;
               }
 
               if (delta?.content) {
@@ -193,23 +220,54 @@ export async function parseStreamingResponse(
 
               // Capture reasoning_details for Gemini thinking models (OpenRouter format)
               // These contain signatures that MUST be preserved for multi-turn tool use
-              if (delta?.reasoning_details && Array.isArray(delta.reasoning_details)) {
+              // IMPORTANT: Gemini sends CUMULATIVE SNAPSHOTS, not incremental deltas.
+              // Each rd.text contains the FULL text so far, not just the new portion.
+              // Skip if we already handled reasoning via delta.reasoning (DeepSeek via OpenRouter)
+              if (!handledReasoningDelta && delta?.reasoning_details && Array.isArray(delta.reasoning_details)) {
                 for (const rd of delta.reasoning_details) {
-                  // Merge or append reasoning details
+                  // Merge or update reasoning details
                   const existingIdx = reasoningDetails.findIndex(
                     (existing) => existing.id && existing.id === rd.id
                   );
                   if (existingIdx >= 0) {
-                    // Update existing (append text if streaming)
+                    // Update existing - Gemini sends cumulative snapshots, not deltas
                     if (rd.text) {
-                      reasoningDetails[existingIdx].text = (reasoningDetails[existingIdx].text || '') + rd.text;
+                      const previousText = reasoningDetails[existingIdx].text || '';
+                      // Only emit delta if text actually changed
+                      if (rd.text !== previousText) {
+                        // Calculate the actual delta (new text minus previous)
+                        const deltaText = rd.text.startsWith(previousText)
+                          ? rd.text.slice(previousText.length)
+                          : rd.text; // Fallback to full text if not a clean extension
+
+                        // Store full snapshot (replace, not append)
+                        reasoningDetails[existingIdx].text = rd.text;
+
+                        // Emit delta event with just the new portion
+                        if (deltaText && !suppressAssistantDelta) {
+                          onProgress?.('reasoning_delta', { text: deltaText, snapshot: rd.text });
+                        }
+                      }
                     }
                     if (rd.signature) {
                       reasoningDetails[existingIdx].signature = rd.signature;
                     }
                   } else {
                     reasoningDetails.push(rd as ReasoningDetail);
+                    // Emit delta for new reasoning detail
+                    if (rd.text && !suppressAssistantDelta) {
+                      onProgress?.('reasoning_delta', { text: rd.text, snapshot: rd.text });
+                    }
                   }
+                }
+                // Update reasoning buffer from the latest cumulative text
+                // Use the last reasoning detail's text as the current total
+                const latestText = reasoningDetails
+                  .filter(rd => rd.text)
+                  .map(rd => rd.text)
+                  .join('');
+                if (latestText) {
+                  reasoning = latestText; // Replace, don't append
                 }
               }
 
@@ -290,6 +348,7 @@ export async function parseStreamingResponse(
                 completionTokens: json.usage.completion_tokens || 0,
                 totalTokens: json.usage.total_tokens || 0,
                 cachedTokens: json.usage.cached_tokens,
+                reasoningTokens: json.usage.reasoning_tokens || json.usage.completion_tokens_details?.reasoning_tokens || 0,
                 model: options.model,
                 provider
               };
@@ -300,6 +359,7 @@ export async function parseStreamingResponse(
                 promptTokens: json.x_groq.usage.prompt_tokens || 0,
                 completionTokens: json.x_groq.usage.completion_tokens || 0,
                 totalTokens: json.x_groq.usage.total_tokens || 0,
+                reasoningTokens: json.x_groq.usage.reasoning_tokens || 0,
                 model: options.model,
                 provider
               };
@@ -327,6 +387,7 @@ export async function parseStreamingResponse(
 
   return {
     content,
+    reasoning: reasoning || undefined,
     toolCalls: toolCallsArray,
     usage: usageInfo,
     wasTruncated,

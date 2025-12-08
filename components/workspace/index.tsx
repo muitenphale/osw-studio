@@ -108,7 +108,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   const addDebugEvent = useCallback(async (event: string, data: any) => {
     setDebugEvents(prev => {
-      const shouldCoalesce = event === 'assistant_delta' || event === 'tool_param_delta';
+      const shouldCoalesce = event === 'assistant_delta' || event === 'tool_param_delta' || event === 'reasoning_delta';
 
       let newEvents: DebugEvent[];
 
@@ -722,9 +722,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         saveManager.markDirty(project.id);
       }
 
-      // Truncate debug events to remove assistant response and all subsequent events
-      // Keep events up to and including the user message
-      const truncatedEvents = debugEvents.slice(0, userMessageIndex + 1);
+      // Truncate debug events to remove the user message and all subsequent events
+      // The user message will be re-added by the orchestrator when generation runs
+      const truncatedEvents = debugEvents.slice(0, userMessageIndex);
       setDebugEvents(truncatedEvents);
       await debugEventsState.truncateEvents(project.id, truncatedEvents);
 

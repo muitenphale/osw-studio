@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.17.0 - 2025-12-03
+- **Reasoning Token Support**: Display reasoning/thinking from compatible models
+  - Anthropic extended thinking, DeepSeek, Gemini thinking models
+  - Separate reasoning tracking with `reasoning_delta` events and coalescing
+  - Collapsible reasoning display in chat panel
+- **Reasoning Toggle**: Enable/disable reasoning per model in settings
+- **Malformed Tool Call Detection**: Auto-detect and correct when model writes tool syntax as text instead of using function calling
+- **UI Improvements**:
+  - Renamed "Thinking..." to "Waiting for response..." for clarity
+  - Fixed "Thinking..." indicator persisting after response completes
+
 ## v1.16.0 - 2025-11-23
 - **Server Mode (Optional)**: PostgreSQL-backed deployment mode for persistent storage and multi-device access
   - Browser Mode remains the default (IndexedDB, client-side only, no backend required)

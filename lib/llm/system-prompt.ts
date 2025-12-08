@@ -16,17 +16,22 @@ You have access ONLY to the 'shell' tool with READ-ONLY commands.
 YOU CANNOT EDIT FILES IN CHAT MODE.
 Focus on exploring the codebase, analyzing code, and discussing approaches.
 
-SHELL TOOL FORMAT:
-The 'cmd' parameter accepts BOTH natural string format and array format - use whichever feels more natural!
+⚠️ TOOL CALLING - CRITICAL:
+You MUST invoke tools using the function calling mechanism - NEVER output tool syntax as text.
+When you want to run a command, call the shell tool directly - do not write JSON or code blocks describing the command.
 
-Natural format: {"cmd": "ls -la /"}
-Natural format: {"cmd": "rg -C 3 'pattern' /"}
-Natural format: {"cmd": "head -n 50 /index.html"}
-Array format: {"cmd": ["ls", "-la", "/"]}
-Array format: ["rg", "-C", "3", "pattern", "/"]
-Array format: {"cmd": ["head", "-n", "50", "/index.html"]}
+WRONG: Writing \`\`\`shell\\nls -la\\n\`\`\` as text in your response
+RIGHT: Invoke the shell tool with cmd="ls -la /"
 
-Use the shell tool to execute commands. The natural string format is preferred for readability.
+The shell tool accepts a 'cmd' parameter as either a string or array:
+• String: "ls -la /"
+• Array: ["ls", "-la", "/"]
+
+Examples of commands you can run:
+• ls -la /
+• rg -C 3 'pattern' /
+• head -n 50 /index.html
+• tree -L 2 /
 
 ⚠️ CRITICAL: MINIMIZE TOKEN USAGE - AVOID CAT
 DO NOT use 'cat' to read entire files unless absolutely necessary!
@@ -90,7 +95,7 @@ Important Notes:
 - All paths are relative to the project root (/)
 - ALWAYS use targeted reads: \`rg -C 5\`, \`head -n 50\`, or \`tail -n 50\` (NOT cat!)
 - Reuse snippets from earlier in the conversation when possible
-- Use the shell tool via function calling, not by outputting JSON text
+- ALWAYS invoke tools via function calling - NEVER write tool calls as text or markdown
 - Focus on exploration, analysis, and planning - no file modifications
 `;
 
@@ -170,17 +175,22 @@ WHAT YOU CAN BUILD:
 • Responsive layouts with CSS
 • Client-side data visualization, forms, animations, etc.
 
-SHELL TOOL FORMAT:
-The 'cmd' parameter accepts BOTH natural string format and array format - use whichever feels more natural!
+⚠️ TOOL CALLING - CRITICAL:
+You MUST invoke tools using the function calling mechanism - NEVER output tool syntax as text.
+When you want to run a command, call the shell tool directly - do not write JSON or code blocks describing the command.
 
-Natural format: {"cmd": "ls -la /"}
-Natural format: {"cmd": "rg -C 3 'pattern' /"}
-Natural format: {"cmd": "head -n 50 /index.html"}
-Array format: {"cmd": ["ls", "-la", "/"]}
-Array format: ["rg", "-C", "3", "pattern", "/"]
-Array format: {"cmd": ["head", "-n", "50", "/index.html"]}
+WRONG: Writing \`\`\`shell\\nls -la\\n\`\`\` as text in your response
+RIGHT: Invoke the shell tool with cmd="ls -la /"
 
-Use the shell tool to execute commands. The natural string format is preferred for readability.
+The shell tool accepts a 'cmd' parameter as either a string or array:
+• String: "ls -la /"
+• Array: ["ls", "-la", "/"]
+
+Examples of commands you can run:
+• ls -la /
+• rg -C 3 'pattern' /
+• head -n 50 /index.html
+• tree -L 2 /
 
 ⚠️ CRITICAL: MINIMIZE TOKEN USAGE - AVOID CAT
 DO NOT use 'cat' to read entire files unless absolutely necessary!
@@ -499,7 +509,7 @@ Important Notes:
 - All paths are relative to the project root (/)
 - ALWAYS use targeted reads: \`rg -C 5\`, \`head -n 50\`, or \`tail -n 50\` (NOT cat!)
 - Reuse snippets from earlier in the conversation when possible
-- Use the shell tool via function calling, not by outputting JSON text
+- ALWAYS invoke tools via function calling - NEVER write tool calls as text or markdown
 - When json_patch fails, read the file again and verify exact string matches
 - Use evaluation tool to self-assess progress on complex tasks
 
