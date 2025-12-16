@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
+import { getSyncOverviewStatus, SyncOverviewStatus } from '@/lib/vfs/auto-sync';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Cloud, CloudOff, Download, Upload, RefreshCw } from 'lucide-react';
+import { Cloud, CloudOff, Download, Upload, RefreshCw, AlertTriangle, Database, HardDrive, Globe } from 'lucide-react';
 import { logger } from '@/lib/utils';
 
 interface SyncDialogProps {
@@ -23,17 +24,33 @@ interface SyncDialogProps {
   onSyncComplete?: () => void;
 }
 
+function formatRelativeTime(date: Date | null): string {
+  if (!date) return 'Never';
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogProps) {
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [localProjects, setLocalProjects] = useState<Project[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncOverviewStatus | null>(null);
   const syncManager = getSyncManager();
 
   useEffect(() => {
     if (open) {
       checkAuth();
-      loadLocalProjects();
+      loadData();
     }
   }, [open]);
 
@@ -49,13 +66,17 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
     }
   };
 
-  const loadLocalProjects = async () => {
+  const loadData = async () => {
     try {
       await vfs.init();
       const projects = await vfs.listProjects();
       setLocalProjects(projects);
+
+      // Get comprehensive sync status
+      const status = await getSyncOverviewStatus();
+      setSyncStatus(status);
     } catch (error) {
-      logger.error('Failed to load local projects:', error);
+      logger.error('Failed to load sync data:', error);
     }
   };
 
@@ -98,6 +119,8 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
         );
       }
 
+      // Refresh status
+      await loadData();
       onSyncComplete?.();
     } catch (error) {
       toast.error('Failed to sync projects');
@@ -178,6 +201,8 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
         );
       }
 
+      // Refresh data
+      await loadData();
       onSyncComplete?.();
     } catch (error) {
       toast.error('Failed to pull projects');
@@ -235,30 +260,89 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
     );
   }
 
+  const showWarning = syncStatus?.needsSync || (syncStatus?.isUninitialized && localProjects.length > 0);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             <Cloud className="inline-block w-5 h-5 mr-2" />
-            Bulk Sync Operations
+            Server Sync
           </DialogTitle>
           <DialogDescription>
-            Projects auto-sync on save. Use this for troubleshooting or bulk operations.
+            Synchronize projects between your browser and the server database.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div>
-              <p className="font-medium">Local Projects</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {localProjects.length} project(s)
-              </p>
+          {/* Warning Banner */}
+          {showWarning && (
+            <div className="flex items-start gap-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-medium text-orange-600 dark:text-orange-400">
+                  Server database is empty
+                </p>
+                <p className="text-muted-foreground mt-1">
+                  Push your local projects to enable Sites functionality and publishing.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Server Stats */}
+          <div className="p-4 border rounded-lg space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Database className="w-4 h-4" />
+              Server (SQLite)
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Projects:</span>{' '}
+                <span className="font-medium">{syncStatus?.serverProjectCount ?? 0}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Sites:</span>{' '}
+                <span className="font-medium">{syncStatus?.serverSiteCount ?? 0}</span>
+              </div>
+              <div className="col-span-2">
+                <span className="text-muted-foreground">Last updated:</span>{' '}
+                <span className="font-medium">
+                  {formatRelativeTime(syncStatus?.serverLastUpdated ?? null)}
+                </span>
+              </div>
             </div>
             <Button
               variant="outline"
               size="sm"
+              className="w-full"
+              onClick={handlePullAll}
+              disabled={syncing || (syncStatus?.serverProjectCount ?? 0) === 0}
+            >
+              {syncing ? (
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4 mr-2" />
+              )}
+              Pull from Server
+            </Button>
+          </div>
+
+          {/* Local Stats */}
+          <div className="p-4 border rounded-lg space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <HardDrive className="w-4 h-4" />
+              Local (IndexedDB)
+            </div>
+            <div className="text-sm">
+              <span className="text-muted-foreground">Projects:</span>{' '}
+              <span className="font-medium">{localProjects.length}</span>
+            </div>
+            <Button
+              variant={showWarning ? 'default' : 'outline'}
+              size="sm"
+              className="w-full"
               onClick={handlePushAll}
               disabled={syncing || localProjects.length === 0}
             >
@@ -268,28 +352,6 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
                 <Upload className="w-4 h-4 mr-2" />
               )}
               Push to Server
-            </Button>
-          </div>
-
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div>
-              <p className="font-medium">Server Projects</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Pull from database
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePullAll}
-              disabled={syncing}
-            >
-              {syncing ? (
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4 mr-2" />
-              )}
-              Pull from Server
             </Button>
           </div>
         </div>

@@ -6,6 +6,32 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.18.0
+
+### SQLite Migration - Simpler Server Mode
+
+Server Mode now uses SQLite instead of PostgreSQL. This means:
+
+- **Zero database setup** - No need to install or configure PostgreSQL
+- **Just run it** - `npm install && npm start` is all you need
+- **Portable** - All data stored in local files, easy to backup and move
+
+### Per-Site Databases
+
+Each published site now has its own SQLite database containing its files, settings, and analytics. This keeps sites isolated from each other.
+
+**Storage structure:**
+- `data/osws.sqlite` - Your projects, templates, and skills
+- `sites/{siteId}/site.sqlite` - Each site's files and analytics
+
+### Breaking Change
+
+PostgreSQL is no longer supported. If you have an existing Server Mode deployment with PostgreSQL, you'll need to migrate your data manually.
+
+**[Server Mode Guide →](?doc=server-mode)**
+
+---
+
 ## v1.17.0
 
 ### Reasoning Token Support
@@ -13,8 +39,8 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 See what the AI is thinking! Models with reasoning capabilities now display their thought process in a collapsible "reasoning" block in the chat panel.
 
 - **Anthropic extended thinking** - Claude models with thinking enabled
-- **DeepSeek Reasoner** - DeepSeek's reasoning model
-- **Gemini thinking models** - Gemini 2.5 Flash/Pro with thinking
+- **DeepSeek reasoning models** - DeepSeek v3.2 and other reasoning-capable models
+- **Gemini thinking models** - Gemini Pro 3 with thinking enabled
 
 ### Reasoning Toggle
 
@@ -35,7 +61,7 @@ The AI now auto-detects when a model accidentally writes tool syntax as text ins
 
 ### Server Mode
 
-Self-host OSW Studio with PostgreSQL for a complete web publishing platform. Server Mode adds:
+Self-host OSW Studio for a complete web publishing platform. Server Mode adds:
 
 - **Admin authentication** - Password-protected admin area
 - **Project sync** - Push projects to the server, pull them back to any browser
@@ -54,7 +80,7 @@ Browse all documentation without leaving OSW Studio. Access guides from the side
 
 ### Gemini Thinking Model Support
 
-Full compatibility with Gemini 2.5 Flash, 2.5 Pro, and 3 Pro thinking models via OpenRouter.
+Full compatibility with Gemini thinking models via OpenRouter.
 
 ### Skills System Enhancements
 

@@ -13,8 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 import {
   pageviewRateLimiter,
   RATE_LIMIT_CONFIG,
@@ -94,22 +93,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const adapter = await createServerAdapter();
-
-    // Only PostgresAdapter supports analytics
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // 5. Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // 5. Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
@@ -118,10 +107,18 @@ export async function POST(request: NextRequest) {
 
     // 6. Check if analytics is enabled for this site
     if (!site.analytics.enabled || site.analytics.provider !== 'builtin') {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Built-in analytics not enabled for this site' },
         { status: 403 }
+      );
+    }
+
+    // 6b. Check if site database is enabled (created when site is published)
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
       );
     }
 
@@ -131,7 +128,6 @@ export async function POST(request: NextRequest) {
     // Browser security prevents attackers from spoofing Origin/Referer across domains.
     const allowedOrigins = getAllowedOrigins(siteId, site.customDomain);
     if (!validateOrigin(request, allowedOrigins)) {
-      await adapter.close?.();
       console.warn('[Analytics] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         referer: request.headers.get('referer'),
@@ -158,67 +154,18 @@ export async function POST(request: NextRequest) {
     // Normalize path for consistent tracking
     const normalizedPath = normalizePath(pagePath);
 
-    // Insert pageview
-    const sql = adapter.getSQL();
-    await sql`
-      INSERT INTO pageviews (
-        site_id, page_path, referrer, country, user_agent, device_type, session_id, timestamp
-      ) VALUES (
-        ${siteId},
-        ${normalizedPath},
-        ${referrer || null},
-        ${country || null},
-        ${userAgent},
-        ${deviceType || null},
-        ${sessionId},
-        NOW()
-      )
-    `;
+    // Record pageview using SiteDatabase
+    siteDb.recordPageview({
+      pagePath: normalizedPath,
+      referrer: referrer || undefined,
+      country: country || undefined,
+      userAgent,
+      deviceType: deviceType || undefined,
+      sessionId,
+    });
 
     // Upsert session record
-    // Check if session exists
-    const existingSession = await sql`
-      SELECT id, entry_page, page_count, created_at
-      FROM sessions
-      WHERE site_id = ${siteId} AND session_id = ${sessionId}
-      LIMIT 1
-    `;
-
-    if (existingSession.length === 0) {
-      // Create new session
-      await sql`
-        INSERT INTO sessions (
-          site_id, session_id, entry_page, exit_page, page_count, is_bounce, created_at, ended_at
-        ) VALUES (
-          ${siteId},
-          ${sessionId},
-          ${normalizedPath},
-          ${normalizedPath},
-          1,
-          true,
-          NOW(),
-          NOW()
-        )
-      `;
-    } else {
-      // Update existing session
-      const session = existingSession[0];
-      const newPageCount = session.page_count + 1;
-      const duration = Date.now() - new Date(session.created_at).getTime();
-
-      await sql`
-        UPDATE sessions
-        SET
-          exit_page = ${normalizedPath},
-          page_count = ${newPageCount},
-          is_bounce = false,
-          duration = ${duration},
-          ended_at = NOW()
-        WHERE site_id = ${siteId} AND session_id = ${sessionId}
-      `;
-    }
-
-    await adapter.close?.();
+    siteDb.upsertSession(sessionId, normalizedPath);
 
     return NextResponse.json({ success: true });
   } catch (error) {

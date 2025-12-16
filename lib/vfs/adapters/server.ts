@@ -1,22 +1,36 @@
 /**
  * Server-only adapter factory
  *
- * This module is marked server-only to prevent bundling in client code
+ * This module is marked server-only to prevent bundling in client code.
+ * Uses SQLite for persistence (data/osws.sqlite for core, sites/{id}/site.sqlite per site)
  */
 
 import 'server-only';
 
 import { StorageAdapter } from './types';
-import { PostgresAdapter } from './postgres-adapter';
+import { SQLiteAdapter } from './sqlite-adapter';
+
+// Singleton instance for the server adapter
+let adapterInstance: SQLiteAdapter | null = null;
 
 /**
  * Create storage adapter for server-side usage (Server mode only)
- * Returns PostgresAdapter configured with DATABASE_URL from environment
+ * Returns SQLiteAdapter singleton
  */
 export async function createServerAdapter(): Promise<StorageAdapter> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL environment variable not set. Required for Server mode.');
+  if (!adapterInstance) {
+    adapterInstance = new SQLiteAdapter();
   }
-  return new PostgresAdapter(databaseUrl);
+  return adapterInstance;
+}
+
+/**
+ * Get the SQLiteAdapter instance directly (for analytics access)
+ * This allows API routes to access site-specific analytics methods
+ */
+export function getSQLiteAdapter(): SQLiteAdapter {
+  if (!adapterInstance) {
+    adapterInstance = new SQLiteAdapter();
+  }
+  return adapterInstance;
 }

@@ -110,7 +110,7 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 - Dual modes (Chat/Code)
 - Templates & Skills systems
 - Browser mode (IndexedDB)
-- Optional Server mode (PostgreSQL)
+- Optional Server mode
 - Static site publishing
 - Cost tracking
 

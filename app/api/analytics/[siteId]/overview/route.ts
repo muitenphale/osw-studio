@@ -3,14 +3,12 @@
  * GET /api/analytics/[siteId]/overview - Fetch overview analytics
  *
  * Query parameters:
- * - dateFrom: ISO date string (optional)
- * - dateTo: ISO date string (optional)
+ * - days: Number of days to look back (default: 30)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 interface AnalyticsOverview {
   totalPageviews: number;
@@ -39,153 +37,49 @@ export async function GET(
 
     const { siteId } = await params;
     const { searchParams } = new URL(request.url);
-    const dateFrom = searchParams.get('dateFrom');
-    const dateTo = searchParams.get('dateTo');
+    const days = parseInt(searchParams.get('days') || '30', 10);
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
 
-    // Build date filter
-    const dateFilter = (timestampColumn: string) => {
-      const conditions = [];
-      if (dateFrom) conditions.push(sql`${sql(timestampColumn)} >= ${dateFrom}`);
-      if (dateTo) conditions.push(sql`${sql(timestampColumn)} <= ${dateTo}`);
-      return conditions.length > 0 ? sql`AND ${sql.unsafe(conditions.map(() => '?').join(' AND '))}` : sql``;
-    };
-
-    // Total pageviews
-    const totalPageviews = await sql`
-      SELECT COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-      ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-      ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-    `;
-
-    // Unique visitors
-    const uniqueVisitors = await sql`
-      SELECT COUNT(DISTINCT session_id)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-      ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-      ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-    `;
-
-    // Average time on site from sessions
-    const avgTimeOnSite = await sql`
-      SELECT AVG(duration) as avg_duration
-      FROM sessions
-      WHERE
-        site_id = ${siteId}
-        AND duration IS NOT NULL
-        ${dateFrom ? sql`AND created_at >= ${dateFrom}` : sql``}
-        ${dateTo ? sql`AND created_at <= ${dateTo}` : sql``}
-    `;
-
-    // Bounce rate
-    const bounceRate = await sql`
-      SELECT
-        SUM(CASE WHEN is_bounce THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as rate
-      FROM sessions
-      WHERE site_id = ${siteId}
-      ${dateFrom ? sql`AND created_at >= ${dateFrom}` : sql``}
-      ${dateTo ? sql`AND created_at <= ${dateTo}` : sql``}
-    `;
-
-    // Top pages
-    const topPages = await sql`
-      SELECT page_path, COUNT(*)::integer as views
-      FROM pageviews
-      WHERE site_id = ${siteId}
-      ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-      ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-      GROUP BY page_path
-      ORDER BY views DESC
-      LIMIT 20
-    `;
-
-    // Top referrers
-    const topReferrers = await sql`
-      SELECT referrer, COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-      ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-      ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-      GROUP BY referrer
-      ORDER BY count DESC
-      LIMIT 20
-    `;
-
-    // Device breakdown
-    const deviceBreakdown = await sql`
-      SELECT device_type, COUNT(*)::integer as count
-      FROM pageviews
-      WHERE
-        site_id = ${siteId}
-        AND device_type IS NOT NULL
-        ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-        ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-      GROUP BY device_type
-    `;
-
-    // Country breakdown
-    const countryBreakdown = await sql`
-      SELECT country, COUNT(*)::integer as count
-      FROM pageviews
-      WHERE
-        site_id = ${siteId}
-        AND country IS NOT NULL
-        ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-        ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-      GROUP BY country
-      ORDER BY count DESC
-      LIMIT 20
-    `;
-
-    await adapter.close?.();
+    // Get overview stats from SiteDatabase
+    const overviewStats = siteDb.getOverviewStats(days);
+    const basicStats = siteDb.getStats(days);
 
     // Build response
     const overview: AnalyticsOverview = {
-      totalPageviews: parseInt(totalPageviews[0]?.count || '0', 10),
-      uniqueVisitors: parseInt(uniqueVisitors[0]?.count || '0', 10),
-      averageTimeOnSite: avgTimeOnSite[0]?.avg_duration || 0,
-      bounceRate: bounceRate[0]?.rate || 0,
-      topPages: topPages.map((row) => ({
-        page: row.page_path,
-        views: parseInt(row.views, 10),
+      totalPageviews: overviewStats.totalPageviews,
+      uniqueVisitors: overviewStats.uniqueSessions,
+      averageTimeOnSite: overviewStats.avgSessionDuration,
+      bounceRate: overviewStats.bounceRate / 100, // Convert from percentage
+      topPages: basicStats.topPages.map((p) => ({
+        page: p.path,
+        views: p.views,
       })),
-      topReferrers: topReferrers.map((row) => ({
-        referrer: row.referrer,
-        count: parseInt(row.count, 10),
-      })),
-      deviceBreakdown: deviceBreakdown.reduce((acc, row) => {
-        acc[row.device_type] = parseInt(row.count, 10);
+      topReferrers: basicStats.topReferrers,
+      deviceBreakdown: overviewStats.deviceBreakdown.reduce((acc, item) => {
+        acc[item.device] = item.count;
         return acc;
       }, {} as Record<string, number>),
-      countryBreakdown: countryBreakdown.reduce((acc, row) => {
-        acc[row.country] = parseInt(row.count, 10);
-        return acc;
-      }, {} as Record<string, number>),
+      countryBreakdown: {}, // Country tracking not implemented yet
     };
 
     return NextResponse.json(overview);

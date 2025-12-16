@@ -125,28 +125,6 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     try {
       await vfs.init();
 
-      // TEMPORARILY DISABLED: Auto-pull causing 500 errors and spam
-      // TODO: Re-enable after fixing server sync issues
-      // Auto-pull from server in background (non-blocking)
-      // if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
-      //   // Don't await - let it run in background
-      //   import('@/lib/vfs/auto-sync').then(({ autoPullAllProjects }) => {
-      //     autoPullAllProjects().then((result) => {
-      //       if (result.pulled > 0) {
-      //         // Reload projects to show updated data
-      //         vfs.listProjects().then((updatedList) => {
-      //           const sorted = updatedList.sort((a, b) =>
-      //             b.updatedAt.getTime() - a.updatedAt.getTime()
-      //           );
-      //           setProjects(sorted);
-      //           setProjectList(sorted);
-      //           toast.success(`Synced ${result.pulled} project(s) from server`);
-      //         });
-      //       }
-      //     });
-      //   });
-      // }
-
       const projectList = await vfs.listProjects();
       const sorted = projectList.sort((a, b) =>
         b.updatedAt.getTime() - a.updatedAt.getTime()

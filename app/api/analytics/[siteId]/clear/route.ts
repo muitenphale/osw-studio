@@ -4,14 +4,11 @@
  *
  * Query parameters:
  * - type: all | pageviews | interactions | sessions (default: all)
- * - dateFrom: ISO date string (optional)
- * - dateTo: ISO date string (optional)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 export async function DELETE(
   request: NextRequest,
@@ -30,8 +27,6 @@ export async function DELETE(
     const { siteId } = await params;
     const searchParams = request.nextUrl.searchParams;
     const type = searchParams.get('type') || 'all';
-    const dateFrom = searchParams.get('dateFrom');
-    const dateTo = searchParams.get('dateTo');
 
     // Validate type parameter
     const validTypes = ['all', 'pageviews', 'interactions', 'sessions'];
@@ -42,83 +37,45 @@ export async function DELETE(
       );
     }
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
-    let deletedCounts = {
-      pageviews: 0,
-      interactions: 0,
-      sessions: 0,
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
+
+    // Get counts before clearing for reporting
+    const beforeCounts = siteDb.getAnalyticsStorageInfo();
+
+    // Clear analytics data based on type
+    if (type === 'all') {
+      siteDb.clearAnalytics();
+    } else {
+      siteDb.clearAnalytics(type as 'pageviews' | 'interactions' | 'sessions');
+    }
+
+    // Get counts after clearing
+    const afterCounts = siteDb.getAnalyticsStorageInfo();
+
+    const deletedCounts = {
+      pageviews: beforeCounts.pageviewCount - afterCounts.pageviewCount,
+      interactions: beforeCounts.interactionCount - afterCounts.interactionCount,
+      sessions: beforeCounts.sessionCount - afterCounts.sessionCount,
     };
-
-    // Delete pageviews
-    if (type === 'all' || type === 'pageviews') {
-      let query = sql`DELETE FROM pageviews WHERE site_id = ${siteId}`;
-
-      if (dateFrom && dateTo) {
-        query = sql`DELETE FROM pageviews WHERE site_id = ${siteId} AND timestamp >= ${dateFrom} AND timestamp <= ${dateTo}`;
-      } else if (dateFrom) {
-        query = sql`DELETE FROM pageviews WHERE site_id = ${siteId} AND timestamp >= ${dateFrom}`;
-      } else if (dateTo) {
-        query = sql`DELETE FROM pageviews WHERE site_id = ${siteId} AND timestamp <= ${dateTo}`;
-      }
-
-      const result = await query;
-      deletedCounts.pageviews = result.count || 0;
-    }
-
-    // Delete interactions
-    if (type === 'all' || type === 'interactions') {
-      let query = sql`DELETE FROM interactions WHERE site_id = ${siteId}`;
-
-      if (dateFrom && dateTo) {
-        query = sql`DELETE FROM interactions WHERE site_id = ${siteId} AND timestamp >= ${dateFrom} AND timestamp <= ${dateTo}`;
-      } else if (dateFrom) {
-        query = sql`DELETE FROM interactions WHERE site_id = ${siteId} AND timestamp >= ${dateFrom}`;
-      } else if (dateTo) {
-        query = sql`DELETE FROM interactions WHERE site_id = ${siteId} AND timestamp <= ${dateTo}`;
-      }
-
-      const result = await query;
-      deletedCounts.interactions = result.count || 0;
-    }
-
-    // Delete sessions
-    if (type === 'all' || type === 'sessions') {
-      let query = sql`DELETE FROM sessions WHERE site_id = ${siteId}`;
-
-      if (dateFrom && dateTo) {
-        query = sql`DELETE FROM sessions WHERE site_id = ${siteId} AND created_at >= ${dateFrom} AND created_at <= ${dateTo}`;
-      } else if (dateFrom) {
-        query = sql`DELETE FROM sessions WHERE site_id = ${siteId} AND created_at >= ${dateFrom}`;
-      } else if (dateTo) {
-        query = sql`DELETE FROM sessions WHERE site_id = ${siteId} AND created_at <= ${dateTo}`;
-      }
-
-      const result = await query;
-      deletedCounts.sessions = result.count || 0;
-    }
-
-    await adapter.close?.();
 
     return NextResponse.json({
       success: true,

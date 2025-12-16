@@ -11,11 +11,19 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
   webpack: (config, { isServer }) => {
-    // Exclude postgres from client bundle (server-only)
+    // Exclude server-only modules from client bundle
     if (!isServer) {
       config.resolve.alias = {
         ...config.resolve.alias,
         postgres: false,
+        'better-sqlite3': false,
+      };
+      // Also exclude native Node.js modules
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
       };
     }
     return config;

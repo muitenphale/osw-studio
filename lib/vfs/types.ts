@@ -69,6 +69,9 @@ export interface Site {
   previewImage?: string; // base64 data URL of site screenshot
   previewUpdatedAt?: Date;
 
+  // Database feature (for edge functions - future feature)
+  databaseEnabled?: boolean;
+
   // Metadata
   createdAt: Date;
   updatedAt: Date;
@@ -200,9 +203,12 @@ export interface FileTreeNode {
   id: string;
   projectId: string;
   path: string;
+  name: string;
   type: 'directory' | 'file';
   parentPath: string | null;
+  isExpanded?: boolean;
   children?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface FileOperation {

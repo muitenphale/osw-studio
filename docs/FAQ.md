@@ -45,7 +45,7 @@ The application itself is **free and open source** (MIT license). However:
 - Only sent to AI provider when you generate
 
 **Server Mode** (optional):
-- Data stored in your PostgreSQL database
+- Data stored locally on your server
 - You control the infrastructure
 
 **AI Providers**:
@@ -241,7 +241,7 @@ Most static hosts provide free SSL:
 - No site publishing
 
 **Server Mode** (optional):
-- PostgreSQL database
+- Local database (no external database needed)
 - Admin authentication
 - Site publishing system
 - Next.js routing
@@ -251,7 +251,7 @@ Most static hosts provide free SSL:
 ### When should I use Server Mode?
 
 **Use Server Mode if**:
-- You want PostgreSQL persistence
+- You want server-side persistence
 - Need site publishing features
 - Building production systems
 - Multi-device access
@@ -260,20 +260,17 @@ Most static hosts provide free SSL:
 - Personal use
 - Quick prototyping
 - Privacy-focused
-- Don't want to manage database
+- Don't need publishing features
 
 ### How do I enable Server Mode?
 
-1. Install PostgreSQL
-2. Create database
-3. Set environment variables:
+1. Set environment variables:
 ```bash
 NEXT_PUBLIC_SERVER_MODE=true
-DATABASE_URL=postgresql://...
 SESSION_SECRET=...
 ADMIN_PASSWORD=...
 ```
-4. Start server
+2. Run `npm install && npm start`
 
 **See**: [Server Mode Guide](?doc=server-mode) for complete setup
 

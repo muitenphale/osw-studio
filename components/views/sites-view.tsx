@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Site, Project } from '@/lib/vfs/types';
+import { vfs } from '@/lib/vfs';
+import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { SiteCard } from '../site-card';
 import { SiteSettingsModal } from '../site-settings';
 import { CreateSiteModal } from '../create-site-modal';
@@ -12,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { captureSiteThumbnail } from '@/lib/utils/site-thumbnail';
+import { toast } from 'sonner';
 
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
@@ -143,6 +146,26 @@ export function SitesView() {
     setPublishingStates(prev => ({ ...prev, [siteId]: true }));
 
     try {
+      // First, sync files from IndexedDB to server
+      toast.info('Syncing project files...');
+
+      await vfs.init();
+      const project = await vfs.getProject(site.projectId);
+      if (!project) {
+        throw new Error('Project not found in local storage');
+      }
+
+      const files = await vfs.listFiles(site.projectId);
+      const syncManager = getSyncManager();
+
+      // Push project and files to server
+      const syncResult = await syncManager.pushProjectWithFiles(project, files);
+      if (!syncResult.success) {
+        throw new Error(syncResult.error || 'Failed to sync files to server');
+      }
+
+      toast.info('Building site...');
+
       // Call publish API to trigger build
       const response = await fetch(`/api/sites/${siteId}/publish`, {
         method: 'POST',
@@ -155,11 +178,14 @@ export function SitesView() {
 
       const result = await response.json();
 
+      toast.success(`Site published! ${result.filesWritten} files written.`);
+
       // Update state optimistically with publish data
       updateSiteInState(siteId, {
         lastPublishedVersion: result.lastPublishedVersion,
         publishedAt: new Date(),
         updatedAt: new Date(),
+        databaseEnabled: true, // Site database is now enabled
       });
 
       // Generate thumbnail after successful publish (non-blocking, but keep loading state)
@@ -189,7 +215,7 @@ export function SitesView() {
         });
     } catch (error) {
       console.error('Failed to publish:', error);
-      alert('Failed to publish. Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to publish. Please try again.');
       // Clear publishing state on error
       setPublishingStates(prev => ({ ...prev, [siteId]: false }));
     }

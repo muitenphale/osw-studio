@@ -94,6 +94,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const debugIdCounter = useRef(0);
   const saveDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // Maximum debug events to keep in memory to prevent unbounded growth
+  const MAX_DEBUG_EVENTS = 500;
+
   // Debounced save function to persist events array to IndexedDB
   const debouncedSaveEvents = useCallback((events: DebugEvent[]) => {
     if (saveDebounceTimer.current) {
@@ -149,14 +152,22 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       };
 
       newEvents = [...prev, debugEvent];
+
+      // Prune old events if exceeding limit to prevent memory growth
+      if (newEvents.length > MAX_DEBUG_EVENTS) {
+        newEvents = newEvents.slice(-MAX_DEBUG_EVENTS);
+      }
+
       debouncedSaveEvents(newEvents);
       return newEvents;
     });
-  }, [project.id, debouncedSaveEvents]);
+  }, [project.id, debouncedSaveEvents, MAX_DEBUG_EVENTS]);
 
   const clearDebugEvents = useCallback(async () => {
     setDebugEvents([]);
     await debugEventsState.clearEvents(project.id);
+    // Clear auto-checkpoints when conversation is cleared (keep manual saves)
+    await checkpointManager.clearAutoCheckpoints(project.id);
     // Clear orchestrator to reset conversation history
     setPersistedOrchestrator(null);
   }, [project.id]);
@@ -517,6 +528,31 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   useEffect(() => {
     setPersistedOrchestrator(null);
   }, [project.id, chatMode]);
+
+  // MEMORY CLEANUP: Unload project data from singletons when leaving the workspace
+  // This prevents memory accumulation across project switches
+  useEffect(() => {
+    const projectId = project.id;
+
+    return () => {
+      // Unload checkpoint data from memory (they stay in IndexedDB)
+      checkpointManager.unloadProject(projectId);
+
+      // Clear debug events cache
+      debugEventsState.unloadProject(projectId);
+
+      // Clear any pending debounce timer for debug events
+      if (saveDebounceTimer.current) {
+        clearTimeout(saveDebounceTimer.current);
+        saveDebounceTimer.current = null;
+      }
+
+      // Clear VFS sync timeout for this project
+      vfs.clearSyncTimeout(projectId);
+
+      logger.debug(`[Workspace] Cleaned up memory for project ${projectId}`);
+    };
+  }, [project.id]);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)

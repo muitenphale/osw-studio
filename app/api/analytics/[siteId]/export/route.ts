@@ -5,20 +5,15 @@
  * Request body:
  * - format: 'csv' | 'json' (default: csv)
  * - type: 'all' | 'pageviews' | 'interactions' | 'sessions' (default: all)
- * - dateFrom: ISO date string (optional)
- * - dateTo: ISO date string (optional)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 interface ExportRequest {
   format?: 'csv' | 'json';
   type?: 'all' | 'pageviews' | 'interactions' | 'sessions';
-  dateFrom?: string;
-  dateTo?: string;
 }
 
 export async function POST(
@@ -37,88 +32,31 @@ export async function POST(
 
     const { siteId } = await params;
     const body: ExportRequest = await request.json();
-    const { format = 'csv', type = 'all', dateFrom, dateTo } = body;
+    const { format = 'csv', type = 'all' } = body;
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
-
-    // Build date filter
-    const buildDateFilter = (table: string, timestampColumn: string) => {
-      const conditions = [`${table}.site_id = ${siteId}`];
-
-      if (dateFrom) {
-        conditions.push(`${table}.${timestampColumn} >= '${dateFrom}'`);
-      }
-
-      if (dateTo) {
-        conditions.push(`${table}.${timestampColumn} <= '${dateTo}'`);
-      }
-
-      return sql.unsafe(conditions.join(' AND '));
-    };
-
-    const data: any = {};
-
-    // Export pageviews
-    if (type === 'all' || type === 'pageviews') {
-      const pageviews = await sql`
-        SELECT
-          id, page_path, referrer, country, user_agent, session_id,
-          load_time, exit_time, device_type, timestamp
-        FROM pageviews
-        WHERE ${buildDateFilter('pageviews', 'timestamp')}
-        ORDER BY timestamp DESC
-      `;
-      data.pageviews = pageviews;
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
     }
 
-    // Export interactions
-    if (type === 'all' || type === 'interactions') {
-      const interactions = await sql`
-        SELECT
-          id, session_id, page_path, interaction_type, element_selector,
-          coordinates, scroll_depth, time_on_page, timestamp
-        FROM interactions
-        WHERE ${buildDateFilter('interactions', 'timestamp')}
-        ORDER BY timestamp DESC
-      `;
-      data.interactions = interactions;
-    }
-
-    // Export sessions
-    if (type === 'all' || type === 'sessions') {
-      const sessions = await sql`
-        SELECT
-          id, session_id, entry_page, exit_page, page_count,
-          duration, is_bounce, created_at, ended_at
-        FROM sessions
-        WHERE ${buildDateFilter('sessions', 'created_at')}
-        ORDER BY created_at DESC
-      `;
-      data.sessions = sessions;
-    }
-
-    await adapter.close?.();
+    // Export analytics data
+    const data = siteDb.exportAnalyticsData(type);
 
     // Format response based on requested format
     if (format === 'json') {

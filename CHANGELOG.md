@@ -1,8 +1,19 @@
 # Changelog
 
+## v1.18.0 - 2025-12-11
+- **SQLite Migration**: Replaced PostgreSQL with SQLite (better-sqlite3) for Server Mode
+  - No external database setup required - just `npm install && npm start`
+  - Simpler self-hosting with zero configuration
+- **Per-Site Database Architecture**: Each site now has its own SQLite database
+  - `data/osws.sqlite` - Core database (projects, templates, skills)
+  - `sites/{siteId}/site.sqlite` - Per-site database (files, settings, analytics)
+- **Memory Leak Fix**: Reduced memory usage during long AI sessions
+- **Removed**: PostgreSQL support - `DATABASE_URL` environment variable no longer used
+- **Breaking Change**: Existing PostgreSQL Server Mode deployments must migrate data manually
+
 ## v1.17.0 - 2025-12-03
 - **Reasoning Token Support**: Display reasoning/thinking from compatible models
-  - Anthropic extended thinking, DeepSeek, Gemini thinking models
+  - Anthropic extended thinking, DeepSeek R1, Gemini thinking models
   - Separate reasoning tracking with `reasoning_delta` events and coalescing
   - Collapsible reasoning display in chat panel
 - **Reasoning Toggle**: Enable/disable reasoning per model in settings
@@ -49,7 +60,7 @@
   - Fixed compliance settings not persisting
   - Fixed site thumbnails not updating
   - Fixed analytics tracking issues
-- **Gemini Thinking Model Support**: Full compatibility with Gemini 2.5 Flash, 2.5 Pro, and 3 Pro thinking models via OpenRouter
+- **Gemini Thinking Model Support**: Full compatibility with Gemini thinking models via OpenRouter
   - Automatic `reasoning_details` preservation for multi-turn tool use conversations
   - Enables reliable function calling with thinking models (previously failed with 400 errors)
 - **Skills System Enhancements**: Reorganized built-in skills for better AI guidance

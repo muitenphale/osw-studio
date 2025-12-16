@@ -3,7 +3,7 @@
  *
  * Creates the appropriate storage adapter based on environment configuration.
  * Browser mode: IndexedDBAdapter only
- * Server mode: IndexedDBAdapter for working storage (server uses PostgresAdapter via API)
+ * Server mode: IndexedDBAdapter for working storage (server uses SQLiteAdapter via API)
  */
 
 import { StorageAdapter } from './types';
@@ -19,17 +19,12 @@ export function createClientAdapter(): StorageAdapter {
 
 /**
  * Create storage adapter for server-side usage (Server mode only)
- * Returns PostgresAdapter configured with DATABASE_URL from environment
+ * Returns SQLiteAdapter configured to use data/osws.sqlite
  *
- * NOTE: This function uses dynamic import to avoid bundling postgres in client code
+ * NOTE: This function uses dynamic import to avoid bundling sqlite in client code
  */
 export async function createServerAdapter(): Promise<StorageAdapter> {
   // Dynamic import to avoid bundling server-only code in client
-  const { PostgresAdapter } = await import('./postgres-adapter');
-
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL environment variable not set. Required for Server mode.');
-  }
-  return new PostgresAdapter(databaseUrl);
+  const { SQLiteAdapter } = await import('./sqlite-adapter');
+  return new SQLiteAdapter();
 }

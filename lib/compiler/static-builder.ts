@@ -1,15 +1,13 @@
 /**
  * Static Site Builder
  *
- * Compiles projects from PostgreSQL using VirtualServer (Handlebars rendering)
+ * Compiles projects from SQLite using VirtualServer (Handlebars rendering)
  * and writes compiled static files to public directory
  */
 
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
-import { VirtualFileSystem } from '@/lib/vfs';
 import { VirtualServer } from '@/lib/preview/virtual-server';
 import { VirtualFile, FileTreeNode } from '@/lib/vfs/types';
 import { logger } from '@/lib/utils';
@@ -30,7 +28,6 @@ export interface BuildResult {
  * Only implements the methods that VirtualServer actually uses
  */
 function createServerVfs(
-  adapter: PostgresAdapter,
   projectId: string,
   allFiles: VirtualFile[]
 ) {
@@ -168,12 +165,12 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
       };
     }
 
-    // Get all files from PostgreSQL
+    // Get all files from SQLite
     const allFiles = await adapter.listFiles(site.projectId);
     console.log(`[Static Builder] Loaded ${allFiles.length} files from database for project ${site.projectId}`);
 
     // Create a minimal VFS-like wrapper for server-side compilation
-    const serverVfs = createServerVfs(adapter as PostgresAdapter, site.projectId, allFiles);
+    const serverVfs = createServerVfs(site.projectId, allFiles);
 
     // Compile project using VirtualServer (renders Handlebars templates)
     console.log(`[Static Builder] Starting Handlebars compilation...`);

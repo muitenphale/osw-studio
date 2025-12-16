@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { buildStaticSite } from '@/lib/compiler/static-builder';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 export async function POST(
   request: NextRequest,
@@ -25,7 +25,7 @@ export async function POST(
     }
 
     // Update site metadata after successful build
-    const adapter = await createServerAdapter();
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
     const site = await adapter.getSite?.(id);
@@ -33,10 +33,15 @@ export async function POST(
       site.lastPublishedVersion = site.settingsVersion;
       site.publishedAt = new Date();
       site.updatedAt = new Date();
+
+      // Enable site database for analytics when publishing
+      if (!site.databaseEnabled) {
+        site.databaseEnabled = true;
+        await adapter.enableSiteDatabase(id);
+      }
+
       await adapter.updateSite(site);
     }
-
-    await adapter.close?.();
 
     return NextResponse.json({
       success: true,

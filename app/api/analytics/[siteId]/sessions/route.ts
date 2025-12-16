@@ -10,8 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 interface SessionJourney {
   sessionId: string;
@@ -54,100 +53,70 @@ export async function GET(
     const dateTo = searchParams.get('dateTo');
     const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 1000);
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
 
-    // Fetch sessions
-    const sessions = await sql`
-      SELECT
-        id, session_id, entry_page, exit_page, page_count,
-        duration, is_bounce, created_at, ended_at
-      FROM sessions
-      WHERE
-        site_id = ${siteId}
-        ${dateFrom ? sql`AND created_at >= ${dateFrom}` : sql``}
-        ${dateTo ? sql`AND created_at <= ${dateTo}` : sql``}
-      ORDER BY created_at DESC
-      LIMIT ${limit}
-    `;
+    // Get sessions with journeys from SiteDatabase
+    const sessionsWithJourneys = siteDb.getSessionsWithJourneys(
+      dateFrom || undefined,
+      dateTo || undefined,
+      limit
+    );
 
-    // Fetch pageviews for journey reconstruction
-    const sessionIds = sessions.map((s) => s.session_id);
-    const pageviews = sessionIds.length > 0
-      ? await sql`
-          SELECT
-            session_id, page_path, timestamp, load_time, exit_time
-          FROM pageviews
-          WHERE
-            site_id = ${siteId}
-            AND session_id IN ${sql(sessionIds)}
-          ORDER BY session_id, timestamp ASC
-        `
-      : [];
-
-    // Group pageviews by session
-    const pageviewsBySession = pageviews.reduce((acc, pv) => {
-      if (!acc[pv.session_id]) acc[pv.session_id] = [];
-      acc[pv.session_id].push(pv);
-      return acc;
-    }, {} as Record<string, any[]>);
-
-    // Build journey data
-    const journeys: SessionJourney[] = sessions.map((s) => {
-      const sessionPageviews = pageviewsBySession[s.session_id] || [];
-
-      return {
-        sessionId: s.session_id,
-        pages: sessionPageviews.map((pv: any, index: number) => ({
-          path: pv.page_path,
-          timestamp: pv.timestamp,
-          duration: index < sessionPageviews.length - 1
-            ? new Date(sessionPageviews[index + 1].timestamp).getTime() - new Date(pv.timestamp).getTime()
-            : undefined,
-        })),
-        entryPage: s.entry_page,
-        exitPage: s.exit_page,
-        pageCount: s.page_count,
-        totalDuration: s.duration,
-        isBounce: s.is_bounce,
-        createdAt: s.created_at,
-        endedAt: s.ended_at,
-      };
-    });
+    // Build journey data with page durations
+    const journeys: SessionJourney[] = sessionsWithJourneys.map((s) => ({
+      sessionId: s.sessionId,
+      pages: s.pages.map((page, index) => ({
+        path: page.path,
+        timestamp: page.timestamp,
+        duration: index < s.pages.length - 1
+          ? new Date(s.pages[index + 1].timestamp).getTime() - new Date(page.timestamp).getTime()
+          : undefined,
+      })),
+      entryPage: s.entryPage,
+      exitPage: s.exitPage,
+      pageCount: s.pageCount,
+      totalDuration: s.duration ?? 0,
+      isBounce: s.isBounce,
+      createdAt: s.createdAt,
+      endedAt: s.endedAt ?? s.createdAt,
+    }));
 
     // Build flow data for Sankey diagram
     const flowData = buildFlowData(journeys);
-
-    await adapter.close?.();
 
     return NextResponse.json({
       sessions: journeys,
       flowData,
       summary: {
-        totalSessions: sessions.length,
-        bounceRate: sessions.filter((s) => s.is_bounce).length / sessions.length,
-        averageDuration: sessions.reduce((sum, s) => sum + (s.duration || 0), 0) / sessions.length,
-        averagePageCount: sessions.reduce((sum, s) => sum + s.page_count, 0) / sessions.length,
+        totalSessions: journeys.length,
+        bounceRate: journeys.length > 0
+          ? journeys.filter((s) => s.isBounce).length / journeys.length
+          : 0,
+        averageDuration: journeys.length > 0
+          ? journeys.reduce((sum, s) => sum + s.totalDuration, 0) / journeys.length
+          : 0,
+        averagePageCount: journeys.length > 0
+          ? journeys.reduce((sum, s) => sum + s.pageCount, 0) / journeys.length
+          : 0,
       },
     });
   } catch (error) {

@@ -1,6 +1,6 @@
 # Server Mode - Self-Hosting Guide
 
-Self-host OSW Studio with PostgreSQL persistence, authentication, and static site publishing.
+Self-host OSW Studio with persistence, authentication, and static site publishing.
 
 ---
 
@@ -9,13 +9,13 @@ Self-host OSW Studio with PostgreSQL persistence, authentication, and static sit
 OSW Studio supports two deployment modes:
 
 - **Browser Mode** (default): Pure client-side application using IndexedDB
-- **Server Mode**: Full-stack deployment with PostgreSQL and publishing
+- **Server Mode**: Full-stack deployment with publishing
 
 Server Mode adds:
-- PostgreSQL database for persistent storage
+- Local database for persistent storage (no external database needed)
 - Admin authentication with JWT sessions
 - Sites publishing system with static site serving
-- Project sync between IndexedDB and PostgreSQL
+- Project sync between browser and server
 - Built-in analytics and compliance features
 
 ---
@@ -42,13 +42,13 @@ Server Mode adds:
 ### Server Mode
 
 **Characteristics:**
-- ✅ PostgreSQL persistence
+- ✅ Local persistence (no external database)
 - ✅ Admin authentication
 - ✅ Multiple sites per project
 - ✅ Static site publishing at `/sites/{siteId}/`
 - ✅ Built-in analytics
-- ✅ Project sync (IndexedDB ↔ PostgreSQL)
-- ❌ Requires PostgreSQL database
+- ✅ Project sync (browser ↔ server)
+- ❌ Requires persistent file system
 - ❌ Requires server hosting
 
 **Use Cases:**
@@ -61,7 +61,7 @@ Server Mode adds:
 
 ## Project Sync
 
-Server Mode uses a hybrid storage approach: projects are edited locally in IndexedDB (for speed) and synced to PostgreSQL (for persistence). This gives you the best of both worlds - fast local editing with server-side backup.
+Server Mode uses a hybrid storage approach: projects are edited locally in the browser (for speed) and synced to the server (for persistence). This gives you the best of both worlds - fast local editing with server-side backup.
 
 ### How Sync Works
 
@@ -86,51 +86,13 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 
 ## Quick Start
 
-### 1. Install PostgreSQL
-
-**macOS (Homebrew):**
-```bash
-brew install postgresql@17
-brew services start postgresql@17
-```
-
-**Ubuntu/Debian:**
-```bash
-sudo apt install postgresql-17
-sudo systemctl start postgresql
-```
-
-**Windows:**
-Download from https://www.postgresql.org/download/windows/
-
-### 2. Create Database
-
-```bash
-# Connect to PostgreSQL
-psql -U postgres
-
-# Create database
-CREATE DATABASE osw_studio;
-
-# Exit
-\q
-```
-
-**Or use managed PostgreSQL** (easier):
-- **Neon**: https://neon.com (free tier: 0.5GB storage, scales to zero)
-- **Supabase**: https://supabase.com (free tier available)
-- **Railway**: https://railway.app (PostgreSQL add-on, usage-based pricing)
-
-### 3. Configure Environment
+### 1. Configure Environment
 
 Create `.env` file in project root:
 
 ```bash
 # Enable Server Mode
 NEXT_PUBLIC_SERVER_MODE=true
-
-# PostgreSQL connection
-DATABASE_URL=postgresql://postgres:your_password@localhost:5432/osw_studio
 
 # Session security (generate with: openssl rand -base64 32)
 SESSION_SECRET=your_random_secret_here
@@ -145,14 +107,18 @@ ANALYTICS_SECRET=your_analytics_secret_here
 NEXT_PUBLIC_APP_URL=https://your-domain.com
 ```
 
-### 4. Start Server
+### 2. Start Server
 
 ```bash
 npm install
 npm run dev
 ```
 
-### 5. Access Application
+SQLite databases are created automatically:
+- `data/osws.sqlite` - Core database (projects, templates, skills)
+- `sites/{siteId}/site.sqlite` - Per-site databases (files, settings, analytics)
+
+### 3. Access Application
 
 - **Studio**: http://localhost:3000/
 - **Admin panel**: http://localhost:3000/admin/login
@@ -164,11 +130,11 @@ npm run dev
 
 ## Deployment Options
 
-> ⚠️ **Important**: Server Mode requires **persistent file system** storage because published sites are written to `/public/sites/`. Serverless platforms like Vercel, Netlify, and Cloudflare Workers **will not work** for Server Mode.
+> ⚠️ **Important**: Server Mode requires **persistent file system** storage because published sites are written to `/public/sites/` and databases are stored locally. Serverless platforms like Vercel, Netlify, and Cloudflare Workers **will not work** for Server Mode.
 
 ### Option 1: Railway (Recommended)
 
-**Why**: Simple setup, integrated PostgreSQL, persistent storage, usage-based pricing
+**Why**: Simple setup, persistent storage, usage-based pricing
 
 **Pricing**: $5/month minimum (includes $5 in usage credits). Free trial: 30 days with $5 credits.
 
@@ -183,12 +149,7 @@ npm run dev
    - Select "Deploy from GitHub repo"
    - Choose your OSW Studio fork
 
-3. **Add PostgreSQL:**
-   - Click "+ New"
-   - Select "Database" → "PostgreSQL"
-   - Railway auto-provisions database
-
-4. **Configure Variables:**
+3. **Configure Variables:**
    - Go to project variables
    - Add:
      ```
@@ -197,129 +158,14 @@ npm run dev
      ADMIN_PASSWORD=<your password>
      NEXT_PUBLIC_APP_URL=${{ RAILWAY_PUBLIC_DOMAIN }}
      ```
-   - `DATABASE_URL` is automatically set by Railway
 
-5. **Deploy:**
+4. **Deploy:**
    - Railway auto-deploys on push
    - Access at: `https://your-project.up.railway.app`
 
 ---
 
-### Option 2: Heroku
-
-**Why**: Simple deployment, integrated PostgreSQL, established platform
-
-**Pricing**: Starts at ~$5/month (Essential-0 dyno + Essential-0 Postgres). No free tier.
-
-**Steps:**
-
-1. **Install Heroku CLI:**
-   ```bash
-   # macOS
-   brew tap heroku/brew && brew install heroku
-
-   # Ubuntu/Debian
-   curl https://cli-assets.heroku.com/install.sh | sh
-
-   # Windows
-   # Download from https://devcenter.heroku.com/articles/heroku-cli
-   ```
-
-2. **Login to Heroku:**
-   ```bash
-   heroku login
-   ```
-
-3. **Create Heroku App:**
-   ```bash
-   cd osw-studio
-   heroku create your-osw-studio
-   ```
-
-4. **Add PostgreSQL Add-on:**
-   ```bash
-   # Essential-0 (~$5/month, 1GB storage)
-   heroku addons:create heroku-postgresql:essential-0
-
-   # Or Standard-0 for production (~$50/month)
-   # heroku addons:create heroku-postgresql:standard-0
-   ```
-
-   **Note**: `DATABASE_URL` is automatically set by Heroku
-
-5. **Configure Environment Variables:**
-   ```bash
-   # Enable Server Mode
-   heroku config:set NEXT_PUBLIC_SERVER_MODE=true
-
-   # Session secret (generate with: openssl rand -base64 32)
-   heroku config:set SESSION_SECRET=$(openssl rand -base64 32)
-
-   # Admin password
-   heroku config:set ADMIN_PASSWORD=your_secure_password
-
-   # App URL (use your Heroku app domain)
-   heroku config:set NEXT_PUBLIC_APP_URL=https://your-osw-studio.herokuapp.com
-   ```
-
-6. **Deploy to Heroku:**
-
-   **Option A: Using Git (recommended):**
-   ```bash
-   # Initialize git if not already
-   git init
-   git add .
-   git commit -m "Deploy to Heroku"
-
-   # Push to Heroku
-   git push heroku main
-   ```
-
-   **Option B: Using Heroku CLI (no git required):**
-   ```bash
-   # Build and deploy
-   heroku deploy
-   ```
-
-7. **Open Application:**
-   ```bash
-   heroku open
-   ```
-
-   Or visit: `https://your-osw-studio.herokuapp.com`
-
-**Access Points:**
-- **Studio**: `https://your-osw-studio.herokuapp.com/`
-- **Admin**: `https://your-osw-studio.herokuapp.com/admin/login`
-- **Published sites**: `https://your-osw-studio.herokuapp.com/sites/{siteId}/`
-
-**Useful Commands:**
-```bash
-# View logs
-heroku logs --tail
-
-# Check PostgreSQL connection
-heroku pg:info
-
-# Open PostgreSQL console
-heroku pg:psql
-
-# Restart app
-heroku restart
-
-# View environment variables
-heroku config
-```
-
-**Notes:**
-- Heroku automatically runs `npm run build` and `npm start`
-- PostgreSQL `DATABASE_URL` is set automatically by the addon
-- Essential-0 dynos sleep after 30 minutes of inactivity (use Eco dynos to avoid this)
-- For custom domains: `heroku domains:add yourdomain.com`
-
----
-
-### Option 3: VPS (Full Control)
+### Option 2: VPS (Full Control)
 
 **Why**: Complete control, custom domains, lowest cost at scale
 
@@ -339,26 +185,11 @@ heroku config
    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
    sudo apt install -y nodejs
 
-   # Install PostgreSQL
-   sudo apt install -y postgresql postgresql-contrib
-
    # Install git
    sudo apt install -y git
    ```
 
-2. **Setup PostgreSQL:**
-   ```bash
-   # Switch to postgres user
-   sudo -u postgres psql
-
-   # Create database and user
-   CREATE DATABASE osw_studio;
-   CREATE USER oswuser WITH PASSWORD 'secure_password';
-   GRANT ALL PRIVILEGES ON DATABASE osw_studio TO oswuser;
-   \q
-   ```
-
-3. **Clone and Configure:**
+2. **Clone and Configure:**
    ```bash
    # Clone repository
    git clone https://github.com/o-stahl/osw-studio.git
@@ -374,13 +205,12 @@ heroku config
    Paste:
    ```
    NEXT_PUBLIC_SERVER_MODE=true
-   DATABASE_URL=postgresql://oswuser:secure_password@localhost:5432/osw_studio
    SESSION_SECRET=<generate with: openssl rand -base64 32>
    ADMIN_PASSWORD=<your password>
    NEXT_PUBLIC_APP_URL=http://your-domain.com
    ```
 
-4. **Build and Start:**
+3. **Build and Start:**
    ```bash
    # Production build
    npm run build
@@ -392,7 +222,7 @@ heroku config
    pm2 startup
    ```
 
-5. **Setup Nginx (Reverse Proxy):**
+4. **Setup Nginx (Reverse Proxy):**
    ```bash
    sudo apt install -y nginx
    sudo nano /etc/nginx/sites-available/osw-studio
@@ -422,7 +252,7 @@ heroku config
    sudo systemctl restart nginx
    ```
 
-6. **Setup SSL (Let's Encrypt):**
+5. **Setup SSL (Let's Encrypt):**
    ```bash
    sudo apt install -y certbot python3-certbot-nginx
    sudo certbot --nginx -d your-domain.com
@@ -503,7 +333,7 @@ Once Server Mode is running, you can publish sites directly from OSW Studio.
 2. Click **"Save & Close"**
 3. Click **"Publish Now"** (or right-click site → Publish)
 4. Static builder runs:
-   - Loads project files from PostgreSQL
+   - Loads project files from server
    - Compiles Handlebars templates
    - Injects configured settings (scripts, analytics, SEO)
    - Generates sitemap.xml and robots.txt
@@ -705,29 +535,15 @@ sweetcandies.com, www.sweetcandies.com {
 
 ## Troubleshooting
 
-### Database Connection Errors
+### Database Issues
 
-**Symptoms**: "Failed to connect to database"
+**Symptoms**: "Failed to initialize database"
 
 **Solutions**:
-1. Verify `DATABASE_URL` is correct
-2. Check PostgreSQL is running:
-   ```bash
-   # Local
-   brew services list  # macOS
-   sudo systemctl status postgresql  # Linux
-
-   # Managed (Neon/Supabase)
-   # Check dashboard for connection string
-   ```
-3. Test connection:
-   ```bash
-   psql $DATABASE_URL
-   ```
-4. Check firewall rules (VPS)
-5. Ensure SSL mode matches:
-   - Local: `?sslmode=disable` or omit
-   - Managed: `?sslmode=require`
+1. Check write permissions on `data/` directory
+2. Ensure disk space is available
+3. Check file system supports SQLite (most do)
+4. Try deleting `data/osws.sqlite` and restarting (loses data)
 
 ### Migration Failures
 
@@ -736,17 +552,7 @@ sweetcandies.com, www.sweetcandies.com {
 **Solutions**:
 1. Migrations run automatically on first request
 2. Check terminal logs for errors
-3. Manually run migrations:
-   ```bash
-   # Connect to database
-   psql $DATABASE_URL
-
-   # Check if tables exist
-   \dt
-
-   # If empty, restart server (triggers migration)
-   npm run dev
-   ```
+3. Restart the server to trigger migrations
 
 ### Publishing Errors
 
@@ -754,7 +560,7 @@ sweetcandies.com, www.sweetcandies.com {
 
 **Solutions**:
 1. Check build logs in terminal
-2. Verify project has files in PostgreSQL
+2. Verify project has files synced to server
 3. Check Handlebars syntax in templates
 4. Verify disk permissions:
    ```bash
@@ -820,21 +626,18 @@ sweetcandies.com, www.sweetcandies.com {
 **Symptoms**: Slow site loads, high memory
 
 **Solutions**:
-1. Check PostgreSQL connection pool:
-   - Default: 20 connections
-   - Reduce if needed in DATABASE_URL
-2. Optimize published sites:
+1. Optimize published sites:
    - Compress images
    - Minify CSS/JS
    - Use CDN for libraries
-3. Monitor server resources:
+2. Monitor server resources:
    ```bash
    htop  # or top
    df -h  # disk space
    free -m  # memory
    ```
-4. Scale server resources (RAM/CPU)
-5. Add caching (Redis, Nginx cache)
+3. Scale server resources (RAM/CPU)
+4. Add caching (Nginx cache)
 
 ### Site Not Updating After Republish
 

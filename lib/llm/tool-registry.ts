@@ -330,12 +330,52 @@ For large file rewrites, ensure:
         execute: async (projectId, args, context) => {
           // Evaluation is handled by orchestrator loop logic
           // This executor just formats the response for the LLM
+
+          // Handle remaining_work - LLM sometimes sends as string "[]" instead of array
+          let remainingWork: string[] = [];
+          if (Array.isArray(args.remaining_work)) {
+            remainingWork = args.remaining_work;
+          } else if (typeof args.remaining_work === 'string') {
+            try {
+              const parsed = JSON.parse(args.remaining_work);
+              if (Array.isArray(parsed)) remainingWork = parsed;
+            } catch {
+              // Not valid JSON, treat as single item if non-empty
+              if (args.remaining_work.trim()) remainingWork = [args.remaining_work];
+            }
+          }
+
+          // Handle blockers similarly
+          let blockers: string[] = [];
+          if (Array.isArray(args.blockers)) {
+            blockers = args.blockers;
+          } else if (typeof args.blockers === 'string') {
+            try {
+              const parsed = JSON.parse(args.blockers);
+              if (Array.isArray(parsed)) blockers = parsed;
+            } catch {
+              if (args.blockers.trim()) blockers = [args.blockers];
+            }
+          }
+
+          // Handle boolean fields - LLM sometimes sends as string "true"/"false"
+          const parseBool = (val: any): boolean => {
+            if (typeof val === 'boolean') return val;
+            if (typeof val === 'string') {
+              return val.toLowerCase() === 'true' || val === '1';
+            }
+            return Boolean(val);
+          };
+
+          const goalAchieved = parseBool(args.goal_achieved);
+          const shouldContinue = parseBool(args.should_continue);
+
           const summary = [
-            `Goal achieved: ${args.goal_achieved ? 'Yes' : 'No'}`,
+            `Goal achieved: ${goalAchieved ? 'Yes' : 'No'}`,
             `Progress: ${args.progress_summary}`,
-            args.remaining_work.length > 0 ? `Remaining: ${args.remaining_work.join(', ')}` : '',
-            args.blockers && args.blockers.length > 0 ? `Blockers: ${args.blockers.join(', ')}` : '',
-            `Should continue: ${args.should_continue ? 'Yes' : 'No'}`
+            remainingWork.length > 0 ? `Remaining: ${remainingWork.join(', ')}` : '',
+            blockers.length > 0 ? `Blockers: ${blockers.join(', ')}` : '',
+            `Should continue: ${shouldContinue ? 'Yes' : 'No'}`
           ].filter(Boolean).join('\n');
 
           return summary;

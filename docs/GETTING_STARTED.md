@@ -169,7 +169,7 @@ Both services offer:
 - [Projects](?doc=projects) - Save, organize, and export projects
 
 **Advanced features:**
-- [Server Mode](?doc=server-mode) - Self-host with PostgreSQL and publish sites directly
+- [Server Mode](?doc=server-mode) - Self-host and publish sites directly
 
 **Need help?**
 - [FAQ](?doc=faq) - Common questions

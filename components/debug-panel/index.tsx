@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, ChevronUp, Bug, X, Trash2, Terminal } from 'lucide-react';
 import { vfsShell } from '@/lib/vfs/cli-shell';
+import { MemoryMonitor } from './memory-monitor';
 
 export interface DebugEvent {
   id: string;
@@ -34,23 +35,23 @@ export function DebugPanel({ events, onClear, onClose, projectId }: DebugPanelPr
   const [isRunning, setIsRunning] = useState(false);
   const shellOutputRef = useRef<HTMLDivElement>(null);
 
-  // Compress consecutive assistant_delta and tool_param_delta events
+  // Compress consecutive assistant_delta, tool_param_delta, and reasoning_delta events
+  // Only store count, not individual events - prevents O(N²) memory growth
   const compressedEvents = useMemo(() => {
     const result: DebugEvent[] = [];
     let currentDeltaGroup: DebugEvent | null = null;
 
+    const COMPRESSIBLE_EVENTS = new Set(['assistant_delta', 'tool_param_delta', 'reasoning_delta']);
+
     for (const event of events) {
-      const shouldCompress = event.event === 'assistant_delta' || event.event === 'tool_param_delta';
+      const shouldCompress = COMPRESSIBLE_EVENTS.has(event.event);
 
       if (shouldCompress) {
-        // If we're already in a group of the same type, increment count
+        // If we're already in a group of the same type, just increment count
         if (currentDeltaGroup && currentDeltaGroup.event === event.event) {
           currentDeltaGroup.count = (currentDeltaGroup.count || 1) + 1;
-          // Accumulate data for viewing
-          if (!currentDeltaGroup.data.all) {
-            currentDeltaGroup.data = { all: [currentDeltaGroup.data] };
-          }
-          currentDeltaGroup.data.all.push(event.data);
+          // Don't accumulate data.all - that causes O(N²) memory usage
+          // The count is sufficient for debugging purposes
         } else {
           // Start a new group
           if (currentDeltaGroup) {
@@ -169,6 +170,7 @@ export function DebugPanel({ events, onClear, onClose, projectId }: DebugPanelPr
           <span className="text-xs text-muted-foreground">
             ({filteredEvents.length}/{events.length})
           </span>
+          <MemoryMonitor />
         </div>
         <div className="flex items-center gap-1">
           <Button

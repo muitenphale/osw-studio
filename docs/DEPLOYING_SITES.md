@@ -210,7 +210,7 @@ git push
 **Want to publish sites directly from OSW Studio without exporting?**
 
 OSW Studio's **Server Mode** lets you:
-- Host OSW Studio on your own server with PostgreSQL
+- Host OSW Studio on your own server
 - Create and publish sites at `/sites/{siteId}/` directly
 - Configure SEO, analytics, and custom domains per site
 - Skip the export/upload cycle

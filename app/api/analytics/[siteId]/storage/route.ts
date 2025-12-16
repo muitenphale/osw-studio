@@ -5,8 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 interface StorageBreakdown {
   totalMB: number;
@@ -42,71 +41,38 @@ export async function GET(
 
     const { siteId } = await params;
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
 
-    // Get pageviews count and approximate size
-    const pageviewsStats = await sql`
-      SELECT
-        COUNT(*)::integer as count,
-        pg_total_relation_size('pageviews') as total_bytes
-      FROM pageviews
-      WHERE site_id = ${siteId}
-    `;
-
-    // Get interactions count and approximate size
-    const interactionsStats = await sql`
-      SELECT
-        COUNT(*)::integer as count,
-        pg_total_relation_size('interactions') as total_bytes
-      FROM interactions
-      WHERE site_id = ${siteId}
-    `;
-
-    // Get sessions count and approximate size
-    const sessionsStats = await sql`
-      SELECT
-        COUNT(*)::integer as count,
-        pg_total_relation_size('sessions') as total_bytes
-      FROM sessions
-      WHERE site_id = ${siteId}
-    `;
-
-    await adapter.close?.();
-
-    // Calculate sizes (rough estimate based on row count)
-    const pageviewsCount = parseInt(pageviewsStats[0]?.count || '0');
-    const interactionsCount = parseInt(interactionsStats[0]?.count || '0');
-    const sessionsCount = parseInt(sessionsStats[0]?.count || '0');
+    // Get storage info from SiteDatabase
+    const storageInfo = siteDb.getAnalyticsStorageInfo();
 
     // Rough size estimates (in bytes per row)
-    const PAGEVIEW_SIZE = 300; // ~300 bytes per pageview
-    const INTERACTION_SIZE = 500; // ~500 bytes per interaction (JSONB data)
-    const SESSION_SIZE = 200; // ~200 bytes per session
+    const PAGEVIEW_SIZE = 200; // ~200 bytes per pageview (SQLite is more compact)
+    const INTERACTION_SIZE = 150; // ~150 bytes per interaction
+    const SESSION_SIZE = 100; // ~100 bytes per session
 
-    const pageviewsSizeMB = (pageviewsCount * PAGEVIEW_SIZE) / (1024 * 1024);
-    const interactionsSizeMB = (interactionsCount * INTERACTION_SIZE) / (1024 * 1024);
-    const sessionsSizeMB = (sessionsCount * SESSION_SIZE) / (1024 * 1024);
+    const pageviewsSizeMB = (storageInfo.pageviewCount * PAGEVIEW_SIZE) / (1024 * 1024);
+    const interactionsSizeMB = (storageInfo.interactionCount * INTERACTION_SIZE) / (1024 * 1024);
+    const sessionsSizeMB = (storageInfo.sessionCount * SESSION_SIZE) / (1024 * 1024);
 
     const totalMB = pageviewsSizeMB + interactionsSizeMB + sessionsSizeMB;
 
@@ -114,15 +80,15 @@ export async function GET(
       totalMB: parseFloat(totalMB.toFixed(2)),
       breakdown: {
         pageviews: {
-          count: pageviewsCount,
+          count: storageInfo.pageviewCount,
           sizeMB: parseFloat(pageviewsSizeMB.toFixed(2)),
         },
         interactions: {
-          count: interactionsCount,
+          count: storageInfo.interactionCount,
           sizeMB: parseFloat(interactionsSizeMB.toFixed(2)),
         },
         sessions: {
-          count: sessionsCount,
+          count: storageInfo.sessionCount,
           sizeMB: parseFloat(sessionsSizeMB.toFixed(2)),
         },
       },

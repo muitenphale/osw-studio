@@ -120,11 +120,6 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
       }
       // 'all' and 'desktop' use default 1280x720
 
-      console.log('[Heatmap Screenshot] Starting capture');
-      console.log('[Heatmap Screenshot] Selected page:', selectedPage);
-      console.log('[Heatmap Screenshot] Device filter:', deviceFilter);
-      console.log('[Heatmap Screenshot] Capture dimensions:', captureWidth, 'x', captureHeight);
-
       // Set iframe size to match capture dimensions
       iframe.style.width = `${captureWidth}px`;
       iframe.style.height = `${captureHeight}px`;
@@ -133,21 +128,17 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
       // This avoids CORS issues since it's same-origin
       iframe.src = selectedPage;
 
-      console.log('[Heatmap Screenshot] Set iframe.src to:', selectedPage);
-
       // Wait for iframe to fully load
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
 
         iframe.onload = () => {
           clearTimeout(timeout);
-          console.log('[Heatmap Screenshot] Iframe loaded successfully');
           resolve(null);
         };
 
         iframe.onerror = () => {
           clearTimeout(timeout);
-          console.error('[Heatmap Screenshot] Iframe failed to load');
           reject(new Error('Failed to load page'));
         };
       });
@@ -155,12 +146,8 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
       // Wait for any dynamic content to render (match thumbnail behavior)
       await new Promise(r => setTimeout(r, 500));
 
-      console.log('[Heatmap Screenshot] Calling captureIframeScreenshot');
-
       // Capture screenshot at device-specific dimensions
       const dataUrl = await captureIframeScreenshot(iframe, captureWidth, captureHeight);
-
-      console.log('[Heatmap Screenshot] Screenshot result:', dataUrl ? 'Success' : 'Failed');
 
       if (dataUrl) {
         setScreenshotDataUrl(dataUrl);
@@ -171,7 +158,7 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
         toast.error('Failed to capture screenshot');
       }
     } catch (error) {
-      console.error('[Heatmap Screenshot] Error:', error);
+      console.error('Failed to capture screenshot:', error);
       toast.error('Failed to capture page screenshot');
     } finally {
       setScreenshotLoading(false);
@@ -180,22 +167,11 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
 
   // Render click heatmap on canvas with screenshot background
   useEffect(() => {
-    console.log('[Heatmap Render] Effect triggered:', {
-      hasCanvas: !!canvasRef.current,
-      hasData: !!data,
-      dataType: data?.type,
-      dataPointCount: data?.type === 'click' ? data.points.length : 0,
-      hasScreenshot: !!screenshotDataUrl
-    });
-
     if (!canvasRef.current || !data || data.type !== 'click' || !screenshotDataUrl) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    console.log('[Heatmap Render] Starting render with', data.points.length, 'raw points');
-    console.log('[Heatmap Render] Sample raw point:', data.points[0]);
 
     // Load screenshot image
     const img = new Image();
@@ -204,14 +180,11 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
       canvas.width = img.width;
       canvas.height = img.height;
 
-      console.log('[Heatmap Render] Canvas size set to:', canvas.width, 'x', canvas.height);
-
       // Draw screenshot as background
       ctx.drawImage(img, 0, 0);
 
       // Calculate absolute Y positions and scale to screenshot dimensions
-      // Screenshot is always 640px wide, so we need to scale click coordinates
-      const screenshotWidth = canvas.width; // Should be 640
+      const screenshotWidth = canvas.width;
 
       const transformedPoints = data.points.map((point) => {
         // Scale factor based on viewport width where click was recorded vs screenshot width
@@ -224,49 +197,27 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
           x: point.x * scale,
           y: (point.y + scrollY) * scale, // Absolute Y position, scaled
           viewportWidth: point.viewportWidth,
-          scale, // Store for debugging
-          raw: point, // Keep raw for debugging
+          scale,
         };
       });
-
-      console.log('[Heatmap Render] Transformed points sample:', transformedPoints.slice(0, 3));
 
       const points = transformedPoints
         // Filter out invalid coordinates (NaN, Infinity, negative, etc.)
         .filter((point) => {
-          const valid =
+          return (
             Number.isFinite(point.x) &&
             Number.isFinite(point.y) &&
             point.x >= 0 &&
             point.y >= 0 &&
             point.x <= canvas.width &&
-            point.y <= canvas.height;
-          if (!valid) {
-            console.warn('[Heatmap Render] Filtering out invalid point:', {
-              transformed: { x: point.x, y: point.y },
-              raw: point.raw,
-              canvasSize: { width: canvas.width, height: canvas.height }
-            });
-          }
-          return valid;
+            point.y <= canvas.height
+          );
         });
 
-      console.log('[Heatmap Render] After filtering:', points.length, 'valid points out of', data.points.length, 'total');
-      console.log('[Heatmap Render] Rendering on canvas:', canvas.width, 'x', canvas.height);
-
       // Draw heatmap using radial gradients
-      points.forEach((point, index) => {
+      points.forEach((point) => {
         // Scale radius too
         const radius = 40 * point.scale;
-
-        if (index < 3) {
-          console.log('[Heatmap Render] Drawing point', index, ':', {
-            x: point.x,
-            y: point.y,
-            radius,
-            scale: point.scale
-          });
-        }
 
         const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
         gradient.addColorStop(0, 'rgba(255, 0, 0, 0.7)');
@@ -276,8 +227,6 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
         ctx.fillStyle = gradient;
         ctx.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
       });
-
-      console.log('[Heatmap Render] Finished drawing', points.length, 'points');
     };
     img.src = screenshotDataUrl;
   }, [data, screenshotDataUrl]);

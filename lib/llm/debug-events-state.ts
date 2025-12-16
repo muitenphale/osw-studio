@@ -12,6 +12,14 @@ export interface DebugEvent {
   data: any;
 }
 
+// Ephemeral events are only kept in memory for live viewing, not persisted to IndexedDB
+// This prevents O(N²) memory growth from streaming token snapshots
+const EPHEMERAL_EVENTS = new Set([
+  'assistant_delta',
+  'tool_param_delta',
+  'reasoning_delta'
+]);
+
 interface StoredDebugEventsState {
   id: string;
   projectId: string;
@@ -115,6 +123,7 @@ export class DebugEventsStateManager {
 
   /**
    * Append a new debug event
+   * Ephemeral events (deltas) are only kept in memory, not persisted to IndexedDB
    */
   async appendEvent(projectId: string, event: DebugEvent): Promise<void> {
     let events = this.eventsCache.get(projectId);
@@ -125,7 +134,13 @@ export class DebugEventsStateManager {
     events.push(event);
     this.eventsCache.set(projectId, events);
 
-    // Save to DB - await to prevent race conditions with rapid event appends
+    // Skip persisting ephemeral streaming events - they're only useful during live viewing
+    // This prevents massive IndexedDB growth from streaming tokens
+    if (EPHEMERAL_EVENTS.has(event.event)) {
+      return;
+    }
+
+    // Save meaningful events to DB - await to prevent race conditions with rapid event appends
     await this.saveEvents(projectId, events);
   }
 
@@ -184,6 +199,20 @@ export class DebugEventsStateManager {
         reject(request.error);
       };
     });
+  }
+
+  /**
+   * Unload debug events for a project from memory cache
+   * Data remains in IndexedDB and can be reloaded on demand
+   * This is called when leaving a project to free up memory
+   */
+  unloadProject(projectId: string): void {
+    const hadCache = this.eventsCache.has(projectId);
+    this.eventsCache.delete(projectId);
+
+    if (hadCache) {
+      logger.debug(`[DebugEventsState] Unloaded debug events cache for project ${projectId}`);
+    }
   }
 }
 

@@ -323,7 +323,7 @@ navigator.storage.estimate().then(estimate => {
    - Break into multiple smaller projects
 
 3. **Use Server Mode**:
-   - PostgreSQL handles large projects better
+   - Server Mode handles large projects better
 
 ---
 
@@ -575,7 +575,7 @@ Error: Parse error on line 5
    - Split into multiple projects
 
 3. **Use Server Mode**:
-   - Offload storage to PostgreSQL
+   - Offload storage to server
 
 ---
 

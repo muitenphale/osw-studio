@@ -253,11 +253,18 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
 
   // Initialize tracking
   function init() {
-    // Track initial pageview
-    if (document.readyState === 'complete') {
+    // Track initial pageview (only once)
+    var pageviewTracked = false;
+    function trackInitialPageview() {
+      if (pageviewTracked) return;
+      pageviewTracked = true;
       trackPageview();
+    }
+
+    if (document.readyState === 'complete') {
+      trackInitialPageview();
     } else {
-      window.addEventListener('load', trackPageview);
+      window.addEventListener('load', trackInitialPageview, { once: true });
     }
 
     // Track SPA navigation
@@ -282,29 +289,26 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
       });
     }
 
-    // Track page exit
-    if (config.features.engagementTracking) {
-      window.addEventListener('beforeunload', function() {
-        flushEvents(true); // Force flush pending events
+    // Track page exit (with deduplication)
+    var exitTracked = false;
+    function handlePageExit() {
+      flushEvents(true); // Force flush pending events
+      if (config.features.engagementTracking && !exitTracked) {
+        exitTracked = true;
         trackExit();
-      });
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'hidden') {
-          flushEvents(true); // Force flush pending events
-          trackExit();
-        }
-      });
-    } else {
-      // Even without engagement tracking, flush pending events on exit
-      window.addEventListener('beforeunload', function() {
-        flushEvents(true);
-      });
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'hidden') {
-          flushEvents(true);
-        }
-      });
+      }
     }
+
+    // Both beforeunload and visibilitychange may fire - deduplicate
+    window.addEventListener('beforeunload', handlePageExit);
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden') {
+        handlePageExit();
+      } else if (document.visibilityState === 'visible') {
+        // Reset exit tracking when page becomes visible again
+        exitTracked = false;
+      }
+    });
 
     // Flush events periodically (increased to 30s for efficiency)
     setInterval(function() { flushEvents(false); }, 30000);

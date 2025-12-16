@@ -13,8 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 import {
   interactionRateLimiter,
   RATE_LIMIT_CONFIG,
@@ -35,12 +34,14 @@ interface InteractionData {
   coordinates?: {
     x: number;
     y: number;
-    viewportWidth: number;
-    viewportHeight: number;
+    scrollY?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    documentHeight?: number;
   };
   scrollDepth?: number;
   timeOnPage?: number;
-  customData?: Record<string, any>;
+  customData?: Record<string, unknown>;
   userAgent?: string;
   // token field removed - origin validation provides sufficient security
 }
@@ -68,7 +69,6 @@ export async function POST(request: NextRequest) {
       coordinates,
       scrollDepth,
       timeOnPage,
-      customData,
       userAgent,
     } = body as InteractionData;
 
@@ -124,21 +124,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // 5. Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // 5. Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
@@ -147,17 +138,24 @@ export async function POST(request: NextRequest) {
 
     // 6. Check if analytics is enabled
     if (!site.analytics.enabled || site.analytics.provider !== 'builtin') {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Built-in analytics not enabled for this site' },
         { status: 403 }
       );
     }
 
+    // 6b. Check if site database is enabled (created when site is published)
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
+
     // 7. Check if specific feature is enabled
     const features = site.analytics.features || {};
     if (interactionType === 'click' && !features.heatmaps) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Heatmaps feature not enabled' },
         { status: 403 }
@@ -165,7 +163,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (interactionType === 'scroll' && !features.engagementTracking && !features.heatmaps) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Engagement tracking not enabled' },
         { status: 403 }
@@ -173,7 +170,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (interactionType === 'exit' && !features.engagementTracking) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Engagement tracking not enabled' },
         { status: 403 }
@@ -181,12 +177,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 8. CORS/Origin Validation (Primary Security Layer)
-    // This is our main defense against abuse. Unlike Google Analytics (which must accept
-    // requests from any domain), we only accept requests from our own domain paths.
-    // Browser security prevents attackers from spoofing Origin/Referer across domains.
     const allowedOrigins = getAllowedOrigins(siteId, site.customDomain);
     if (!validateOrigin(request, allowedOrigins)) {
-      await adapter.close?.();
       console.warn('[Analytics Interaction] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         referer: request.headers.get('referer'),
@@ -200,44 +192,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Note: Token-based authentication removed in favor of origin validation.
-    // Origin validation is stronger for same-origin hosting and avoids token expiration issues.
-    // Additional protection provided by: rate limiting, bot detection, and anomaly detection.
-
     // Generate session ID
     const sessionId = generateSessionId(userAgent || request.headers.get('user-agent') || '', request);
 
     // Normalize path for consistent tracking
     const normalizedPath = normalizePath(pagePath);
 
-    const sql = adapter.getSQL();
-
-    // Insert interaction
-    await sql`
-      INSERT INTO interactions (
-        site_id,
-        session_id,
-        page_path,
-        interaction_type,
-        element_selector,
-        coordinates,
-        scroll_depth,
-        time_on_page,
-        timestamp
-      ) VALUES (
-        ${siteId},
-        ${sessionId},
-        ${normalizedPath},
-        ${interactionType},
-        ${elementSelector || null},
-        ${coordinates ? JSON.stringify(coordinates) : null},
-        ${scrollDepth || null},
-        ${timeOnPage || null},
-        NOW()
-      )
-    `;
-
-    await adapter.close?.();
+    // Record interaction using SiteDatabase
+    siteDb.recordInteraction({
+      sessionId,
+      pagePath: normalizedPath,
+      interactionType,
+      elementSelector,
+      coordinates: coordinates ? {
+        x: coordinates.x,
+        y: coordinates.y,
+        scrollY: coordinates.scrollY,
+        viewportWidth: coordinates.viewportWidth,
+        viewportHeight: coordinates.viewportHeight,
+        documentHeight: coordinates.documentHeight,
+      } : undefined,
+      scrollDepth,
+      timeOnPage,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -283,9 +260,6 @@ function anonymizeIP(ip: string): string {
 
 /**
  * Normalize page path for consistent tracking
- * - Strips trailing slashes
- * - Converts directory paths to index.html
- * Example: /sites/abc/ -> /sites/abc/index.html
  */
 function normalizePath(path: string): string {
   if (!path || path === '/') return '/index.html';
@@ -368,22 +342,13 @@ async function handleBatchInteractions(
     return NextResponse.json({ success: true });
   }
 
-  const adapter = await createServerAdapter();
-
-  if (!(adapter instanceof PostgresAdapter)) {
-    return NextResponse.json(
-      { error: 'Analytics requires Server Mode (PostgreSQL)' },
-      { status: 503 }
-    );
-  }
-
+  const adapter = getSQLiteAdapter();
   await adapter.init();
 
   try {
-    // 4. Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // 4. Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
@@ -392,17 +357,24 @@ async function handleBatchInteractions(
 
     // 5. Check if analytics is enabled
     if (!site.analytics.enabled || site.analytics.provider !== 'builtin') {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Built-in analytics not enabled for this site' },
         { status: 403 }
       );
     }
 
+    // 5b. Check if site database is enabled (created when site is published)
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
+
     // 6. CORS/Origin Validation
     const allowedOrigins = getAllowedOrigins(siteId, site.customDomain);
     if (!validateOrigin(request, allowedOrigins)) {
-      await adapter.close?.();
       console.warn('[Analytics Batch] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         referer: request.headers.get('referer'),
@@ -416,14 +388,12 @@ async function handleBatchInteractions(
       );
     }
 
-    // 7. Process all interactions in a single transaction
-    const sql = adapter.getSQL();
+    // 7. Process all interactions
     const defaultUserAgent = request.headers.get('user-agent') || '';
 
     let successCount = 0;
     let skipCount = 0;
 
-    // Use transaction for atomic batch insert
     for (const interaction of interactions) {
       const {
         pagePath,
@@ -473,39 +443,30 @@ async function handleBatchInteractions(
       // Normalize path
       const normalizedPath = normalizePath(pagePath);
 
-      // Insert interaction
+      // Record interaction
       try {
-        await sql`
-          INSERT INTO interactions (
-            site_id,
-            session_id,
-            page_path,
-            interaction_type,
-            element_selector,
-            coordinates,
-            scroll_depth,
-            time_on_page,
-            timestamp
-          ) VALUES (
-            ${siteId},
-            ${sessionId},
-            ${normalizedPath},
-            ${interactionType},
-            ${elementSelector || null},
-            ${coordinates ? JSON.stringify(coordinates) : null},
-            ${scrollDepth || null},
-            ${timeOnPage || null},
-            NOW()
-          )
-        `;
+        siteDb.recordInteraction({
+          sessionId,
+          pagePath: normalizedPath,
+          interactionType,
+          elementSelector,
+          coordinates: coordinates ? {
+            x: coordinates.x,
+            y: coordinates.y,
+            scrollY: coordinates.scrollY,
+            viewportWidth: coordinates.viewportWidth,
+            viewportHeight: coordinates.viewportHeight,
+            documentHeight: coordinates.documentHeight,
+          } : undefined,
+          scrollDepth,
+          timeOnPage,
+        });
         successCount++;
       } catch (error) {
         console.error('[Analytics Batch] Error inserting interaction:', error);
         skipCount++;
       }
     }
-
-    await adapter.close?.();
 
     return NextResponse.json({
       success: true,
@@ -515,7 +476,6 @@ async function handleBatchInteractions(
     });
   } catch (error) {
     console.error('[Analytics Batch] Error processing batch:', error);
-    await adapter.close?.();
     return NextResponse.json(
       { error: 'Failed to process batch interactions' },
       { status: 500 }

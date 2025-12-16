@@ -118,7 +118,8 @@ export async function parseStreamingResponse(
                 const piece = json.delta.thinking as string;
                 reasoning += piece;
                 if (!suppressAssistantDelta) {
-                  onProgress?.('reasoning_delta', { text: piece, snapshot: reasoning });
+                  // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+                  onProgress?.('reasoning_delta', { text: piece });
                 }
               } else if (json.type === 'content_block_stop' && json.index === anthropicThinkingBlockIndex) {
                 anthropicThinkingBlockIndex = null;
@@ -128,7 +129,8 @@ export async function parseStreamingResponse(
               } else if (json.type === 'content_block_delta' && json.delta?.text_delta?.text) {
                 const piece = json.delta.text_delta.text as string;
                 content += piece;
-                if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece, snapshot: content });
+                // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+                if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece });
               } else if (json.type === 'content_block_start' && json.content_block?.type === 'tool_use') {
                 const toolCall = {
                   id: json.content_block.id,
@@ -207,7 +209,8 @@ export async function parseStreamingResponse(
                 const reasoningPiece = String(delta.reasoning);
                 reasoning += reasoningPiece;
                 if (!suppressAssistantDelta) {
-                  onProgress?.('reasoning_delta', { text: reasoningPiece, snapshot: reasoning });
+                  // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+                  onProgress?.('reasoning_delta', { text: reasoningPiece });
                 }
                 handledReasoningDelta = true;
               }
@@ -215,7 +218,8 @@ export async function parseStreamingResponse(
               if (delta?.content) {
                 const piece = String(delta.content);
                 content += piece;
-                if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece, snapshot: content });
+                // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+                if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece });
               }
 
               // Capture reasoning_details for Gemini thinking models (OpenRouter format)
@@ -244,8 +248,9 @@ export async function parseStreamingResponse(
                         reasoningDetails[existingIdx].text = rd.text;
 
                         // Emit delta event with just the new portion
+                        // Only emit text, not snapshot - snapshots cause O(N²) memory usage
                         if (deltaText && !suppressAssistantDelta) {
-                          onProgress?.('reasoning_delta', { text: deltaText, snapshot: rd.text });
+                          onProgress?.('reasoning_delta', { text: deltaText });
                         }
                       }
                     }
@@ -255,8 +260,9 @@ export async function parseStreamingResponse(
                   } else {
                     reasoningDetails.push(rd as ReasoningDetail);
                     // Emit delta for new reasoning detail
+                    // Only emit text, not snapshot - snapshots cause O(N²) memory usage
                     if (rd.text && !suppressAssistantDelta) {
-                      onProgress?.('reasoning_delta', { text: rd.text, snapshot: rd.text });
+                      onProgress?.('reasoning_delta', { text: rd.text });
                     }
                   }
                 }

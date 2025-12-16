@@ -138,6 +138,18 @@ export class VirtualFileSystem {
     this.syncTimeouts.set(projectId, timeout);
   }
 
+  /**
+   * Clear any pending sync timeout for a project
+   * Called when leaving a project to prevent stale timeout references
+   */
+  clearSyncTimeout(projectId: string): void {
+    const timeout = this.syncTimeouts.get(projectId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.syncTimeouts.delete(projectId);
+      logger.debug(`[VFS] Cleared sync timeout for project ${projectId}`);
+    }
+  }
 
   async createFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {
     this.ensureInitialized();
@@ -340,10 +352,12 @@ export class VirtualFileSystem {
       return;
     }
     
+    const name = path.split('/').pop() || path;
     const node: FileTreeNode = {
       id: uuidv4(),
       projectId,
       path,
+      name,
       type: 'directory',
       parentPath: this.getParentPath(path),
       children: []
@@ -452,6 +466,7 @@ export class VirtualFileSystem {
         id: uuidv4(),
         projectId,
         path: newPath,
+        name: newPath.split('/').pop() || newPath,
         type: 'directory',
         parentPath: this.getParentPath(newPath),
         children: oldNode.children
@@ -488,6 +503,7 @@ export class VirtualFileSystem {
         id: uuidv4(),
         projectId,
         path: newSubdirPath,
+        name: newSubdirPath.split('/').pop() || newSubdirPath,
         type: 'directory',
         parentPath: this.getParentPath(newSubdirPath),
         children: node.children
@@ -561,6 +577,7 @@ export class VirtualFileSystem {
         id: uuidv4(),
         projectId: project.id,
         path: '/',
+        name: '/',
         type: 'directory',
         parentPath: null,
         children: []

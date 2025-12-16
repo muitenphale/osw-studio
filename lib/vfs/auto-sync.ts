@@ -18,6 +18,20 @@ interface SyncStatusResult {
 }
 
 /**
+ * Comprehensive sync status info for UI display
+ */
+export interface SyncOverviewStatus {
+  serverProjectCount: number;
+  serverSiteCount: number;
+  serverLastUpdated: Date | null;
+  localProjectCount: number;
+  isUninitialized: boolean;  // Server has no projects
+  needsSync: boolean;        // Local has projects but server is empty or out of sync
+  loading: boolean;
+  error: string | null;
+}
+
+/**
  * Calculate sync status using three-way timestamp comparison
  */
 export function calculateSyncStatus(
@@ -255,6 +269,74 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
       toast.error('Failed to pull server updates');
     }
     return false;
+  }
+}
+
+/**
+ * Get comprehensive sync overview status for UI display
+ * Compares local IndexedDB with server SQLite state
+ */
+export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
+  // Only available in Server Mode
+  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
+    return {
+      serverProjectCount: 0,
+      serverSiteCount: 0,
+      serverLastUpdated: null,
+      localProjectCount: 0,
+      isUninitialized: false,
+      needsSync: false,
+      loading: false,
+      error: 'Server mode not enabled',
+    };
+  }
+
+  try {
+    // Fetch server status
+    const response = await fetch('/api/sync/status');
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const summary = data.summary || {
+      projectCount: 0,
+      siteCount: 0,
+      lastUpdated: null,
+      isUninitialized: true,
+    };
+
+    // Get local project count from IndexedDB
+    await vfs.init();
+    const localProjects = await vfs.listProjects();
+    const localProjectCount = localProjects.length;
+
+    // Determine if sync is needed
+    const isUninitialized = summary.projectCount === 0;
+    const needsSync = isUninitialized && localProjectCount > 0;
+
+    return {
+      serverProjectCount: summary.projectCount,
+      serverSiteCount: summary.siteCount,
+      serverLastUpdated: summary.lastUpdated ? new Date(summary.lastUpdated) : null,
+      localProjectCount,
+      isUninitialized,
+      needsSync,
+      loading: false,
+      error: null,
+    };
+  } catch (error) {
+    logger.error('[AutoSync] Failed to get sync overview status:', error);
+    return {
+      serverProjectCount: 0,
+      serverSiteCount: 0,
+      serverLastUpdated: null,
+      localProjectCount: 0,
+      isUninitialized: true,
+      needsSync: false,
+      loading: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch sync status',
+    };
   }
 }
 

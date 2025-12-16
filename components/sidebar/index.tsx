@@ -3,6 +3,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
+import { getSyncOverviewStatus, SyncOverviewStatus } from '@/lib/vfs/auto-sync';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import {
@@ -121,6 +122,7 @@ function SidebarContent({
   const [hovering, setHovering] = useState(false);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [loadingRecentProjects, setLoadingRecentProjects] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<SyncOverviewStatus | null>(null);
 
   // Initialize expandedItems based on currentView to prevent flash
   const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
@@ -176,6 +178,21 @@ function SidebarContent({
     }
     loadRecentProjects();
   }, []);
+
+  // Load sync status for Server Mode
+  useEffect(() => {
+    if (!isServerMode) return;
+
+    async function loadSyncStatus() {
+      try {
+        const status = await getSyncOverviewStatus();
+        setSyncStatus(status);
+      } catch (error) {
+        console.error('Failed to load sync status:', error);
+      }
+    }
+    loadSyncStatus();
+  }, [isServerMode]);
 
   // Load pinned state from localStorage
   useEffect(() => {
@@ -535,6 +552,8 @@ function SidebarContent({
           {SYSTEM_ACTIONS.map((item) => {
             const Icon = item.icon;
             const isLogout = item.id === 'logout';
+            const isSync = item.id === 'sync';
+            const showSyncIndicator = isSync && syncStatus?.needsSync;
 
             return (
               <Button
@@ -542,7 +561,7 @@ function SidebarContent({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  'w-full',
+                  'w-full relative',
                   collapsed ? 'justify-center px-2' : 'justify-start',
                   isLogout && 'text-destructive hover:text-destructive hover:bg-destructive/10'
                 )}
@@ -551,6 +570,10 @@ function SidebarContent({
               >
                 <Icon className={cn('h-4 w-4', !collapsed && 'mr-2')} />
                 {!collapsed && item.label}
+                {/* Orange indicator dot when sync is needed */}
+                {showSyncIndicator && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full" />
+                )}
               </Button>
             );
           })}

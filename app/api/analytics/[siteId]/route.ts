@@ -4,8 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 export interface AnalyticsStats {
   totalPageviews: number;
@@ -27,123 +26,43 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const days = parseInt(searchParams.get('days') || '30', 10);
 
-    const adapter = await createServerAdapter();
-
-    // Only PostgresAdapter supports analytics
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
+    }
 
-    // Total pageviews
-    const totalResult = await sql<[{ count: string }]>`
-      SELECT COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-        AND timestamp >= ${startDate}
-    `;
-    const totalPageviews = parseInt(totalResult[0]?.count || '0', 10);
+    // Get analytics stats
+    const analyticsStats = siteDb.getStats(days);
+    const topPages = siteDb.getTopPages(days, 10);
+    const topReferrers = siteDb.getTopReferrers(days, 10);
+    const pageviewsOverTime = siteDb.getPageviewsOverTime(days);
 
-    // Unique visitors
-    const uniqueResult = await sql<[{ count: string }]>`
-      SELECT COUNT(DISTINCT session_id)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-        AND timestamp >= ${startDate}
-    `;
-    const uniqueVisitors = parseInt(uniqueResult[0]?.count || '0', 10);
-
-    // Top pages
-    const topPagesResult = await sql<Array<{ page_path: string; count: string }>>`
-      SELECT page_path, COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-        AND timestamp >= ${startDate}
-      GROUP BY page_path
-      ORDER BY count DESC
-      LIMIT 10
-    `;
-    const topPages = topPagesResult.map(row => ({
-      path: row.page_path,
-      views: parseInt(row.count, 10),
-    }));
-
-    // Top referrers (excluding empty/null)
-    const topReferrersResult = await sql<Array<{ referrer: string; count: string }>>`
-      SELECT referrer, COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-        AND timestamp >= ${startDate}
-        AND referrer IS NOT NULL
-        AND referrer != ''
-      GROUP BY referrer
-      ORDER BY count DESC
-      LIMIT 10
-    `;
-    const topReferrers = topReferrersResult.map(row => ({
-      referrer: row.referrer,
-      views: parseInt(row.count, 10),
-    }));
-
-    // Countries (if available)
-    const countriesResult = await sql<Array<{ country: string; count: string }>>`
-      SELECT country, COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-        AND timestamp >= ${startDate}
-        AND country IS NOT NULL
-      GROUP BY country
-      ORDER BY count DESC
-      LIMIT 10
-    `;
-    const countries = countriesResult.map(row => ({
-      country: row.country,
-      views: parseInt(row.count, 10),
-    }));
-
-    // Pageviews over time (daily)
-    const timeSeriesResult = await sql<Array<{ date: string; count: string }>>`
-      SELECT
-        DATE(timestamp) as date,
-        COUNT(*)::integer as count
-      FROM pageviews
-      WHERE site_id = ${siteId}
-        AND timestamp >= ${startDate}
-      GROUP BY DATE(timestamp)
-      ORDER BY date ASC
-    `;
-    const pageviewsOverTime = timeSeriesResult.map(row => ({
-      date: row.date,
-      views: parseInt(row.count, 10),
-    }));
-
-    await adapter.close?.();
+    // Note: Country tracking not implemented yet
+    const countries: Array<{ country: string; views: number }> = [];
 
     const stats: AnalyticsStats = {
-      totalPageviews,
-      uniqueVisitors,
+      totalPageviews: analyticsStats.totalPageviews,
+      uniqueVisitors: analyticsStats.uniqueSessions,
       topPages,
-      topReferrers,
+      topReferrers: topReferrers.map(r => ({ referrer: r.referrer, views: r.count })),
       countries,
-      pageviewsOverTime,
+      pageviewsOverTime: pageviewsOverTime.map(p => ({ date: p.date, views: p.views })),
     };
 
     return NextResponse.json(stats);

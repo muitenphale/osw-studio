@@ -49,12 +49,22 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notPublished, setNotPublished] = useState(false);
 
   useEffect(() => {
     if (!site) return;
+
+    // Check if site has been published (database enabled)
+    if (!site.databaseEnabled) {
+      setNotPublished(true);
+      setLoading(false);
+      return;
+    }
+
+    setNotPublished(false);
     fetchOverview();
     fetchStorage();
-  }, [site?.id]);
+  }, [site?.id, site?.databaseEnabled]);
 
   const fetchOverview = async () => {
     if (!site) return;
@@ -189,11 +199,11 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
             <DialogDescription>{site.name || site.id}</DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={notPublished}>
               <Download className="h-4 w-4 mr-2" />
               Export
             </Button>
-            <Button variant="outline" size="sm" onClick={handleClearData}>
+            <Button variant="outline" size="sm" onClick={handleClearData} disabled={notPublished}>
               <Trash2 className="h-4 w-4 mr-2" />
               Clear Data
             </Button>
@@ -247,7 +257,18 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
                 </div>
               )}
 
-              {!loading && overview && (
+              {!loading && notPublished && (
+                <div className="flex flex-col items-center justify-center h-96 text-center">
+                  <BarChart3 className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Analytics Not Available</h3>
+                  <p className="text-muted-foreground max-w-md">
+                    Analytics data will be available after you publish your site for the first time.
+                    The analytics database is created when the site is published.
+                  </p>
+                </div>
+              )}
+
+              {!loading && !notPublished && overview && (
                 <>
                   <div className="grid grid-cols-4 gap-4">
                     <div className="border rounded-lg p-4">
@@ -322,15 +343,45 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
             </TabsContent>
 
             <TabsContent value="heatmaps" className="p-6">
-              <HeatmapViewer siteId={site.id} pages={pages} />
+              {notPublished ? (
+                <div className="flex flex-col items-center justify-center h-96 text-center">
+                  <MousePointerClick className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Heatmaps Not Available</h3>
+                  <p className="text-muted-foreground max-w-md">
+                    Heatmap data will be collected after you publish your site.
+                  </p>
+                </div>
+              ) : (
+                <HeatmapViewer siteId={site.id} pages={pages} />
+              )}
             </TabsContent>
 
             <TabsContent value="sessions" className="p-6">
-              <SessionViewer siteId={site.id} />
+              {notPublished ? (
+                <div className="flex flex-col items-center justify-center h-96 text-center">
+                  <Users className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Sessions Not Available</h3>
+                  <p className="text-muted-foreground max-w-md">
+                    Session data will be collected after you publish your site.
+                  </p>
+                </div>
+              ) : (
+                <SessionViewer siteId={site.id} />
+              )}
             </TabsContent>
 
             <TabsContent value="engagement" className="p-6">
-              <EngagementMetrics siteId={site.id} />
+              {notPublished ? (
+                <div className="flex flex-col items-center justify-center h-96 text-center">
+                  <Activity className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Engagement Metrics Not Available</h3>
+                  <p className="text-muted-foreground max-w-md">
+                    Engagement data will be collected after you publish your site.
+                  </p>
+                </div>
+              ) : (
+                <EngagementMetrics siteId={site.id} />
+              )}
             </TabsContent>
           </div>
         </Tabs>

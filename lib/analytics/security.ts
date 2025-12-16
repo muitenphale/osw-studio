@@ -142,8 +142,15 @@ export function getAllowedOrigins(
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   const origins: string[] = [
-    `${appUrl}/sites/${siteId}` // Published site path
+    `${appUrl}/sites/${siteId}`, // Published site path
+    appUrl // Base app URL (for development/testing)
   ];
+
+  // Add localhost variations for development
+  if (appUrl.includes('localhost')) {
+    origins.push('http://localhost:3000');
+    origins.push('http://127.0.0.1:3000');
+  }
 
   // Add custom domain if configured
   if (customDomain) {

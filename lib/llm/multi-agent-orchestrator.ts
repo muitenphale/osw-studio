@@ -301,6 +301,15 @@ Note: Your response will be automatically appended to the buffered content. Only
     const context = this.activeContinuations.get(filePath);
     return context ? context.attemptCount > 1 : false;
   }
+
+  /**
+   * Clear all buffers and active continuations
+   * Called when orchestrator completes to free memory
+   */
+  clearAll(): void {
+    this.contentBuffer.clear();
+    this.activeContinuations.clear();
+  }
 }
 
 export interface AgentMessage {
@@ -506,6 +515,9 @@ export class MultiAgentOrchestrator {
         totalCost: this.totalCost,
         totalUsage: this.totalUsage
       };
+    } finally {
+      // Clean up continuation handler buffers to free memory
+      this.continuationHandler.clearAll();
     }
   }
 
@@ -918,8 +930,17 @@ Please revise your approach.`;
         if (toolId === 'evaluation') {
           try {
             const args = JSON.parse(toolCall.function.arguments);
+            // Handle should_continue - LLM sometimes sends as string "true"/"false"
+            let shouldContinue = true; // Default to true
+            if (typeof args.should_continue === 'boolean') {
+              shouldContinue = args.should_continue;
+            } else if (typeof args.should_continue === 'string') {
+              shouldContinue = args.should_continue.toLowerCase() === 'true' || args.should_continue === '1';
+            } else if (args.should_continue !== undefined) {
+              shouldContinue = Boolean(args.should_continue);
+            }
             this.lastEvaluationResult = {
-              should_continue: args.should_continue !== false // Default to true if not specified
+              should_continue: shouldContinue
             };
             logger.info(`[MultiAgentOrchestrator] Captured evaluation result: should_continue=${this.lastEvaluationResult.should_continue}`);
           } catch (error) {

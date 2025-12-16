@@ -55,6 +55,7 @@ interface TurnItem {
   type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error';
   timestamp: number;
   data: any;
+  eventId?: string;  // Links item to its source debug event (for coalesced updates)
 }
 
 interface Turn {
@@ -193,53 +194,41 @@ export function ChatPanel({
 
         case 'reasoning_delta':
           // Handle reasoning tokens (from Anthropic extended thinking, DeepSeek, Gemini, etc.)
-          // When coalesced, data.all contains array of {text, snapshot} objects
-          //
-          // IMPORTANT: Different providers handle snapshots differently:
-          // - Gemini: snapshot is cumulative (contains full text so far)
-          // - DeepSeek: snapshot equals text (NOT cumulative, need to concatenate)
-          // - Anthropic: snapshot is cumulative
-          //
-          // Strategy: Check if last snapshot looks cumulative (longer than individual text).
-          // If not, concatenate all text fields to build the full reasoning.
+          // When coalesced, data.all contains array of {text} objects (snapshots removed for memory efficiency)
+          // The coalesced event contains ALL text accumulated so far, so we REPLACE (not append)
           const reasoningDeltaItems = event.data?.all || [event.data];
 
-          // Find the last reasoning item
-          let lastReasoningItem = state.currentTurn.items.findLast(item => item.type === 'reasoning');
+          // Concatenate all text fields from the coalesced deltas
+          // This gives us the complete reasoning content from this coalesced event
+          const allReasoningText = reasoningDeltaItems.map((d: any) => d?.text || '').join('');
 
-          // Get the final snapshot from the last item
-          const lastDelta = reasoningDeltaItems[reasoningDeltaItems.length - 1];
-          const lastSnapshot = lastDelta?.snapshot;
-          const lastText = lastDelta?.text;
-
-          // Determine if snapshots are cumulative or not
-          // If the last snapshot equals the last text, snapshots are NOT cumulative (DeepSeek behavior)
-          // In that case, we need to concatenate all text fields
-          let finalContent: string;
-
-          if (reasoningDeltaItems.length > 1 && lastSnapshot === lastText) {
-            // Non-cumulative snapshots (DeepSeek) - concatenate all text fields
-            // and append to existing reasoning content
-            const newText = reasoningDeltaItems.map((d: any) => d?.text || '').join('');
-            const existingContent = lastReasoningItem?.data || '';
-            finalContent = existingContent + newText;
-          } else {
-            // Cumulative snapshots (Gemini, Anthropic) - use the last snapshot directly
-            finalContent = lastSnapshot || lastText || '';
+          // Skip whitespace-only reasoning (often happens between tool calls)
+          const trimmedReasoningText = allReasoningText.trim();
+          if (!trimmedReasoningText) {
+            // Remove waiting indicator even for whitespace-only reasoning
+            state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
+            break;
           }
 
-          if (finalContent) {
-            if (lastReasoningItem) {
-              lastReasoningItem.data = finalContent;
-            } else {
-              lastReasoningItem = {
-                id: `item-${state.itemIdCounter++}`,
-                type: 'reasoning',
-                timestamp: event.timestamp,
-                data: finalContent
-              };
-              state.currentTurn.items.push(lastReasoningItem);
-            }
+          // Find the reasoning item that corresponds to THIS event (by matching eventId)
+          // This ensures multiple reasoning sessions (separated by tool calls) each get their own item
+          let matchingReasoningItem = state.currentTurn.items.find(
+            item => item.type === 'reasoning' && item.eventId === event.id
+          ) as TurnItem | undefined;
+
+          if (matchingReasoningItem) {
+            // Update the existing reasoning item for this event
+            matchingReasoningItem.data = allReasoningText;
+          } else {
+            // Create new reasoning item and link it to this event's ID
+            const newReasoningItem: TurnItem = {
+              id: `item-${state.itemIdCounter++}`,
+              type: 'reasoning',
+              timestamp: event.timestamp,
+              data: allReasoningText,
+              eventId: event.id  // Track which event this item belongs to
+            };
+            state.currentTurn.items.push(newReasoningItem);
           }
 
           // Remove waiting indicator when reasoning arrives
@@ -343,42 +332,33 @@ export function ChatPanel({
 
         case 'assistant_delta':
           // Handle both coalesced (data.all) and individual delta formats
+          // When coalesced, data.all contains array of {text} objects (snapshots removed for memory efficiency)
           const deltaItems = event.data?.all || [event.data];
 
-          // Find the last text item once
-          let lastTextItem = state.currentTurn.items.findLast(item => item.type === 'text');
+          // Find the text item that corresponds to THIS event (by matching eventId)
+          // This ensures multiple text blocks (separated by tool calls) each get their own item
+          let matchingTextItem = state.currentTurn.items.find(
+            item => item.type === 'text' && item.eventId === event.id
+          ) as TurnItem | undefined;
 
-          // Process all deltas in the event
-          for (const delta of deltaItems) {
-            const text = delta?.text || '';
-            const snapshot = delta?.snapshot;
+          // Concatenate all text fields from the coalesced deltas
+          // This gives us the complete content from this coalesced event
+          const allText = deltaItems.map((d: any) => d?.text || '').join('');
 
-            if (snapshot !== undefined) {
-              // Snapshot contains full text, update or create
-              if (lastTextItem) {
-                lastTextItem.data = snapshot;
-              } else {
-                lastTextItem = {
-                  id: `item-${state.itemIdCounter++}`,
-                  type: 'text',
-                  timestamp: event.timestamp,
-                  data: snapshot
-                };
-                state.currentTurn.items.push(lastTextItem);
-              }
-            } else if (text) {
-              // Delta - append to existing or create new
-              if (lastTextItem) {
-                lastTextItem.data += text;
-              } else {
-                lastTextItem = {
-                  id: `item-${state.itemIdCounter++}`,
-                  type: 'text',
-                  timestamp: event.timestamp,
-                  data: text
-                };
-                state.currentTurn.items.push(lastTextItem);
-              }
+          if (allText) {
+            if (matchingTextItem) {
+              // Update the existing text item for this event
+              matchingTextItem.data = allText;
+            } else {
+              // Create new text item and link it to this event's ID
+              const newTextItem: TurnItem = {
+                id: `item-${state.itemIdCounter++}`,
+                type: 'text',
+                timestamp: event.timestamp,
+                data: allText,
+                eventId: event.id  // Track which event this item belongs to
+              };
+              state.currentTurn.items.push(newTextItem);
             }
           }
 

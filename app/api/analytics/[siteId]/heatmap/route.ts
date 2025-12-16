@@ -11,8 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { PostgresAdapter } from '@/lib/vfs/adapters/postgres-adapter';
+import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 
 export async function GET(
   request: NextRequest,
@@ -43,100 +42,38 @@ export async function GET(
       );
     }
 
-    const adapter = await createServerAdapter();
-
-    if (!(adapter instanceof PostgresAdapter)) {
-      return NextResponse.json(
-        { error: 'Analytics requires Server Mode (PostgreSQL)' },
-        { status: 503 }
-      );
-    }
-
+    const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Verify site exists
-    const site = await adapter.getSite?.(siteId);
+    // Verify site exists (from core database)
+    const site = await adapter.getSite(siteId);
     if (!site) {
-      await adapter.close?.();
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
 
-    const sql = adapter.getSQL();
-
-    // Build query based on type
-    let data: any[] = [];
-
-    if (type === 'click') {
-      // Get click coordinates
-      const query = sql`
-        SELECT
-          coordinates,
-          element_selector,
-          timestamp
-        FROM interactions
-        WHERE
-          site_id = ${siteId}
-          AND page_path = ${page}
-          AND interaction_type = 'click'
-          AND coordinates IS NOT NULL
-          ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-          ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-        ORDER BY timestamp DESC
-        LIMIT 10000
-      `;
-
-      data = await query;
-
-      // Filter by device type based on viewport width (since device_type is not stored in interactions)
-      if (device && device !== 'all') {
-        data = data.filter((row) => {
-          try {
-            const coords = typeof row.coordinates === 'string'
-              ? JSON.parse(row.coordinates)
-              : row.coordinates;
-            const width = coords.viewportWidth;
-
-            if (device === 'mobile') return width < 768;
-            if (device === 'tablet') return width >= 768 && width < 1024;
-            if (device === 'desktop') return width >= 1024;
-
-            return true;
-          } catch {
-            return false;
-          }
-        });
-      }
-    } else if (type === 'scroll') {
-      // Get scroll depth milestones
-      const query = sql`
-        SELECT
-          scroll_depth,
-          time_on_page,
-          timestamp
-        FROM interactions
-        WHERE
-          site_id = ${siteId}
-          AND page_path = ${page}
-          AND interaction_type = 'scroll'
-          AND scroll_depth IS NOT NULL
-          ${dateFrom ? sql`AND timestamp >= ${dateFrom}` : sql``}
-          ${dateTo ? sql`AND timestamp <= ${dateTo}` : sql``}
-        ORDER BY timestamp DESC
-        LIMIT 10000
-      `;
-
-      data = await query;
+    // Get site database for analytics
+    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    if (!siteDb) {
+      return NextResponse.json(
+        { error: 'Site database not enabled' },
+        { status: 404 }
+      );
     }
 
-    await adapter.close?.();
-
-    // Process and return heatmap data
+    // Process and return heatmap data based on type
     if (type === 'click') {
-      // Parse coordinates and aggregate
-      const points = data
+      // Get click data from SiteDatabase
+      const clickData = siteDb.getClickData(
+        page,
+        dateFrom || undefined,
+        dateTo || undefined
+      );
+
+      // Parse coordinates and filter by device
+      let points = clickData
         .map((row) => {
           try {
             const coords = typeof row.coordinates === 'string'
@@ -145,18 +82,29 @@ export async function GET(
             return {
               x: coords.x,
               y: coords.y,
-              scrollY: coords.scrollY || 0, // Add scrollY for full-page heatmap
+              scrollY: coords.scrollY || 0,
               viewportWidth: coords.viewportWidth,
               viewportHeight: coords.viewportHeight,
-              documentHeight: coords.documentHeight, // Also include document height
-              elementSelector: row.element_selector,
+              documentHeight: coords.documentHeight,
+              elementSelector: row.elementSelector,
               timestamp: row.timestamp,
             };
           } catch {
             return null;
           }
         })
-        .filter((p) => p !== null);
+        .filter((p): p is NonNullable<typeof p> => p !== null);
+
+      // Filter by device type based on viewport width
+      if (device && device !== 'all') {
+        points = points.filter((point) => {
+          const width = point.viewportWidth;
+          if (device === 'mobile') return width < 768;
+          if (device === 'tablet') return width >= 768 && width < 1024;
+          if (device === 'desktop') return width >= 1024;
+          return true;
+        });
+      }
 
       return NextResponse.json({
         type: 'click',
@@ -165,9 +113,16 @@ export async function GET(
         points,
       });
     } else if (type === 'scroll') {
+      // Get scroll data from SiteDatabase
+      const scrollData = siteDb.getScrollData(
+        page,
+        dateFrom || undefined,
+        dateTo || undefined
+      );
+
       // Aggregate scroll depth data
-      const depthCounts = data.reduce((acc, row) => {
-        const depth = row.scroll_depth;
+      const depthCounts = scrollData.reduce((acc, row) => {
+        const depth = row.scrollDepth;
         acc[depth] = (acc[depth] || 0) + 1;
         return acc;
       }, {} as Record<number, number>);
@@ -175,13 +130,9 @@ export async function GET(
       return NextResponse.json({
         type: 'scroll',
         page,
-        sampleSize: data.length,
+        sampleSize: scrollData.length,
         depthDistribution: depthCounts,
-        rawData: data.map((row) => ({
-          scrollDepth: row.scroll_depth,
-          timeOnPage: row.time_on_page,
-          timestamp: row.timestamp,
-        })),
+        rawData: scrollData,
       });
     }
 
