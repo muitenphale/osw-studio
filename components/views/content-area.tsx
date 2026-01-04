@@ -20,7 +20,7 @@ export function ContentArea({ view, onProjectSelect, settingsTab }: ContentAreaP
     case 'projects':
       return <ProjectsView onProjectSelect={onProjectSelect} />;
     case 'sites':
-      return <SitesView />;
+      return <SitesView onProjectSelect={onProjectSelect} />;
     case 'templates':
       return <TemplatesView />;
     case 'skills':

@@ -1,0 +1,281 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { EdgeFunction } from '@/lib/vfs/types';
+import {
+  Plus, Loader2, AlertCircle, Code2, MoreVertical, Pencil, Trash2,
+  ToggleLeft, ToggleRight, Copy, ExternalLink, CheckCircle2
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { FunctionEditor } from './function-editor';
+import { cn } from '@/lib/utils';
+
+interface FunctionsManagerProps {
+  siteId: string;
+}
+
+export function FunctionsManager({ siteId }: FunctionsManagerProps) {
+  const [functions, setFunctions] = useState<EdgeFunction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingFunction, setEditingFunction] = useState<EdgeFunction | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadFunctions();
+  }, [siteId]);
+
+  const loadFunctions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch(`/api/admin/sites/${siteId}/functions`);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to load functions');
+      }
+      const data = await res.json();
+      setFunctions(data.functions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load functions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleEnabled = async (fn: EdgeFunction) => {
+    try {
+      const res = await fetch(`/api/admin/sites/${siteId}/functions/${fn.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !fn.enabled }),
+      });
+      if (!res.ok) throw new Error('Failed to update function');
+      await loadFunctions();
+    } catch (err) {
+      console.error('Failed to toggle function:', err);
+    }
+  };
+
+  const deleteFunction = async (fn: EdgeFunction) => {
+    if (!confirm(`Delete function "${fn.name}"? This cannot be undone.`)) return;
+
+    try {
+      const res = await fetch(`/api/admin/sites/${siteId}/functions/${fn.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete function');
+      await loadFunctions();
+    } catch (err) {
+      console.error('Failed to delete function:', err);
+    }
+  };
+
+  const copyUrl = (fn: EdgeFunction) => {
+    const url = `${window.location.origin}/api/sites/${siteId}/functions/${fn.name}`;
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(fn.id);
+    setTimeout(() => setCopiedUrl(null), 2000);
+  };
+
+  const handleSave = async (data: Partial<EdgeFunction>) => {
+    try {
+      if (editingFunction) {
+        // Update existing
+        const res = await fetch(`/api/admin/sites/${siteId}/functions/${editingFunction.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to update function');
+        }
+      } else {
+        // Create new
+        const res = await fetch(`/api/admin/sites/${siteId}/functions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to create function');
+        }
+      }
+
+      setEditingFunction(null);
+      setIsCreating(false);
+      await loadFunctions();
+    } catch (err) {
+      throw err; // Let the editor handle the error
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" onClick={loadFunctions}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium">Edge Functions</h3>
+        <Button size="sm" onClick={() => setIsCreating(true)}>
+          <Plus className="h-4 w-4 mr-1" />
+          New Function
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        {functions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full p-8 text-center border rounded-lg">
+            <Code2 className="h-8 w-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">No edge functions yet</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              Create your first API endpoint
+            </p>
+            <Button size="sm" onClick={() => setIsCreating(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Create Function
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {functions.map(fn => (
+              <div
+                key={fn.id}
+                className={cn(
+                  "border rounded-lg p-4 transition-colors",
+                  !fn.enabled && "opacity-60 bg-muted/30"
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Code2 className="h-4 w-4 text-blue-500 shrink-0" />
+                      <span className="font-mono font-medium truncate">{fn.name}</span>
+                      <span className={cn(
+                        "text-xs px-1.5 py-0.5 rounded shrink-0",
+                        fn.method === 'ANY' ? "bg-purple-500/20 text-purple-600" :
+                        fn.method === 'GET' ? "bg-green-500/20 text-green-600" :
+                        fn.method === 'POST' ? "bg-blue-500/20 text-blue-600" :
+                        fn.method === 'PUT' ? "bg-yellow-500/20 text-yellow-600" :
+                        "bg-red-500/20 text-red-600"
+                      )}>
+                        {fn.method}
+                      </span>
+                      {!fn.enabled && (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0">disabled</span>
+                      )}
+                    </div>
+                    {fn.description && (
+                      <p className="text-sm text-muted-foreground mt-1 truncate">
+                        {fn.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                      <span className="shrink-0">Timeout: {fn.timeoutMs / 1000}s</span>
+                      <button
+                        onClick={() => copyUrl(fn)}
+                        className="flex items-center gap-1 hover:text-foreground transition-colors shrink-0"
+                      >
+                        {copiedUrl === fn.id ? (
+                          <>
+                            <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" />
+                            Copy URL
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setEditingFunction(fn)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => toggleEnabled(fn)}>
+                        {fn.enabled ? (
+                          <>
+                            <ToggleLeft className="h-4 w-4 mr-2" />
+                            Disable
+                          </>
+                        ) : (
+                          <>
+                            <ToggleRight className="h-4 w-4 mr-2" />
+                            Enable
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => window.open(`/api/sites/${siteId}/functions/${fn.name}`, '_blank')}
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Open in Browser
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => deleteFunction(fn)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Function Editor Dialog */}
+      {(isCreating || editingFunction) && (
+        <FunctionEditor
+          siteId={siteId}
+          function={editingFunction}
+          isOpen={true}
+          onClose={() => {
+            setIsCreating(false);
+            setEditingFunction(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}

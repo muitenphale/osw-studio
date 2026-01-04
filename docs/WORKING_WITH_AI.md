@@ -409,6 +409,46 @@ nothing happens. Can you fix the JavaScript?
 
 ---
 
+## Server Context (Server Mode Only)
+
+> ⚠️ **Experimental Feature**: Server Context Integration is experimental and may change in future versions.
+
+In Server Mode, the AI can understand your published site's server features when you select a site from the dropdown in the workspace header.
+
+### What the AI Knows
+
+When a site is selected, the AI has access to:
+- **Edge Functions** - Available API endpoints
+- **Database Schema** - Tables, columns, and types
+- **Server Functions** - Reusable helper code
+- **Secrets** - Available secret names (not values)
+
+### Example Prompts
+
+```
+What edge functions are available?
+```
+
+```
+Create an endpoint to fetch all users from the database
+```
+
+```
+I need to use the STRIPE_KEY secret in a payment function
+```
+
+```
+Show me the current database schema
+```
+
+### How It Works
+
+OSW Studio mounts a `/.server/` hidden folder containing JSON files with your site's server context. The LLM reads these to understand what's exists and writes to them to extend them.
+
+See **[Server Features → AI Integration](?doc=server-features#ai-integration)** for more details.
+
+---
+
 ## Advanced Tips
 
 ### Reference Specific Files

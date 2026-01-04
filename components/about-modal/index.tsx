@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/ui/logo';
 import { Badge } from '@/components/ui/badge';
 import { Github, ExternalLink } from 'lucide-react';
+import { DiscordIcon } from '@/components/ui/discord-icon';
 
 interface AboutModalProps {
   open: boolean;
@@ -56,8 +57,18 @@ export function AboutModal({ open, onOpenChange }: AboutModalProps) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-lg mb-3">Links & Support</h3>
+            <h3 className="font-semibold text-lg mb-3">Links & Community</h3>
             <div className="flex flex-col gap-2">
+              <a
+                href="https://discord.gg/mAJ8Ss4u"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                <DiscordIcon className="h-4 w-4" />
+                Discord Community
+                <ExternalLink className="h-3 w-3" />
+              </a>
               <a
                 href="https://github.com/o-stahl/osw-studio"
                 target="_blank"

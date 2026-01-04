@@ -55,15 +55,78 @@ async function vfsShellExecute(
   if (!projectId || typeof projectId !== 'string') {
     return { stdout: '', stderr: 'Invalid project ID provided', exitCode: 2 };
   }
-  
+
   if (!cmd || cmd.length === 0) {
     return { stdout: '', stderr: 'No command provided', exitCode: 2 };
   }
-  
+
   // Filter out empty/undefined arguments
   const cleanCmd = cmd.filter(arg => arg !== undefined && arg !== null && arg !== '');
   if (cleanCmd.length === 0) {
     return { stdout: '', stderr: 'No valid command arguments provided', exitCode: 2 };
+  }
+
+  // Handle && command chaining - execute sequentially, stop on first failure
+  if (cleanCmd.some(arg => arg === '&&')) {
+    const commands: string[][] = [];
+    let currentCmd: string[] = [];
+
+    for (const arg of cleanCmd) {
+      if (arg === '&&') {
+        if (currentCmd.length > 0) {
+          commands.push(currentCmd);
+          currentCmd = [];
+        }
+      } else {
+        currentCmd.push(arg);
+      }
+    }
+    if (currentCmd.length > 0) {
+      commands.push(currentCmd);
+    }
+
+    // Execute commands sequentially
+    const allStdout: string[] = [];
+    const allStderr: string[] = [];
+
+    for (const singleCmd of commands) {
+      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd, _opts);
+      if (result.stdout) allStdout.push(result.stdout);
+      if (result.stderr) allStderr.push(result.stderr);
+
+      // Stop on first failure (that's && semantics)
+      if (result.exitCode !== 0) {
+        return {
+          stdout: allStdout.join('\n'),
+          stderr: allStderr.join('\n'),
+          exitCode: result.exitCode
+        };
+      }
+    }
+
+    return {
+      stdout: allStdout.join('\n'),
+      stderr: allStderr.join('\n'),
+      exitCode: 0
+    };
+  }
+
+  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts);
+}
+
+async function vfsShellExecuteSingle(
+  vfs: VirtualFileSystem,
+  projectId: string,
+  cleanCmd: string[],
+  _opts: ShellOpts = {}
+): Promise<ShellResult> {
+  // Detect unsupported pipe operator
+  if (cleanCmd.some(arg => arg === '|' || arg.includes('|'))) {
+    return {
+      stdout: '',
+      stderr: 'Pipes (|) are not supported in the VFS shell. Commands run independently.\n\nInstead of piping commands, use the appropriate flags:\n  head -n 20 /file.txt      (first 20 lines)\n  tail -n 20 /file.txt      (last 20 lines)\n  rg -C 3 "pattern" /file   (search with context)',
+      exitCode: 2
+    };
   }
 
   const [program, ...args] = cleanCmd;
@@ -409,16 +472,22 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
       }
       case 'rg': {
         // ripgrep with context flags: rg [-n] [-i] [-C num] [-A num] [-B num] pattern [path]
+        // Also supports combined flags like -nC, -ni, etc.
         const flags: Record<string, any> = { n: true, i: false, C: 0, A: 0, B: 0 };
         const fargs: string[] = [];
         for (let i = 0; i < args.length; i++) {
           const a = args[i];
-          if (a.startsWith('-')) {
-            if (a === '-n') flags.n = true;
-            else if (a === '-i') flags.i = true;
-            else if (a === '-C') { flags.C = parseInt(args[++i]) || 2; }
-            else if (a === '-A') { flags.A = parseInt(args[++i]) || 2; }
-            else if (a === '-B') { flags.B = parseInt(args[++i]) || 2; }
+          if (a.startsWith('-') && a.length > 1 && !/^-\d+$/.test(a)) {
+            // Handle combined flags like -nC, -ni, -iC, etc.
+            const flagStr = a.slice(1);
+            for (let j = 0; j < flagStr.length; j++) {
+              const ch = flagStr[j];
+              if (ch === 'n') flags.n = true;
+              else if (ch === 'i') flags.i = true;
+              else if (ch === 'C') { flags.C = parseInt(args[++i]) || 2; break; }
+              else if (ch === 'A') { flags.A = parseInt(args[++i]) || 2; break; }
+              else if (ch === 'B') { flags.B = parseInt(args[++i]) || 2; break; }
+            }
           } else {
             fargs.push(a);
           }
@@ -562,6 +631,13 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         for (const path of paths) {
           if (!path) continue;
 
+          // Block mkdir under /.server/ - these are transient/auto-generated
+          if (path.startsWith('/.server/')) {
+            errors.push(`mkdir: cannot create '${path}': server context directories are auto-generated`);
+            hadError = true;
+            continue;
+          }
+
           try {
             if (hasP) {
               await ensureDirectory(vfs, projectId, path);
@@ -622,7 +698,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         let force = false;
         let verbose = false;
         const targets: string[] = [];
-        
+
         for (const arg of args) {
           if (arg && arg.startsWith('-')) {
             // Handle combined flags like -rf, -rfv
@@ -633,19 +709,36 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
             targets.push(arg);
           }
         }
-        
+
         if (targets.length === 0) return { stdout: '', stderr: 'rm: missing operand', exitCode: 2 };
-        
+
         let hadError = false;
         const verboseOutput: string[] = [];
-        
+        const errorMessages: string[] = [];
+
         for (const target of targets) {
           const path = normalizePath(target);
           if (!path) {
             if (!force) hadError = true;
             continue;
           }
-          
+
+          // Handle server context files (/.server/)
+          if (path.startsWith('/.server/')) {
+            try {
+              await vfs.deleteServerContextFile(path);
+              if (verbose) verboseOutput.push(`removed '${path}'`);
+            } catch (e: any) {
+              if (!force) {
+                hadError = true;
+                const msg = `rm: cannot remove '${path}': ${e?.message || 'unknown error'}`;
+                errorMessages.push(msg);
+                if (verbose) verboseOutput.push(msg);
+              }
+            }
+            continue;
+          }
+
           try {
             // Try to delete as file first
             await vfs.deleteFile(projectId, path);
@@ -659,20 +752,24 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
               } catch {
                 if (!force) {
                   hadError = true;
-                  if (verbose) verboseOutput.push(`rm: cannot remove '${path}': No such file or directory`);
+                  const msg = `rm: cannot remove '${path}': No such file or directory`;
+                  errorMessages.push(msg);
+                  if (verbose) verboseOutput.push(msg);
                 }
               }
             } else {
               if (!force) {
                 hadError = true;
-                if (verbose) verboseOutput.push(`rm: cannot remove '${path}': Is a directory (use -r to remove directories)`);
+                const msg = `rm: cannot remove '${path}': Is a directory (use -r to remove directories)`;
+                errorMessages.push(msg);
+                if (verbose) verboseOutput.push(msg);
               }
             }
           }
         }
-        
+
         const stdout = verbose ? verboseOutput.join('\n') : '';
-        const stderr = hadError && !verbose ? 'rm: some paths could not be removed' : '';
+        const stderr = hadError ? errorMessages.join('\n') : '';
         return { stdout: truncate(stdout), stderr, exitCode: hadError ? 1 : 0 };
       }
       case 'mv': {
@@ -769,6 +866,24 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
           return { stdout: '', stderr: `echo: ${path}: ${e?.message || 'cannot write file'}`, exitCode: 1 };
         }
       }
+      case 'sqlite3': {
+        // This case is reached when sqlite3 is called without a siteId context
+        // When siteId is available, tool-registry.ts routes the call to the server API
+        return {
+          stdout: '',
+          stderr: `sqlite3: requires Server Mode with a published site
+
+The sqlite3 command requires:
+1. Server Mode (not Browser Mode)
+2. A site to be selected and published
+
+If you are in Server Mode with a published site, this error indicates the site context is not set.
+Please ensure the site is selected in the workspace before using sqlite3.
+
+Alternative: Use edge functions for database access via db.query() and db.run()`,
+          exitCode: 1
+        };
+      }
       default: {
         const bashHint = program === 'bash' ? `
 Don't use "bash" as a command - call the shell tool directly with your command.
@@ -780,7 +895,7 @@ Right: {"cmd": ["ls", "-la"]}
           stdout: '',
           stderr: `${program}: command not found${bashHint}
 
-Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo
+Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sqlite3
 
 Correct shell tool usage:
   {"cmd": ["ls", "/"]}                        - List files
@@ -801,8 +916,11 @@ Correct shell tool usage:
   {"cmd": ["cp", "-r", "/src", "/dest"]}      - Copy files/directories
   {"cmd": ["echo", "Hello World"]}            - Output text
   {"cmd": ["echo", "content", ">", "/file.txt"]} - Write text to file
+  {"cmd": ["sqlite3", "SELECT * FROM users"]} - Execute SQL (Server Mode)
+  {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 
-Note: Use json_patch tool for complex file editing. Use rg (ripgrep) instead of grep for better context.`,
+Note: Use json_patch tool for file editing. Use rg (ripgrep) instead of grep for better context management.
+Note: sqlite3 is only available in Server Mode and when a site context is selected.`,
           exitCode: 127
         };
       }

@@ -1,5 +1,51 @@
 # Changelog
 
+## v1.19.0 - 2026-01-03
+- **Server Mode Backend Features**: Complete backend functionality for published sites
+  - **Edge Functions**: REST API endpoints with JavaScript runtime
+    - Create JavaScript API endpoints for published sites (GET, POST, PUT, DELETE, ANY)
+    - Database access via `db.query()` and `db.run()` with parameterized queries
+    - External API calls with `fetch()`
+    - Isolated execution via Node.js VM contexts with configurable timeouts (1-30 seconds)
+    - Access to secrets via `secrets.get()`, `secrets.has()`, `secrets.list()`
+  - **Server Functions (Helpers)**: Reusable JavaScript code callable from edge functions
+    - Define shared logic once, use across edge functions via `server.functionName()`
+    - Same security model as edge functions with full `db` and `fetch` access
+  - **Secrets Management**: Encrypted storage for API keys and tokens
+    - AES-256-GCM encryption with unique IVs per secret
+    - Admin-only access, values never logged or returned in API responses
+    - AI can create secret entries, user sets values via admin UI
+  - **SQL Editor**: Execute raw SQL queries with Monaco editor and query history
+  - **Schema Viewer**: Browse database structure with expandable table/column tree
+  - **Execution Logs**: Automatic logging of function invocations with status, duration, timestamps
+- **Server Context Integration** (Experimental): AI awareness of site server features
+  - Site Selector dropdown in workspace header to choose site context
+  - `/.server/` hidden folder with transient files containing server context
+  - AI receives edge functions, database schema, server functions, and secret names
+  - Hidden folder icons: purple book for `/.skills/`, orange server for `/.server/`
+- **AI Read-Write Access to Server Features**:
+  - `sqlite3` shell command for executing SQL queries on site database
+    - Supports `-json` and `-header` output flags
+    - System tables protected from modification
+  - Edge functions writable via `json_patch` on `/.server/edge-functions/*.json`
+  - Server functions writable via `json_patch` on `/.server/server-functions/*.json`
+  - Function files use JSON format with metadata (name, method, enabled, code, etc.)
+- **Edge Function Routing for Published Sites**: Automatic client-side routing
+  - Lightweight interceptor script (~1.5KB) injected into published HTML
+  - Intercepts `fetch()` and `XMLHttpRequest` calls to paths without file extensions
+  - Routes requests to `/api/sites/{siteId}/functions/{path}` automatically
+  - Form submissions with edge function actions intercepted and sent as JSON
+  - Custom events: `edge-function-response` and `edge-function-error`
+  - Zero server overhead for static files - only edge function calls hit the server
+- **Preview Edge Function Support**: Test edge functions in preview before publishing
+  - VirtualServer accepts optional siteId parameter
+  - VFS interceptor routes edge functions in preview iframe
+- **System Prompt Enhancements**: Comprehensive server feature guidance
+  - sqlite3 usage examples with proper quoting and common mistakes to avoid
+  - Function creation, editing, and deletion patterns
+  - JSON format documentation for edge and server functions
+- **Bug Fix**: Fixed system prompt being appended on every follow-up message (~8k extra tokens per message)
+
 ## v1.18.0 - 2025-12-11
 - **SQLite Migration**: Replaced PostgreSQL with SQLite (better-sqlite3) for Server Mode
   - No external database setup required - just `npm install && npm start`

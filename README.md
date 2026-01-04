@@ -8,10 +8,11 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.16.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.19.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
-[Try it Now](https://huggingface.co/spaces/otst/osw-studio) · [Documentation](docs/README.md) · [GitHub](https://github.com/o-stahl/osw-studio)
+[Try it Now](https://huggingface.co/spaces/otst/osw-studio) · [Documentation](docs/README.md) · [Discord](https://discord.gg/mAJ8Ss4u) · [GitHub](https://github.com/o-stahl/osw-studio)
 
 ---
 
@@ -40,7 +41,7 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 
 **Perfect for:** Business websites, landing pages, portfolios, documentation sites, blogs, marketing pages
 
-**Not for:** Backend applications (Python/Node.js servers, databases, APIs) - static sites only
+**Two modes:** Browser Mode (static sites, export as ZIP) or [Server Mode](#server-mode-optional) (self-hosted platform with databases, APIs, and publishing)
 
 ## 🚀 Quick Start
 
@@ -90,28 +91,17 @@ npm run dev
 - **Export Options** - ZIP deployment packages or .osws backups (full history)
 - **Project Gallery** - Grid/list views with screenshots, search, sorting
 
-### Optional Server Mode
-- **PostgreSQL Persistence** - Sync projects across devices
-- **Static Site Publishing** - Host sites at `/sites/{projectId}/`
-- **Admin Authentication** - JWT sessions with bcrypt
-- **Analytics** - Privacy-focused page view tracking
-- **Custom Domains** - SEO-friendly URLs via reverse proxy
-
 ## What Can You Build?
 
-| ✅ Supported | Details |
-|-------------|---------|
+| ✅ Browser Mode | Details |
+|----------------|---------|
 | **Landing Pages** | Marketing sites, product pages, SaaS homepages |
 | **Portfolios** | Personal websites, photography, design portfolios |
 | **Documentation** | Project docs, help centers, knowledge bases |
 | **Blogs** | Static blogs with templates and navigation |
 | **Client-side Apps** | Calculators, tools, games, interactive demos |
 
-| ❌ Not Supported | Why |
-|-----------------|-----|
-| **Backend Code** | No Python/Node.js/PHP server runtimes |
-| **Databases** | No PostgreSQL/MySQL/MongoDB (static only) |
-| **APIs** | No Express/FastAPI servers (unless self-hosting) |
+See [Server Mode](#server-mode-optional) for REST APIs, databases, analytics, and more.
 
 ## How It Works
 
@@ -130,7 +120,7 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 ### ✅ Recommended Models (Tool Calling)
 - **Gemini 3** - Good pricing, speed and quality, best value currently
 - **Haiku 4.5** - Reasonable pricing, speed and quality
-- **GLM4.6, GLM4.5 & air** - Fast, reliable and cheap, among SOTA for webdev
+- **GLM4.7, GLM4.6, GLM4.5 & air** - Fast, reliable and cheap, among SOTA for webdev
 - **Grok Code Fast 1** - Good balance of speed, quality and price
 - **Kimi K2** - Good balance of speed, quality and price
 - **gpt-oss-120b & 20b** - Strong agentic capabilities
@@ -168,6 +158,8 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 
 ## Server Mode (Optional)
 
+> ⚠️ **Experimental**: Server Mode is under active development. Some features may be unstable or change in future releases.
+
 OSW Studio runs client-side by default (Browser Mode). For advanced use cases, enable **Server Mode**:
 
 ### Browser Mode (Default)
@@ -178,41 +170,44 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 - ✅ Zero configuration
 
 ### Server Mode (Optional)
-- ✅ PostgreSQL persistence across devices
+- ✅ SQLite persistence (no external database setup)
 - ✅ Admin authentication (JWT + bcrypt)
-- ✅ Static site publishing to `/sites/{projectId}/`
-- ✅ Built-in analytics (privacy-focused)
-- ✅ Project sync (IndexedDB ↔ PostgreSQL)
+- ✅ Static site publishing to `/sites/{siteId}/`
+- ✅ Edge Functions - JavaScript API endpoints with database access
+- ✅ Per-site SQLite databases (WAL mode) with SQL editor
+- ✅ Secrets management (AES-256-GCM encrypted)
+- ✅ SEO controls - Meta tags, Open Graph, Twitter Cards, auto-sitemap
+- ✅ Built-in analytics (privacy-focused) or external (GA4, Plausible)
+- ✅ Compliance - Cookie consent banners with GDPR/CCPA support
+- ✅ Custom scripts - Inject head/body scripts, CDN resources
+- ✅ Project sync (IndexedDB ↔ SQLite)
 - ✅ Custom domains via reverse proxy
 
 **Quick Start (Server Mode):**
 
 ```bash
-# 1. Setup PostgreSQL
-createdb osw_studio
-
-# 2. Configure .env
+# 1. Configure .env
 NEXT_PUBLIC_SERVER_MODE=true
-DATABASE_URL=postgresql://user:pass@localhost:5432/osw_studio
 SESSION_SECRET=$(openssl rand -base64 32)
 ADMIN_PASSWORD=your_secure_password
+SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)
 
-# 3. Start server
-npm run dev
+# 2. Start server (SQLite databases created automatically)
+npm install && npm run dev
 
-# 4. Access at http://localhost:3000/admin/login
+# 3. Access at http://localhost:3000/admin/login
 ```
 
 **Documentation:**
 - [Server Mode Guide](docs/SERVER_MODE.md) - Full setup and features
-- [Deploying Sites](docs/DEPLOYING_SITES.md) - Site publishing and hosting
+- [Server Features](docs/SERVER_FEATURES.md) - Edge Functions, Secrets, Database
 
 ## Tech Stack
 
 - **Framework**: Next.js 15.3.3, React 19, TypeScript
 - **UI**: TailwindCSS v4, Radix UI primitives
 - **Editor**: Monaco Editor (VS Code engine)
-- **Storage**: IndexedDB (browser), PostgreSQL (server mode)
+- **Storage**: IndexedDB (browser), SQLite (server mode)
 - **AI**: 8 LLM provider integrations
 - **Templating**: Handlebars.js for components
 - **Export**: JSZip for deployment packages
@@ -253,16 +248,15 @@ NEXT_PUBLIC_DEBUG_TOOL_STREAM=0
 
 - **API keys** - Stored in browser `localStorage` (never sent to OSW Studio servers)
 - **Network calls** - Direct to AI providers or via optional proxy endpoints
-- **Data storage** - Projects stay in IndexedDB (browser mode) or PostgreSQL (server mode)
+- **Data storage** - Projects stay in IndexedDB (browser mode) or SQLite (server mode)
 - **Complete privacy** - Use Ollama/LM Studio for 100% local operation
 
 **Note:** Remote LLM providers (OpenAI, Anthropic, etc.) will receive your code during generation. For complete privacy, use local models.
 
 ## Limitations
 
-- **Static sites only** - No Python, Node.js, or backend runtimes
 - **No package managers** - Use CDN links for libraries (unpkg, jsdelivr, cdnjs)
-- **Client-side only** - No server-side rendering (unless self-hosting with Server Mode)
+- **Browser Mode** - Static sites only, no backend (use Server Mode for APIs/databases)
 
 ## Contributing
 

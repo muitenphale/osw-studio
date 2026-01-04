@@ -467,14 +467,24 @@ export class MultiAgentOrchestrator {
         // Ignore errors getting file tree
       }
 
-      // Build system prompt (includes skills dynamically)
-      const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode);
+      // Get server context metadata from VFS (already computed when context was mounted)
+      const serverContext = vfs.getServerContextMetadata();
 
-      // Initialize conversation with system prompt
-      this.addMessage(this.currentConversationId, {
-        role: 'system',
-        content: systemPrompt
-      });
+      // Build system prompt (includes skills and server context dynamically)
+      const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode, serverContext);
+
+      // Get current conversation
+      const conversation = this.conversations.get(this.currentConversationId);
+      const hasExistingSystemMessage = conversation?.messages.some(m => m.role === 'system');
+
+      // Only add system prompt if this is a fresh conversation (no existing system message)
+      // For follow-up messages, the system prompt is already in the conversation history
+      if (!hasExistingSystemMessage) {
+        this.addMessage(this.currentConversationId, {
+          role: 'system',
+          content: systemPrompt
+        });
+      }
 
       // Add user prompt
       this.addMessage(this.currentConversationId, {

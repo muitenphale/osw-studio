@@ -196,6 +196,8 @@ export interface VirtualFile {
     dependencies?: string[];
     isTransient?: boolean;
     isBuiltIn?: boolean;
+    isServerContext?: boolean;
+    isReadOnly?: boolean;
   };
 }
 
@@ -357,6 +359,68 @@ export interface LicenseOption {
   value: string;
   label: string;
   description: string;
+}
+
+// Edge Functions Types
+export interface EdgeFunction {
+  id: string;
+  name: string;          // URL-safe name (e.g., "products", "get-user")
+  description?: string;
+  code: string;          // JavaScript code
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY';
+  enabled: boolean;
+  timeoutMs: number;     // Default 5000, max 30000
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FunctionLog {
+  id: number;
+  functionId: string;
+  method: string;
+  path: string;
+  statusCode: number;
+  durationMs: number;
+  error?: string;
+  timestamp: Date;
+}
+
+// Database Schema Types (for SQL schema viewer)
+export interface TableInfo {
+  name: string;
+  columns: ColumnInfo[];
+  rowCount: number;
+  isSystemTable: boolean;
+}
+
+export interface ColumnInfo {
+  name: string;
+  type: string;
+  nullable: boolean;
+  primaryKey: boolean;
+  defaultValue?: string;
+}
+
+// Server Functions (callable from edge functions)
+export interface ServerFunction {
+  id: string;
+  name: string;          // Function name (e.g., 'validateAuth', 'formatPrice')
+  description?: string;
+  code: string;          // JavaScript function body (receives args, has db/fetch access)
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Secrets (encrypted key-value storage for edge functions)
+export interface Secret {
+  id: string;
+  name: string;          // e.g., 'STRIPE_API_KEY', 'SENDGRID_KEY'
+  description?: string;
+  hasValue: boolean;     // true if user has set a value, false if placeholder
+  createdAt: Date;
+  updatedAt: Date;
+  // Note: value is never exposed in this interface - only stored encrypted
 }
 
 export const LICENSE_OPTIONS: LicenseOption[] = [

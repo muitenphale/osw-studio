@@ -1,13 +1,92 @@
 import { skillsService } from '@/lib/vfs/skills';
 
-export async function buildShellSystemPrompt(fileTree?: string, chatMode?: boolean): Promise<string> {
-  if (chatMode) {
-    return buildChatModePrompt(fileTree);
-  }
-  return await buildCodeModePrompt(fileTree);
+// Server context metadata type (matches VFS.getServerContextMetadata())
+export interface ServerContextMetadata {
+  siteName: string;
+  siteId: string;
+  hasDatabase: boolean;
+  edgeFunctionCount: number;
+  serverFunctionCount: number;
+  secretCount: number;
 }
 
-async function buildChatModePrompt(fileTree?: string): Promise<string> {
+export interface SystemPromptOptions {
+  fileTree?: string;
+  chatMode?: boolean;
+  serverContext?: ServerContextMetadata | null;
+}
+
+export async function buildShellSystemPrompt(fileTree?: string, chatMode?: boolean, serverContext?: ServerContextMetadata | null): Promise<string> {
+  if (chatMode) {
+    return buildChatModePrompt(fileTree, serverContext);
+  }
+  return await buildCodeModePrompt(fileTree, serverContext);
+}
+
+/**
+ * Build the server context section for the system prompt
+ */
+function buildServerContextSection(serverContext: ServerContextMetadata): string {
+  let section = `\n\n🖥️ SERVER CONTEXT - Site "${serverContext.siteName}":\n`;
+  section += `This project is linked to a site with server-side features.\n\n`;
+  section += `Available Server Features:\n`;
+
+  if (serverContext.hasDatabase) {
+    section += `• Database: SQLite database accessible via sqlite3 shell command\n`;
+  }
+
+  if (serverContext.edgeFunctionCount > 0) {
+    section += `• Edge Functions: ${serverContext.edgeFunctionCount} endpoint(s) in /.server/edge-functions/*.json\n`;
+  }
+
+  if (serverContext.serverFunctionCount > 0) {
+    section += `• Server Functions: ${serverContext.serverFunctionCount} helper(s) in /.server/server-functions/*.json\n`;
+  }
+
+  // Always show secrets info (can create placeholders even if none exist yet)
+  section += `• Secrets: ${serverContext.secretCount} secret(s) in /.server/secrets/*.json\n`;
+
+  // Add prominent sqlite3 section when database is available
+  if (serverContext.hasDatabase) {
+    section += `\n## 🗄️ DATABASE COMMANDS (sqlite3)\n`;
+    section += `Use the sqlite3 shell command to query/modify the site database:\n\n`;
+    section += `⚠️ CRITICAL: Put the COMPLETE SQL query in double quotes after sqlite3. Examples:\n\n`;
+    section += `  # List all tables\n`;
+    section += `  sqlite3 "SELECT name FROM sqlite_master WHERE type='table'"\n\n`;
+    section += `  # Query data\n`;
+    section += `  sqlite3 "SELECT * FROM products"\n`;
+    section += `  sqlite3 "SELECT * FROM users WHERE active = 1"\n\n`;
+    section += `  # Create table\n`;
+    section += `  sqlite3 "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price REAL)"\n\n`;
+    section += `  # Insert data\n`;
+    section += `  sqlite3 "INSERT INTO products (name, price) VALUES ('Widget', 9.99)"\n\n`;
+    section += `  # JSON output\n`;
+    section += `  sqlite3 -json "SELECT * FROM products"\n\n`;
+    section += `  # Get table schema\n`;
+    section += `  sqlite3 "SELECT sql FROM sqlite_master WHERE name='products'"\n\n`;
+    section += `COMMON MISTAKES TO AVOID:\n`;
+    section += `❌ sqlite3 ".tables"           <- Don't use dot commands\n`;
+    section += `❌ sqlite3 "SELECT * FROM      <- Don't truncate queries\n`;
+    section += `✅ sqlite3 "SELECT * FROM products"  <- Complete SQL in quotes\n\n`;
+    section += `Current schema: cat /.server/db/schema.sql\n`;
+  }
+
+  section += `\n## Creating Secrets\n`;
+  section += `Write JSON to /.server/secrets/{NAME}.json:\n`;
+  section += `  echo '{"name":"STRIPE_API_KEY","description":"Stripe secret key"}' > /.server/secrets/STRIPE_API_KEY.json\n`;
+  section += `User sets the value in admin panel. Use in edge functions: secrets.get('STRIPE_API_KEY')\n`;
+
+  section += `\n## Creating Edge Functions\n`;
+  section += `Write JSON to /.server/edge-functions/{name}.json:\n`;
+  section += `  echo '{"name":"list-products","method":"GET","code":"Response.json(db.query(\\"SELECT * FROM products\\"));"}' > /.server/edge-functions/list-products.json\n`;
+
+  section += `\n## Creating Server Functions\n`;
+  section += `  echo '{"name":"formatPrice","code":"const [amount, currency] = args; return currency + amount.toFixed(2);"}' > /.server/server-functions/formatPrice.json\n`;
+
+  return section;
+}
+
+async function buildChatModePrompt(fileTree?: string, serverContext?: ServerContextMetadata | null): Promise<string> {
   let prompt = `You are an AI assistant that helps users with their coding projects. You work in a sandboxed virtual file system.
 
 🔒 CHAT MODE - READ-ONLY EXPLORATION AND PLANNING
@@ -83,6 +162,7 @@ Available Commands (READ-ONLY):
 - Read entire files: cat [filepath] ← AVOID (use only for small files)
 - Search (basic, no context): grep [-n] [-i] [-F] [pattern] [path] ← Use rg instead for context
 - Find files: find [path] -name [pattern]
+- Database queries (Server Mode): sqlite3 "SELECT * FROM table" ← Full SQL in double quotes
 
 ⚠️ IMPORTANT: grep does NOT support -A, -B, or -C flags. For context around matches, use rg (ripgrep)!
 
@@ -110,19 +190,42 @@ Important Notes:
     prompt += `\n⚡ WORKFLOW: When a skill matches your task, run: cat /.skills/<skill-name>.md FIRST, then proceed.\n`;
   }
 
-  // Build combined project structure with skills
-  if (fileTree || skillsMetadata.length > 0) {
+  // Add server context section if available
+  if (serverContext) {
+    prompt += buildServerContextSection(serverContext);
+  }
+
+  // Build combined project structure with skills and server context
+  if (fileTree || skillsMetadata.length > 0 || serverContext) {
     prompt += `\n\nProject Structure:\n`;
 
     // Add skills directory first (as a top-level entry)
     if (skillsMetadata.length > 0) {
       prompt += `├── .skills/\n`;
       skillsMetadata.forEach((skill, index) => {
-        const isLast = index === skillsMetadata.length - 1;
+        const isLast = index === skillsMetadata.length - 1 && !serverContext;
         const connector = isLast ? '└── ' : '├── ';
         const filename = skill.path.split('/').pop();
         prompt += `│   ${connector}${filename}\n`;
       });
+    }
+
+    // Add server context directory
+    if (serverContext) {
+      prompt += `├── .server/\n`;
+      prompt += `│   ├── README.md\n`;
+      if (serverContext.hasDatabase) {
+        prompt += `│   ├── db/\n`;
+        prompt += `│   │   └── schema.sql\n`;
+      }
+      if (serverContext.edgeFunctionCount > 0) {
+        prompt += `│   ├── edge-functions/\n`;
+      }
+      if (serverContext.serverFunctionCount > 0) {
+        prompt += `│   ├── server-functions/\n`;
+      }
+      // Always show secrets folder (can create placeholders)
+      prompt += `│   └── secrets/\n`;
     }
 
     // Add project files (strip "Project Structure:\n" header if present)
@@ -134,7 +237,7 @@ Important Notes:
   return prompt;
 }
 
-async function buildCodeModePrompt(fileTree?: string): Promise<string> {
+async function buildCodeModePrompt(fileTree?: string, serverContext?: ServerContextMetadata | null): Promise<string> {
   let prompt = `You are an AI assistant that helps users with their coding projects. You work in a sandboxed virtual file system.
 
 🚨 PLATFORM CONSTRAINTS - READ THIS FIRST:
@@ -250,6 +353,7 @@ Available Commands for the shell tool:
 - Output text: echo [text]
 - Write to file: echo [text] > [filepath]
 - Edit files: Use json_patch tool for reliable file editing
+- Database queries (Server Mode): sqlite3 "SQL QUERY" ← Full SQL in double quotes
 
 ⚠️ IMPORTANT: grep does NOT support -A, -B, or -C flags. For context around matches, use rg (ripgrep)!
 
@@ -861,19 +965,42 @@ Nested Data Access:
     prompt += `\n⚡ WORKFLOW: When a skill matches your task, run: cat /.skills/<skill-name>.md FIRST, then proceed.\n`;
   }
 
-  // Build combined project structure with skills
-  if (fileTree || skillsMetadata.length > 0) {
+  // Add server context section if available
+  if (serverContext) {
+    prompt += buildServerContextSection(serverContext);
+  }
+
+  // Build combined project structure with skills and server context
+  if (fileTree || skillsMetadata.length > 0 || serverContext) {
     prompt += `\n\nProject Structure:\n`;
 
     // Add skills directory first (as a top-level entry)
     if (skillsMetadata.length > 0) {
       prompt += `├── .skills/\n`;
       skillsMetadata.forEach((skill, index) => {
-        const isLast = index === skillsMetadata.length - 1;
+        const isLast = index === skillsMetadata.length - 1 && !serverContext;
         const connector = isLast ? '└── ' : '├── ';
         const filename = skill.path.split('/').pop();
         prompt += `│   ${connector}${filename}\n`;
       });
+    }
+
+    // Add server context directory
+    if (serverContext) {
+      prompt += `├── .server/\n`;
+      prompt += `│   ├── README.md\n`;
+      if (serverContext.hasDatabase) {
+        prompt += `│   ├── db/\n`;
+        prompt += `│   │   └── schema.sql\n`;
+      }
+      if (serverContext.edgeFunctionCount > 0) {
+        prompt += `│   ├── edge-functions/\n`;
+      }
+      if (serverContext.serverFunctionCount > 0) {
+        prompt += `│   ├── server-functions/\n`;
+      }
+      // Always show secrets folder (can create placeholders)
+      prompt += `│   └── secrets/\n`;
     }
 
     // Add project files (strip "Project Structure:\n" header if present)

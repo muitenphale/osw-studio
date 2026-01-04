@@ -41,6 +41,7 @@ import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
 import { FocusContextPayload } from '@/lib/preview/types';
 import { DebugPanel, DebugEvent } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
+import { SiteSelector } from '@/components/workspace/site-selector';
 
 interface WorkspaceProps {
   project: Project;
@@ -88,6 +89,10 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [showEditor, setShowEditor] = useState(false);   // Column 3: Monaco editor
   const [showPreview, setShowPreview] = useState(true);  // Column 4: Live preview
   const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 5: Debug events
+
+  // Server context state (site selection for server features)
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const [selectedSiteName, setSelectedSiteName] = useState<string | null>(null);
 
   // Debug events state
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
@@ -550,9 +555,32 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       // Clear VFS sync timeout for this project
       vfs.clearSyncTimeout(projectId);
 
+      // Unmount server context when leaving workspace
+      vfs.unmountServerContext();
+
       logger.debug(`[Workspace] Cleaned up memory for project ${projectId}`);
     };
   }, [project.id]);
+
+  // Handle site selection change - mount/unmount server context
+  const handleSiteChange = useCallback(async (siteId: string | null, siteName: string | null) => {
+    setSelectedSiteId(siteId);
+    setSelectedSiteName(siteName);
+
+    // Reset orchestrator so it picks up new server context on next message
+    setPersistedOrchestrator(null);
+
+    if (siteId && siteName) {
+      await vfs.mountServerContext(siteId, siteName);
+      logger.info(`[Workspace] Mounted server context for site: ${siteName}`);
+    } else {
+      vfs.unmountServerContext();
+      logger.info('[Workspace] Unmounted server context');
+    }
+
+    // Refresh file tree
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)
@@ -967,28 +995,38 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     });
   }
 
-  // Add desktop-only settings button
-  const desktopSettingsButton = (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 px-3 flex items-center gap-2"
-          title="Project cost and settings"
-        >
-          {shouldShowCosts && (
-            <span className="text-sm font-medium">
-              ${projectCost.toFixed(3)}
-            </span>
-          )}
-          <Settings className="h-4 w-4" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-96" align="end">
-        <SettingsPanel />
-      </PopoverContent>
-    </Popover>
+  // Desktop header content: Site selector + Settings
+  const desktopHeaderContent = (
+    <div className="flex items-center gap-3">
+      {/* Site selector for server context */}
+      <SiteSelector
+        projectId={project.id}
+        selectedSiteId={selectedSiteId}
+        onSiteChange={handleSiteChange}
+      />
+
+      {/* Settings popover */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 px-3 flex items-center gap-2"
+            title="Project cost and settings"
+          >
+            {shouldShowCosts && (
+              <span className="text-sm font-medium">
+                ${projectCost.toFixed(3)}
+              </span>
+            )}
+            <Settings className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96" align="end">
+          <SettingsPanel />
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 
   const mobileMenuContent = (
@@ -1027,7 +1065,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           onLogoClick={onBack}
           actions={headerActions}
           mobileMenuContent={mobileMenuContent}
-          desktopOnlyContent={desktopSettingsButton}
+          desktopOnlyContent={desktopHeaderContent}
           mobileVisibleActions={isDirty ? ['save'] : []}
         />
 
@@ -1292,6 +1330,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                         onFocusSelection={handleFocusSelection}
                         hasFocusTarget={Boolean(focusContext)}
                         onClose={handleClosePreview}
+                        siteId={selectedSiteId}
                       />
                     </div>
                 </ResizablePanel>
@@ -1371,6 +1410,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onFocusSelection={handleFocusSelection}
                   hasFocusTarget={Boolean(focusContext)}
                   onClose={handleClosePreview}
+                  siteId={selectedSiteId}
                 />
               </div>
             )}

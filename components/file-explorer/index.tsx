@@ -16,7 +16,9 @@ import {
   Video,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  Server,
+  BookOpen
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -53,6 +55,22 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if a path is a transient/read-only path (skills or server context)
+  const isTransientPath = (path: string): boolean => {
+    return path.startsWith('/.skills/') || path.startsWith('/.server/') ||
+           path === '/.skills' || path === '/.server';
+  };
+
+  // Check if a path is a server context path
+  const isServerContextPath = (path: string): boolean => {
+    return path.startsWith('/.server/') || path === '/.server';
+  };
+
+  // Check if a path is a skills path
+  const isSkillsPath = (path: string): boolean => {
+    return path.startsWith('/.skills/') || path === '/.skills';
+  };
 
   const loadFiles = useCallback(async () => {
     try {
@@ -439,15 +457,33 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
     const isSelected = selectedPath === item.path;
     const isRenaming = renamingPath === item.path;
     const isDropTarget = dropTarget === item.path;
+    const isTransient = isTransientPath(item.path);
+    const isServerContext = isServerContextPath(item.path);
+    const isSkills = isSkillsPath(item.path);
+
+    // Get the appropriate folder icon for special directories
+    const getFolderIcon = (expanded: boolean) => {
+      if (isServerContext) {
+        return <Server className="w-4 h-4 text-orange-500" />;
+      }
+      if (isSkills) {
+        return <BookOpen className="w-4 h-4 text-purple-500" />;
+      }
+      return expanded ? (
+        <FolderOpen className="w-4 h-4 text-blue-500" />
+      ) : (
+        <Folder className="w-4 h-4 text-blue-500" />
+      );
+    };
 
     return (
-      <div 
+      <div
         key={item.path}
-        draggable={!isRenaming}
-        onDragStart={(e) => handleItemDragStart(e, item)}
+        draggable={!isRenaming && !isTransient}
+        onDragStart={(e) => !isTransient && handleItemDragStart(e, item)}
         onDragEnd={handleItemDragEnd}
-        onDragOver={(e) => item.type === 'directory' && handleItemDragOver(e, item.path)}
-        onDrop={(e) => item.type === 'directory' && handleItemDrop(e, item)}
+        onDragOver={(e) => item.type === 'directory' && !isTransient && handleItemDragOver(e, item.path)}
+        onDrop={(e) => item.type === 'directory' && !isTransient && handleItemDrop(e, item)}
       >
         <ContextMenu>
           <ContextMenuTrigger>
@@ -457,6 +493,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
               isSelected && 'bg-accent text-accent-foreground',
               isDropTarget && item.type === 'directory' && 'bg-blue-500/20 border border-blue-500',
               draggedItem?.path === item.path && 'opacity-50',
+              isTransient && 'opacity-75',
               'group'
             )}
             style={{ paddingLeft: `${level * 16 + 8}px` }}
@@ -469,11 +506,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
                 ) : (
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 )}
-                {isExpanded ? (
-                  <FolderOpen className="w-4 h-4 text-blue-500" />
-                ) : (
-                  <Folder className="w-4 h-4 text-blue-500" />
-                )}
+                {getFolderIcon(isExpanded)}
               </>
             ) : (
               <>
@@ -508,39 +541,54 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="text-sm flex-1">{item.name}</span>
+              <span className={cn("text-sm flex-1", isTransient && "italic")}>
+                {item.name}
+                {isTransient && <span className="text-xs text-muted-foreground ml-1">(read-only)</span>}
+              </span>
             )}
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-          {item.type === 'directory' && (
+          {/* Only show edit options for non-transient paths */}
+          {!isTransient && (
             <>
-              <ContextMenuItem onClick={() => handleCreateFile(item.path)}>
-                <File className="mr-2 h-4 w-4" />
-                New File
+              {item.type === 'directory' && (
+                <>
+                  <ContextMenuItem onClick={() => handleCreateFile(item.path)}>
+                    <File className="mr-2 h-4 w-4" />
+                    New File
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleCreateDirectory(item.path)}>
+                    <Folder className="mr-2 h-4 w-4" />
+                    New Folder
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => fileInputRef.current?.click()}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload Files
+                  </ContextMenuItem>
+                </>
+              )}
+              <ContextMenuItem onClick={() => {
+                setRenamingPath(item.path);
+                setNewName(item.name);
+              }}>
+                Rename
               </ContextMenuItem>
-              <ContextMenuItem onClick={() => handleCreateDirectory(item.path)}>
-                <Folder className="mr-2 h-4 w-4" />
-                New Folder
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => fileInputRef.current?.click()}>
-                <Upload className="mr-2 h-4 w-4" />
-                Upload Files
+              <ContextMenuItem
+                onClick={() => handleDelete(item.path, item.type)}
+                className="text-destructive"
+              >
+                Delete
               </ContextMenuItem>
             </>
           )}
-          <ContextMenuItem onClick={() => {
-            setRenamingPath(item.path);
-            setNewName(item.name);
-          }}>
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem 
-            onClick={() => handleDelete(item.path, item.type)}
-            className="text-destructive"
-          >
-            Delete
-          </ContextMenuItem>
+          {/* For transient files, just show a read-only indicator */}
+          {isTransient && (
+            <ContextMenuItem disabled>
+              <Eye className="mr-2 h-4 w-4" />
+              Read-only {isServerContext ? 'server context' : 'skill'}
+            </ContextMenuItem>
+          )}
           </ContextMenuContent>
         </ContextMenu>
         {item.type === 'directory' && isExpanded && item.children && (

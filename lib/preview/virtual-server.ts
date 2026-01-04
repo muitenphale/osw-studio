@@ -6,6 +6,7 @@ import Handlebars from 'handlebars';
 export class VirtualServer {
   private vfs: VirtualFileSystem;
   private projectId: string;
+  private siteId?: string;
   private baseUrl: string;
   private blobUrls: Map<string, string> = new Map();
   private fileHashes: Map<string, string> = new Map();
@@ -13,14 +14,15 @@ export class VirtualServer {
   private templateCache: Map<string, HandlebarsTemplateDelegate> = new Map();
   private partialsRegistered: boolean = false;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>) {
+  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, siteId?: string) {
     this.vfs = vfs;
     this.projectId = projectId;
+    this.siteId = siteId;
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     if (existingBlobUrls) {
       this.blobUrls = new Map(existingBlobUrls);
     }
-    
+
     // Initialize Handlebars instance
     this.handlebars = Handlebars.create();
     this.registerHelpers();
@@ -328,11 +330,13 @@ export class VirtualServer {
     // Inject VFS asset interceptor for transparent HTTP requests
     // Always inject the interceptor, even if no blob URLs yet (for future dynamic loading)
     const blobUrlMap = blobUrls ? Object.fromEntries(blobUrls) : {};
+    const siteIdForScript = this.siteId || '';
     const vfsScript = `<script>
 // VFS Asset Interceptor - Auto-injected by OSW Studio
 (function() {
   const vfsBlobUrls = ${JSON.stringify(blobUrlMap)};
-  
+  const siteId = ${JSON.stringify(siteIdForScript)};
+
   // Helper function to resolve VFS paths to blob URLs
   function resolveVfsUrl(url) {
     if (!url || typeof url !== 'string') return url;
@@ -340,6 +344,37 @@ export class VirtualServer {
       return vfsBlobUrls[url];
     }
     return url;
+  }
+
+  // Helper function to check if a URL looks like an edge function call
+  function isEdgeFunctionUrl(url) {
+    if (!url || typeof url !== 'string' || !siteId) return false;
+    // Skip external URLs, blob URLs, data URLs, and hash-only URLs
+    if (url.startsWith('http://') || url.startsWith('https://') ||
+        url.startsWith('blob:') || url.startsWith('data:') ||
+        url.startsWith('//') || url.startsWith('#')) {
+      return false;
+    }
+    // Skip if already an API path
+    if (url.startsWith('/api/')) return false;
+    // Skip if it has a file extension (likely an asset)
+    const pathWithoutQuery = url.split('?')[0].split('#')[0];
+    const lastSegment = pathWithoutQuery.split('/').pop() || '';
+    if (lastSegment.includes('.')) return false;
+    // This looks like an edge function path
+    return true;
+  }
+
+  // Helper function to convert an edge function URL to the API endpoint
+  function toEdgeFunctionApiUrl(url) {
+    if (!siteId) return url;
+    // Normalize the path
+    let path = url;
+    if (!path.startsWith('/')) path = '/' + path;
+    // Remove leading slash for the function name
+    const functionPath = path.substring(1);
+    // Return the API endpoint URL
+    return '/api/sites/' + siteId + '/functions/' + functionPath;
   }
   
   // Intercept Image src setter to handle ALL image loading
@@ -434,32 +469,110 @@ export class VirtualServer {
     return element;
   };
   
-  // Intercept fetch requests to VFS assets
+  // Intercept fetch requests to VFS assets and edge functions
   const originalFetch = window.fetch;
   window.fetch = function(input, init) {
     const url = typeof input === 'string' ? input : input.url;
+
+    // First check if this is an edge function call
+    if (isEdgeFunctionUrl(url)) {
+      const apiUrl = toEdgeFunctionApiUrl(url);
+      // Use the parent window's origin for the API call
+      const fullApiUrl = window.parent ? window.parent.location.origin + apiUrl : apiUrl;
+      return originalFetch(fullApiUrl, init);
+    }
+
+    // Then check for VFS asset resolution
     const resolvedUrl = resolveVfsUrl(url);
-    
     if (resolvedUrl !== url) {
       return originalFetch(resolvedUrl, init);
     }
-    
+
     return originalFetch(input, init);
   };
   
-  // Intercept XMLHttpRequest for older code
+  // Intercept XMLHttpRequest for older code and edge functions
   const OriginalXHR = window.XMLHttpRequest;
   window.XMLHttpRequest = function() {
     const xhr = new OriginalXHR();
     const originalOpen = xhr.open;
-    
+
     xhr.open = function(method, url, ...args) {
-      const resolvedUrl = resolveVfsUrl(url);
-      return originalOpen.call(this, method, resolvedUrl, ...args);
+      let finalUrl = url;
+
+      // Check for edge function first
+      if (isEdgeFunctionUrl(url)) {
+        const apiUrl = toEdgeFunctionApiUrl(url);
+        finalUrl = window.parent ? window.parent.location.origin + apiUrl : apiUrl;
+      } else {
+        finalUrl = resolveVfsUrl(url);
+      }
+
+      return originalOpen.call(this, method, finalUrl, ...args);
     };
-    
+
     return xhr;
   };
+
+  // Intercept form submissions for edge functions
+  if (siteId) {
+    document.addEventListener('submit', function(e) {
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement)) return;
+
+      const action = form.getAttribute('action') || '';
+      if (isEdgeFunctionUrl(action)) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const apiUrl = toEdgeFunctionApiUrl(action);
+        const fullApiUrl = window.parent ? window.parent.location.origin + apiUrl : apiUrl;
+        const method = (form.method || 'GET').toUpperCase();
+
+        // Collect form data
+        const formData = new FormData(form);
+
+        // Convert to JSON for edge functions
+        const data = {};
+        formData.forEach(function(value, key) {
+          data[key] = value;
+        });
+
+        // Make the fetch request
+        fetch(fullApiUrl, {
+          method: method,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: method !== 'GET' ? JSON.stringify(data) : undefined
+        })
+        .then(function(response) {
+          return response.json().catch(function() {
+            return response.text();
+          });
+        })
+        .then(function(result) {
+          // Dispatch custom event with the result
+          const event = new CustomEvent('edge-function-response', {
+            detail: { action: action, result: result }
+          });
+          form.dispatchEvent(event);
+          document.dispatchEvent(event);
+
+          // Result available for custom event handlers if needed
+          void result;
+        })
+        .catch(function(error) {
+          console.error('[Edge Function] Error:', error);
+          const event = new CustomEvent('edge-function-error', {
+            detail: { action: action, error: error.message }
+          });
+          form.dispatchEvent(event);
+          document.dispatchEvent(event);
+        });
+      }
+    }, true);
+  }
   
   // Process any existing images in the DOM when ready
   function processExistingImages() {

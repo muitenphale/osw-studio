@@ -52,7 +52,9 @@ For support and self-hosters:
 
 - **[FAQ](?doc=faq)** - Common questions answered
 - **[Troubleshooting](?doc=troubleshooting)** - Fix common issues
-- **[Server Mode](?doc=server-mode)** - Self-hosting, publishing, custom domains
+- **[Server Mode](?doc=server-mode)** - Self-hosting and deployment
+- **[Site Publishing](?doc=site-publishing)** - Analytics, SEO, compliance (Server Mode)
+- **[Server Features](?doc=server-features)** - Database, API endpoints, secrets (Server Mode)
 
 ---
 
@@ -65,7 +67,9 @@ OSW Studio is perfect for creating static websites:
 ✅ **Documentation sites** - Project docs, help centers
 ✅ **Interactive apps** - Calculators, tools, games (client-side)
 
-❌ **Not for backend** - No server-side code, databases, or APIs (unless self-hosting)
+**Server Mode adds:**
+✅ **API endpoints** - REST APIs with database access via edge functions
+✅ **Dynamic sites** - Store and retrieve data with SQLite databases
 
 ---
 
@@ -112,6 +116,7 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 - Browser mode (IndexedDB)
 - Optional Server mode
 - Static site publishing
+- Edge functions & database management
 - Cost tracking
 
 ---

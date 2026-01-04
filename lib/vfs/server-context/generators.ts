@@ -1,0 +1,253 @@
+/**
+ * Server Context Content Generators
+ *
+ * Generate content for transient files in /.server/ directory.
+ * Structure:
+ * - /.server/secrets/{NAME}.json - individual secret files (SCREAMING_SNAKE_CASE)
+ * - /.server/db/schema.sql - database schema
+ * - /.server/edge-functions/{name}.json - individual edge functions
+ * - /.server/server-functions/{name}.json - individual server functions
+ */
+
+import { EdgeFunction, ServerFunction, Secret } from '../types';
+
+// ============================================
+// Type Definitions
+// ============================================
+
+export interface EdgeFunctionFileData {
+  name: string;
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY';
+  description?: string;
+  enabled: boolean;
+  timeoutMs: number;
+  code: string;
+}
+
+export interface ServerFunctionFileData {
+  name: string;
+  description?: string;
+  enabled: boolean;
+  code: string;
+}
+
+export interface SecretFileData {
+  name: string;
+  description?: string;
+  hasValue?: boolean;
+}
+
+export interface ServerContextMetadata {
+  siteName: string;
+  siteId: string;
+  hasDatabase: boolean;
+  edgeFunctionCount: number;
+  serverFunctionCount: number;
+  secretCount: number;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+// ============================================
+// File Generators
+// ============================================
+
+/**
+ * Generate edge function file in JSON format
+ */
+export function generateEdgeFunctionFile(fn: EdgeFunction): string {
+  const data: EdgeFunctionFileData = {
+    name: fn.name,
+    method: fn.method,
+    description: fn.description,
+    enabled: fn.enabled,
+    timeoutMs: fn.timeoutMs || 5000,
+    code: fn.code,
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+/**
+ * Generate server function file in JSON format
+ */
+export function generateServerFunctionFile(fn: ServerFunction): string {
+  const data: ServerFunctionFileData = {
+    name: fn.name,
+    description: fn.description,
+    enabled: fn.enabled,
+    code: fn.code,
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+/**
+ * Generate individual secret file in JSON format
+ */
+export function generateSecretFile(secret: Secret): string {
+  const data: SecretFileData = {
+    name: secret.name,
+    description: secret.description || undefined,
+    hasValue: secret.hasValue,
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+/**
+ * Generate metadata for system prompt
+ */
+export function generateServerContextMetadata(
+  siteName: string,
+  siteId: string,
+  edgeFunctions: EdgeFunction[],
+  serverFunctions: ServerFunction[],
+  secrets: Secret[]
+): ServerContextMetadata {
+  return {
+    siteName,
+    siteId,
+    hasDatabase: true,
+    edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
+    serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
+    secretCount: secrets.length,
+  };
+}
+
+// ============================================
+// Validators
+// ============================================
+
+/**
+ * Reserved names that cannot be used for server functions
+ */
+const RESERVED_SERVER_FUNCTION_NAMES = [
+  'db', 'fetch', 'console', 'args', 'request', 'Response', 'server', 'secrets'
+];
+
+/**
+ * Validate edge function data before saving
+ */
+export function validateEdgeFunctionData(data: unknown): ValidationResult {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Invalid JSON: expected an object'] };
+  }
+
+  const fn = data as Record<string, unknown>;
+
+  // Name validation (URL-safe)
+  if (!fn.name || typeof fn.name !== 'string') {
+    errors.push('Missing or invalid "name" field');
+  } else if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(fn.name)) {
+    errors.push('Name must be lowercase letters, numbers, and hyphens only (e.g., "get-users")');
+  }
+
+  // Method validation
+  const validMethods = ['GET', 'POST', 'PUT', 'DELETE', 'ANY'];
+  if (!fn.method || typeof fn.method !== 'string') {
+    errors.push('Missing or invalid "method" field');
+  } else if (!validMethods.includes(fn.method)) {
+    errors.push(`Method must be one of: ${validMethods.join(', ')}`);
+  }
+
+  // Code validation
+  if (!fn.code || typeof fn.code !== 'string') {
+    errors.push('Missing or invalid "code" field');
+  } else {
+    try {
+      new Function(fn.code);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push(`JavaScript syntax error: ${message}`);
+    }
+  }
+
+  // Enabled validation (optional, defaults to true)
+  if (fn.enabled !== undefined && typeof fn.enabled !== 'boolean') {
+    errors.push('"enabled" must be a boolean');
+  }
+
+  // Timeout validation (optional)
+  if (fn.timeoutMs !== undefined) {
+    if (typeof fn.timeoutMs !== 'number') {
+      errors.push('"timeoutMs" must be a number');
+    } else if (fn.timeoutMs < 1000 || fn.timeoutMs > 30000) {
+      errors.push('Timeout must be between 1000 and 30000 ms');
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate server function data before saving
+ */
+export function validateServerFunctionData(data: unknown): ValidationResult {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Invalid JSON: expected an object'] };
+  }
+
+  const fn = data as Record<string, unknown>;
+
+  // Name validation (JavaScript identifier)
+  if (!fn.name || typeof fn.name !== 'string') {
+    errors.push('Missing or invalid "name" field');
+  } else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(fn.name)) {
+    errors.push('Name must be a valid JavaScript identifier (e.g., "validateAuth", "formatPrice")');
+  } else if (RESERVED_SERVER_FUNCTION_NAMES.includes(fn.name)) {
+    errors.push(`Cannot use reserved name: ${fn.name}`);
+  }
+
+  // Code validation
+  if (!fn.code || typeof fn.code !== 'string') {
+    errors.push('Missing or invalid "code" field');
+  } else {
+    try {
+      new Function('args', 'db', 'fetch', 'console', fn.code);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push(`JavaScript syntax error: ${message}`);
+    }
+  }
+
+  // Enabled validation (optional, defaults to true)
+  if (fn.enabled !== undefined && typeof fn.enabled !== 'boolean') {
+    errors.push('"enabled" must be a boolean');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate individual secret file data
+ */
+export function validateSecretData(data: unknown): ValidationResult {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Invalid JSON: expected an object'] };
+  }
+
+  const secret = data as Record<string, unknown>;
+
+  // Name validation (SCREAMING_SNAKE_CASE)
+  if (!secret.name || typeof secret.name !== 'string') {
+    errors.push('Missing or invalid "name" field');
+  } else if (!/^[A-Z][A-Z0-9_]*$/.test(secret.name)) {
+    errors.push('Name must be SCREAMING_SNAKE_CASE (e.g., MY_API_KEY, SMTP_PASSWORD)');
+  } else if (secret.name.length > 64) {
+    errors.push('Name must be 64 characters or less');
+  }
+
+  // Description validation (optional)
+  if (secret.description !== undefined && typeof secret.description !== 'string') {
+    errors.push('"description" must be a string');
+  }
+
+  return { valid: errors.length === 0, errors };
+}

@@ -6,6 +6,7 @@ import { vfs } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { SiteCard } from '../site-card';
 import { SiteSettingsModal } from '../site-settings';
+import { ServerSettingsModal } from '../server-settings';
 import { CreateSiteModal } from '../create-site-modal';
 import { AnalyticsDashboard } from '../analytics-dashboard';
 import { Globe, Plus, Search, ArrowUpDown } from 'lucide-react';
@@ -18,13 +19,18 @@ import { toast } from 'sonner';
 
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
-export function SitesView() {
+interface SitesViewProps {
+  onProjectSelect: (project: Project) => void;
+}
+
+export function SitesView({ onProjectSelect }: SitesViewProps) {
   const [sites, setSites] = useState<Site[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [publishingStates, setPublishingStates] = useState<Record<string, boolean>>({});
   const [selectedSite, setSelectedSite] = useState<Site | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showServerSettingsModal, setShowServerSettingsModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -90,9 +96,29 @@ export function SitesView() {
     setShowSettingsModal(true);
   };
 
+  const handleOpenServerSettings = (site: Site) => {
+    setSelectedSite(site);
+    setShowServerSettingsModal(true);
+  };
+
   const handleViewAnalytics = (site: Site) => {
     setSelectedSite(site);
     setShowAnalyticsModal(true);
+  };
+
+  const handleEditProject = async (site: Site) => {
+    try {
+      await vfs.init();
+      const project = await vfs.getProject(site.projectId);
+      if (!project) {
+        toast.error('Project not found in local storage');
+        return;
+      }
+      onProjectSelect(project);
+    } catch (error) {
+      console.error('[SitesView] Failed to load project:', error);
+      toast.error('Failed to load project');
+    }
   };
 
   const handleSaveSettings = async (settings: any) => {
@@ -482,7 +508,9 @@ export function SitesView() {
                       project={project}
                       isPublishing={publishingStates[site.id] || false}
                       onOpenSettings={handleOpenSettings}
+                      onOpenServerSettings={handleOpenServerSettings}
                       onViewAnalytics={handleViewAnalytics}
+                      onEditProject={handleEditProject}
                       onPublish={handlePublish}
                       onDisable={handleDisable}
                       onEnable={handleEnable}
@@ -506,6 +534,15 @@ export function SitesView() {
               setSelectedSite(null);
             }}
             onSave={handleSaveSettings}
+          />
+
+          <ServerSettingsModal
+            site={selectedSite}
+            isOpen={showServerSettingsModal}
+            onClose={() => {
+              setShowServerSettingsModal(false);
+              setSelectedSite(null);
+            }}
           />
 
           <AnalyticsDashboard

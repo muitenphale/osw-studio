@@ -10,6 +10,8 @@ import {
   Users,
   HelpCircle,
   Wrench,
+  Database,
+  Upload,
 } from 'lucide-react';
 
 export interface DocItem {
@@ -34,6 +36,8 @@ export const DOCS_ITEMS: DocItem[] = [
   { id: 'skills', title: 'Skills', icon: Sparkles, file: 'SKILLS.md' },
   { id: 'deploying-sites', title: 'Deploying Sites', icon: Globe, file: 'DEPLOYING_SITES.md' },
   { id: 'server-mode', title: 'Server Mode', icon: Server, file: 'SERVER_MODE.md' },
+  { id: 'site-publishing', title: 'Site Publishing', icon: Upload, file: 'SITE_PUBLISHING.md' },
+  { id: 'server-features', title: 'Server Features', icon: Database, file: 'SERVER_FEATURES.md' },
 
   // Help & Advanced
   { id: 'faq', title: 'FAQ', icon: HelpCircle, file: 'FAQ.md' },

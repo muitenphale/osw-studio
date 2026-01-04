@@ -93,12 +93,781 @@ export class VirtualFileSystem {
    * Reload transient skills (call after adding/updating/deleting skills)
    */
   async reloadTransientSkills(): Promise<void> {
+    // Preserve server context files when reloading skills
+    const serverContextFiles = new Map<string, VirtualFile>();
+    for (const [path, file] of this.transientFiles) {
+      if (path.startsWith('/.server/')) {
+        serverContextFiles.set(path, file);
+      }
+    }
+
     this.transientFiles.clear();
     await this.mountTransientSkills();
+
+    // Restore server context files
+    for (const [path, file] of serverContextFiles) {
+      this.transientFiles.set(path, file);
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
     }
+  }
+
+  // Track current server context site
+  private serverContextSiteId: string | null = null;
+  private serverContextMetadata: {
+    siteName: string;
+    siteId: string;
+    hasDatabase: boolean;
+    edgeFunctionCount: number;
+    serverFunctionCount: number;
+    secretCount: number;
+  } | null = null;
+
+  /**
+   * Get current server context site ID
+   */
+  getServerContextSiteId(): string | null {
+    return this.serverContextSiteId;
+  }
+
+  /**
+   * Check if server context is mounted
+   */
+  hasServerContext(): boolean {
+    return this.serverContextSiteId !== null;
+  }
+
+  /**
+   * Get server context metadata
+   */
+  getServerContextMetadata(): {
+    siteName: string;
+    siteId: string;
+    hasDatabase: boolean;
+    edgeFunctionCount: number;
+    serverFunctionCount: number;
+    secretCount: number;
+  } | null {
+    return this.serverContextMetadata;
+  }
+
+  /**
+   * Mount server context for a site
+   * Creates transient files at /.server/ with database schema, edge functions, etc.
+   */
+  async mountServerContext(siteId: string, siteName: string): Promise<void> {
+    // Only works in Server Mode on client side
+    if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
+      logger.warn('[VFS] Server context only available in Server Mode');
+      return;
+    }
+
+    // On client side, we need to fetch server context via API
+    if (typeof window !== 'undefined') {
+      await this.fetchServerContextFromAPI(siteId, siteName);
+      return;
+    }
+
+    // Server-side: directly import modules
+    try {
+      // Clear existing server context
+      this.unmountServerContext();
+
+      // Import server modules (webpackIgnore prevents client bundling)
+      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+      const {
+        generateEdgeFunctionFile,
+        generateServerFunctionFile,
+        generateSecretFile,
+      } = await import('./server-context');
+
+      const adapter = getSQLiteAdapter();
+      await adapter.init();
+
+      // Get site database
+      const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+      if (!siteDb) {
+        logger.warn(`[VFS] Site database not available for ${siteId}`);
+        return;
+      }
+
+      // Mount database schema (read-only)
+      const schema = siteDb.getSchemaForExport();
+      this.mountTransientFile('/.server/db/schema.sql', schema, true);
+
+      // Mount secrets - individual files per secret (SCREAMING_SNAKE_CASE names)
+      const secrets = siteDb.listSecrets();
+      for (const secret of secrets) {
+        this.mountTransientFile(`/.server/secrets/${secret.name}.json`, generateSecretFile(secret), false);
+      }
+
+      // Mount edge functions - individual files
+      const edgeFunctions = siteDb.listFunctions();
+      for (const fn of edgeFunctions) {
+        this.mountTransientFile(`/.server/edge-functions/${fn.name}.json`, generateEdgeFunctionFile(fn), false);
+      }
+
+      // Mount server functions - individual files
+      const serverFunctions = siteDb.listServerFunctions();
+      for (const fn of serverFunctions) {
+        this.mountTransientFile(`/.server/server-functions/${fn.name}.json`, generateServerFunctionFile(fn), false);
+      }
+
+      // Store metadata for the orchestrator
+      this.serverContextSiteId = siteId;
+      this.serverContextMetadata = {
+        siteName,
+        siteId,
+        hasDatabase: true,
+        edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
+        serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
+        secretCount: secrets.length,
+      };
+
+      logger.info(`[VFS] Mounted server context for site ${siteId} (${siteName})`);
+    } catch (error) {
+      logger.error('[VFS] Failed to mount server context', error);
+    }
+  }
+
+  /**
+   * Fetch server context from API (client-side)
+   * Creates transient files from API response
+   */
+  private async fetchServerContextFromAPI(siteId: string, siteName: string): Promise<void> {
+    try {
+      this.unmountServerContext();
+
+      const response = await fetch(`/api/admin/sites/${siteId}/server-context`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to fetch server context' }));
+        throw new Error(error.error || 'Failed to fetch server context');
+      }
+
+      const data = await response.json();
+
+      // Mount all files from the API response
+      for (const file of data.files) {
+        const virtualFile: VirtualFile = {
+          id: `transient-server-${file.path.replace(/[^a-z0-9]/gi, '-')}`,
+          projectId: 'transient',
+          path: file.path,
+          name: file.path.split('/').pop() || '',
+          type: 'text',
+          content: file.content,
+          mimeType: file.path.endsWith('.sql') ? 'text/sql' :
+                    file.path.endsWith('.json') ? 'application/json' :
+                    file.path.endsWith('.js') ? 'application/javascript' :
+                    'text/markdown',
+          size: new Blob([file.content]).size,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          metadata: {
+            isTransient: true,
+            isServerContext: true,
+            isReadOnly: file.isReadOnly,
+          }
+        };
+        this.transientFiles.set(file.path, virtualFile);
+      }
+
+      // Store metadata
+      this.serverContextSiteId = siteId;
+      this.serverContextMetadata = data.metadata;
+
+      // Persist siteId to sessionStorage for HMR resilience
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('vfs_serverContextSiteId', siteId);
+      }
+
+      logger.info(`[VFS] Mounted server context for site ${siteId} (${siteName}) via API`);
+
+      window.dispatchEvent(new Event('filesChanged'));
+    } catch (error) {
+      logger.error('[VFS] Failed to fetch server context from API', error);
+    }
+  }
+
+  /**
+   * Unmount server context
+   */
+  unmountServerContext(): void {
+    const removed: string[] = [];
+
+    for (const path of this.transientFiles.keys()) {
+      if (path.startsWith('/.server/')) {
+        this.transientFiles.delete(path);
+        removed.push(path);
+      }
+    }
+
+    if (this.serverContextSiteId) {
+      logger.info(`[VFS] Unmounted server context (${removed.length} files)`);
+      this.serverContextSiteId = null;
+      this.serverContextMetadata = null;
+
+      // Clear sessionStorage when unmounting
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('vfs_serverContextSiteId');
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
+    }
+  }
+
+  /**
+   * Get all transient files in a directory
+   */
+  getTransientFilesInDirectory(dirPath: string): VirtualFile[] {
+    const normalizedPath = dirPath.endsWith('/') ? dirPath : dirPath + '/';
+    const files: VirtualFile[] = [];
+
+    for (const [path, file] of this.transientFiles) {
+      if (path.startsWith(normalizedPath)) {
+        files.push(file);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Mount a single transient file
+   * @param isReadOnly - If false, the file can be edited via json_patch (edge functions, server functions)
+   */
+  private mountTransientFile(path: string, content: string, isReadOnly = true): void {
+    const file: VirtualFile = {
+      id: `transient-server-${path.replace(/[^a-z0-9]/gi, '-')}`,
+      projectId: 'transient',
+      path,
+      name: path.split('/').pop() || '',
+      type: 'text',
+      content,
+      mimeType: path.endsWith('.sql') ? 'text/sql' :
+                path.endsWith('.json') ? 'application/json' :
+                path.endsWith('.js') ? 'application/javascript' :
+                'text/markdown',
+      size: new Blob([content]).size,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      metadata: {
+        isTransient: true,
+        isServerContext: true,
+        isReadOnly,
+      }
+    };
+
+    this.transientFiles.set(path, file);
+  }
+
+  /**
+   * Update a server context file (/.server/)
+   * Validates content and syncs to site database
+   * On client side, routes through API; on server side, uses direct imports
+   */
+  private async updateServerContextFile(path: string, content: string): Promise<VirtualFile> {
+    // Try to recover siteId from sessionStorage if not set (HMR resilience)
+    if (!this.serverContextSiteId && typeof sessionStorage !== 'undefined') {
+      const storedSiteId = sessionStorage.getItem('vfs_serverContextSiteId');
+      if (storedSiteId) {
+        logger.info(`[VFS] Recovered serverContextSiteId from sessionStorage: ${storedSiteId}`);
+        this.serverContextSiteId = storedSiteId;
+      }
+    }
+
+    if (!this.serverContextSiteId) {
+      throw new Error('No site selected. Select a site from the Site Selector.');
+    }
+
+    // Check for read-only files
+    if (path === '/.server/db/schema.sql') {
+      throw new Error(`Cannot modify ${path} - read-only file`);
+    }
+
+    // On client side, use API
+    if (typeof window !== 'undefined') {
+      return await this.mutateServerContextViaAPI('update', path, content);
+    }
+
+    // Server-side: direct implementation
+    // Handle individual secret files
+    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
+      return await this.updateSecretFromFile(path, content);
+    }
+
+    // Handle edge functions
+    if (path.startsWith('/.server/edge-functions/') && path.endsWith('.json')) {
+      return await this.updateEdgeFunctionFromFile(path, content);
+    }
+
+    // Handle server functions
+    if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
+      return await this.updateServerFunctionFromFile(path, content);
+    }
+
+    throw new Error(`Cannot modify ${path} - unrecognized server context path`);
+  }
+
+  /**
+   * Mutate server context via API (client-side)
+   */
+  private async mutateServerContextViaAPI(
+    operation: 'update' | 'create' | 'delete',
+    path: string,
+    content?: string
+  ): Promise<VirtualFile> {
+    if (!this.serverContextSiteId) {
+      throw new Error('No site selected. Select a site from the Site Selector.');
+    }
+
+    const response = await fetch(`/api/admin/sites/${this.serverContextSiteId}/server-context/mutate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation, path, content }),
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error || 'Mutation failed');
+    }
+
+    // For delete operations, remove the transient file
+    if (operation === 'delete') {
+      this.transientFiles.delete(path);
+      window.dispatchEvent(new Event('filesChanged'));
+      // Return a placeholder file for delete operations
+      return {
+        id: 'deleted',
+        projectId: 'transient',
+        path,
+        name: path.split('/').pop() || '',
+        type: 'text',
+        content: '',
+        mimeType: 'text/plain',
+        size: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        metadata: {
+          isTransient: true,
+          isServerContext: true,
+          isReadOnly: false,
+        },
+      };
+    }
+
+    // For create/update, update the transient file with the response
+    if (result.file) {
+      const oldPath = path;
+      const newPath = result.file.path;
+
+      // If path changed (e.g., function renamed), remove old entry
+      if (oldPath !== newPath) {
+        this.transientFiles.delete(oldPath);
+      }
+
+      // Create the virtual file
+      const virtualFile: VirtualFile = {
+        id: `transient-server-${newPath.replace(/[^a-z0-9]/gi, '-')}`,
+        projectId: 'transient',
+        path: newPath,
+        name: newPath.split('/').pop() || '',
+        type: 'text',
+        content: result.file.content,
+        mimeType: newPath.endsWith('.json') ? 'application/json' :
+                  newPath.endsWith('.sql') ? 'text/sql' :
+                  'text/markdown',
+        size: new Blob([result.file.content]).size,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        metadata: {
+          isTransient: true,
+          isServerContext: true,
+          isReadOnly: result.file.isReadOnly,
+        }
+      };
+
+      this.transientFiles.set(newPath, virtualFile);
+      window.dispatchEvent(new Event('filesChanged'));
+      return virtualFile;
+    }
+
+    throw new Error('No file returned from mutation');
+  }
+
+  /**
+   * Update edge function from file content
+   */
+  private async updateEdgeFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
+    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+    const { validateEdgeFunctionData, generateEdgeFunctionFile } = await import('./server-context');
+
+    // Parse JSON
+    let data: unknown;
+    try {
+      data = JSON.parse(content);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`Invalid JSON: ${message}`);
+    }
+
+    // Validate
+    const validation = validateEdgeFunctionData(data);
+    if (!validation.valid) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    // Type-safe cast after validation
+    const fnData = data as { name: string; method: string; code: string; description?: string; enabled?: boolean; timeoutMs?: number };
+
+    // Get site database
+    const adapter = getSQLiteAdapter();
+    await adapter.init();
+    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
+    if (!siteDb) {
+      throw new Error('Site database not available');
+    }
+
+    // Check if function exists by current filename
+    const filename = path.split('/').pop()!.replace('.json', '');
+    const existingFn = siteDb.getFunctionByName(filename);
+
+    if (existingFn) {
+      // Update existing function
+      siteDb.updateFunction(existingFn.id, {
+        name: fnData.name,
+        code: fnData.code,
+        method: fnData.method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY',
+        description: fnData.description,
+        enabled: fnData.enabled ?? true,
+        timeoutMs: fnData.timeoutMs ?? 5000,
+      });
+
+      // If name changed, we need to update the path
+      if (fnData.name !== filename) {
+        // Remove old transient file
+        this.transientFiles.delete(path);
+        // Mount with new path
+        const newPath = `/.server/edge-functions/${fnData.name}.json`;
+        const updated = siteDb.getFunctionByName(fnData.name)!;
+        this.mountTransientFile(newPath, generateEdgeFunctionFile(updated), false);
+        return this.transientFiles.get(newPath)!;
+      }
+    } else {
+      // Create new function
+      siteDb.createFunction({
+        name: fnData.name,
+        code: fnData.code,
+        method: fnData.method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY',
+        description: fnData.description,
+        enabled: fnData.enabled ?? true,
+        timeoutMs: fnData.timeoutMs ?? 5000,
+      });
+    }
+
+    // Update transient file with validated content
+    const updated = siteDb.getFunctionByName(fnData.name)!;
+    this.mountTransientFile(path, generateEdgeFunctionFile(updated), false);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('filesChanged'));
+    }
+
+    return this.transientFiles.get(path)!;
+  }
+
+  /**
+   * Update server function from file content
+   */
+  private async updateServerFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
+    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+    const { validateServerFunctionData, generateServerFunctionFile } = await import('./server-context');
+
+    // Parse JSON
+    let data: unknown;
+    try {
+      data = JSON.parse(content);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`Invalid JSON: ${message}`);
+    }
+
+    // Validate
+    const validation = validateServerFunctionData(data);
+    if (!validation.valid) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    // Type-safe cast after validation
+    const fnData = data as { name: string; code: string; description?: string; enabled?: boolean };
+
+    // Get site database
+    const adapter = getSQLiteAdapter();
+    await adapter.init();
+    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
+    if (!siteDb) {
+      throw new Error('Site database not available');
+    }
+
+    // Check if function exists by current filename
+    const filename = path.split('/').pop()!.replace('.json', '');
+    const existingFn = siteDb.getServerFunctionByName(filename);
+
+    if (existingFn) {
+      // Update existing function
+      siteDb.updateServerFunction(existingFn.id, {
+        name: fnData.name,
+        code: fnData.code,
+        description: fnData.description,
+        enabled: fnData.enabled ?? true,
+      });
+
+      // If name changed, we need to update the path
+      if (fnData.name !== filename) {
+        // Remove old transient file
+        this.transientFiles.delete(path);
+        // Mount with new path
+        const newPath = `/.server/server-functions/${fnData.name}.json`;
+        const updated = siteDb.getServerFunctionByName(fnData.name)!;
+        this.mountTransientFile(newPath, generateServerFunctionFile(updated), false);
+        return this.transientFiles.get(newPath)!;
+      }
+    } else {
+      // Create new function
+      siteDb.createServerFunction({
+        name: fnData.name,
+        code: fnData.code,
+        description: fnData.description,
+        enabled: fnData.enabled ?? true,
+      });
+    }
+
+    // Update transient file with validated content
+    const updated = siteDb.getServerFunctionByName(fnData.name)!;
+    this.mountTransientFile(path, generateServerFunctionFile(updated), false);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('filesChanged'));
+    }
+
+    return this.transientFiles.get(path)!;
+  }
+
+  /**
+   * Update individual secret from file content
+   * Creates or updates a single secret in the database
+   */
+  private async updateSecretFromFile(path: string, content: string): Promise<VirtualFile> {
+    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+    const { validateSecretData, generateSecretFile } = await import('./server-context');
+
+    // Parse JSON
+    let data: unknown;
+    try {
+      data = JSON.parse(content);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`Invalid JSON: ${message}`);
+    }
+
+    // Validate
+    const validation = validateSecretData(data);
+    if (!validation.valid) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    // Type-safe cast after validation
+    const secretData = data as { name: string; description?: string };
+
+    // Get site database
+    const adapter = getSQLiteAdapter();
+    await adapter.init();
+    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
+    if (!siteDb) {
+      throw new Error('Site database not available');
+    }
+
+    // Check if secret exists by current filename
+    const filename = path.split('/').pop()!.replace('.json', '');
+    const existingSecret = siteDb.getSecretByName(filename);
+
+    if (existingSecret) {
+      // Update existing secret
+      siteDb.updateSecretMetadata(existingSecret.id, {
+        name: secretData.name,
+        description: secretData.description || ''
+      });
+
+      // If name changed, update the path
+      if (secretData.name !== filename) {
+        this.transientFiles.delete(path);
+        const newPath = `/.server/secrets/${secretData.name}.json`;
+        const updated = siteDb.getSecretByName(secretData.name)!;
+        this.mountTransientFile(newPath, generateSecretFile(updated), false);
+        return this.transientFiles.get(newPath)!;
+      }
+    } else {
+      // Create new secret placeholder
+      siteDb.createSecretPlaceholder(secretData.name, secretData.description || '');
+    }
+
+    // Update transient file with validated content
+    const updated = siteDb.getSecretByName(secretData.name)!;
+    this.mountTransientFile(path, generateSecretFile(updated), false);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('filesChanged'));
+    }
+
+    return this.transientFiles.get(path)!;
+  }
+
+  /**
+   * Create a new server context file (/.server/)
+   * Validates content and creates in site database
+   * On client side, routes through API
+   */
+  private async createServerContextFile(path: string, content: string): Promise<VirtualFile> {
+    // Try to recover siteId from sessionStorage if not set (HMR resilience)
+    if (!this.serverContextSiteId && typeof sessionStorage !== 'undefined') {
+      const storedSiteId = sessionStorage.getItem('vfs_serverContextSiteId');
+      if (storedSiteId) {
+        logger.info(`[VFS] Recovered serverContextSiteId from sessionStorage: ${storedSiteId}`);
+        this.serverContextSiteId = storedSiteId;
+      }
+    }
+
+    if (!this.serverContextSiteId) {
+      throw new Error('No site selected. Select a site from the Site Selector.');
+    }
+
+    // Check if file already exists in transient files
+    if (this.transientFiles.has(path)) {
+      throw new Error(`File already exists: ${path}`);
+    }
+
+    // On client side, use API
+    if (typeof window !== 'undefined') {
+      return await this.mutateServerContextViaAPI('create', path, content);
+    }
+
+    // Server-side: direct implementation
+    // Handle individual secret files
+    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
+      return await this.updateSecretFromFile(path, content);
+    }
+
+    // Handle edge functions
+    if (path.startsWith('/.server/edge-functions/') && path.endsWith('.json')) {
+      return await this.updateEdgeFunctionFromFile(path, content);
+    }
+
+    // Handle server functions
+    if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
+      return await this.updateServerFunctionFromFile(path, content);
+    }
+
+    throw new Error(`Cannot create ${path} - only secrets, edge functions, and server functions (.json) can be created`);
+  }
+
+  /**
+   * Delete a server context file (/.server/)
+   * Deletes from site database
+   * On client side, routes through API
+   */
+  async deleteServerContextFile(path: string): Promise<void> {
+    // Try to recover siteId from sessionStorage if not set (HMR resilience)
+    if (!this.serverContextSiteId && typeof sessionStorage !== 'undefined') {
+      const storedSiteId = sessionStorage.getItem('vfs_serverContextSiteId');
+      if (storedSiteId) {
+        logger.info(`[VFS] Recovered serverContextSiteId from sessionStorage: ${storedSiteId}`);
+        this.serverContextSiteId = storedSiteId;
+      }
+    }
+
+    if (!this.serverContextSiteId) {
+      throw new Error('No site selected');
+    }
+
+    // Cannot delete schema.sql - read-only
+    if (path === '/.server/db/schema.sql') {
+      throw new Error(`Cannot delete ${path} - read-only file`);
+    }
+
+    // On client side, use API for all deletions
+    if (typeof window !== 'undefined') {
+      await this.mutateServerContextViaAPI('delete', path);
+      return;
+    }
+
+    // Handle individual secret files
+    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
+      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+      const adapter = getSQLiteAdapter();
+      await adapter.init();
+      const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId);
+      if (!siteDb) {
+        throw new Error('Site database not available');
+      }
+
+      const filename = path.split('/').pop()!.replace('.json', '');
+      const secret = siteDb.getSecretByName(filename);
+      if (!secret) {
+        throw new Error(`Secret not found: ${filename}`);
+      }
+
+      siteDb.deleteSecret(secret.id);
+      this.transientFiles.delete(path);
+      return;
+    }
+
+    // Handle edge functions
+    if (path.startsWith('/.server/edge-functions/') && path.endsWith('.json')) {
+      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+      const adapter = getSQLiteAdapter();
+      await adapter.init();
+      const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId);
+      if (!siteDb) {
+        throw new Error('Site database not available');
+      }
+
+      const filename = path.split('/').pop()!.replace('.json', '');
+      const fn = siteDb.getFunctionByName(filename);
+      if (!fn) {
+        throw new Error(`Edge function not found: ${filename}`);
+      }
+
+      siteDb.deleteFunction(fn.id);
+      this.transientFiles.delete(path);
+      return;
+    }
+
+    // Handle server functions
+    if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
+      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+      const adapter = getSQLiteAdapter();
+      await adapter.init();
+      const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId);
+      if (!siteDb) {
+        throw new Error('Site database not available');
+      }
+
+      const filename = path.split('/').pop()!.replace('.json', '');
+      const fn = siteDb.getServerFunctionByName(filename);
+      if (!fn) {
+        throw new Error(`Server function not found: ${filename}`);
+      }
+
+      siteDb.deleteServerFunction(fn.id);
+      this.transientFiles.delete(path);
+      return;
+    }
+
+    throw new Error(`Cannot delete ${path} - read-only file`);
   }
 
   private ensureInitialized() {
@@ -153,12 +922,17 @@ export class VirtualFileSystem {
 
   async createFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {
     this.ensureInitialized();
-    
+
     try {
       // Clean path of any trailing newlines or escape sequences
       const cleanPath = path.replace(/\\n$|\\r$|\n$|\r$/, '').trim();
       path = cleanPath;
-      
+
+      // Handle server context file creation (/.server/)
+      if (path.startsWith('/.server/')) {
+        return await this.createServerContextFile(path, content as string);
+      }
+
       const existing = await this.adapter.getFile(projectId, path);
       if (existing) {
         logger.error('VFS: File already exists', { projectId, path });
@@ -266,7 +1040,7 @@ export class VirtualFileSystem {
 
   async updateFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {
     this.ensureInitialized();
-    
+
     try {
       // Clean and validate path before database operation
       const cleanPath = path.replace(/\\n$|\\r$|\n$|\r$/, '').trim();
@@ -274,10 +1048,15 @@ export class VirtualFileSystem {
         logger.error('VFS: Invalid path detected', { projectId, path: path.slice(0, 100) + '...' });
         throw new Error(`Invalid file path: ${path.slice(0, 50)}...`);
       }
-      
+
       // Use cleaned path for lookup
       path = cleanPath;
-      
+
+      // Handle server context file writes (/.server/)
+      if (path.startsWith('/.server/')) {
+        return await this.updateServerContextFile(path, content as string);
+      }
+
       const file = await this.adapter.getFile(projectId, path);
       if (!file) {
         logger.error('VFS: File not found for update', { projectId, path });

@@ -37,6 +37,7 @@ interface MultipagePreviewProps {
   onFocusSelection?: (selection: FocusContextPayload | null) => void;
   hasFocusTarget?: boolean;
   onClose?: () => void;
+  siteId?: string | null;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -53,7 +54,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   refreshTrigger,
   onFocusSelection,
   hasFocusTarget = false,
-  onClose
+  onClose,
+  siteId
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -196,7 +198,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         serverRef.current.cleanupBlobUrls();
       }
       
-      const server = new VirtualServer(vfs, projectId);
+      const server = new VirtualServer(vfs, projectId, undefined, siteId || undefined);
       serverRef.current = server;
       
       const compiled = await server.compileProject();

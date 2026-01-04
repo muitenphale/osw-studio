@@ -71,6 +71,7 @@ Available commands:
 - Directory listing: ls, tree
 - Search: grep, rg (ripgrep), find
 - File operations: mkdir, mv, cp, rm, rmdir, touch
+- Database: sqlite3 (Server Mode only, requires site context)
 - Other: echo
 
 IMPORTANT: Execute ONE command at a time. Pass the complete command as a single string.
@@ -111,13 +112,47 @@ Examples:
 
           // Parse command string into array
           const cmdArray = parseShellCommand(args.cmd);
+          const command = cmdArray[0];
 
           // Block write operations in read-only mode
           if (context.isReadOnly && isWriteOperation(cmdArray)) {
             return `Error: Write operations are disabled in read-only mode. "${cmdArray[0]}" is not allowed.`;
           }
 
-          // Execute command
+          // Check if this command requires server-side execution
+          const serverCommands = ['sqlite3'];
+          const siteId = vfs.getServerContextSiteId();
+
+          if (serverCommands.includes(command) && siteId) {
+            // Proxy to server API for server-side execution
+            try {
+              const response = await fetch('/api/shell/execute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId, cmd: cmdArray })
+              });
+
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                return `Error: ${errorData.stderr || 'Server request failed'}`;
+              }
+
+              const result = await response.json();
+
+              if (result.exitCode === 0) {
+                return result.stdout && result.stdout.trim().length > 0
+                  ? result.stdout
+                  : 'Command succeeded with no output';
+              } else {
+                return `Error: ${result.stderr || 'Command failed'}`;
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Server request failed';
+              return `Error: ${message}`;
+            }
+          }
+
+          // Execute command via browser-side VFS shell
           const result = await vfsShell.execute(projectId, cmdArray);
 
           if (result.success) {

@@ -22,6 +22,7 @@ import {
   Cloud,
   LogOut,
 } from 'lucide-react';
+import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
 import { cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -76,6 +77,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'tour', label: 'Guided Tour', icon: Info, action: 'start-tour' },
   { id: 'tester', label: 'Model Tester', icon: TestTube, path: '/test-generation' },
   { id: 'about', label: 'About', icon: Info, action: 'open-about' },
+  { id: 'discord', label: 'Discord', icon: DiscordIcon, href: 'https://discord.gg/mAJ8Ss4u' },
   { id: 'github', label: 'GitHub', icon: Github, href: 'https://github.com/o-stahl/osw-studio' },
 ];
 
@@ -118,6 +120,7 @@ function SidebarContent({
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentDocId = searchParams.get('doc');
+  const currentSettingsTab = searchParams.get('settings');
   const [pinned, setPinned] = useState(true); // Pinned = sidebar stays expanded
   const [hovering, setHovering] = useState(false);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
@@ -495,10 +498,14 @@ function SidebarContent({
                 )}>
                   {item.subItems.map((subItem) => {
                     const SubIcon = subItem.icon;
-                    // For docs, check currentDocId. For settings, check URL path
+                    // For docs, check currentDocId. For settings, check URL param or path
                     const isSubItemActive = subItem.file
                       ? currentDocId === subItem.id
-                      : (isServerMode && window.location.pathname === `/admin/${item.id}/${subItem.id}`);
+                      : item.id === 'settings'
+                        ? (isServerMode
+                            ? window.location.pathname === `/admin/${item.id}/${subItem.id}`
+                            : currentSettingsTab === subItem.id)
+                        : (isServerMode && window.location.pathname === `/admin/${item.id}/${subItem.id}`);
 
                     return (
                       <Button
@@ -524,8 +531,12 @@ function SidebarContent({
                               // Docs sub-item - navigate to specific doc
                               router.push(`/?doc=${subItem.id}`);
                               onNavigate(item.id);
+                            } else if (item.id === 'settings') {
+                              // Settings sub-item - use query param
+                              router.push(`/?settings=${subItem.id}`);
+                              onNavigate(item.id);
                             } else {
-                              // Settings sub-item or other
+                              // Other sub-items
                               router.push('/');
                               onNavigate(item.id);
                             }

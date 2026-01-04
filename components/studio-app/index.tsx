@@ -34,13 +34,18 @@ function StudioInner() {
     }
   }, [router]);
 
+  const settingsParam = searchParams.get('settings');
+
   // Sync URL params with view state
   useEffect(() => {
     if (docParam) {
       // If ?doc= param exists, show docs view
       setCurrentView('docs');
+    } else if (settingsParam) {
+      // If ?settings= param exists, show settings view
+      setCurrentView('settings');
     }
-  }, [docParam]);
+  }, [docParam, settingsParam]);
 
   const stepId = state.currentStep?.id;
   const isTourRunning = state.status === 'running';

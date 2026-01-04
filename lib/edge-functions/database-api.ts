@@ -1,0 +1,155 @@
+/**
+ * Sandboxed Database API for Edge Functions
+ *
+ * Provides a secure, limited interface to the site's SQLite database
+ * for use within edge functions. Blocks access to system tables and
+ * enforces query limits.
+ */
+
+import { SiteDatabase } from '@/lib/vfs/adapters/site-database';
+import { DatabaseAPI, DatabaseAPIOptions } from './types';
+
+/**
+ * Tables that edge functions cannot access
+ * These contain system data, analytics, and function definitions
+ */
+const FORBIDDEN_TABLES = [
+  'sqlite_',        // SQLite internal tables
+  '_migrations',    // Migration tracking
+  'site_info',      // Site configuration
+  'edge_functions', // Function definitions
+  'function_logs',  // Execution logs
+  'server_functions', // Server function definitions
+  'secrets',        // Encrypted secrets
+  'pageviews',      // Analytics
+  'interactions',   // Analytics
+  'sessions',       // Analytics
+  'files',          // VFS files
+  'file_tree_nodes', // VFS tree
+];
+
+/**
+ * DDL keywords that modify schema
+ */
+const DDL_KEYWORDS = ['create', 'drop', 'alter', 'truncate'];
+
+/**
+ * Dangerous keywords that should never be allowed
+ */
+const DANGEROUS_KEYWORDS = ['attach', 'detach', 'vacuum', 'reindex'];
+
+/**
+ * Create a sandboxed database API for edge function use
+ *
+ * @param siteDb The site's database instance
+ * @param options Configuration options
+ * @returns A DatabaseAPI that enforces security restrictions
+ */
+export function createDatabaseAPI(
+  siteDb: SiteDatabase,
+  options: DatabaseAPIOptions = {}
+): DatabaseAPI {
+  let queryCount = 0;
+  const maxQueries = options.maxQueries ?? 100;
+  const readOnly = options.readOnly ?? false;
+
+  /**
+   * Validate SQL query for security
+   * Throws an error if the query is not allowed
+   */
+  const validateSQL = (sql: string): void => {
+    const lowerSQL = sql.toLowerCase().trim();
+
+    // Check for dangerous keywords
+    for (const keyword of DANGEROUS_KEYWORDS) {
+      if (lowerSQL.includes(keyword)) {
+        throw new Error(`SQL keyword "${keyword}" is not allowed`);
+      }
+    }
+
+    // Block access to system tables
+    for (const table of FORBIDDEN_TABLES) {
+      // Check if the forbidden table name appears in the query
+      // Use word boundaries to avoid false positives
+      const tableRegex = new RegExp(`\\b${table.replace('_', '_?')}\\w*\\b`, 'i');
+      if (tableRegex.test(lowerSQL)) {
+        throw new Error(`Access to system table "${table}" is not allowed`);
+      }
+    }
+
+    // Block DDL in read-only mode
+    if (readOnly) {
+      for (const keyword of DDL_KEYWORDS) {
+        if (lowerSQL.startsWith(keyword)) {
+          throw new Error(`DDL statements (${keyword.toUpperCase()}) not allowed in read-only mode`);
+        }
+      }
+    }
+
+    // Check query count limit
+    queryCount++;
+    if (queryCount > maxQueries) {
+      throw new Error(`Query limit exceeded (max ${maxQueries} queries per execution)`);
+    }
+  };
+
+  /**
+   * Execute a query and convert results to objects
+   */
+  const executeQuery = <T>(sql: string, params?: unknown[]): T[] => {
+    validateSQL(sql);
+
+    try {
+      const result = siteDb.executeRawSQL(sql, params);
+
+      // Convert row arrays to objects
+      return result.rows.map(row => {
+        const obj: Record<string, unknown> = {};
+        result.columns.forEach((col, i) => {
+          obj[col] = row[i];
+        });
+        return obj as T;
+      });
+    } catch (error) {
+      // Re-throw with cleaner message
+      const message = error instanceof Error ? error.message : 'Query failed';
+      throw new Error(`Database error: ${message}`);
+    }
+  };
+
+  /**
+   * Execute a statement that modifies data
+   */
+  const executeRun = (sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } => {
+    validateSQL(sql);
+
+    if (readOnly) {
+      throw new Error('Database is in read-only mode');
+    }
+
+    try {
+      const result = siteDb.executeRawSQL(sql, params);
+      return {
+        changes: result.rowsAffected,
+        lastInsertRowid: 0, // SQLite doesn't expose this through our API currently
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Query failed';
+      throw new Error(`Database error: ${message}`);
+    }
+  };
+
+  return {
+    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      return executeQuery<T>(sql, params);
+    },
+
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+      return executeRun(sql, params);
+    },
+
+    all<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      return executeQuery<T>(sql, params);
+    },
+  };
+}

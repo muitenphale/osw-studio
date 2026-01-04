@@ -40,6 +40,22 @@ Your 3 most recent projects appear in the sidebar for quick access.
 
 When you open a project, you'll see 4 panels:
 
+### Workspace Header
+
+The header contains key controls:
+- **Project name** - Click to rename
+- **Mode toggle** - Switch between Chat (read-only) and Code (full access) modes
+- **Site selector** (Server Mode only) - Choose which published site's server context to load
+
+#### Site Selector (Server Mode)
+
+In Server Mode, a dropdown appears in the workspace header that lets you select a site. When selected:
+- The AI gains awareness of that site's server features
+- A `/.server/` hidden folder appears with server context files
+- You can ask the AI about edge functions, database schema, etc.
+
+See **[Server Mode → Server Context Integration](?doc=server-mode#server-context-integration)** for details.
+
 ### Chat (Left-most)
 
 Talk to AI to build and modify your project. The chat panel has two modes:
@@ -63,8 +79,18 @@ Browse your project structure:
 - Click folders to expand/collapse
 - Click files to open in editor
 - Right-click for options (rename, delete, etc.)
-- Right-click and select **Show Hidden Files** to view hidden folders/files (like `.skills/`)
-- Hidden files contain skill documents that make them accessible to the AI
+- Right-click and select **Show Hidden Files** to view hidden folders
+
+#### Hidden Folders
+
+OSW Studio uses hidden folders (starting with `.`) to provide AI context:
+
+| Folder | Icon | Purpose |
+|--------|------|---------|
+| `/.skills/` | Purple book | Skill documents that teach the AI your preferences |
+| `/.server/` | Orange server | Server context (Server Mode only) - database schema, edge functions, etc. |
+
+These folders are **read-only** and **transient** - their contents are generated dynamically to provide context to the AI and are not saved with your project
 
 ### Code Editor (3rd)
 

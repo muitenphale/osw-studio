@@ -6,6 +6,152 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.19.0 - Server Mode Backend Features
+
+This release adds complete backend functionality for published sites, including edge functions, database management, server functions, secrets, and AI integration.
+
+### Edge Functions
+
+Create serverless JavaScript endpoints for your published sites:
+
+- **REST API endpoints** - GET, POST, PUT, DELETE, or ANY method
+- **Database access** - Query your site's SQLite database via `db.query()` and `db.run()`
+- **External requests** - Use `fetch()` to call external APIs
+- **Sandboxed execution** - Safe VM-based runtime with configurable timeouts (1-30 seconds)
+- **Secrets access** - Use `secrets.get()`, `secrets.has()`, `secrets.list()` for API keys
+
+```javascript
+// Example: GET /api/sites/{siteId}/functions/get-users
+const users = db.query('SELECT * FROM users LIMIT 10');
+Response.json({ users });
+```
+
+### Server Functions (Helpers)
+
+Create reusable JavaScript helpers callable from edge functions:
+
+- **Code reuse** - Define shared logic once, use across all edge functions via `server.functionName()`
+- **Same security model** - Runs in the same sandboxed VM as edge functions
+- **Full access** - Helpers have access to `db`, `fetch`, and `console`
+
+```javascript
+// Server function "validateAuth"
+const [apiKey] = args;
+const users = db.query('SELECT * FROM users WHERE api_key = ?', [apiKey]);
+return users.length > 0 ? { valid: true, user: users[0] } : { valid: false };
+```
+
+### Secrets Management
+
+Encrypted storage for API keys and tokens:
+
+- AES-256-GCM encryption with unique IVs per secret
+- Admin-only access, values never logged or exposed
+- AI can create secret placeholders, user sets values in admin UI
+
+### Database Tools
+
+- **SQL Editor** - Execute raw SQL queries with Monaco editor and query history
+- **Schema Viewer** - Browse database structure with expandable table/column tree
+- **Execution Logs** - Monitor function invocations with status, duration, timestamps
+
+### Server Context Integration
+
+The AI can now understand and work with your site's server features! When you select a site:
+
+- **Site Selector** dropdown in workspace header to choose site context
+- **`/.server/` hidden folder** with transient files containing server context
+- AI receives edge functions, database schema, server functions, and secret names
+
+#### The `/.server/` Folder
+
+A hidden folder appears in the file explorer (right-click → "Show Hidden Files"):
+
+- `db/schema.sql` - Database schema (read-only, use sqlite3 for DDL)
+- `edge-functions/*.json` - Edge functions (editable)
+- `server-functions/*.json` - Server functions (editable)
+- `secrets/*.json` - Secret placeholders (editable - AI creates, user sets values)
+
+### AI Read-Write Access to Server Features
+
+The AI can create, modify, and delete server features:
+
+#### SQL Queries with `sqlite3`
+
+```
+sqlite3 "SELECT * FROM products"
+sqlite3 -json "SELECT * FROM users WHERE active = 1"
+sqlite3 "CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)"
+```
+
+System tables are protected from modification.
+
+#### Creating Functions
+
+Ask the AI to create endpoints or helpers:
+
+```
+Create an edge function called "list-products" that returns all products
+```
+
+Functions are stored as JSON files:
+
+```json
+{
+  "name": "list-products",
+  "method": "GET",
+  "enabled": true,
+  "timeoutMs": 5000,
+  "code": "Response.json(db.query('SELECT * FROM products'));"
+}
+```
+
+### Edge Function Routing for Published Sites
+
+Published sites can call edge functions using simple paths like `/submit-contact` instead of the full API URL.
+
+A lightweight interceptor script (~1.5KB) is injected into published HTML that:
+- Intercepts `fetch()` and `XMLHttpRequest` calls
+- Detects paths without file extensions (e.g., `/submit-contact`, not `/styles.css`)
+- Routes them to `/api/sites/{siteId}/functions/{path}`
+- Handles form submissions automatically
+
+```javascript
+// Your frontend code - simple and clean!
+const response = await fetch('/submit-contact', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'John', email: 'john@example.com' })
+});
+```
+
+Forms work automatically too:
+```html
+<form action="/submit-contact" method="POST">
+  <input name="email" type="email" required>
+  <button type="submit">Subscribe</button>
+</form>
+```
+
+Custom events for response handling:
+```javascript
+document.addEventListener('edge-function-response', (e) => {
+  console.log('Result:', e.detail.result);
+});
+
+document.addEventListener('edge-function-error', (e) => {
+  console.error('Error:', e.detail.error);
+});
+```
+
+### Preview Edge Function Support
+
+The live preview now supports edge function routing when a site is selected. Test your edge functions directly in the preview without publishing first.
+
+**[Server Features Guide →](?doc=server-features)** | **[Server Mode Guide →](?doc=server-mode)** | **[Edge Functions Guide →](?doc=edge-functions)**
+
+---
+
 ## v1.18.0
 
 ### SQLite Migration - Simpler Server Mode

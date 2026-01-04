@@ -13,7 +13,8 @@
 
 import type { Database } from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
-import { VirtualFile, FileTreeNode, Site } from '../types';
+import { VirtualFile, FileTreeNode, Site, EdgeFunction, FunctionLog, TableInfo, ColumnInfo, ServerFunction, Secret } from '../types';
+import { encryptSecret, isEncryptionConfigured } from '../../edge-functions/secrets-crypto';
 import { getSiteDatabase, closeSiteDatabase } from './sqlite-connection';
 
 /**
@@ -250,6 +251,83 @@ export class SiteDatabase {
 
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)
+    `);
+
+    // Edge Functions
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS edge_functions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        code TEXT NOT NULL,
+        method TEXT NOT NULL DEFAULT 'ANY',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        timeout_ms INTEGER NOT NULL DEFAULT 5000,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_edge_functions_name ON edge_functions(name)
+    `);
+
+    // Function Execution Logs
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS function_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        function_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        status_code INTEGER,
+        duration_ms INTEGER,
+        error TEXT,
+        timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (function_id) REFERENCES edge_functions(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_function_logs_function_id ON function_logs(function_id)
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_function_logs_timestamp ON function_logs(timestamp)
+    `);
+
+    // Server Functions (callable from edge functions)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS server_functions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        code TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_server_functions_name ON server_functions(name)
+    `);
+
+    // Secrets (encrypted key-value storage)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS secrets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        encrypted_value TEXT NOT NULL,
+        iv TEXT NOT NULL,
+        auth_tag TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_secrets_name ON secrets(name)
     `);
 
     this.initialized = true;
@@ -1107,5 +1185,684 @@ export class SiteDatabase {
     }
 
     return data;
+  }
+
+  // ============================================
+  // Edge Functions: CRUD
+  // ============================================
+
+  /**
+   * Create a new edge function
+   */
+  createFunction(fn: Omit<EdgeFunction, 'id' | 'createdAt' | 'updatedAt'>): string {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO edge_functions (
+        id, name, description, code, method, enabled, timeout_ms, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      fn.name,
+      fn.description ?? null,
+      fn.code,
+      fn.method,
+      fn.enabled ? 1 : 0,
+      fn.timeoutMs,
+      now,
+      now
+    );
+
+    return id;
+  }
+
+  /**
+   * Get an edge function by ID
+   */
+  getFunction(id: string): EdgeFunction | null {
+    const row = this.db.prepare('SELECT * FROM edge_functions WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToFunction(row);
+  }
+
+  /**
+   * Get an edge function by name
+   */
+  getFunctionByName(name: string): EdgeFunction | null {
+    const row = this.db.prepare('SELECT * FROM edge_functions WHERE name = ?').get(name) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToFunction(row);
+  }
+
+  /**
+   * Update an edge function
+   */
+  updateFunction(id: string, updates: Partial<Omit<EdgeFunction, 'id' | 'createdAt' | 'updatedAt'>>): void {
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.name !== undefined) { setClauses.push('name = ?'); values.push(updates.name); }
+    if (updates.description !== undefined) { setClauses.push('description = ?'); values.push(updates.description); }
+    if (updates.code !== undefined) { setClauses.push('code = ?'); values.push(updates.code); }
+    if (updates.method !== undefined) { setClauses.push('method = ?'); values.push(updates.method); }
+    if (updates.enabled !== undefined) { setClauses.push('enabled = ?'); values.push(updates.enabled ? 1 : 0); }
+    if (updates.timeoutMs !== undefined) { setClauses.push('timeout_ms = ?'); values.push(updates.timeoutMs); }
+
+    if (setClauses.length === 0) return;
+
+    setClauses.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+
+    const sql = `UPDATE edge_functions SET ${setClauses.join(', ')} WHERE id = ?`;
+    this.db.prepare(sql).run(...values);
+  }
+
+  /**
+   * Delete an edge function
+   */
+  deleteFunction(id: string): void {
+    this.db.prepare('DELETE FROM edge_functions WHERE id = ?').run(id);
+  }
+
+  /**
+   * List all edge functions
+   */
+  listFunctions(): EdgeFunction[] {
+    const rows = this.db.prepare('SELECT * FROM edge_functions ORDER BY name').all() as Record<string, unknown>[];
+    return rows.map(row => this.rowToFunction(row));
+  }
+
+  private rowToFunction(row: Record<string, unknown>): EdgeFunction {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string | undefined,
+      code: row.code as string,
+      method: row.method as EdgeFunction['method'],
+      enabled: Boolean(row.enabled),
+      timeoutMs: row.timeout_ms as number,
+      createdAt: parseDate(row.created_at as string),
+      updatedAt: parseDate(row.updated_at as string),
+    };
+  }
+
+  // ============================================
+  // Edge Functions: Logging
+  // ============================================
+
+  /**
+   * Log a function execution
+   */
+  logFunctionExecution(functionId: string, data: {
+    method: string;
+    path: string;
+    statusCode: number;
+    durationMs: number;
+    error?: string;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO function_logs (function_id, method, path, status_code, duration_ms, error)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      functionId,
+      data.method,
+      data.path,
+      data.statusCode,
+      data.durationMs,
+      data.error ?? null
+    );
+  }
+
+  /**
+   * Get logs for a specific function
+   */
+  getFunctionLogs(functionId: string, limit: number = 100): FunctionLog[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM function_logs WHERE function_id = ?
+      ORDER BY timestamp DESC LIMIT ?
+    `).all(functionId, limit) as Record<string, unknown>[];
+
+    return rows.map(row => this.rowToFunctionLog(row));
+  }
+
+  /**
+   * Get recent logs across all functions
+   */
+  getRecentLogs(limit: number = 100): FunctionLog[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM function_logs ORDER BY timestamp DESC LIMIT ?
+    `).all(limit) as Record<string, unknown>[];
+
+    return rows.map(row => this.rowToFunctionLog(row));
+  }
+
+  /**
+   * Clear function logs
+   */
+  clearFunctionLogs(functionId?: string, beforeDate?: Date): void {
+    if (functionId && beforeDate) {
+      this.db.prepare('DELETE FROM function_logs WHERE function_id = ? AND timestamp < ?')
+        .run(functionId, beforeDate.toISOString());
+    } else if (functionId) {
+      this.db.prepare('DELETE FROM function_logs WHERE function_id = ?').run(functionId);
+    } else if (beforeDate) {
+      this.db.prepare('DELETE FROM function_logs WHERE timestamp < ?').run(beforeDate.toISOString());
+    } else {
+      this.db.prepare('DELETE FROM function_logs').run();
+    }
+  }
+
+  private rowToFunctionLog(row: Record<string, unknown>): FunctionLog {
+    return {
+      id: row.id as number,
+      functionId: row.function_id as string,
+      method: row.method as string,
+      path: row.path as string,
+      statusCode: row.status_code as number,
+      durationMs: row.duration_ms as number,
+      error: row.error as string | undefined,
+      timestamp: parseDate(row.timestamp as string),
+    };
+  }
+
+  // ============================================
+  // Server Functions: CRUD
+  // ============================================
+
+  /**
+   * Create a new server function
+   */
+  createServerFunction(fn: Omit<ServerFunction, 'id' | 'createdAt' | 'updatedAt'>): string {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO server_functions (
+        id, name, description, code, enabled, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      fn.name,
+      fn.description ?? null,
+      fn.code,
+      fn.enabled ? 1 : 0,
+      now,
+      now
+    );
+
+    return id;
+  }
+
+  /**
+   * Get a server function by ID
+   */
+  getServerFunction(id: string): ServerFunction | null {
+    const row = this.db.prepare('SELECT * FROM server_functions WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToServerFunction(row);
+  }
+
+  /**
+   * Get a server function by name
+   */
+  getServerFunctionByName(name: string): ServerFunction | null {
+    const row = this.db.prepare('SELECT * FROM server_functions WHERE name = ?').get(name) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToServerFunction(row);
+  }
+
+  /**
+   * Update a server function
+   */
+  updateServerFunction(id: string, updates: Partial<Omit<ServerFunction, 'id' | 'createdAt' | 'updatedAt'>>): void {
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.name !== undefined) { setClauses.push('name = ?'); values.push(updates.name); }
+    if (updates.description !== undefined) { setClauses.push('description = ?'); values.push(updates.description); }
+    if (updates.code !== undefined) { setClauses.push('code = ?'); values.push(updates.code); }
+    if (updates.enabled !== undefined) { setClauses.push('enabled = ?'); values.push(updates.enabled ? 1 : 0); }
+
+    if (setClauses.length === 0) return;
+
+    setClauses.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+
+    const sql = `UPDATE server_functions SET ${setClauses.join(', ')} WHERE id = ?`;
+    this.db.prepare(sql).run(...values);
+  }
+
+  /**
+   * Delete a server function
+   */
+  deleteServerFunction(id: string): void {
+    this.db.prepare('DELETE FROM server_functions WHERE id = ?').run(id);
+  }
+
+  /**
+   * List all server functions
+   */
+  listServerFunctions(): ServerFunction[] {
+    const rows = this.db.prepare('SELECT * FROM server_functions ORDER BY name').all() as Record<string, unknown>[];
+    return rows.map(row => this.rowToServerFunction(row));
+  }
+
+  private rowToServerFunction(row: Record<string, unknown>): ServerFunction {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string | undefined,
+      code: row.code as string,
+      enabled: Boolean(row.enabled),
+      createdAt: parseDate(row.created_at as string),
+      updatedAt: parseDate(row.updated_at as string),
+    };
+  }
+
+  // ============================================
+  // Secrets Management
+  // ============================================
+
+  /**
+   * Create a new secret (value is encrypted before storage)
+   */
+  createSecret(name: string, value: string, description?: string): string {
+    if (!isEncryptionConfigured()) {
+      throw new Error('Secrets encryption not configured. Set SECRETS_ENCRYPTION_KEY environment variable.');
+    }
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const encrypted = encryptSecret(value);
+
+    this.db.prepare(`
+      INSERT INTO secrets (id, name, encrypted_value, iv, auth_tag, description, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, name, encrypted.encryptedValue, encrypted.iv, encrypted.authTag, description || null, now, now);
+
+    return id;
+  }
+
+  /**
+   * Get a secret by ID (metadata only, no value)
+   */
+  getSecret(id: string): Secret | null {
+    const row = this.db.prepare('SELECT * FROM secrets WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToSecret(row);
+  }
+
+  /**
+   * Get a secret by name (metadata only, no value)
+   */
+  getSecretByName(name: string): Secret | null {
+    const row = this.db.prepare('SELECT * FROM secrets WHERE name = ?').get(name) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToSecret(row);
+  }
+
+  /**
+   * Update secret value (re-encrypts with new IV)
+   */
+  updateSecretValue(id: string, value: string): void {
+    if (!isEncryptionConfigured()) {
+      throw new Error('Secrets encryption not configured. Set SECRETS_ENCRYPTION_KEY environment variable.');
+    }
+
+    const now = new Date().toISOString();
+    const encrypted = encryptSecret(value);
+
+    this.db.prepare(`
+      UPDATE secrets
+      SET encrypted_value = ?, iv = ?, auth_tag = ?, updated_at = ?
+      WHERE id = ?
+    `).run(encrypted.encryptedValue, encrypted.iv, encrypted.authTag, now, id);
+  }
+
+  /**
+   * Update secret metadata (name, description)
+   */
+  updateSecretMetadata(id: string, updates: { name?: string; description?: string }): void {
+    const now = new Date().toISOString();
+
+    if (updates.name !== undefined) {
+      this.db.prepare('UPDATE secrets SET name = ?, updated_at = ? WHERE id = ?')
+        .run(updates.name, now, id);
+    }
+
+    if (updates.description !== undefined) {
+      this.db.prepare('UPDATE secrets SET description = ?, updated_at = ? WHERE id = ?')
+        .run(updates.description, now, id);
+    }
+  }
+
+  /**
+   * Delete a secret
+   */
+  deleteSecret(id: string): void {
+    this.db.prepare('DELETE FROM secrets WHERE id = ?').run(id);
+  }
+
+  /**
+   * List all secrets (metadata only, no values)
+   */
+  listSecrets(): Secret[] {
+    const rows = this.db.prepare('SELECT * FROM secrets ORDER BY name').all() as Record<string, unknown>[];
+    return rows.map(row => this.rowToSecret(row));
+  }
+
+  /**
+   * Get all secrets with encrypted values (for executor use only)
+   * Returns encrypted data that must be decrypted by the caller
+   */
+  listSecretsWithValues(): Array<{
+    name: string;
+    encryptedValue: string;
+    iv: string;
+    authTag: string;
+  }> {
+    const rows = this.db.prepare('SELECT name, encrypted_value, iv, auth_tag FROM secrets').all() as Record<string, unknown>[];
+    return rows.map(row => ({
+      name: row.name as string,
+      encryptedValue: row.encrypted_value as string,
+      iv: row.iv as string,
+      authTag: row.auth_tag as string,
+    }));
+  }
+
+  private rowToSecret(row: Record<string, unknown>): Secret {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string | undefined,
+      hasValue: row.encrypted_value !== null && row.encrypted_value !== '',
+      createdAt: parseDate(row.created_at as string),
+      updatedAt: parseDate(row.updated_at as string),
+    };
+  }
+
+  /**
+   * Create a secret placeholder (name + description, no value)
+   * Used when LLM creates a secret that user needs to fill in via admin UI
+   */
+  createSecretPlaceholder(name: string, description?: string): string {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    // Use empty strings for encryption fields to satisfy NOT NULL constraints
+    // The hasValue check uses: row.encrypted_value !== null && row.encrypted_value !== ''
+    this.db.prepare(`
+      INSERT INTO secrets (id, name, encrypted_value, iv, auth_tag, description, created_at, updated_at)
+      VALUES (?, ?, '', '', '', ?, ?, ?)
+    `).run(id, name, description || null, now, now);
+
+    return id;
+  }
+
+  // ============================================
+  // Schema Management & Raw SQL
+  // ============================================
+
+  /**
+   * System tables that should not be accessible to user queries
+   */
+  private static readonly SYSTEM_TABLES = [
+    'site_info',
+    'files',
+    'file_tree_nodes',
+    'pageviews',
+    'interactions',
+    'sessions',
+    'edge_functions',
+    'function_logs',
+    'server_functions',
+    'secrets',
+  ];
+
+  /**
+   * Execute raw SQL query
+   * WARNING: This is intended for admin use only. User-facing queries should use
+   * the sandboxed database API in edge functions.
+   */
+  executeRawSQL(sql: string, params?: unknown[]): {
+    columns: string[];
+    rows: unknown[][];
+    rowsAffected: number;
+  } {
+    const trimmedSql = sql.trim().toLowerCase();
+
+    // Determine if this is a SELECT query
+    const isSelect = trimmedSql.startsWith('select');
+
+    if (isSelect) {
+      const stmt = this.db.prepare(sql);
+      const rows = params ? stmt.all(...params) : stmt.all();
+
+      if (rows.length === 0) {
+        return { columns: [], rows: [], rowsAffected: 0 };
+      }
+
+      const columns = Object.keys(rows[0] as Record<string, unknown>);
+      const rowsArray = rows.map(row => columns.map(col => (row as Record<string, unknown>)[col]));
+
+      return { columns, rows: rowsArray, rowsAffected: 0 };
+    } else {
+      // INSERT, UPDATE, DELETE, CREATE, etc.
+      const stmt = this.db.prepare(sql);
+      const result = params ? stmt.run(...params) : stmt.run();
+
+      return {
+        columns: [],
+        rows: [],
+        rowsAffected: result.changes,
+      };
+    }
+  }
+
+  /**
+   * Get schema information for all tables
+   */
+  getTableSchema(): TableInfo[] {
+    // Get list of all tables
+    const tables = this.db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `).all() as Array<{ name: string }>;
+
+    return tables.map(table => {
+      const isSystemTable = SiteDatabase.SYSTEM_TABLES.includes(table.name);
+
+      // Get column info using PRAGMA
+      const columns = this.db.prepare(`PRAGMA table_info('${table.name}')`).all() as Array<{
+        cid: number;
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+        pk: number;
+      }>;
+
+      // Get row count
+      const countResult = this.db.prepare(`SELECT COUNT(*) as count FROM "${table.name}"`).get() as { count: number };
+
+      return {
+        name: table.name,
+        columns: columns.map(col => ({
+          name: col.name,
+          type: col.type,
+          nullable: !col.notnull,
+          primaryKey: col.pk > 0,
+          defaultValue: col.dflt_value ?? undefined,
+        })),
+        rowCount: countResult.count,
+        isSystemTable,
+      };
+    });
+  }
+
+  /**
+   * Get data from a specific table (for admin data browser)
+   */
+  getTableData(tableName: string, limit: number = 100, offset: number = 0): {
+    columns: string[];
+    rows: unknown[][];
+    total: number;
+  } {
+    // Validate table name to prevent SQL injection
+    const validTables = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?
+    `).get(tableName);
+
+    if (!validTables) {
+      throw new Error(`Table "${tableName}" does not exist`);
+    }
+
+    // Get total count
+    const countResult = this.db.prepare(`SELECT COUNT(*) as count FROM "${tableName}"`).get() as { count: number };
+
+    // Get data
+    const rows = this.db.prepare(`SELECT * FROM "${tableName}" LIMIT ? OFFSET ?`).all(limit, offset) as Record<string, unknown>[];
+
+    if (rows.length === 0) {
+      return { columns: [], rows: [], total: countResult.count };
+    }
+
+    const columns = Object.keys(rows[0]);
+    const rowsArray = rows.map(row => columns.map(col => row[col]));
+
+    return {
+      columns,
+      rows: rowsArray,
+      total: countResult.count,
+    };
+  }
+
+  /**
+   * Check if a table is a system table
+   */
+  isSystemTable(tableName: string): boolean {
+    return SiteDatabase.SYSTEM_TABLES.includes(tableName);
+  }
+
+  /**
+   * Execute a user-provided SQL query with system table protection.
+   * Blocks DDL/DML operations on system tables to prevent corruption.
+   * Used by the sqlite3 shell command for LLM access.
+   */
+  executeUserQuery(sql: string, params?: unknown[]): {
+    columns: string[];
+    rows: unknown[][];
+    rowsAffected: number;
+    error?: string;
+  } {
+    const trimmedSql = sql.trim();
+    const upperSql = trimmedSql.toUpperCase();
+
+    // Check for system table modifications
+    const systemTableError = this.validateNotSystemTable(upperSql);
+    if (systemTableError) {
+      return {
+        columns: [],
+        rows: [],
+        rowsAffected: 0,
+        error: systemTableError,
+      };
+    }
+
+    // Delegate to existing executeRawSQL
+    try {
+      return this.executeRawSQL(sql, params);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return {
+        columns: [],
+        rows: [],
+        rowsAffected: 0,
+        error: message,
+      };
+    }
+  }
+
+  /**
+   * Validate that a query doesn't target system tables.
+   * Returns an error message if validation fails, null if OK.
+   */
+  private validateNotSystemTable(upperSql: string): string | null {
+    // Check for dangerous DDL operations on any table
+    const ddlMatch = upperSql.match(/^(DROP|ALTER|TRUNCATE)\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i);
+    if (ddlMatch) {
+      const tableName = ddlMatch[2].toLowerCase();
+      if (SiteDatabase.SYSTEM_TABLES.includes(tableName)) {
+        return `Cannot modify system table: ${tableName}`;
+      }
+    }
+
+    // Check for INSERT/UPDATE/DELETE on system tables
+    const insertMatch = upperSql.match(/^INSERT\s+INTO\s+["'`]?(\w+)["'`]?/i);
+    if (insertMatch) {
+      const tableName = insertMatch[1].toLowerCase();
+      if (SiteDatabase.SYSTEM_TABLES.includes(tableName)) {
+        return `Cannot insert into system table: ${tableName}`;
+      }
+    }
+
+    const updateMatch = upperSql.match(/^UPDATE\s+["'`]?(\w+)["'`]?/i);
+    if (updateMatch) {
+      const tableName = updateMatch[1].toLowerCase();
+      if (SiteDatabase.SYSTEM_TABLES.includes(tableName)) {
+        return `Cannot update system table: ${tableName}`;
+      }
+    }
+
+    const deleteMatch = upperSql.match(/^DELETE\s+FROM\s+["'`]?(\w+)["'`]?/i);
+    if (deleteMatch) {
+      const tableName = deleteMatch[1].toLowerCase();
+      if (SiteDatabase.SYSTEM_TABLES.includes(tableName)) {
+        return `Cannot delete from system table: ${tableName}`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Export schema as SQL for display in server context
+   * Filters out system tables, returns only user-created tables
+   */
+  getSchemaForExport(): string {
+    const tables = this.getTableSchema();
+    const userTables = tables.filter(t => !t.isSystemTable);
+
+    if (userTables.length === 0) {
+      return '-- No user tables defined\n-- Create tables using the SQL Editor or edge functions\n';
+    }
+
+    let sql = '-- Database Schema\n';
+    sql += `-- ${userTables.length} user table(s)\n\n`;
+
+    for (const table of userTables) {
+      sql += `-- Table: ${table.name} (${table.rowCount} rows)\n`;
+      sql += `CREATE TABLE ${table.name} (\n`;
+      sql += table.columns.map(col => {
+        let def = `  ${col.name} ${col.type}`;
+        if (col.primaryKey) def += ' PRIMARY KEY';
+        if (!col.nullable) def += ' NOT NULL';
+        if (col.defaultValue !== undefined) def += ` DEFAULT ${col.defaultValue}`;
+        return def;
+      }).join(',\n');
+      sql += '\n);\n\n';
+    }
+
+    return sql;
   }
 }

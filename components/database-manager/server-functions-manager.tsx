@@ -1,0 +1,240 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { ServerFunction } from '@/lib/vfs/types';
+import {
+  Plus, Loader2, AlertCircle, Wrench, MoreVertical, Pencil, Trash2,
+  ToggleLeft, ToggleRight
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ServerFunctionEditor } from './server-function-editor';
+import { cn } from '@/lib/utils';
+
+interface ServerFunctionsManagerProps {
+  siteId: string;
+}
+
+export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) {
+  const [functions, setFunctions] = useState<ServerFunction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingFunction, setEditingFunction] = useState<ServerFunction | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  useEffect(() => {
+    loadFunctions();
+  }, [siteId]);
+
+  const loadFunctions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch(`/api/admin/sites/${siteId}/server-functions`);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to load server functions');
+      }
+      const data = await res.json();
+      setFunctions(data.functions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load server functions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleEnabled = async (fn: ServerFunction) => {
+    try {
+      const res = await fetch(`/api/admin/sites/${siteId}/server-functions/${fn.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !fn.enabled }),
+      });
+      if (!res.ok) throw new Error('Failed to update server function');
+      await loadFunctions();
+    } catch (err) {
+      console.error('Failed to toggle server function:', err);
+    }
+  };
+
+  const deleteFunction = async (fn: ServerFunction) => {
+    if (!confirm(`Delete server function "${fn.name}"? This cannot be undone.`)) return;
+
+    try {
+      const res = await fetch(`/api/admin/sites/${siteId}/server-functions/${fn.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete server function');
+      await loadFunctions();
+    } catch (err) {
+      console.error('Failed to delete server function:', err);
+    }
+  };
+
+  const handleSave = async (data: Partial<ServerFunction>) => {
+    try {
+      if (editingFunction) {
+        // Update existing
+        const res = await fetch(`/api/admin/sites/${siteId}/server-functions/${editingFunction.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to update server function');
+        }
+      } else {
+        // Create new
+        const res = await fetch(`/api/admin/sites/${siteId}/server-functions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to create server function');
+        }
+      }
+
+      setEditingFunction(null);
+      setIsCreating(false);
+      await loadFunctions();
+    } catch (err) {
+      throw err; // Let the editor handle the error
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" onClick={loadFunctions}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium">Server Functions (Helpers)</h3>
+        <Button size="sm" onClick={() => setIsCreating(true)}>
+          <Plus className="h-4 w-4 mr-1" />
+          New Helper
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        {functions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full p-8 text-center border rounded-lg">
+            <Wrench className="h-8 w-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">No server functions yet</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              Create reusable helpers for your edge functions
+            </p>
+            <Button size="sm" onClick={() => setIsCreating(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Create Helper
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {functions.map(fn => (
+              <div
+                key={fn.id}
+                className={cn(
+                  "border rounded-lg p-4 transition-colors",
+                  !fn.enabled && "opacity-60 bg-muted/30"
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Wrench className="h-4 w-4 text-orange-500 shrink-0" />
+                      <span className="font-mono font-medium truncate">{fn.name}</span>
+                      {!fn.enabled && (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0">disabled</span>
+                      )}
+                    </div>
+                    {fn.description && (
+                      <p className="text-sm text-muted-foreground mt-1 truncate">
+                        {fn.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                      <span className="font-mono truncate">server.{fn.name}(args)</span>
+                    </div>
+                  </div>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setEditingFunction(fn)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => toggleEnabled(fn)}>
+                        {fn.enabled ? (
+                          <>
+                            <ToggleLeft className="h-4 w-4 mr-2" />
+                            Disable
+                          </>
+                        ) : (
+                          <>
+                            <ToggleRight className="h-4 w-4 mr-2" />
+                            Enable
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => deleteFunction(fn)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Server Function Editor Dialog */}
+      {(isCreating || editingFunction) && (
+        <ServerFunctionEditor
+          function={editingFunction}
+          isOpen={true}
+          onClose={() => {
+            setIsCreating(false);
+            setEditingFunction(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}

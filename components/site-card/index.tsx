@@ -14,6 +14,7 @@ import {
 import {
   Globe,
   Settings,
+  Server,
   ExternalLink,
   Copy,
   RefreshCw,
@@ -25,6 +26,7 @@ import {
   Construction,
   Folder,
   BarChart3,
+  Pencil,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -33,7 +35,9 @@ interface SiteCardProps {
   project?: Project;
   isPublishing?: boolean;
   onOpenSettings: (site: Site) => void;
+  onOpenServerSettings?: (site: Site) => void;
   onViewAnalytics: (site: Site) => void;
+  onEditProject: (site: Site) => void;
   onPublish: (siteId: string) => void;
   onDisable: (siteId: string) => void;
   onEnable: (siteId: string) => void;
@@ -45,7 +49,9 @@ export function SiteCard({
   project,
   isPublishing = false,
   onOpenSettings,
+  onOpenServerSettings,
   onViewAnalytics,
+  onEditProject,
   onPublish,
   onDisable,
   onEnable,
@@ -240,14 +246,6 @@ export function SiteCard({
             </Button>
           )}
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenSettings(site)}
-          >
-            <Settings className="h-4 w-4" />
-          </Button>
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
@@ -255,10 +253,21 @@ export function SiteCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onEditProject(site)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit Project
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onOpenSettings(site)}>
                 <Settings className="h-4 w-4 mr-2" />
                 Site Settings
               </DropdownMenuItem>
+              {site.databaseEnabled && (
+                <DropdownMenuItem onClick={() => onOpenServerSettings?.(site)}>
+                  <Server className="h-4 w-4 mr-2" />
+                  Server Settings
+                </DropdownMenuItem>
+              )}
               {site.analytics.enabled && site.analytics.provider === 'builtin' && (
                 <DropdownMenuItem onClick={() => onViewAnalytics(site)}>
                   <BarChart3 className="h-4 w-4 mr-2" />
