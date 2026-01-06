@@ -72,16 +72,17 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
   }
 
   section += `\n## Creating Secrets\n`;
-  section += `Write JSON to /.server/secrets/{NAME}.json:\n`;
-  section += `  echo '{"name":"STRIPE_API_KEY","description":"Stripe secret key"}' > /.server/secrets/STRIPE_API_KEY.json\n`;
+  section += `Use json_patch to create /.server/secrets/{NAME}.json:\n`;
+  section += `  json_patch /.server/secrets/STRIPE_API_KEY.json rewrite '{"name":"STRIPE_API_KEY","description":"Stripe secret key"}'\n`;
   section += `User sets the value in admin panel. Use in edge functions: secrets.get('STRIPE_API_KEY')\n`;
 
   section += `\n## Creating Edge Functions\n`;
-  section += `Write JSON to /.server/edge-functions/{name}.json:\n`;
-  section += `  echo '{"name":"list-products","method":"GET","code":"Response.json(db.query(\\"SELECT * FROM products\\"));"}' > /.server/edge-functions/list-products.json\n`;
+  section += `Use json_patch (preferred) to create /.server/edge-functions/{name}.json:\n`;
+  section += `  json_patch /.server/edge-functions/list-products.json rewrite '{"name":"list-products","method":"GET","enabled":true,"code":"Response.json(db.query(\\"SELECT * FROM products\\"));"}'\n`;
 
   section += `\n## Creating Server Functions\n`;
-  section += `  echo '{"name":"formatPrice","code":"const [amount, currency] = args; return currency + amount.toFixed(2);"}' > /.server/server-functions/formatPrice.json\n`;
+  section += `  json_patch /.server/server-functions/formatPrice.json rewrite '{"name":"formatPrice","enabled":true,"code":"const [amount, currency] = args; return currency + amount.toFixed(2);"}'\n`;
+  section += `\nNote: echo also works for simple JSON, but json_patch handles escaping better for complex code.\n`;
 
   return section;
 }

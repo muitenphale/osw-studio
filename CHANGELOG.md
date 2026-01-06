@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.19.1 - 2026-01-06
+- System prompt now recommends `json_patch` over `echo` for creating server functions/edge functions
+- Added `SECURE_COOKIES` environment variable to allow insecure cookies for pre-SSL VPS setup
+- Fixed admin login not redirecting after successful authentication
+
 ## v1.19.0 - 2026-01-03
 - **Server Mode Backend Features**: Complete backend functionality for published sites
   - **Edge Functions**: REST API endpoints with JavaScript runtime

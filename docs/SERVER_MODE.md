@@ -262,7 +262,10 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
    SESSION_SECRET=<generate with: openssl rand -base64 32>
    ADMIN_PASSWORD=<your password>
    NEXT_PUBLIC_APP_URL=http://your-domain.com
+   # SECURE_COOKIES=false  # Uncomment until SSL is configured
    ```
+
+   > **Note**: If you're setting up without SSL initially, uncomment `SECURE_COOKIES=false` to allow login over HTTP. Re-comment or remove this line after configuring SSL with certbot (Step 5).
 
 3. **Build and Start:**
    ```bash
@@ -327,6 +330,7 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 | `ADMIN_PASSWORD` | Yes | Password for admin login |
 | `ANALYTICS_SECRET` | No | Secret for analytics API |
 | `SECRETS_ENCRYPTION_KEY` | No | 256-bit key for encrypting secrets |
+| `SECURE_COOKIES` | No | Set to `false` to allow insecure cookies (pre-SSL only) |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL for SEO/sitemaps |
 
 ---

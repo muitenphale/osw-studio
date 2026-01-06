@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createSession, setSessionCookie } from '@/lib/auth/session';
+import { createSession } from '@/lib/auth/session';
 import { logger } from '@/lib/utils';
 
 export async function POST(request: NextRequest) {
@@ -44,9 +44,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Create session
+    let token: string;
     try {
-      const token = await createSession('admin', 'admin@localhost', true);
-      await setSessionCookie(token);
+      token = await createSession('admin', 'admin@localhost', true);
     } catch (sessionError) {
       logger.error('[API /api/auth/login] Session creation error:', sessionError);
       return NextResponse.json(
@@ -55,8 +55,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Set cookie directly on response to avoid Next.js cookies() issues
     logger.debug('[API /api/auth/login] Login successful');
-    return NextResponse.json({ success: true });
+    const response = NextResponse.json({ success: true });
+    response.cookies.set('osw_session', token, {
+      httpOnly: true,
+      secure: process.env.SECURE_COOKIES !== 'false' && process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60, // 24 hours
+      path: '/',
+    });
+    return response;
   } catch (error) {
     logger.error('[API /api/auth/login] Error:', error);
     return NextResponse.json(
