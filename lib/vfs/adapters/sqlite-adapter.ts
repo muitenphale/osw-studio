@@ -493,11 +493,14 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.getDB();
 
     // Handle ArrayBuffer content (binary files)
+    // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
     let content: string;
     if (file.content instanceof ArrayBuffer) {
       content = Buffer.from(file.content).toString('base64');
-    } else {
+    } else if (typeof file.content === 'string') {
       content = file.content;
+    } else {
+      content = '';
     }
 
     const stmt = db.prepare(`
@@ -536,11 +539,14 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.getDB();
 
     // Handle ArrayBuffer content
+    // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
     let content: string;
     if (file.content instanceof ArrayBuffer) {
       content = Buffer.from(file.content).toString('base64');
-    } else {
+    } else if (typeof file.content === 'string') {
       content = file.content;
+    } else {
+      content = '';
     }
 
     const stmt = db.prepare(`

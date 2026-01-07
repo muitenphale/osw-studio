@@ -457,11 +457,14 @@ export class SiteDatabase {
     `);
 
     // Handle ArrayBuffer content
+    // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
     let content: string;
     if (file.content instanceof ArrayBuffer) {
       content = Buffer.from(file.content).toString('base64');
-    } else {
+    } else if (typeof file.content === 'string') {
       content = file.content;
+    } else {
+      content = '';
     }
 
     stmt.run(
@@ -495,11 +498,14 @@ export class SiteDatabase {
     `);
 
     // Handle ArrayBuffer content
+    // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
     let content: string;
     if (file.content instanceof ArrayBuffer) {
       content = Buffer.from(file.content).toString('base64');
-    } else {
+    } else if (typeof file.content === 'string') {
       content = file.content;
+    } else {
+      content = '';
     }
 
     stmt.run(

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.19.5 - 2026-01-07
+- Fixed binary file sync causing "Too few parameter values" error (ArrayBuffer becomes {} in JSON)
+
 ## v1.19.4 - 2026-01-07
 - Fixed VPS deployment docs missing standalone mode static file copy step
 - Fixed "Too few parameter values" error in SiteDatabase (mimeType/size null coalescing)
