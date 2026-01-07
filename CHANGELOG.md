@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.19.3 - 2026-01-07
+- Fixed static site path rewriting for navigation links and root "/" href
+
 ## v1.19.2 - 2026-01-07
 - Fixed admin login not redirecting after successful authentication
 - Fixed file sync failing with "Too few parameter values" error for legacy files

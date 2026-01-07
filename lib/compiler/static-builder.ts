@@ -418,44 +418,61 @@ function replaceAssetPathsWithSitePrefix(
     result = result.replace(new RegExp(escapeRegex(blobUrl), 'g'), absolutePath);
   }
 
-  // Second, replace file path references that weren't blob URLs
-  // Match common patterns: href="/path", src="/path", url('/path'), etc.
-  const patterns = [
-    // Asset directories (absolute paths)
-    /(?:href|src)=["'](\/((?:styles|scripts|assets|images|fonts|js|css)\/[^"']+))["']/g,
-    /url\(['"]?(\/((?:styles|scripts|assets|images|fonts|js|css)\/[^'")]+))['"]?\)/g,
-    // HTML files with absolute paths
-    /href=["'](\/[^"']*\.html?)["']/g,
-  ];
+  // Helper to check if path is already prefixed with site path
+  const isAlreadyPrefixed = (path: string) =>
+    pathPrefix && path.startsWith(pathPrefix);
 
-  for (const pattern of patterns) {
-    result = result.replace(pattern, (match, filePath) => {
-      // Check if this file exists in our project
-      const fileExists = allFiles.some(f => f.path === filePath);
-      if (fileExists) {
-        // Replace with appropriate path (root-relative or site-prefixed)
-        const absolutePath = `${pathPrefix}${filePath}`;
-        return match.replace(filePath, absolutePath);
-      }
-      return match;
-    });
-  }
-
-  // Handle relative HTML paths (e.g., href="about.html")
-  // These need to be converted to absolute paths
+  // Rewrite all internal absolute paths for HTML files
+  // Pattern matches: href="/anything.html" or href="/anything.htm"
   result = result.replace(
-    /href=["']([^"':/]+\.html?)["']/g,
-    (match, filePath) => {
-      // Check if this file exists in our project (as absolute path)
-      const absoluteFilePath = `/${filePath}`;
-      const fileExists = allFiles.some(f => f.path === absoluteFilePath);
-      if (fileExists) {
-        // Replace with appropriate path (root-relative or site-prefixed)
-        return match.replace(filePath, `${pathPrefix}${absoluteFilePath}`);
+    /href=(["'])(\/[^"']*\.html?)\1/g,
+    (match, quote, filePath) => {
+      if (isAlreadyPrefixed(filePath)) {
+        return match;
       }
-      return match;
+      return `href=${quote}${pathPrefix}${filePath}${quote}`;
     }
   );
+
+  // Rewrite asset directory paths (styles, scripts, assets, images, fonts, js, css)
+  const assetDirPattern = /(?:href|src)=(["'])(\/(?:styles|scripts|assets|images|fonts|js|css)\/[^"']+)\1/g;
+  result = result.replace(assetDirPattern, (match, quote, filePath) => {
+    if (isAlreadyPrefixed(filePath)) {
+      return match;
+    }
+    return match.replace(filePath, `${pathPrefix}${filePath}`);
+  });
+
+  // Rewrite CSS url() references for asset directories
+  result = result.replace(
+    /url\(['"]?(\/(?:styles|scripts|assets|images|fonts|js|css)\/[^'")]+)['"]?\)/g,
+    (match, filePath) => {
+      if (isAlreadyPrefixed(filePath)) {
+        return match;
+      }
+      return match.replace(filePath, `${pathPrefix}${filePath}`);
+    }
+  );
+
+  // Handle relative HTML paths (e.g., href="about.html") - convert to absolute with prefix
+  result = result.replace(
+    /href=(["'])([^"':/][^"']*\.html?)\1/g,
+    (match, quote, filePath) => {
+      // Skip if it looks like an already-processed path or external
+      if (filePath.startsWith('/') || filePath.includes('://')) {
+        return match;
+      }
+      return `href=${quote}${pathPrefix}/${filePath}${quote}`;
+    }
+  );
+
+  // Handle root path href="/" - rewrite to site prefix
+  if (pathPrefix) {
+    result = result.replace(
+      /href=(["'])\/\1/g,
+      (match, quote) => `href=${quote}${pathPrefix}/${quote}`
+    );
+  }
 
   return result;
 }
