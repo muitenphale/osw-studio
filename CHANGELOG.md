@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.19.4 - 2026-01-07
+- Fixed VPS deployment docs missing standalone mode static file copy step
+- Fixed "Too few parameter values" error in SiteDatabase (mimeType/size null coalescing)
+
 ## v1.19.3 - 2026-01-07
 - Fixed static site path rewriting for navigation links and root "/" href
 

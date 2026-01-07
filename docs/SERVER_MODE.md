@@ -272,9 +272,13 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
    # Production build
    npm run build
 
+   # Copy static files for standalone mode
+   cp -r .next/static .next/standalone/.next/
+   cp -r public .next/standalone/
+
    # Start with PM2 (process manager)
    sudo npm install -g pm2
-   pm2 start npm --name "osw-studio" -- start
+   pm2 start .next/standalone/server.js --name "osw-studio"
    pm2 save
    pm2 startup
    ```

@@ -470,8 +470,8 @@ export class SiteDatabase {
       file.name,
       file.type,
       content,
-      file.mimeType,
-      file.size,
+      file.mimeType ?? null,
+      file.size ?? 0,
       toISOStringRequired(file.createdAt),
       toISOStringRequired(file.updatedAt),
       JSON.stringify(file.metadata ?? {})
@@ -506,8 +506,8 @@ export class SiteDatabase {
       file.name,
       file.type,
       content,
-      file.mimeType,
-      file.size,
+      file.mimeType ?? null,
+      file.size ?? 0,
       toISOStringRequired(file.updatedAt),
       JSON.stringify(file.metadata ?? {}),
       file.path
