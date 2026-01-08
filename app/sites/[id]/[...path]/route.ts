@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { logRequest } from '@/lib/logging/request-logger';
 
 const MIME_TYPES: Record<string, string> = {
   html: 'text/html',
@@ -40,12 +41,10 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; path?: string[] }> }
 ) {
+  const { id, path: pathSegments = [] } = await params;
+  const requestedPath = pathSegments.length > 0 ? pathSegments.join('/') : 'index.html';
+
   try {
-    const { id, path: pathSegments = [] } = await params;
-
-    // Determine requested file path (default to index.html)
-    const requestedPath = pathSegments.length > 0 ? pathSegments.join('/') : 'index.html';
-
     // Construct absolute path to static file
     const staticFilePath = path.join(
       process.cwd(),
@@ -60,6 +59,13 @@ export async function GET(
       await fs.access(staticFilePath);
     } catch {
       // File not found, return 404
+      logRequest({
+        siteId: id,
+        path: '/' + requestedPath,
+        statusCode: 404,
+        ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+        userAgent: request.headers.get('user-agent') || '',
+      });
       return new NextResponse('File not found', { status: 404 });
     }
 
@@ -68,6 +74,15 @@ export async function GET(
 
     // Determine MIME type
     const mimeType = getMimeType(requestedPath);
+
+    // Log request (fire-and-forget)
+    logRequest({
+      siteId: id,
+      path: '/' + requestedPath,
+      statusCode: 200,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+      userAgent: request.headers.get('user-agent') || '',
+    });
 
     // Return file with correct MIME type
     return new NextResponse(content.toString('utf-8'), {
@@ -80,6 +95,13 @@ export async function GET(
 
   } catch (error) {
     console.error('[Sites Route] Error:', error);
+    logRequest({
+      siteId: id,
+      path: '/' + requestedPath,
+      statusCode: 500,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+      userAgent: request.headers.get('user-agent') || '',
+    });
     return new NextResponse('Internal server error', { status: 500 });
   }
 }

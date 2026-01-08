@@ -8,6 +8,7 @@ import { SkillsView } from './skills-view';
 import { SitesView } from './sites-view';
 import { SettingsView } from './settings-view';
 import { DocsView } from './docs-view';
+import { DashboardView } from './dashboard-view';
 
 interface ContentAreaProps {
   view: string;
@@ -17,6 +18,8 @@ interface ContentAreaProps {
 
 export function ContentArea({ view, onProjectSelect, settingsTab }: ContentAreaProps) {
   switch (view) {
+    case 'dashboard':
+      return <DashboardView />;
     case 'projects':
       return <ProjectsView onProjectSelect={onProjectSelect} />;
     case 'sites':

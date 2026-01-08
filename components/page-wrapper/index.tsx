@@ -9,7 +9,7 @@ import { GuidedTourProvider } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { AboutModal } from '@/components/about-modal';
 
-type View = 'projects' | 'templates' | 'skills' | 'sites' | 'docs' | 'settings';
+type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'sites' | 'docs' | 'settings';
 
 interface PageWrapperProps {
   view: View;

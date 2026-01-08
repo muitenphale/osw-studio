@@ -102,7 +102,7 @@ SQLite databases are created automatically:
 - **Admin panel**: http://localhost:3000/admin/login
 - **Published sites**: http://localhost:3000/sites/{siteId}/
 
-**Login with** ADMIN_PASSWORD from .env
+**Login with** ADMIN_PASSWORD from .env. After login, you'll land on the **Dashboard** with server stats and traffic metrics.
 
 ---
 

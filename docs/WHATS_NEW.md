@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.20.0 - Admin Dashboard for server mode
+
+A new dashboard is now the landing page after login, giving you a quick overview of your server:
+
+- **System** - OSWS version, Node.js version, uptime, memory usage
+- **Content** - Projects, templates, skills, and total files
+- **Hosting** - Published sites, sites with databases, storage used
+- **Traffic** - Requests per hour/day, error counts, top sites, recent errors
+
+Traffic is logged server-side with automatic 7-day retention.
+
+---
+
 ## v1.19.0 - Server Mode Backend Features
 
 This release adds complete backend functionality for published sites, including edge functions, database management, server functions, secrets, and AI integration.

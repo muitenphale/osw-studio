@@ -1,7 +1,8 @@
 /**
  * Next.js Middleware
  *
- * Handles authentication and routing for Server mode
+ * Handles authentication and routing for Server mode.
+ * In Browser mode, admin routes are blocked.
  */
 
 import { NextResponse } from 'next/server';
@@ -9,10 +10,28 @@ import type { NextRequest } from 'next/server';
 import { verifySession } from '@/lib/auth/session';
 
 export async function middleware(request: NextRequest) {
+  const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
   const { pathname } = request.nextUrl;
 
-  // Protect /admin routes (except /admin/login)
+  // Block admin API routes in Browser mode
+  if (pathname.startsWith('/api/admin')) {
+    if (!isServerMode) {
+      return NextResponse.json(
+        { error: 'Admin API is only available in Server mode' },
+        { status: 404 }
+      );
+    }
+    // API routes handle their own auth - allow through
+    return NextResponse.next();
+  }
+
+  // Block admin pages in Browser mode
   if (pathname.startsWith('/admin')) {
+    if (!isServerMode) {
+      // Redirect to home page
+      return NextResponse.redirect(new URL('/', request.url));
+    }
+
     // Allow access to login page
     if (pathname === '/admin/login') {
       return NextResponse.next();
@@ -46,12 +65,12 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except:
-     * - api (API routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public files (public folder)
+     * Note: /api/admin/* is now included for server mode checks
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

@@ -8,14 +8,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { logRequest } from '@/lib/logging/request-logger';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
+  let statusCode = 200;
+  const { id } = await params;
 
+  try {
     // Construct absolute path to index.html
     const indexPath = path.join(
       process.cwd(),
@@ -30,11 +32,28 @@ export async function GET(
       await fs.access(indexPath);
     } catch {
       // Site not found or not published
+      statusCode = 404;
+      logRequest({
+        siteId: id,
+        path: '/index.html',
+        statusCode,
+        ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+        userAgent: request.headers.get('user-agent') || '',
+      });
       return new NextResponse('Site not found', { status: 404 });
     }
 
     // Read file content
     const content = await fs.readFile(indexPath, 'utf-8');
+
+    // Log request (fire-and-forget)
+    logRequest({
+      siteId: id,
+      path: '/index.html',
+      statusCode,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+      userAgent: request.headers.get('user-agent') || '',
+    });
 
     // Return HTML
     return new NextResponse(content, {
@@ -47,6 +66,13 @@ export async function GET(
 
   } catch (error) {
     console.error('[Sites Route] Error:', error);
+    logRequest({
+      siteId: id,
+      path: '/index.html',
+      statusCode: 500,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+      userAgent: request.headers.get('user-agent') || '',
+    });
     return new NextResponse('Internal server error', { status: 500 });
   }
 }

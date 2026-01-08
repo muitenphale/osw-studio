@@ -7,6 +7,7 @@ import pkg from '../../package.json';
 
 export default function AdminPage() {
   const router = useRouter();
+  const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 
   useEffect(() => {
     const currentVersion = pkg.version;
@@ -17,10 +18,10 @@ export default function AdminPage() {
       router.push('/admin/docs?doc=whats-new');
       configManager.setLastSeenVersion(currentVersion);
     } else {
-      // Same version - go to projects
-      router.push('/admin/projects');
+      // Same version - go to dashboard (Server Mode) or projects (Browser Mode)
+      router.push(isServerMode ? '/admin/dashboard' : '/admin/projects');
     }
-  }, [router]);
+  }, [router, isServerMode]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">

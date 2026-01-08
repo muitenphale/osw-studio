@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Cloud,
   LogOut,
+  LayoutDashboard,
 } from 'lucide-react';
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
@@ -48,6 +49,7 @@ interface SidebarItem {
 }
 
 const SIDEBAR_ITEMS: SidebarItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: 'dashboard', serverModeOnly: true },
   { id: 'projects', label: 'Projects', icon: FolderOpen, path: 'projects', hasRecentProjects: true },
   { id: 'sites', label: 'Sites', icon: Globe, path: 'sites', serverModeOnly: true },
   { id: 'templates', label: 'Templates', icon: LayoutTemplate, path: 'templates' },

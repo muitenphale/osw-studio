@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.20.0 - 2026-01-08
+- **Admin Dashboard** (Server Mode): New landing page after login with server stats and traffic metrics
+  - System info: OSWS version, Node.js version, uptime, memory usage
+  - Content stats: Projects, templates, skills, total files counts
+  - Hosting stats: Published sites, sites with databases, storage used
+  - Traffic monitoring: Requests per hour/day, error counts, top sites, recent errors
+  - Manual refresh button (no polling overhead)
+- **Request Logging**: Lightweight server-side logging for published site traffic
+  - Logs site requests to `request_log` table in core database
+  - Anonymized IP hashing for privacy
+  - Fire-and-forget async inserts (no response latency impact)
+  - Automatic 7-day log retention cleanup
+- Fixed admin routes (`/admin/*`, `/api/admin/*`) being accessible in Browser mode
+
 ## v1.19.5 - 2026-01-07
 - Fixed binary file sync causing "Too few parameter values" error (ArrayBuffer becomes {} in JSON)
 

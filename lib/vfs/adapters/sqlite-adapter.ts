@@ -205,6 +205,31 @@ const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_sites_project_id ON sites(project_id)
       `);
     }
+  },
+  {
+    id: 'add_request_log_v3',
+    up: (db) => {
+      // Request log for tracking site traffic (server-level analytics)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS request_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          site_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          status_code INTEGER NOT NULL,
+          ip_hash TEXT,
+          user_agent TEXT,
+          timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Indexes for efficient querying
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_request_log_timestamp ON request_log(timestamp)
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_request_log_site_id ON request_log(site_id)
+      `);
+    }
   }
 ];
 
