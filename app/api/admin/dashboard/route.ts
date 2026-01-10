@@ -27,6 +27,71 @@ async function getVersion(): Promise<string> {
   }
 }
 
+// Parse What's New from docs/WHATS_NEW.md
+interface WhatsNewData {
+  version: string;
+  title: string;
+  highlights: string[];
+}
+
+async function getWhatsNew(): Promise<WhatsNewData> {
+  const defaultData: WhatsNewData = {
+    version: 'unknown',
+    title: 'Welcome to OSW Studio',
+    highlights: [],
+  };
+
+  try {
+    const whatsNewPath = path.join(process.cwd(), 'docs', 'WHATS_NEW.md');
+    const content = await fs.readFile(whatsNewPath, 'utf-8');
+
+    // Find first version heading: ## v{version} - {title}
+    const versionMatch = content.match(/^## v(\d+\.\d+\.\d+)\s*-\s*(.+)$/m);
+    if (!versionMatch) {
+      return defaultData;
+    }
+
+    const version = versionMatch[1];
+    const title = versionMatch[2].trim();
+
+    // Get content after the version heading until the next ## or ---
+    const versionIndex = content.indexOf(versionMatch[0]);
+    const afterVersion = content.substring(versionIndex + versionMatch[0].length);
+    const nextSectionMatch = afterVersion.match(/^(?:## |---)/m);
+    const sectionContent = nextSectionMatch
+      ? afterVersion.substring(0, nextSectionMatch.index)
+      : afterVersion;
+
+    // Extract bullet points (lines starting with - or *)
+    const bulletRegex = /^[-*]\s+\*\*(.+?)\*\*\s*[-–]?\s*(.*)$/gm;
+    const highlights: string[] = [];
+    let match;
+
+    while ((match = bulletRegex.exec(sectionContent)) !== null && highlights.length < 4) {
+      // Combine bold title with description if present
+      const boldTitle = match[1].trim();
+      const description = match[2]?.trim();
+      highlights.push(description ? `${boldTitle} - ${description}` : boldTitle);
+    }
+
+    // If no bold bullet points found, try regular bullets
+    if (highlights.length === 0) {
+      const simpleBulletRegex = /^[-*]\s+(.+)$/gm;
+      while ((match = simpleBulletRegex.exec(sectionContent)) !== null && highlights.length < 4) {
+        const text = match[1].trim();
+        // Skip if it's a link-only line
+        if (!text.match(/^\[.*\]\(.*\)$/)) {
+          highlights.push(text.replace(/\*\*/g, ''));
+        }
+      }
+    }
+
+    return { version, title, highlights };
+  } catch {
+    return defaultData;
+  }
+}
+
 // Calculate directory size recursively
 async function getDirectorySize(dirPath: string): Promise<number> {
   let totalSize = 0;
@@ -109,6 +174,7 @@ export async function GET() {
       sitesWithDb,
       storageSize,
       trafficStats,
+      whatsNew,
     ] = await Promise.all([
       getVersion(),
       Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM projects').get() as { count: number }).count),
@@ -119,6 +185,7 @@ export async function GET() {
       countSiteDatabases(),
       getDirectorySize(path.join(process.cwd(), 'public', 'sites')),
       Promise.resolve(getRequestStats(24)),
+      getWhatsNew(),
     ]);
 
     // Get site names for top sites
@@ -129,6 +196,22 @@ export async function GET() {
         siteName: siteInfo?.name || site.siteId.substring(0, 8),
       };
     });
+
+    // Get recent projects (last 5 by updated_at)
+    const recentProjects = db.prepare(`
+      SELECT id, name, description, updated_at as updatedAt
+      FROM projects
+      ORDER BY updated_at DESC
+      LIMIT 5
+    `).all() as Array<{ id: string; name: string; description: string | null; updatedAt: string }>;
+
+    // Get recent sites (last 5 by updated_at)
+    const recentSites = db.prepare(`
+      SELECT id, name, slug, enabled, published_at as publishedAt, updated_at as updatedAt
+      FROM sites
+      ORDER BY updated_at DESC
+      LIMIT 5
+    `).all() as Array<{ id: string; name: string; slug: string; enabled: number; publishedAt: string | null; updatedAt: string }>;
 
     // System info
     const memoryUsage = process.memoryUsage();
@@ -159,6 +242,12 @@ export async function GET() {
         topSites: topSitesWithNames,
         recentErrors: trafficStats.recentErrors,
       },
+      whatsNew,
+      recentProjects,
+      recentSites: recentSites.map(site => ({
+        ...site,
+        enabled: Boolean(site.enabled),
+      })),
     });
 
   } catch (error) {

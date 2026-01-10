@@ -6,6 +6,18 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.21.0 - Dashboard for Browser Mode
+
+The dashboard is now available in browser mode and is the default landing page for both modes.
+
+- **Dashboard for Browser Mode** - Dashboard now available in browser mode (previously server mode only)
+- **Dashboard as Landing Page** - Dashboard is the default landing page for both modes
+- **Quick Actions Bar** - Create projects, start guided tour, join Discord, and access docs
+- **What's New Component** - Shows latest version highlights with link to full changelog
+- **Recent Projects** - Quick access to recently updated projects from dashboard
+
+---
+
 ## v1.20.0 - Admin Dashboard for server mode
 
 A new dashboard is now the landing page after login, giving you a quick overview of your server:

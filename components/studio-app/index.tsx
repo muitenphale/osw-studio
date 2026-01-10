@@ -2,37 +2,22 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useRouter } from 'next/navigation';
 import { Project } from '@/lib/vfs/types';
 import { Workspace } from '@/components/workspace';
 import { GuidedTourProvider, useGuidedTour } from '@/components/guided-tour/context';
-import { configManager } from '@/lib/config/storage';
-import pkg from '../../package.json';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { PageLayout } from '@/components/page-layout';
 import { ContentArea } from '@/components/views/content-area';
 import { AboutModal } from '@/components/about-modal';
 
 function StudioInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const docParam = searchParams.get('doc');
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [currentView, setCurrentView] = useState<'projects' | 'sites' | 'templates' | 'skills' | 'docs' | 'settings'>('projects');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'projects' | 'sites' | 'templates' | 'skills' | 'docs' | 'settings'>('dashboard');
   const [showAboutModal, setShowAboutModal] = useState(false);
   const { state, setActiveProjectId, start: startTour } = useGuidedTour();
-
-  // Check version and redirect to What's New if needed
-  useEffect(() => {
-    const currentVersion = pkg.version;
-    const lastSeenVersion = configManager.getLastSeenVersion();
-
-    if (!lastSeenVersion || lastSeenVersion !== currentVersion) {
-      router.push('/?doc=whats-new');
-      configManager.setLastSeenVersion(currentVersion);
-    }
-  }, [router]);
 
   const settingsParam = searchParams.get('settings');
 
@@ -122,6 +107,20 @@ function StudioInner() {
     }
   }, [isTourRunning, stepId, selectedProject, state.projectList, state.tourDemoProjectId]);
 
+  const handleNavigate = useCallback((view: string) => {
+    setCurrentView(view as typeof currentView);
+  }, []);
+
+  const handleStartTour = useCallback(() => {
+    // Make sure we're on the projects page and no project is selected
+    setSelectedProject(null);
+    setCurrentView('projects');
+    // Start the tour
+    if (startTour) {
+      startTour();
+    }
+  }, [startTour]);
+
   const content = useMemo(() => {
     if (selectedProject) {
       return (
@@ -135,19 +134,11 @@ function StudioInner() {
       <ContentArea
         view={currentView}
         onProjectSelect={setSelectedProject}
+        onNavigate={handleNavigate}
+        onStartTour={handleStartTour}
       />
     );
-  }, [selectedProject, currentView]);
-
-  const handleStartTour = useCallback(() => {
-    // Make sure we're on the projects page and no project is selected
-    setSelectedProject(null);
-    setCurrentView('projects');
-    // Start the tour
-    if (startTour) {
-      startTour();
-    }
-  }, [startTour]);
+  }, [selectedProject, currentView, handleNavigate, handleStartTour]);
 
   return (
     <>
