@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.22.0 - 2026-01-10
+- **QuickJS WASM Sandbox**: Upgraded function executor from Node.js VM to QuickJS WebAssembly
+  - Edge functions and server functions now run in isolated WASM sandbox
+  - Memory limits enforced by WASM (64MB default)
+  - Execution time limits with interrupt handler
+  - No access to Node.js APIs (process, require, fs, etc.)
+  - Same API surface: `db`, `secrets`, `Response`, `console`, `server`, `fetch`, `atob`, `btoa`
+- **Fetch API with Security Controls**: External HTTP requests from functions
+  - Max 10 requests per execution
+  - 10 second timeout per request
+  - 5MB max response body
+  - Protocol allowlist: only `http://` and `https://`
+  - Private IP blocking in production (localhost, 10.x, 172.16-31.x, 192.168.x, 169.254.x)
+  - Development mode allows local requests for testing
+- **Base64 Encoding**: Added `atob()` and `btoa()` functions for base64 encode/decode
+
 ## v1.21.0 - 2026-01-10
 - **Dashboard for Browser Mode**: Dashboard now available in browser mode (previously server mode only)
 - **Dashboard as Landing Page**: Dashboard is now the default landing page for both modes

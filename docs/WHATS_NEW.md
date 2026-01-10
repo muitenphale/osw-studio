@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.22.0 - QuickJS WASM Sandbox
+
+Edge and server functions now run in a QuickJS WebAssembly sandbox for stronger security isolation.
+
+- **WASM Isolation** - Separate JavaScript engine via WebAssembly boundary
+- **Memory Limits** - 64MB default, enforced by WASM runtime
+- **Fetch Security** - 10 requests max, 10s timeout, 5MB limit, private IPs blocked in production
+- **Base64 Support** - Added `atob()` and `btoa()` functions
+
+Your existing functions work unchanged with the same API surface.
+
+---
+
 ## v1.21.0 - Dashboard for Browser Mode
 
 The dashboard is now available in browser mode and is the default landing page for both modes.

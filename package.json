@@ -1,6 +1,6 @@
 {
   "name": "osw-studio-v1",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "^0.31.0",
     "@monaco-editor/react": "^4.7.0-rc.0",
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-collapsible": "^1.1.11",
@@ -41,6 +42,8 @@
     "next": "15.3.3",
     "next-themes": "^0.4.6",
     "postcss": "^8",
+    "quickjs-emscripten": "^0.31.0",
+    "quickjs-emscripten-core": "^0.31.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

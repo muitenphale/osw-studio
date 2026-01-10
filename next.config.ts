@@ -3,6 +3,12 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   output: 'standalone',
   devIndicators: false,
+  // Externalize quickjs-emscripten packages to prevent webpack from mangling WASM loading
+  serverExternalPackages: [
+    'quickjs-emscripten',
+    'quickjs-emscripten-core',
+    '@jitl/quickjs-wasmfile-release-sync',
+  ],
   eslint: {
     ignoreDuringBuilds: true,
   },

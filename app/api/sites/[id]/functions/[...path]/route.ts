@@ -3,8 +3,6 @@
  *
  * Public endpoint for invoking edge functions
  * URL: /api/sites/{siteId}/functions/{functionName}[/additional/path]
- *
- * No authentication required - functions are public endpoints
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,7 +18,7 @@ interface RouteParams {
 }
 
 /**
- * Handle all HTTP methods for edge function invocation
+ * Handle edge function invocation
  */
 async function handleRequest(
   request: NextRequest,
@@ -145,7 +143,7 @@ async function handleRequest(
       path: `/${functionName}${additionalPath ? '/' + additionalPath : ''}`,
     };
 
-    // Execute the function
+    // Execute function
     const result = await executeFunction(fn, functionRequest, siteDb);
 
     // Log execution (async, don't await)

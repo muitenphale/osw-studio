@@ -123,7 +123,7 @@ export function generateServerContextMetadata(
  * Reserved names that cannot be used for server functions
  */
 const RESERVED_SERVER_FUNCTION_NAMES = [
-  'db', 'fetch', 'console', 'args', 'request', 'Response', 'server', 'secrets'
+  'db', 'fetch', 'console', 'args', 'request', 'Response', 'server', 'secrets', 'atob', 'btoa'
 ];
 
 /**

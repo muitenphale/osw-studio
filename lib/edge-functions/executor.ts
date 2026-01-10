@@ -1,27 +1,110 @@
 /**
- * Edge Function Executor
+ * Edge Function Executor using QuickJS WebAssembly Sandbox
  *
- * Executes user-defined JavaScript functions in a sandboxed environment
- * using Node.js VM module. Provides limited globals and a secure database API.
+ * Executes user-defined JavaScript functions in a secure sandbox using QuickJS
+ * compiled to WebAssembly. This provides complete isolation from the Node.js
+ * host environment.
+ *
+ * Security features:
+ * - No access to Node.js APIs (process, require, fs, child_process, etc.)
+ * - Complete isolation via WebAssembly (different JS engine)
+ * - Memory limits enforced by WebAssembly (64MB default)
+ * - Execution time limits via interrupt handler
+ * - Controlled API surface (only db, secrets, Response helpers exposed)
+ *
+ * @see https://github.com/justjake/quickjs-emscripten
  */
 
-import vm from 'vm';
+import type { QuickJSContext, QuickJSHandle, QuickJSWASMModule } from 'quickjs-emscripten-core';
+import { newQuickJSWASMModuleFromVariant } from 'quickjs-emscripten-core';
+import variant from '@jitl/quickjs-wasmfile-release-sync';
 import { EdgeFunction, ServerFunction } from '@/lib/vfs/types';
 import {
   FunctionRequest,
   FunctionResponse,
   ExecutionResult,
-  ConsoleMock,
-  ResponseHelpers,
   DatabaseAPI,
-  SecretsAPI,
 } from './types';
 import { createDatabaseAPI } from './database-api';
 import { SiteDatabase } from '@/lib/vfs/adapters/site-database';
 import { decryptSecret, isEncryptionConfigured } from './secrets-crypto';
 
+// Cache the QuickJS module to avoid re-initializing WASM on every request
+let quickJSModulePromise: Promise<QuickJSWASMModule> | null = null;
+
 /**
- * Execute an edge function with the given request
+ * Get or initialize the QuickJS WASM module
+ * Packages externalized via serverExternalPackages in next.config.ts
+ */
+async function getQuickJSModule(): Promise<QuickJSWASMModule> {
+  if (!quickJSModulePromise) {
+    quickJSModulePromise = newQuickJSWASMModuleFromVariant(variant);
+  }
+  return quickJSModulePromise;
+}
+
+/**
+ * Maximum execution time in milliseconds
+ */
+const MAX_EXECUTION_TIME_MS = 30000;
+
+/**
+ * Maximum memory in bytes (64MB)
+ */
+const MAX_MEMORY_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Fetch security limits
+ */
+const MAX_FETCH_REQUESTS = 10;
+const FETCH_TIMEOUT_MS = 10000;
+const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5MB
+
+/**
+ * Check if a URL targets a private/internal IP address
+ * Only enforced in production to allow local development
+ */
+function isPrivateUrl(urlString: string): boolean {
+  // Skip check in development
+  if (process.env.NODE_ENV !== 'production') {
+    return false;
+  }
+
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+
+    // Block localhost variants
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      return true;
+    }
+
+    // Block private IP ranges (simple check for common patterns)
+    // 10.x.x.x
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return true;
+    }
+    // 172.16.x.x - 172.31.x.x
+    if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return true;
+    }
+    // 192.168.x.x
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return true;
+    }
+    // 169.254.x.x (link-local, includes cloud metadata)
+    if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return true; // Invalid URL, block it
+  }
+}
+
+/**
+ * Execute an edge function in a secure QuickJS WebAssembly sandbox
  *
  * @param fn The edge function definition
  * @param request The incoming request
@@ -36,28 +119,12 @@ export async function executeFunction(
   const startTime = Date.now();
   const logs: string[] = [];
 
-  // Track if response has been set
+  // Track response
   let responseSet = false;
   let response: FunctionResponse = {
     status: 200,
     headers: {},
     body: '',
-  };
-
-  // Create console mock that captures logs
-  const consoleMock: ConsoleMock = {
-    log: (...args: unknown[]) => {
-      logs.push(`[LOG] ${args.map(formatArg).join(' ')}`);
-    },
-    error: (...args: unknown[]) => {
-      logs.push(`[ERROR] ${args.map(formatArg).join(' ')}`);
-    },
-    warn: (...args: unknown[]) => {
-      logs.push(`[WARN] ${args.map(formatArg).join(' ')}`);
-    },
-    info: (...args: unknown[]) => {
-      logs.push(`[INFO] ${args.map(formatArg).join(' ')}`);
-    },
   };
 
   // Create database API
@@ -87,171 +154,99 @@ export async function executeFunction(
     }
   }
 
-  // Create secrets API
-  const secrets: SecretsAPI = {
-    get: (name: string) => decryptedSecrets[name] ?? null,
-    has: (name: string) => name in decryptedSecrets,
-    list: () => Object.keys(decryptedSecrets),
-  };
+  // Get QuickJS instance (using dynamic import for Next.js compatibility)
+  const QuickJS = await getQuickJSModule();
 
-  // Create Response helpers
-  const Response: ResponseHelpers = {
-    json: (data: object, status: number = 200) => {
-      if (responseSet) {
-        logs.push('[WARN] Response already set, ignoring subsequent Response.json() call');
-        return;
-      }
-      responseSet = true;
-      response = {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-        body: data,
-      };
-    },
-    text: (text: string, status: number = 200) => {
-      if (responseSet) {
-        logs.push('[WARN] Response already set, ignoring subsequent Response.text() call');
-        return;
-      }
-      responseSet = true;
-      response = {
-        status,
-        headers: { 'Content-Type': 'text/plain' },
-        body: text,
-      };
-    },
-    error: (message: string, status: number = 500) => {
-      if (responseSet) {
-        logs.push('[WARN] Response already set, ignoring subsequent Response.error() call');
-        return;
-      }
-      responseSet = true;
-      response = {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-        body: { error: message },
-      };
-    },
-  };
+  // Create runtime with memory limit
+  const runtime = QuickJS.newRuntime();
+  runtime.setMemoryLimit(MAX_MEMORY_BYTES);
 
-  // Build server object with callable server functions
-  // Each server function receives args array and has access to db and fetch
-  const server: Record<string, (...args: unknown[]) => unknown> = {};
+  // Set up execution timeout
+  const timeout = Math.min(fn.timeoutMs || 5000, MAX_EXECUTION_TIME_MS);
+  const deadline = Date.now() + timeout;
 
-  // Create VM context with limited globals
-  const context = vm.createContext({
-    // Request and response
-    request,
-    db,
-    Response,
-    server, // Server functions callable via server.functionName(args)
-    secrets, // Encrypted secrets accessible via secrets.get(name)
-
-    // Allowed globals
-    fetch: globalThis.fetch,
-    console: consoleMock,
-    JSON,
-    Date,
-    Math,
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    RegExp,
-    Error,
-    TypeError,
-    RangeError,
-    SyntaxError,
-    Map,
-    Set,
-    WeakMap,
-    WeakSet,
-    Promise,
-    Symbol,
-
-    // Utility functions
-    parseInt,
-    parseFloat,
-    isNaN,
-    isFinite,
-    encodeURIComponent,
-    decodeURIComponent,
-    encodeURI,
-    decodeURI,
-    atob,
-    btoa,
-
-    // Explicitly disabled (set to undefined for clear error messages)
-    setTimeout: undefined,
-    setInterval: undefined,
-    setImmediate: undefined,
-    clearTimeout: undefined,
-    clearInterval: undefined,
-    clearImmediate: undefined,
-    require: undefined,
-    module: undefined,
-    exports: undefined,
-    __dirname: undefined,
-    __filename: undefined,
-    process: undefined,
-    Buffer: undefined,
-    global: undefined,
-    globalThis: undefined,
+  // Interrupt handler for timeout
+  runtime.setInterruptHandler(() => {
+    if (Date.now() > deadline) {
+      return true; // Interrupt execution
+    }
+    return false;
   });
 
-  // Populate server object with callable server functions
-  // Each function wraps the user's code and executes it within the same VM context
-  for (const serverFn of serverFunctions) {
-    server[serverFn.name] = (...callArgs: unknown[]) => {
-      try {
-        // Server function code receives 'args' array and has access to db, fetch, console
-        const wrappedServerFnCode = `
-          (function(args) {
-            'use strict';
-            ${serverFn.code}
-          })
-        `;
+  // Create context
+  const context = runtime.newContext();
 
-        // Compile and get the function
-        const serverScript = new vm.Script(wrappedServerFnCode, {
-          filename: `server-function:${serverFn.name}`,
-        });
-
-        // Run to get the function reference
-        const serverFnRef = serverScript.runInContext(context, {
-          timeout: 5000, // Server functions have 5s timeout each
-        });
-
-        // Call the function with args
-        return serverFnRef(callArgs);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        logs.push(`[ERROR] Server function "${serverFn.name}" failed: ${errorMsg}`);
-        throw new Error(`Server function "${serverFn.name}" failed: ${errorMsg}`);
-      }
-    };
-  }
+  // Track fetch usage for this execution
+  const fetchState: FetchState = { requestCount: 0, pendingFetches: [] };
 
   try {
-    // Wrap code in async IIFE to support await
-    const wrappedCode = `
-      (async function() {
-        'use strict';
-        ${fn.code}
-      })();
-    `;
-
-    const script = new vm.Script(wrappedCode, {
-      filename: `edge-function:${fn.name}`,
+    // Inject globals into the sandbox
+    injectGlobals(context, {
+      request,
+      db,
+      logs,
+      decryptedSecrets,
+      serverFunctions,
+      setResponse: (newResponse: FunctionResponse) => {
+        if (!responseSet) {
+          responseSet = true;
+          response = newResponse;
+        } else {
+          logs.push('[WARN] Response already set, ignoring subsequent call');
+        }
+      },
+      fetchState,
     });
 
-    // Execute with timeout
-    const timeout = Math.min(fn.timeoutMs || 5000, 30000); // Max 30s
-    await script.runInContext(context, {
-      timeout,
-      breakOnSigint: true,
-    });
+    // Build the code to execute
+    const wrappedCode = buildWrappedCode(fn.code);
+
+    // Execute the code
+    const result = context.evalCode(wrappedCode, `edge-function:${fn.name}`);
+
+    // Handle async execution
+    if (result.error) {
+      const errorStr = context.dump(result.error);
+      result.error.dispose();
+      throw new Error(errorStr as string);
+    }
+
+    // If we got a promise, we need to execute pending jobs
+    const value = result.value;
+
+    // Execute any pending async operations (including fetch)
+    let executePending = true;
+    while (executePending) {
+      // Wait for any pending fetch operations
+      const incompleteFetches = fetchState.pendingFetches.filter(f => !f.completed && f.promise !== null);
+      if (incompleteFetches.length > 0) {
+        // Wait a small amount for fetches to complete, then check again
+        await Promise.race([
+          Promise.all(incompleteFetches.map(f => f.promise!)),
+          new Promise(resolve => setTimeout(resolve, 10)),
+        ]);
+      }
+
+      // Execute QuickJS pending jobs
+      const pendingResult = runtime.executePendingJobs();
+      if (pendingResult.error) {
+        const errorStr = context.dump(pendingResult.error);
+        pendingResult.error.dispose();
+        throw new Error(errorStr as string);
+      }
+
+      // Continue if there are more QuickJS jobs OR pending fetches
+      const hasMoreJobs = pendingResult.value > 0;
+      const hasPendingFetches = fetchState.pendingFetches.some(f => !f.completed);
+      executePending = hasMoreJobs || hasPendingFetches;
+
+      // Check timeout
+      if (Date.now() > deadline) {
+        throw new Error('Function execution timed out');
+      }
+    }
+
+    value.dispose();
 
     // If no response was set, return 204 No Content
     if (!responseSet) {
@@ -265,8 +260,6 @@ export async function executeFunction(
     };
   } catch (error) {
     const errorMessage = formatError(error);
-
-    // Log the error
     logs.push(`[ERROR] ${errorMessage}`);
 
     return {
@@ -279,37 +272,577 @@ export async function executeFunction(
       durationMs: Date.now() - startTime,
       error: errorMessage,
     };
+  } finally {
+    // Always clean up
+    context.dispose();
+    runtime.dispose();
   }
 }
 
 /**
- * Format an argument for console output
+ * Configuration for injecting globals into the sandbox
  */
-function formatArg(arg: unknown): string {
-  if (arg === undefined) return 'undefined';
-  if (arg === null) return 'null';
-  if (typeof arg === 'string') return arg;
-  if (typeof arg === 'number' || typeof arg === 'boolean') return String(arg);
-  if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
+interface GlobalsConfig {
+  request: FunctionRequest;
+  db: DatabaseAPI;
+  logs: string[];
+  decryptedSecrets: Record<string, string>;
+  serverFunctions: ServerFunction[];
+  setResponse: (response: FunctionResponse) => void;
+  fetchState: FetchState;
+}
+
+/**
+ * Tracks fetch usage within a single execution
+ */
+interface FetchState {
+  requestCount: number;
+  pendingFetches: Array<{
+    promise: Promise<void> | null;
+    completed: boolean;
+  }>;
+}
+
+/**
+ * Inject global objects and functions into the QuickJS context
+ */
+function injectGlobals(context: QuickJSContext, config: GlobalsConfig): void {
+  const { request, db, logs, decryptedSecrets, serverFunctions, setResponse, fetchState } = config;
+
+  // Inject request object (read-only data)
+  const requestHandle = jsonToHandle(context, request);
+  context.setProp(context.global, 'request', requestHandle);
+  requestHandle.dispose();
+
+  // Inject console object
+  injectConsole(context, logs);
+
+  // Inject Response helpers
+  injectResponseHelpers(context, setResponse);
+
+  // Inject database API
+  injectDatabaseAPI(context, db, logs);
+
+  // Inject secrets API
+  injectSecretsAPI(context, decryptedSecrets);
+
+  // Inject server functions namespace
+  injectServerFunctions(context, serverFunctions, logs);
+
+  // Inject fetch API
+  injectFetch(context, logs, fetchState);
+
+  // Inject base64 helpers (atob/btoa)
+  injectBase64Helpers(context);
+}
+
+/**
+ * Inject console object with log capture
+ */
+function injectConsole(context: QuickJSContext, logs: string[]): void {
+  const consoleObj = context.newObject();
+
+  const methods = ['log', 'error', 'warn', 'info'] as const;
+  const prefixes = {
+    log: '[LOG]',
+    error: '[ERROR]',
+    warn: '[WARN]',
+    info: '[INFO]',
+  };
+
+  for (const method of methods) {
+    const fn = context.newFunction(method, (...args: QuickJSHandle[]) => {
+      const parts = args.map(arg => {
+        const value = context.dump(arg);
+        return formatValue(value);
+      });
+      logs.push(`${prefixes[method]} ${parts.join(' ')}`);
+    });
+    context.setProp(consoleObj, method, fn);
+    fn.dispose();
+  }
+
+  context.setProp(context.global, 'console', consoleObj);
+  consoleObj.dispose();
+}
+
+/**
+ * Inject Response helper object
+ */
+function injectResponseHelpers(context: QuickJSContext, setResponse: (response: FunctionResponse) => void): void {
+  const responseObj = context.newObject();
+
+  // Response.json(data, status?)
+  const jsonFn = context.newFunction('json', (dataHandle: QuickJSHandle, statusHandle?: QuickJSHandle) => {
+    const data = context.dump(dataHandle);
+    const status = statusHandle ? (context.dump(statusHandle) as number) : 200;
+    setResponse({
+      status,
+      headers: { 'Content-Type': 'application/json' },
+      body: data as object,
+    });
+  });
+  context.setProp(responseObj, 'json', jsonFn);
+  jsonFn.dispose();
+
+  // Response.text(text, status?)
+  const textFn = context.newFunction('text', (textHandle: QuickJSHandle, statusHandle?: QuickJSHandle) => {
+    const text = context.dump(textHandle) as string;
+    const status = statusHandle ? (context.dump(statusHandle) as number) : 200;
+    setResponse({
+      status,
+      headers: { 'Content-Type': 'text/plain' },
+      body: text,
+    });
+  });
+  context.setProp(responseObj, 'text', textFn);
+  textFn.dispose();
+
+  // Response.error(message, status?)
+  const errorFn = context.newFunction('error', (msgHandle: QuickJSHandle, statusHandle?: QuickJSHandle) => {
+    const message = context.dump(msgHandle) as string;
+    const status = statusHandle ? (context.dump(statusHandle) as number) : 500;
+    setResponse({
+      status,
+      headers: { 'Content-Type': 'application/json' },
+      body: { error: message },
+    });
+  });
+  context.setProp(responseObj, 'error', errorFn);
+  errorFn.dispose();
+
+  context.setProp(context.global, 'Response', responseObj);
+  responseObj.dispose();
+}
+
+/**
+ * Inject database API
+ */
+function injectDatabaseAPI(context: QuickJSContext, db: DatabaseAPI, logs: string[]): void {
+  const dbObj = context.newObject();
+
+  // db.query(sql, params?)
+  const queryFn = context.newFunction('query', (sqlHandle: QuickJSHandle, paramsHandle?: QuickJSHandle) => {
+    try {
+      const sql = context.dump(sqlHandle) as string;
+      const params = paramsHandle ? (context.dump(paramsHandle) as unknown[]) : undefined;
+      const result = db.query(sql, params);
+      return jsonToHandle(context, result);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logs.push(`[ERROR] db.query failed: ${msg}`);
+      throw error;
+    }
+  });
+  context.setProp(dbObj, 'query', queryFn);
+  queryFn.dispose();
+
+  // db.run(sql, params?)
+  const runFn = context.newFunction('run', (sqlHandle: QuickJSHandle, paramsHandle?: QuickJSHandle) => {
+    try {
+      const sql = context.dump(sqlHandle) as string;
+      const params = paramsHandle ? (context.dump(paramsHandle) as unknown[]) : undefined;
+      const result = db.run(sql, params);
+      return jsonToHandle(context, result);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logs.push(`[ERROR] db.run failed: ${msg}`);
+      throw error;
+    }
+  });
+  context.setProp(dbObj, 'run', runFn);
+  runFn.dispose();
+
+  // db.all(sql, params?) - alias for query
+  const allFn = context.newFunction('all', (sqlHandle: QuickJSHandle, paramsHandle?: QuickJSHandle) => {
+    try {
+      const sql = context.dump(sqlHandle) as string;
+      const params = paramsHandle ? (context.dump(paramsHandle) as unknown[]) : undefined;
+      const result = db.all(sql, params);
+      return jsonToHandle(context, result);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logs.push(`[ERROR] db.all failed: ${msg}`);
+      throw error;
+    }
+  });
+  context.setProp(dbObj, 'all', allFn);
+  allFn.dispose();
+
+  context.setProp(context.global, 'db', dbObj);
+  dbObj.dispose();
+}
+
+/**
+ * Inject secrets API
+ */
+function injectSecretsAPI(context: QuickJSContext, secrets: Record<string, string>): void {
+  const secretsObj = context.newObject();
+
+  // secrets.get(name)
+  const getFn = context.newFunction('get', (nameHandle: QuickJSHandle) => {
+    const name = context.dump(nameHandle) as string;
+    const value = secrets[name];
+    if (value === undefined) {
+      return context.null;
+    }
+    return context.newString(value);
+  });
+  context.setProp(secretsObj, 'get', getFn);
+  getFn.dispose();
+
+  // secrets.has(name)
+  const hasFn = context.newFunction('has', (nameHandle: QuickJSHandle) => {
+    const name = context.dump(nameHandle) as string;
+    return name in secrets ? context.true : context.false;
+  });
+  context.setProp(secretsObj, 'has', hasFn);
+  hasFn.dispose();
+
+  // secrets.list()
+  const listFn = context.newFunction('list', () => {
+    return jsonToHandle(context, Object.keys(secrets));
+  });
+  context.setProp(secretsObj, 'list', listFn);
+  listFn.dispose();
+
+  context.setProp(context.global, 'secrets', secretsObj);
+  secretsObj.dispose();
+}
+
+/**
+ * Inject server functions namespace
+ */
+function injectServerFunctions(
+  context: QuickJSContext,
+  serverFunctions: ServerFunction[],
+  logs: string[]
+): void {
+  const serverObj = context.newObject();
+
+  for (const serverFn of serverFunctions) {
+    const fn = context.newFunction(serverFn.name, (...args: QuickJSHandle[]) => {
+      try {
+        const jsArgs = args.map(arg => context.dump(arg));
+
+        const serverFnCode = `
+          (function(args, db) {
+            'use strict';
+            ${serverFn.code}
+          })
+        `;
+
+        const evalResult = context.evalCode(serverFnCode, `server-function:${serverFn.name}`);
+        if (evalResult.error) {
+          const errorStr = context.dump(evalResult.error);
+          evalResult.error.dispose();
+          throw new Error(`Server function "${serverFn.name}" error: ${errorStr}`);
+        }
+
+        const fnHandle = evalResult.value;
+        const argsHandle = jsonToHandle(context, jsArgs);
+        const dbHandle = context.getProp(context.global, 'db');
+
+        const callResult = context.callFunction(fnHandle, context.undefined, argsHandle, dbHandle);
+
+        fnHandle.dispose();
+        argsHandle.dispose();
+        dbHandle.dispose();
+
+        if (callResult.error) {
+          const errorStr = context.dump(callResult.error);
+          callResult.error.dispose();
+          throw new Error(`Server function "${serverFn.name}" error: ${errorStr}`);
+        }
+
+        const result = callResult.value;
+        const resultValue = context.dump(result);
+        result.dispose();
+
+        return jsonToHandle(context, resultValue);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logs.push(`[ERROR] Server function "${serverFn.name}" failed: ${msg}`);
+        throw error;
+      }
+    });
+
+    context.setProp(serverObj, serverFn.name, fn);
+    fn.dispose();
+  }
+
+  context.setProp(context.global, 'server', serverObj);
+  serverObj.dispose();
+}
+
+/**
+ * Inject fetch API with security controls
+ *
+ * Since QuickJS is synchronous, we implement fetch by:
+ * 1. Creating a QuickJS promise that user code can await
+ * 2. Starting the real fetch on Node.js side
+ * 3. Resolving the QuickJS promise when fetch completes
+ * 4. The execution loop polls for pending fetches
+ */
+function injectFetch(context: QuickJSContext, logs: string[], fetchState: FetchState): void {
+  const fetchFn = context.newFunction('fetch', (urlHandle: QuickJSHandle, optionsHandle?: QuickJSHandle) => {
+    try {
+      const url = context.dump(urlHandle) as string;
+      const options = optionsHandle ? (context.dump(optionsHandle) as Record<string, unknown>) : {};
+
+      // Security checks
+      if (fetchState.requestCount >= MAX_FETCH_REQUESTS) {
+        throw new Error(`Maximum fetch requests (${MAX_FETCH_REQUESTS}) exceeded`);
+      }
+
+      // Validate URL and protocol
+      let protocol: string;
+      try {
+        const parsedUrl = new URL(url);
+        protocol = parsedUrl.protocol;
+      } catch {
+        throw new Error('Invalid URL');
+      }
+
+      if (!['http:', 'https:'].includes(protocol)) {
+        throw new Error('Only http and https protocols are allowed');
+      }
+
+      // Private IP check (production only)
+      if (isPrivateUrl(url)) {
+        throw new Error('Requests to private/internal addresses are not allowed');
+      }
+
+      fetchState.requestCount++;
+      logs.push(`[INFO] fetch: ${options.method || 'GET'} ${url}`);
+
+      // Create a deferred promise in QuickJS
+      const promiseCode = `
+        (function() {
+          let _resolve, _reject;
+          const promise = new Promise((resolve, reject) => {
+            _resolve = resolve;
+            _reject = reject;
+          });
+          promise._resolve = _resolve;
+          promise._reject = _reject;
+          return promise;
+        })()
+      `;
+
+      const promiseResult = context.evalCode(promiseCode, 'fetch-promise');
+      if (promiseResult.error) {
+        const errorStr = context.dump(promiseResult.error);
+        promiseResult.error.dispose();
+        throw new Error(`Failed to create promise: ${errorStr}`);
+      }
+
+      const promiseHandle = promiseResult.value;
+
+      // Track this fetch operation
+      const fetchEntry: { promise: Promise<void> | null; completed: boolean } = { promise: null, completed: false };
+
+      // Execute the actual fetch
+      fetchEntry.promise = (async () => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+          const fetchOptions: RequestInit = {
+            method: (options.method as string) || 'GET',
+            headers: options.headers as Record<string, string>,
+            body: options.body ? JSON.stringify(options.body) : undefined,
+            signal: controller.signal,
+          };
+
+          const response = await globalThis.fetch(url, fetchOptions);
+          clearTimeout(timeoutId);
+
+          // Check response size
+          const contentLength = response.headers.get('content-length');
+          if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
+            throw new Error(`Response too large (max ${MAX_RESPONSE_SIZE / 1024 / 1024}MB)`);
+          }
+
+          // Read response body
+          const text = await response.text();
+          if (text.length > MAX_RESPONSE_SIZE) {
+            throw new Error(`Response too large (max ${MAX_RESPONSE_SIZE / 1024 / 1024}MB)`);
+          }
+
+          // Build response object for QuickJS
+          const headers: Record<string, string> = {};
+          response.headers.forEach((value, key) => {
+            headers[key] = value;
+          });
+
+          const responseObj = {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            headers,
+            url: response.url,
+          };
+
+          // Resolve the promise with the response object
+          const resolveHandle = context.getProp(promiseHandle, '_resolve');
+          const responseHandle = jsonToHandle(context, responseObj);
+
+          // Add json() and text() methods to the response
+          const jsonMethod = context.newFunction('json', () => {
+            try {
+              return jsonToHandle(context, JSON.parse(text));
+            } catch {
+              throw new Error('Failed to parse JSON');
+            }
+          });
+          context.setProp(responseHandle, 'json', jsonMethod);
+          jsonMethod.dispose();
+
+          const textMethod = context.newFunction('text', () => {
+            return context.newString(text);
+          });
+          context.setProp(responseHandle, 'text', textMethod);
+          textMethod.dispose();
+
+          context.callFunction(resolveHandle, context.undefined, responseHandle);
+          resolveHandle.dispose();
+          responseHandle.dispose();
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logs.push(`[ERROR] fetch failed: ${errorMsg}`);
+
+          // Reject the promise
+          const rejectHandle = context.getProp(promiseHandle, '_reject');
+          const errorHandle = context.newString(errorMsg);
+          context.callFunction(rejectHandle, context.undefined, errorHandle);
+          rejectHandle.dispose();
+          errorHandle.dispose();
+        } finally {
+          fetchEntry.completed = true;
+        }
+      })();
+
+      fetchState.pendingFetches.push(fetchEntry);
+
+      return promiseHandle;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logs.push(`[ERROR] fetch failed: ${errorMsg}`);
+      throw context.newError(errorMsg);
+    }
+  });
+
+  context.setProp(context.global, 'fetch', fetchFn);
+  fetchFn.dispose();
+}
+
+/**
+ * Inject atob/btoa base64 encoding functions
+ */
+function injectBase64Helpers(context: QuickJSContext): void {
+  // btoa - binary to ASCII (encode)
+  const btoaFn = context.newFunction('btoa', (dataHandle: QuickJSHandle) => {
+    const data = context.dump(dataHandle) as string;
+    const encoded = Buffer.from(data, 'binary').toString('base64');
+    return context.newString(encoded);
+  });
+  context.setProp(context.global, 'btoa', btoaFn);
+  btoaFn.dispose();
+
+  // atob - ASCII to binary (decode)
+  const atobFn = context.newFunction('atob', (dataHandle: QuickJSHandle) => {
+    const data = context.dump(dataHandle) as string;
+    const decoded = Buffer.from(data, 'base64').toString('binary');
+    return context.newString(decoded);
+  });
+  context.setProp(context.global, 'atob', atobFn);
+  atobFn.dispose();
+}
+
+/**
+ * Build the wrapped code for execution
+ */
+function buildWrappedCode(code: string): string {
+  return `
+    (function() {
+      'use strict';
+      try {
+        ${code}
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        Response.error(msg, 500);
+      }
+    })();
+  `;
+}
+
+/**
+ * Convert a JavaScript value to a QuickJS handle
+ */
+function jsonToHandle(context: QuickJSContext, value: unknown): QuickJSHandle {
+  if (value === null) {
+    return context.null;
+  }
+  if (value === undefined) {
+    return context.undefined;
+  }
+  if (typeof value === 'boolean') {
+    return value ? context.true : context.false;
+  }
+  if (typeof value === 'number') {
+    return context.newNumber(value);
+  }
+  if (typeof value === 'string') {
+    return context.newString(value);
+  }
+  if (Array.isArray(value)) {
+    const arr = context.newArray();
+    for (let i = 0; i < value.length; i++) {
+      const itemHandle = jsonToHandle(context, value[i]);
+      context.setProp(arr, i, itemHandle);
+      itemHandle.dispose();
+    }
+    return arr;
+  }
+  if (typeof value === 'object') {
+    const obj = context.newObject();
+    for (const [key, val] of Object.entries(value)) {
+      const valHandle = jsonToHandle(context, val);
+      context.setProp(obj, key, valHandle);
+      valHandle.dispose();
+    }
+    return obj;
+  }
+  return context.newString(String(value));
+}
+
+/**
+ * Format a value for console output
+ */
+function formatValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
 
   try {
-    return JSON.stringify(arg, null, 2);
+    return JSON.stringify(value, null, 2);
   } catch {
-    return String(arg);
+    return String(value);
   }
 }
 
 /**
- * Format an error for output
+ * Format an error message
  */
 function formatError(error: unknown): string {
   if (error instanceof Error) {
-    // Check for specific VM errors
-    if (error.message.includes('Script execution timed out')) {
+    if (error.message.includes('interrupted')) {
       return 'Function execution timed out';
     }
-    if (error.message.includes('is not defined')) {
-      return `ReferenceError: ${error.message}`;
+    if (error.message.includes('memory')) {
+      return 'Function exceeded memory limit';
     }
     return error.message;
   }
@@ -325,38 +858,19 @@ export function validateFunctionCode(code: string): string | null {
     return 'Function code cannot be empty';
   }
 
-  // Check for obviously dangerous patterns
-  const dangerousPatterns = [
-    { pattern: /\beval\s*\(/, message: 'eval() is not allowed' },
-    { pattern: /\bFunction\s*\(/, message: 'Function constructor is not allowed' },
-    { pattern: /\bprocess\b/, message: 'process object is not available' },
-    { pattern: /\brequire\s*\(/, message: 'require() is not available' },
-    { pattern: /\bimport\s*\(/, message: 'Dynamic import is not available' },
-    { pattern: /\b__proto__\b/, message: '__proto__ access is not allowed' },
-  ];
-
-  for (const { pattern, message } of dangerousPatterns) {
-    if (pattern.test(code)) {
-      return message;
-    }
+  // Check for common mistakes
+  if (code.includes('import ')) {
+    return 'ES6 import statements are not supported. Use the provided APIs.';
   }
-
-  // Try to parse the code as JavaScript
-  try {
-    // Wrap in async function to allow await
-    new vm.Script(`(async function() { ${code} })()`);
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      return `Syntax error: ${error.message}`;
-    }
-    return `Invalid code: ${error instanceof Error ? error.message : String(error)}`;
+  if (code.includes('require(')) {
+    return 'require() is not available. Use the provided APIs.';
   }
 
   return null;
 }
 
 /**
- * Validate function name
+ * Validate function name (URL-safe)
  * Returns an error message if invalid, null if valid
  */
 export function validateFunctionName(name: string): string | null {
@@ -383,8 +897,7 @@ export function validateFunctionName(name: string): string | null {
 }
 
 /**
- * Validate server function name
- * Server functions use camelCase or snake_case (valid JS identifiers)
+ * Validate server function name (valid JS identifier)
  * Returns an error message if invalid, null if valid
  */
 export function validateServerFunctionName(name: string): string | null {
@@ -396,7 +909,7 @@ export function validateServerFunctionName(name: string): string | null {
     return 'Function name must be 64 characters or less';
   }
 
-  // Must be valid JavaScript identifier: starts with letter/underscore, contains letters/numbers/underscores
+  // Must be valid JavaScript identifier
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
     return 'Function name must be a valid identifier (letters, numbers, underscores; cannot start with number)';
   }
@@ -415,8 +928,8 @@ export function validateServerFunctionName(name: string): string | null {
     return `"${name}" is a reserved JavaScript keyword`;
   }
 
-  // Reserved server function names (to avoid conflicts with globals)
-  const reserved = ['db', 'fetch', 'console', 'args', 'request', 'Response', 'server', 'secrets'];
+  // Reserved server function names
+  const reserved = ['db', 'fetch', 'console', 'args', 'request', 'Response', 'server', 'secrets', 'atob', 'btoa'];
   if (reserved.includes(name)) {
     return `"${name}" is reserved and cannot be used as a server function name`;
   }

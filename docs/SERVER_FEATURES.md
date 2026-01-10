@@ -152,6 +152,30 @@ Response.error('Unauthorized', 401);
 const response = await fetch('https://api.example.com/data');
 const data = await response.json();
 Response.json(data);
+
+// With options
+const res = await fetch('https://api.example.com/users', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: { name: 'John', email: 'john@example.com' }
+});
+```
+
+**Security Limits:**
+- Max 10 requests per function execution
+- 10 second timeout per request
+- 5MB max response body
+- Only `http://` and `https://` protocols allowed
+- Private IPs blocked in production (localhost, 10.x.x.x, 172.16-31.x.x, 192.168.x.x, 169.254.x.x)
+- Development mode allows local requests for testing
+
+#### `atob` / `btoa` Functions
+```javascript
+// Base64 encode
+const encoded = btoa('Hello World');  // "SGVsbG8gV29ybGQ="
+
+// Base64 decode
+const decoded = atob('SGVsbG8gV29ybGQ=');  // "Hello World"
 ```
 
 #### `server` Object (Helper Functions)
@@ -255,11 +279,16 @@ Response.json({
 ### Security Considerations
 
 #### Sandboxed Execution
-- Functions run in a Node.js VM sandbox
-- Allowed globals: `JSON`, `Date`, `Math`, `Array`, `Object`, `String`, `Number`, `Boolean`, `RegExp`, `Error`, `Map`, `Set`, `Promise`, `Symbol`, `fetch`, `console`
-- Utility functions: `parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent`, `decodeURIComponent`, `encodeURI`, `decodeURI`, `atob`, `btoa`
+- Functions run in a **QuickJS WebAssembly sandbox** - a completely separate JavaScript engine
+- True isolation via WASM boundary: no shared memory or access to Node.js internals
+- Memory limits enforced by WASM (64MB default)
+- Execution time limits with interrupt handler (configurable 1-30 seconds)
+- Allowed globals: `JSON`, `Date`, `Math`, `Array`, `Object`, `String`, `Number`, `Boolean`, `RegExp`, `Error`, `Map`, `Set`, `Promise`, `Symbol`, `console`
+- Network: `fetch` (with security limits - see above)
+- Utility functions: `parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent`, `decodeURIComponent`, `encodeURI`, `decodeURI`
+- Base64: `atob` (decode), `btoa` (encode)
 - No access to: `require`, `process`, `__dirname`, `Buffer`, file system
-- `setTimeout`/`setInterval` disabled (prevents infinite loops)
+- `setTimeout`/`setInterval` disabled (prevents runaway execution)
 
 #### Database Protection
 System tables are protected and cannot be accessed:
@@ -407,7 +436,7 @@ return perms.length > 0;
 
 ### Security Notes
 
-- Server functions run in the same VM context as the parent edge function
+- Server functions run in the same QuickJS WASM context as the parent edge function
 - They share the total execution timeout (not additive)
 - Recursive calls are possible but limited by timeout
 - The `server_functions` table is protected and cannot be queried
