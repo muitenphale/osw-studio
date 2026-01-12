@@ -261,6 +261,8 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
    NEXT_PUBLIC_SERVER_MODE=true
    SESSION_SECRET=<generate with: openssl rand -base64 32>
    ADMIN_PASSWORD=<your password>
+   ANALYTICS_SECRET=<generate with: openssl rand -base64 32>
+   SECRETS_ENCRYPTION_KEY=<generate with: openssl rand -base64 32>
    NEXT_PUBLIC_APP_URL=http://your-domain.com
    # SECURE_COOKIES=false  # Uncomment until SSL is configured
    ```

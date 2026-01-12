@@ -171,7 +171,7 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 
 ### Server Mode (Optional)
 - ✅ SQLite persistence (no external database setup)
-- ✅ Admin authentication (JWT + bcrypt)
+- ✅ Admin authentication (JWT sessions)
 - ✅ Static site publishing to `/sites/{siteId}/`
 - ✅ Edge Functions - JavaScript API endpoints with database access
 - ✅ Per-site SQLite databases (WAL mode) with SQL editor
@@ -190,6 +190,7 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 NEXT_PUBLIC_SERVER_MODE=true
 SESSION_SECRET=$(openssl rand -base64 32)
 ADMIN_PASSWORD=your_secure_password
+ANALYTICS_SECRET=$(openssl rand -base64 32)
 SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)
 
 # 2. Start server (SQLite databases created automatically)

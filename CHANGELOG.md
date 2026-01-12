@@ -1,8 +1,13 @@
 # Changelog
 
+## v1.22.1 - 2026-01-11
+- Fixed Server Mode setup docs to match `.env.example`
+- Removed unused bcryptjs dependency
+- Fixed redirect on new version going to What's New instead of Dashboard
+
 ## v1.22.0 - 2026-01-10
 - **QuickJS WASM Sandbox**: Upgraded function executor from Node.js VM to QuickJS WebAssembly
-  - Edge functions and server functions now run in isolated WASM sandbox
+  - Edge and server functions now run in isolated WASM sandbox
   - Memory limits enforced by WASM (64MB default)
   - Execution time limits with interrupt handler
   - No access to Node.js APIs (process, require, fs, etc.)

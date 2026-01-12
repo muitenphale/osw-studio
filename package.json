@@ -1,6 +1,6 @@
 {
   "name": "osw-studio-v1",
-  "version": "1.22.0",
+  "version": "1.22.1",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -28,7 +28,6 @@
     "@tailwindcss/postcss": "^4.1.12",
     "@tanstack/react-query": "^5.80.6",
     "@types/node": "20.19.11",
-    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

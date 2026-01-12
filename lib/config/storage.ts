@@ -52,7 +52,6 @@ export interface AppSettings {
   };
   hasSeenAboutModal?: boolean;
   hasSeenGuidedTour?: boolean;
-  lastSeenVersion?: string;
   modelCache?: Partial<Record<ProviderId, ModelCacheEntry>>;
   modelPricing?: Partial<Record<ProviderId, Record<string, ProviderPricingEntry>>>;
   reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
@@ -97,14 +96,6 @@ class ConfigManager {
 
   setHasSeenTour(seen: boolean): void {
     this.setSetting('hasSeenGuidedTour', seen);
-  }
-
-  getLastSeenVersion(): string | null {
-    return this.getSettings().lastSeenVersion || null;
-  }
-
-  setLastSeenVersion(version: string): void {
-    this.setSetting('lastSeenVersion', version);
   }
 
   getApiKey(): string | null {
