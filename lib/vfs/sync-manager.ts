@@ -1,11 +1,13 @@
 /**
  * Sync Manager
  *
- * Handles synchronization between browser (IndexedDB) and server (PostgreSQL) in Server mode.
+ * Handles synchronization between browser (IndexedDB) and server (SQLite) in Server mode.
  * Provides methods to push local data to server and pull server data to browser.
  */
 
-import { Project, VirtualFile } from './types';
+import { Project, VirtualFile, CustomTemplate } from './types';
+import { Skill } from './skills/types';
+import { EnhancedSyncStatusResponse } from './sync-types';
 
 export interface SyncResult {
   success: boolean;
@@ -28,6 +30,28 @@ export interface FilesListSyncResult extends SyncResult {
   files?: VirtualFile[];
 }
 
+export interface SkillSyncResult extends SyncResult {
+  skill?: Skill;
+  action?: 'created' | 'updated';
+}
+
+export interface SkillsListSyncResult extends SyncResult {
+  skills?: Skill[];
+  created?: number;
+  updated?: number;
+}
+
+export interface TemplateSyncResult extends SyncResult {
+  template?: CustomTemplate;
+  action?: 'created' | 'updated';
+}
+
+export interface TemplatesListSyncResult extends SyncResult {
+  templates?: CustomTemplate[];
+  created?: number;
+  updated?: number;
+}
+
 /**
  * SyncManager - Client-side sync utility for Server mode
  */
@@ -39,7 +63,7 @@ export class SyncManager {
   }
 
   /**
-   * Push project to server (IndexedDB → PostgreSQL)
+   * Push project to server (IndexedDB -> SQLite)
    */
   async pushProject(project: Project): Promise<ProjectSyncResult> {
     try {
@@ -73,7 +97,7 @@ export class SyncManager {
   }
 
   /**
-   * Pull all projects from server (PostgreSQL → IndexedDB)
+   * Pull all projects from server (SQLite -> IndexedDB)
    */
   async pullProjects(): Promise<ProjectListSyncResult> {
     try {
@@ -103,7 +127,7 @@ export class SyncManager {
   }
 
   /**
-   * Push files for a project to server (IndexedDB → PostgreSQL)
+   * Push files for a project to server (IndexedDB -> SQLite)
    */
   async pushFiles(projectId: string, files: VirtualFile[]): Promise<FilesSyncResult> {
     try {
@@ -137,7 +161,7 @@ export class SyncManager {
   }
 
   /**
-   * Pull files for a project from server (PostgreSQL → IndexedDB)
+   * Pull files for a project from server (SQLite -> IndexedDB)
    */
   async pullFiles(projectId: string): Promise<FilesListSyncResult> {
     try {
@@ -329,6 +353,366 @@ export class SyncManager {
       return {
         success: true,
         projects: data.projects || [],
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  // ============================================
+  // Skills Sync Methods
+  // ============================================
+
+  /**
+   * Pull all custom skills from server
+   */
+  async pullSkills(): Promise<SkillsListSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/skills`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        skills: data.skills || [],
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Push multiple skills to server
+   */
+  async pushSkills(skills: Skill[]): Promise<SkillsListSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/skills`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ skills }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: data.success,
+        created: data.created,
+        updated: data.updated,
+        error: data.errors?.join(', '),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Pull a single skill from server
+   */
+  async pullSkill(id: string): Promise<SkillSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/skills/${encodeURIComponent(id)}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        skill: data.skill,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Push a single skill to server
+   */
+  async pushSkill(skill: Skill): Promise<SkillSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/skills/${encodeURIComponent(skill.id)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ skill }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        skill: data.skill,
+        action: data.action,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Delete a skill from server
+   */
+  async deleteSkillFromServer(id: string): Promise<SyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/skills/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  // ============================================
+  // Templates Sync Methods
+  // ============================================
+
+  /**
+   * Pull all custom templates from server
+   */
+  async pullTemplates(): Promise<TemplatesListSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/templates`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        templates: data.templates || [],
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Push multiple templates to server
+   */
+  async pushTemplates(templates: CustomTemplate[]): Promise<TemplatesListSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/templates`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ templates }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: data.success,
+        created: data.created,
+        updated: data.updated,
+        error: data.errors?.join(', '),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Pull a single template from server
+   */
+  async pullTemplate(id: string): Promise<TemplateSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/templates/${encodeURIComponent(id)}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        template: data.template,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Push a single template to server
+   */
+  async pushTemplate(template: CustomTemplate): Promise<TemplateSyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/templates/${encodeURIComponent(template.id)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ template }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        template: data.template,
+        action: data.action,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Delete a template from server
+   */
+  async deleteTemplateFromServer(id: string): Promise<SyncResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/templates/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  // ============================================
+  // Detailed Sync Status
+  // ============================================
+
+  /**
+   * Get enhanced sync status including skills and templates
+   */
+  async getEnhancedSyncStatus(): Promise<{
+    success: boolean;
+    error?: string;
+    data?: EnhancedSyncStatusResponse;
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/status`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data: data as EnhancedSyncStatusResponse,
       };
     } catch (error) {
       return {

@@ -1,37 +1,55 @@
 /**
  * Sync Status API
  *
- * Returns updatedAt timestamps for all projects on the server,
+ * Returns updatedAt timestamps for all projects, skills, and templates on the server,
  * plus summary stats about the server database state.
- * Used to detect which projects need syncing without fetching full data.
+ * Used to detect which items need syncing without fetching full data.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerAdapter } from '@/lib/vfs/adapters/server';
 import { logger } from '@/lib/utils';
-import { Project } from '@/lib/vfs/types';
+import { Project, CustomTemplate } from '@/lib/vfs/types';
+import { Skill } from '@/lib/vfs/skills/types';
 
-interface ProjectStatus {
+interface ItemStatus {
   id: string;
+  name: string;
   updatedAt: string; // ISO string for JSON serialization
 }
 
 interface SyncStatusResponse {
   success: boolean;
-  projects: ProjectStatus[];
+  projects: ItemStatus[];
+  skills: ItemStatus[];
+  templates: ItemStatus[];
   summary: {
     projectCount: number;
+    skillCount: number;
+    templateCount: number;
     siteCount: number;
-    lastUpdated: string | null;  // Most recent project update
+    lastUpdated: string | null;  // Most recent update across all items
     isUninitialized: boolean;    // Server has no projects
   };
 }
 
 /**
- * GET /api/sync/status
- * Get timestamps for all server projects and summary stats
+ * Helper to safely parse a date from various formats
  */
-export async function GET(request: NextRequest) {
+function safeParseDate(value: Date | string | null | undefined, fallback: Date = new Date()): Date {
+  if (!value) return fallback;
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? fallback : value;
+  }
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+/**
+ * GET /api/sync/status
+ * Get timestamps for all server projects, skills, templates and summary stats
+ */
+export async function GET(_request: NextRequest) {
   try {
     let adapter;
     try {
@@ -52,48 +70,70 @@ export async function GET(request: NextRequest) {
     // Get all sites count
     const sites = adapter.listSites ? await adapter.listSites() : [];
 
-    // Map to status objects with ISO timestamps
-    const statuses: ProjectStatus[] = projects.map((project: Project) => {
-      // Ensure updatedAt is a Date object
-      let updatedAt: Date;
+    // Get all custom skills (excluding built-in)
+    const allSkills = await adapter.getAllSkills();
+    const customSkills = allSkills.filter((skill: Skill) => !skill.isBuiltIn);
 
-      if (project.updatedAt instanceof Date) {
-        updatedAt = project.updatedAt;
-      } else if (project.updatedAt) {
-        updatedAt = new Date(project.updatedAt);
-      } else {
-        // Fallback to current time if updatedAt is missing
-        updatedAt = new Date();
-      }
+    // Get all custom templates
+    const templates = await adapter.getAllCustomTemplates();
 
-      // Validate the date is valid
-      if (isNaN(updatedAt.getTime())) {
-        logger.warn(`[API /api/sync/status] Invalid date for project ${project.id}, using current time`);
-        updatedAt = new Date();
-      }
-
+    // Map projects to status objects with ISO timestamps
+    const projectStatuses: ItemStatus[] = projects.map((project: Project) => {
+      const updatedAt = safeParseDate(project.updatedAt);
       return {
         id: project.id,
+        name: project.name,
         updatedAt: updatedAt.toISOString()
       };
     });
 
-    // Find most recent update
+    // Map skills to status objects
+    const skillStatuses: ItemStatus[] = customSkills.map((skill: Skill) => {
+      const updatedAt = safeParseDate(skill.updatedAt);
+      return {
+        id: skill.id,
+        name: skill.name,
+        updatedAt: updatedAt.toISOString()
+      };
+    });
+
+    // Map templates to status objects
+    const templateStatuses: ItemStatus[] = templates.map((template: CustomTemplate) => {
+      // Use updatedAt if available, otherwise importedAt
+      const updatedAt = safeParseDate(template.updatedAt || template.importedAt);
+      return {
+        id: template.id,
+        name: template.name,
+        updatedAt: updatedAt.toISOString()
+      };
+    });
+
+    // Find most recent update across all items
+    const allTimestamps = [
+      ...projectStatuses.map(p => p.updatedAt),
+      ...skillStatuses.map(s => s.updatedAt),
+      ...templateStatuses.map(t => t.updatedAt),
+    ];
+
     let lastUpdated: string | null = null;
-    if (statuses.length > 0) {
-      const sortedStatuses = [...statuses].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    if (allTimestamps.length > 0) {
+      const sortedTimestamps = [...allTimestamps].sort(
+        (a, b) => new Date(b).getTime() - new Date(a).getTime()
       );
-      lastUpdated = sortedStatuses[0].updatedAt;
+      lastUpdated = sortedTimestamps[0];
     }
 
-    logger.debug(`[API /api/sync/status] Fetched status for ${statuses.length} projects, ${sites.length} sites`);
+    logger.debug(`[API /api/sync/status] Fetched status for ${projectStatuses.length} projects, ${skillStatuses.length} skills, ${templateStatuses.length} templates, ${sites.length} sites`);
 
     const response: SyncStatusResponse = {
       success: true,
-      projects: statuses,
+      projects: projectStatuses,
+      skills: skillStatuses,
+      templates: templateStatuses,
       summary: {
         projectCount: projects.length,
+        skillCount: customSkills.length,
+        templateCount: templates.length,
         siteCount: sites.length,
         lastUpdated,
         isUninitialized: projects.length === 0,

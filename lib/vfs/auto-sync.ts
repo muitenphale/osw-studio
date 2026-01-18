@@ -38,7 +38,7 @@ export function calculateSyncStatus(
   localProject: Project,
   serverUpdatedAt?: Date
 ): SyncStatusResult {
-  const { updatedAt, lastSyncedAt, serverUpdatedAt: cachedServerTime } = localProject;
+  const { updatedAt, lastSyncedAt } = localProject;
 
   // If no server timestamp available, it's local-only
   if (!serverUpdatedAt) {
@@ -140,11 +140,11 @@ export async function autoSyncProject(projectId: string): Promise<void> {
     const data = await response.json();
     const syncedProject = data.project;
 
-    // Update local project with sync metadata (skip triggering another sync)
+    // Update local project with sync metadata (preserve updatedAt)
     project.lastSyncedAt = new Date(syncedProject.lastSyncedAt);
     project.serverUpdatedAt = new Date(syncedProject.serverUpdatedAt);
     project.syncStatus = 'synced';
-    await vfs.updateProject(project, true); // skipSync = true
+    await vfs.updateProject(project, { preserveUpdatedAt: true });
 
     logger.debug(`[AutoSync] Project ${projectId} synced successfully`);
 
@@ -156,12 +156,12 @@ export async function autoSyncProject(projectId: string): Promise<void> {
   } catch (error) {
     logger.error(`[AutoSync] Failed to sync project ${projectId}:`, error);
 
-    // Update sync status to error (skip triggering another sync)
+    // Update sync status to error (preserve updatedAt)
     try {
       const project = await vfs.getProject(projectId);
       if (project) {
         project.syncStatus = 'error';
-        await vfs.updateProject(project, true); // skipSync = true
+        await vfs.updateProject(project, { preserveUpdatedAt: true });
       }
     } catch (updateError) {
       logger.error(`[AutoSync] Failed to update project status:`, updateError);
@@ -394,13 +394,13 @@ export async function autoPullAllProjects(): Promise<{
             await vfs.createFile(serverStatus.id, file.path, file.content || '');
           }
 
-          // Update sync metadata
+          // Update sync metadata (preserve updatedAt)
           const newProject = await vfs.getProject(serverStatus.id);
           if (newProject) {
             newProject.lastSyncedAt = new Date();
             newProject.serverUpdatedAt = serverUpdatedAt;
             newProject.syncStatus = 'synced';
-            await vfs.updateProject(newProject, true); // skipSync
+            await vfs.updateProject(newProject, { preserveUpdatedAt: true });
           }
 
           pulled++;

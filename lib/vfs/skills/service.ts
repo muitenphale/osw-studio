@@ -430,6 +430,70 @@ class SkillsService {
       isBuiltIn: skill.isBuiltIn,
     }));
   }
+
+  // ============================================
+  // Sync Support (Server Mode)
+  // ============================================
+
+  /**
+   * Get all custom skills (for sync)
+   */
+  async getCustomSkills(): Promise<Skill[]> {
+    await this.init();
+    return Array.from(this.customSkills.values());
+  }
+
+  /**
+   * Update a skill's sync metadata after successful sync
+   */
+  async updateSyncMetadata(skillId: string, lastSyncedAt: Date, serverUpdatedAt: Date): Promise<void> {
+    await this.init();
+
+    const skill = this.customSkills.get(skillId);
+    if (!skill || skill.isBuiltIn) return;
+
+    const updatedSkill: Skill = {
+      ...skill,
+      lastSyncedAt,
+      serverUpdatedAt,
+    };
+
+    this.customSkills.set(skillId, updatedSkill);
+    this.saveCustomSkills();
+
+    logger.info(`[SkillsService] Updated sync metadata for skill: ${skillId}`);
+  }
+
+  /**
+   * Import a skill from server (pull)
+   * Creates or updates local skill with server data
+   */
+  async importFromServer(serverSkill: Skill): Promise<void> {
+    await this.init();
+
+    // Restore Date objects
+    const skill: Skill = {
+      ...serverSkill,
+      createdAt: new Date(serverSkill.createdAt),
+      updatedAt: new Date(serverSkill.updatedAt),
+      lastSyncedAt: new Date(),
+      serverUpdatedAt: new Date(serverSkill.updatedAt),
+      isBuiltIn: false,
+    };
+
+    this.customSkills.set(skill.id, skill);
+    this.saveCustomSkills();
+
+    logger.info(`[SkillsService] Imported skill from server: ${skill.id}`);
+  }
+
+  /**
+   * Check if a skill exists locally
+   */
+  async hasSkill(id: string): Promise<boolean> {
+    await this.init();
+    return this.customSkills.has(id) || BUILT_IN_SKILLS.some(s => s.id === id);
+  }
 }
 
 // Export singleton instance

@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { Project } from '@/lib/vfs/types';
-import { Sidebar, COLLAPSED_SIDEBAR_WIDTH } from '@/components/sidebar';
+import { Sidebar } from '@/components/sidebar';
 import { AppHeader } from '@/components/ui/app-header';
-import { Settings, Cloud, AlertTriangle, Database } from 'lucide-react';
+import { Cloud, AlertTriangle, Database } from 'lucide-react';
 import { SyncDialog } from '@/components/project-manager/sync-dialog';
-import { cn } from '@/lib/utils';
+import { cn, logger } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { getSyncOverviewStatus } from '@/lib/vfs/auto-sync';
 import {
@@ -43,7 +43,7 @@ export function PageLayout({
   const router = useRouter();
   const [sidebarPinned, setSidebarPinned] = useState(true);
   const [sidebarHovering, setSidebarHovering] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [, setSidebarCollapsed] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [initModalOpen, setInitModalOpen] = useState(false);
@@ -70,7 +70,7 @@ export function PageLayout({
           setInitModalOpen(true);
         }
       } catch (error) {
-        console.error('Failed to check server initialization:', error);
+        logger.error('Failed to check server initialization:', error);
       }
     }
     checkServerInit();
@@ -140,10 +140,6 @@ export function PageLayout({
       <SyncDialog
         open={syncDialogOpen}
         onOpenChange={setSyncDialogOpen}
-        onSyncComplete={() => {
-          // Optionally reload data after sync
-          setSyncDialogOpen(false);
-        }}
       />
 
       {/* First-Time Server Initialization Modal */}

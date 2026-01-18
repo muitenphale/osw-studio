@@ -1381,14 +1381,14 @@ export class VirtualFileSystem {
     return project;
   }
 
-  async updateProject(project: Project, skipSync = false): Promise<void> {
+  async updateProject(project: Project, options?: { preserveUpdatedAt?: boolean }): Promise<void> {
     this.ensureInitialized();
 
-    project.updatedAt = new Date();
+    // Only update timestamp if not preserving (for sync metadata updates)
+    if (!options?.preserveUpdatedAt) {
+      project.updatedAt = new Date();
+    }
     await this.adapter.updateProject(project);
-
-    // Note: skipSync parameter kept for backward compatibility but no longer used
-    // Auto-sync is now only triggered explicitly from saveManager.save()
   }
 
   async updateProjectCost(

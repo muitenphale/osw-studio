@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.23.0 - 2026-01-18
+- **Enhanced Server Sync Modal** (Server Mode): Redesigned sync dialog with granular control
+  - Tabbed interface for Projects, Skills, and Templates (previously only projects synced)
+  - Per-item sync status badges showing: Synced, Local Newer, Server Newer, Conflict, Local Only, Server Only
+  - Hover tooltips explaining each status and recommended actions
+  - Individual push/pull buttons per item for precise control
+  - Bulk selection with "Select All" and batch push/pull operations
+  - Summary bar showing status counts per category
+- **Skills & Templates Sync** (Server Mode): Full sync support for custom skills and templates
+  - New API endpoints: `/api/sync/skills`, `/api/sync/templates` with individual item routes
+  - Skills (localStorage) and templates (IndexedDB) now sync with SQLite server storage
+  - Sync metadata tracking: `lastSyncedAt`, `serverUpdatedAt` for three-way comparison
+- **Security**: Updated Next.js to 15.3.8 (CVE-2025-55182)
+
 ## v1.22.1 - 2026-01-11
 - Fixed Server Mode setup docs to match `.env.example`
 - Removed unused bcryptjs dependency

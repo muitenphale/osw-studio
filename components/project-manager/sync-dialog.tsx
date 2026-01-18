@@ -1,10 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Project } from '@/lib/vfs/types';
-import { vfs } from '@/lib/vfs';
-import { getSyncManager } from '@/lib/vfs/sync-manager';
-import { getSyncOverviewStatus, SyncOverviewStatus } from '@/lib/vfs/auto-sync';
 import {
   Dialog,
   DialogContent,
@@ -14,9 +10,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
-import { Cloud, CloudOff, Download, Upload, RefreshCw, AlertTriangle, Database, HardDrive, Globe } from 'lucide-react';
-import { logger } from '@/lib/utils';
+import { Cloud, CloudOff, RefreshCw, AlertTriangle, CheckSquare, ArrowUp, ArrowDown } from 'lucide-react';
+import { SyncTabs, BulkActionState } from './sync-tabs';
+import { useSyncStatus } from './hooks/use-sync-status';
 
 interface SyncDialogProps {
   open: boolean;
@@ -24,198 +20,44 @@ interface SyncDialogProps {
   onSyncComplete?: () => void;
 }
 
-function formatRelativeTime(date: Date | null): string {
-  if (!date) return 'Never';
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-}
-
 export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogProps) {
   const [authenticated, setAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [localProjects, setLocalProjects] = useState<Project[]>([]);
-  const [syncStatus, setSyncStatus] = useState<SyncOverviewStatus | null>(null);
-  const syncManager = getSyncManager();
+  const [authLoading, setAuthLoading] = useState(true);
+  const { status, refresh, loading, error } = useSyncStatus();
+  const [bulkState, setBulkState] = useState<BulkActionState | null>(null);
 
   useEffect(() => {
     if (open) {
       checkAuth();
-      loadData();
+      refresh();
     }
-  }, [open]);
+  }, [open, refresh]);
 
   const checkAuth = async () => {
+    setAuthLoading(true);
     try {
       const response = await fetch('/api/auth/me');
       const data = await response.json();
       setAuthenticated(data.authenticated);
-    } catch (error) {
+    } catch {
       setAuthenticated(false);
     } finally {
-      setLoading(false);
+      setAuthLoading(false);
     }
   };
 
-  const loadData = async () => {
-    try {
-      await vfs.init();
-      const projects = await vfs.listProjects();
-      setLocalProjects(projects);
-
-      // Get comprehensive sync status
-      const status = await getSyncOverviewStatus();
-      setSyncStatus(status);
-    } catch (error) {
-      logger.error('Failed to load sync data:', error);
-    }
+  const handleSyncComplete = () => {
+    refresh();
+    onSyncComplete?.();
   };
 
-  const handlePushAll = async () => {
-    if (!authenticated) {
-      toast.error('Not authenticated. Please login first.');
-      return;
-    }
+  const dialogContentClass = "sm:max-w-2xl";
 
-    setSyncing(true);
-    try {
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const project of localProjects) {
-        try {
-          // Get all files for the project
-          const files = await vfs.listFiles(project.id);
-
-          // Push to server
-          const result = await syncManager.pushProjectWithFiles(project, files);
-
-          if (result.success) {
-            successCount++;
-          } else {
-            errorCount++;
-            logger.error(`Failed to sync project ${project.name}:`, result.error);
-          }
-        } catch (error) {
-          errorCount++;
-          logger.error(`Error syncing project ${project.name}:`, error);
-        }
-      }
-
-      if (errorCount === 0) {
-        toast.success(`Successfully synced ${successCount} project(s) to server`);
-      } else {
-        toast.warning(
-          `Synced ${successCount} project(s), ${errorCount} failed`
-        );
-      }
-
-      // Refresh status
-      await loadData();
-      onSyncComplete?.();
-    } catch (error) {
-      toast.error('Failed to sync projects');
-      logger.error('Sync error:', error);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handlePullAll = async () => {
-    if (!authenticated) {
-      toast.error('Not authenticated. Please login first.');
-      return;
-    }
-
-    setSyncing(true);
-    try {
-      // Get all projects from server
-      const result = await syncManager.pullProjects();
-
-      if (!result.success) {
-        toast.error(result.error || 'Failed to fetch projects from server');
-        return;
-      }
-
-      const serverProjects = result.projects || [];
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const serverProject of serverProjects) {
-        try {
-          // Check if project already exists locally
-          const existingProject = await vfs.getProject(serverProject.id);
-
-          // Pull files
-          const filesResult = await syncManager.pullFiles(serverProject.id);
-
-          if (!filesResult.success) {
-            errorCount++;
-            logger.error(`Failed to pull files for ${serverProject.name}:`, filesResult.error);
-            continue;
-          }
-
-          if (existingProject) {
-            // Update existing project
-            await vfs.updateProject(serverProject);
-
-            // Delete existing files and recreate
-            const existingFiles = await vfs.listFiles(serverProject.id);
-            for (const file of existingFiles) {
-              await vfs.deleteFile(serverProject.id, file.path);
-            }
-          } else {
-            // Create new project
-            await vfs.createProject(
-              serverProject.name,
-              serverProject.description || ''
-            );
-          }
-
-          // Create all files
-          for (const file of filesResult.files || []) {
-            await vfs.createFile(serverProject.id, file.path, file.content || '');
-          }
-
-          successCount++;
-        } catch (error) {
-          errorCount++;
-          logger.error(`Error pulling project ${serverProject.name}:`, error);
-        }
-      }
-
-      if (errorCount === 0) {
-        toast.success(`Successfully pulled ${successCount} project(s) from server`);
-      } else {
-        toast.warning(
-          `Pulled ${successCount} project(s), ${errorCount} failed`
-        );
-      }
-
-      // Refresh data
-      await loadData();
-      onSyncComplete?.();
-    } catch (error) {
-      toast.error('Failed to pull projects');
-      logger.error('Pull error:', error);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  if (loading) {
+  // Loading state
+  if (authLoading) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent className={dialogContentClass}>
           <DialogHeader>
             <DialogTitle>Server Sync</DialogTitle>
             <DialogDescription>
@@ -227,31 +69,25 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
     );
   }
 
+  // Not authenticated
   if (!authenticated) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent className={dialogContentClass}>
           <DialogHeader>
-            <DialogTitle>
-              <CloudOff className="inline-block w-5 h-5 mr-2" />
+            <DialogTitle className="flex items-center gap-2">
+              <CloudOff className="w-5 h-5" />
               Not Authenticated
             </DialogTitle>
             <DialogDescription>
-              You need to login to sync projects with the server.
+              You need to login to sync projects, skills, and templates with the server.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={() => {
-                window.location.href = '/admin/login';
-              }}
-            >
+            <Button onClick={() => (window.location.href = '/admin/login')}>
               Go to Login
             </Button>
           </DialogFooter>
@@ -260,110 +96,107 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
     );
   }
 
-  const showWarning = syncStatus?.needsSync || (syncStatus?.isUninitialized && localProjects.length > 0);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className={dialogContentClass}>
         <DialogHeader>
-          <DialogTitle>
-            <Cloud className="inline-block w-5 h-5 mr-2" />
+          <DialogTitle className="flex items-center gap-2">
+            <Cloud className="w-5 h-5" />
             Server Sync
           </DialogTitle>
           <DialogDescription>
-            Synchronize projects between your browser and the server database.
+            Synchronize projects, skills, and templates between your browser and the server.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {/* Warning Banner */}
-          {showWarning && (
-            <div className="flex items-start gap-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
-              <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
+        <div>
+          {/* Error Banner */}
+          {error && (
+            <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
               <div className="text-sm">
-                <p className="font-medium text-orange-600 dark:text-orange-400">
-                  Server database is empty
+                <p className="font-medium text-red-600 dark:text-red-400">
+                  Error loading sync status
                 </p>
-                <p className="text-muted-foreground mt-1">
-                  Push your local projects to enable Sites functionality and publishing.
-                </p>
+                <p className="text-muted-foreground mt-1">{error}</p>
               </div>
             </div>
           )}
 
-          {/* Server Stats */}
-          <div className="p-4 border rounded-lg space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Database className="w-4 h-4" />
-              Server (SQLite)
+          {/* Loading Overlay */}
+          {loading && (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-muted-foreground">Loading sync status...</span>
             </div>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Projects:</span>{' '}
-                <span className="font-medium">{syncStatus?.serverProjectCount ?? 0}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Sites:</span>{' '}
-                <span className="font-medium">{syncStatus?.serverSiteCount ?? 0}</span>
-              </div>
-              <div className="col-span-2">
-                <span className="text-muted-foreground">Last updated:</span>{' '}
-                <span className="font-medium">
-                  {formatRelativeTime(syncStatus?.serverLastUpdated ?? null)}
-                </span>
-              </div>
-            </div>
+          )}
+
+          {/* Tabbed Content */}
+          {!loading && !error && (
+            <SyncTabs
+              syncStatus={status}
+              onRefresh={refresh}
+              onSyncComplete={handleSyncComplete}
+              onBulkActionStateChange={setBulkState}
+            />
+          )}
+        </div>
+
+        <DialogFooter className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          {/* Bulk Actions - left side */}
+          <div className="flex items-center gap-2 flex-wrap flex-1">
+            {bulkState && bulkState.selectableCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={bulkState.onSelectAll}
+                disabled={bulkState.isSyncing}
+              >
+                <CheckSquare className="h-3.5 w-3.5 mr-1.5" />
+                {bulkState.selectedCount === bulkState.selectableCount ? 'Deselect' : 'Select All'}
+              </Button>
+            )}
+
+            {bulkState && bulkState.pushableCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={bulkState.onPushSelected}
+                disabled={bulkState.isSyncing}
+              >
+                <ArrowUp className="h-3.5 w-3.5 mr-1.5" />
+                Push ({bulkState.pushableCount})
+              </Button>
+            )}
+
+            {bulkState && bulkState.pullableCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={bulkState.onPullSelected}
+                disabled={bulkState.isSyncing}
+              >
+                <ArrowDown className="h-3.5 w-3.5 mr-1.5" />
+                Pull ({bulkState.pullableCount})
+              </Button>
+            )}
+          </div>
+
+          {/* Right side buttons */}
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              className="w-full"
-              onClick={handlePullAll}
-              disabled={syncing || (syncStatus?.serverProjectCount ?? 0) === 0}
+              onClick={refresh}
+              disabled={loading}
             >
-              {syncing ? (
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4 mr-2" />
-              )}
-              Pull from Server
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
             </Button>
           </div>
-
-          {/* Local Stats */}
-          <div className="p-4 border rounded-lg space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <HardDrive className="w-4 h-4" />
-              Local (IndexedDB)
-            </div>
-            <div className="text-sm">
-              <span className="text-muted-foreground">Projects:</span>{' '}
-              <span className="font-medium">{localProjects.length}</span>
-            </div>
-            <Button
-              variant={showWarning ? 'default' : 'outline'}
-              size="sm"
-              className="w-full"
-              onClick={handlePushAll}
-              disabled={syncing || localProjects.length === 0}
-            >
-              {syncing ? (
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Upload className="w-4 h-4 mr-2" />
-              )}
-              Push to Server
-            </Button>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={syncing}
-          >
-            Close
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -25,6 +25,9 @@ export interface Skill {
   isBuiltIn: boolean;    // Whether this is a built-in skill
   createdAt: Date;
   updatedAt: Date;
+  // Sync metadata (Server Mode)
+  lastSyncedAt?: Date | null;      // When skill was last synced with server
+  serverUpdatedAt?: Date | null;   // Server's updatedAt timestamp
 }
 
 /**
