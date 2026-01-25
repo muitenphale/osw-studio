@@ -1,8 +1,74 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ProviderId } from '@/lib/llm/providers/types';
 import { getProvider } from '@/lib/llm/providers/registry';
-import { LLMMessage, ToolDefinition } from '@/lib/llm/types';
+import { LLMMessage, ToolDefinition, ContentBlock, TextContentBlock, ImageContentBlock } from '@/lib/llm/types';
 import { logger } from '@/lib/utils';
+
+// Helper to extract text content from string or ContentBlock[]
+function getTextContent(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((b): b is TextContentBlock => b.type === 'text')
+    .map(b => b.text)
+    .join('\n');
+}
+
+// Parse data URL to extract media type and base64 data
+function parseDataUrl(dataUrl: string): { mediaType: string; data: string } {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error('Invalid data URL format');
+  }
+  return { mediaType: match[1], data: match[2] };
+}
+
+// Transform content blocks for Anthropic (requires specific image format)
+function toAnthropicContent(content: string | ContentBlock[]): any {
+  if (typeof content === 'string') return content;
+  return content.map(block => {
+    if (block.type === 'text') {
+      return { type: 'text', text: block.text };
+    }
+    // Transform image_url to Anthropic's format
+    const { mediaType, data } = parseDataUrl(block.image_url.url);
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: mediaType,
+        data
+      }
+    };
+  });
+}
+
+// Extract images from messages for Ollama (images field at request level)
+function extractOllamaImages(messages: LLMMessage[]): { processedMessages: LLMMessage[]; images: string[] } {
+  const images: string[] = [];
+  const processedMessages = messages.map(m => {
+    if (typeof m.content === 'string') return m;
+
+    const textBlocks = m.content.filter((b): b is TextContentBlock => b.type === 'text');
+    const imageBlocks = m.content.filter((b): b is ImageContentBlock => b.type === 'image_url');
+
+    // Extract base64 data (without data URL prefix) for each image
+    for (const img of imageBlocks) {
+      try {
+        const { data } = parseDataUrl(img.image_url.url);
+        images.push(data);
+      } catch {
+        logger.warn('[API] Failed to parse image data URL for Ollama');
+      }
+    }
+
+    return {
+      ...m,
+      content: textBlocks.map(b => b.text).join('\n')
+    };
+  });
+
+  return { processedMessages, images };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -90,7 +156,7 @@ Habits:
     if (selectedProvider === 'anthropic') {
       const systemMessage = chatMessages.find((msg: LLMMessage) => msg.role === 'system');
       if (systemMessage) {
-        anthropicSystemPrompt = systemMessage.content;
+        anthropicSystemPrompt = getTextContent(systemMessage.content);
       }
       
       processedMessages = [];
@@ -154,6 +220,12 @@ Habits:
             if (!messageContent && msg.role === 'assistant') {
               // Skip empty assistant messages (Anthropic rejects them)
               currentUserMessage = null;
+            } else if (msg.role === 'user' && typeof msg.content !== 'string') {
+              // Handle multimodal user messages - transform to Anthropic format
+              currentUserMessage = {
+                ...msg,
+                content: toAnthropicContent(msg.content)
+              };
             } else {
               currentUserMessage = { ...msg };
             }
@@ -171,11 +243,24 @@ Habits:
       }
     }
 
+    // Handle Ollama images - extract to request level
+    let ollamaImages: string[] = [];
+    if (selectedProvider === 'ollama') {
+      const { processedMessages: ollamaMessages, images } = extractOllamaImages(processedMessages);
+      processedMessages = ollamaMessages;
+      ollamaImages = images;
+    }
+
     const requestBody: Record<string, unknown> = {
       model: model || getDefaultModel(selectedProvider),
       messages: processedMessages,
       stream: true
     };
+
+    // Add images for Ollama at request level
+    if (selectedProvider === 'ollama' && ollamaImages.length > 0) {
+      requestBody.images = ollamaImages;
+    }
 
     if (selectedProvider === 'anthropic' && anthropicSystemPrompt) {
       requestBody.system = anthropicSystemPrompt;

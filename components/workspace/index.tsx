@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Project, VirtualFile } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
@@ -10,10 +10,10 @@ import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/m
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
-import { MultiAgentOrchestrator } from '@/lib/llm/multi-agent-orchestrator';
+import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager } from '@/lib/config/storage';
 import { useCostSettings } from '@/lib/hooks/use-cost-settings';
-import { getProvider } from '@/lib/llm/providers/registry';
+import { getProvider, modelSupportsVision } from '@/lib/llm/providers/registry';
 import { toast } from 'sonner';
 import { debugEventsState } from '@/lib/llm/debug-events-state';
 import {
@@ -83,6 +83,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   // Get cost settings for conditional display
   const { shouldShowCosts } = useCostSettings();
+
+  // Check if current model supports vision for image input
+  const supportsVision = useMemo(() => {
+    const currentProvider = configManager.getSelectedProvider();
+    const modelId = currentModel || configManager.getDefaultModel();
+    return modelSupportsVision(currentProvider, modelId);
+  }, [currentModel]);
   
   const [showChat, setShowChat] = useState(true);    // Column 1: Chat v2 (event-driven)
   const [showFiles, setShowFiles] = useState(true);      // Column 2: File explorer
@@ -811,14 +818,14 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
   }, [handleFilesChange, project.id, debugEvents, setPrompt]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (images?: PendingImage[]) => {
     if (isTourLockingInput) {
       return;
     }
 
     const trimmedPrompt = prompt.trim();
 
-    if (!trimmedPrompt) {
+    if (!trimmedPrompt && (!images || images.length === 0)) {
       toast.error('Please enter a prompt');
       return;
     }
@@ -903,8 +910,14 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       // Store orchestrator reference for stop functionality
       setCurrentOrchestrator(orchestrator);
 
+      // Build images array for orchestrator
+      const imageData = images?.map(img => ({
+        data: img.data,
+        mediaType: img.mediaType
+      }));
+
       // Execute - orchestrator handles conversation history internally
-      const result = await orchestrator.execute(messageContent);
+      const result = await orchestrator.execute(messageContent, imageData?.length ? { images: imageData } : undefined);
 
       logger.debug('[Workspace] Orchestrator result:', {
         success: result.success,
@@ -1265,6 +1278,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   isTourLockingInput={isTourLockingInput}
                   onClearChat={clearDebugEvents}
                   onClose={() => setShowChat(false)}
+                  supportsVision={supportsVision}
                 />
               </ResizablePanel>
             )}
@@ -1378,6 +1392,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 getModelDisplayName={getModelDisplayName}
                 isTourLockingInput={isTourLockingInput}
                 onClearChat={clearDebugEvents}
+                supportsVision={supportsVision}
               />
             )}
 

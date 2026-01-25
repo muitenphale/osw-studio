@@ -11,7 +11,7 @@ import { saveManager } from '@/lib/vfs/save-manager';
 import { configManager } from '@/lib/config/storage';
 import { getProvider } from '@/lib/llm/providers/registry';
 import { CostCalculator } from './cost-calculator';
-import { ToolCall, UsageInfo } from './types';
+import { ToolCall, UsageInfo, ContentBlock } from './types';
 import { GenerationAPIService, GenerationUsage } from './generation-api';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -314,7 +314,7 @@ Note: Your response will be automatically appended to the buffered content. Only
 
 export interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | ContentBlock[];  // String or array of content blocks (for multimodal)
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
@@ -325,6 +325,14 @@ export interface AgentMessage {
     usage?: UsageInfo;
     isSyntheticError?: boolean;  // True if this is an auto-injected error message (e.g., malformed tool call correction)
   };
+}
+
+// Pending image for the chat UI
+export interface PendingImage {
+  id: string;
+  data: string;      // base64 data (without prefix)
+  mediaType: string; // 'image/png', 'image/jpeg', etc.
+  preview: string;   // full data URL for display
 }
 
 export interface ConversationNode {
@@ -443,14 +451,21 @@ export class MultiAgentOrchestrator {
   }
 
   /**
-   * Execute user prompt
+   * Execute user prompt with optional images
    */
-  async execute(userPrompt: string): Promise<MultiAgentResult> {
+  async execute(
+    userPrompt: string,
+    options?: {
+      images?: Array<{ data: string; mediaType: string }>;
+    }
+  ): Promise<MultiAgentResult> {
     logger.info('[MultiAgentOrchestrator] Starting execution', { agent: this.rootAgent.type });
 
-    // Reset loop detection for new execution
+    // Reset state for new execution
     this.lastToolCallSignature = null;
     this.duplicateToolCallCount = 0;
+    this.evaluationRequested = false;
+    this.lastEvaluationResult = null;
 
     try {
       // Note: Initial checkpoint removed - checkpoints only created at task completion
@@ -486,10 +501,30 @@ export class MultiAgentOrchestrator {
         });
       }
 
+      // Build user message content - string or ContentBlock[] with images
+      let userContent: string | ContentBlock[];
+      if (options?.images && options.images.length > 0) {
+        // Build multimodal content with text and images
+        const contentBlocks: ContentBlock[] = [
+          { type: 'text', text: userPrompt }
+        ];
+        for (const img of options.images) {
+          contentBlocks.push({
+            type: 'image_url',
+            image_url: {
+              url: `data:${img.mediaType};base64,${img.data}`
+            }
+          });
+        }
+        userContent = contentBlocks;
+      } else {
+        userContent = userPrompt;
+      }
+
       // Add user prompt
       this.addMessage(this.currentConversationId, {
         role: 'user',
-        content: userPrompt
+        content: userContent
       });
 
       // Run agent loop
@@ -613,10 +648,21 @@ export class MultiAgentOrchestrator {
 
       // No tool calls - LLM wants to finish
       if (!response.toolCalls || response.toolCalls.length === 0) {
-        if (response.content && response.content.trim()) {
+        const hasContent = response.content && response.content.trim();
+
+        // Log when we get reasoning-only responses (no content, no tool calls)
+        if (!hasContent) {
+          logger.warn('[MultiAgentOrchestrator] Response has no content and no tool calls (reasoning-only response)', {
+            hasReasoningDetails: !!response.reasoningDetails,
+            evaluationRequested: this.evaluationRequested,
+            iteration
+          });
+        }
+
+        if (hasContent) {
           this.addMessage(conversationId, {
             role: 'assistant',
-            content: response.content
+            content: response.content!
           });
         }
 

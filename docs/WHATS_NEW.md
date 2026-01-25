@@ -6,6 +6,30 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.24.0 - Vision/Image Input Support (2026-01-26)
+
+Drop or paste images directly into the chat input to share visual context with the AI on supported models.
+
+- **Image Input** - Drag & drop or paste (Ctrl/Cmd+V) images into the chat
+- **Multi-Provider Support** - Works with OpenRouter, OpenAI, Anthropic, Gemini, and Ollama vision models
+- **Supported Models** - GPT-5.x, Claude Opus 4.5, Gemini 3 Flash/Pro, GLM-4.7V, llava, Pixtral, and more
+- **Smart Detection** - Image input automatically enabled when using a vision-capable model
+- **Multiple Images** - Attach multiple images in a single message
+- **Formats** - PNG, JPEG, WebP, and GIF supported
+
+### How to Use
+
+1. Select a vision-capable model (e.g., GPT-5.2 via OpenRouter, Claude Opus 4.5, Gemini 3 Pro)
+2. Drop an image onto the chat input or paste from clipboard
+3. Add your prompt describing what you want
+4. Send the message
+
+The AI will analyze the image and can help you recreate designs, extract content, or use it as reference for building your site.
+
+**Note:** For Gemini vision models, use OpenRouter rather than the direct Gemini API for best compatibility.
+
+---
+
 ## v1.22.0 - QuickJS WASM Sandbox
 
 Edge and server functions now run in a QuickJS WebAssembly sandbox for stronger security isolation.

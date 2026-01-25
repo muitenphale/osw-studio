@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X, Brain } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo, useCallback, DragEvent, ClipboardEvent } from 'react';
+import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X, Brain, Image as ImageIcon } from 'lucide-react';
 import { DebugEvent } from '@/components/debug-panel';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,48 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ModelSettingsPanel } from '@/components/settings/model-settings';
 import { FocusContextPayload } from '@/lib/preview/types';
+import { PendingImage } from '@/lib/llm/multi-agent-orchestrator';
+import { ContentBlock } from '@/lib/llm/types';
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
+
+// Helper to render user message content (string or ContentBlock[])
+function UserMessageContent({ content }: { content: string | ContentBlock[] }) {
+  if (typeof content === 'string') {
+    return <div className="whitespace-pre-wrap">{content}</div>;
+  }
+
+  // Separate text and image blocks
+  const textBlocks = content.filter(b => b.type === 'text');
+  const imageBlocks = content.filter(b => b.type === 'image_url');
+
+  return (
+    <div className="space-y-2">
+      {/* Render text blocks */}
+      {textBlocks.map((block, index) => (
+        <div key={`text-${index}`} className="whitespace-pre-wrap">
+          {block.type === 'text' && block.text}
+        </div>
+      ))}
+
+      {/* Render images in a flex container */}
+      {imageBlocks.length > 0 && (
+        <div className="flex flex-wrap gap-2 p-1 rounded-md bg-muted/50">
+          {imageBlocks.map((block, index) => (
+            block.type === 'image_url' && (
+              <img
+                key={`img-${index}`}
+                src={block.image_url.url}
+                alt="Attached image"
+                className="h-[60px] w-auto rounded border border-border object-cover"
+              />
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ChatPanelProps {
   events: DebugEvent[];
@@ -21,7 +61,7 @@ interface ChatPanelProps {
   prompt: string;
   setPrompt: (value: string) => void;
   generating: boolean;
-  onGenerate: () => void;
+  onGenerate: (images?: PendingImage[]) => void;
   onStop: () => void;
   // Focus context
   focusContext: FocusTarget | null;
@@ -39,6 +79,8 @@ interface ChatPanelProps {
   onClearChat?: () => void;
   // Close panel
   onClose?: () => void;
+  // Vision support
+  supportsVision?: boolean;
 }
 
 interface ToolCall {
@@ -98,12 +140,105 @@ export function ChatPanel({
   isTourLockingInput = false,
   onClearChat,
   onClose,
+  supportsVision = false,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const isScrollingProgrammatically = useRef(false);
+
+  // Image handling state
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Handle image drop
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    if (!supportsVision) return;
+
+    const files = Array.from(e.dataTransfer.files).filter(f =>
+      f.type.startsWith('image/')
+    );
+
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const [header, data] = dataUrl.split(',');
+        const mediaType = header.match(/data:([^;]+)/)?.[1] || 'image/png';
+
+        setPendingImages(prev => [...prev, {
+          id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          data,
+          mediaType,
+          preview: dataUrl
+        }]);
+      };
+      reader.readAsDataURL(file);
+    }
+  }, [supportsVision]);
+
+  // Handle drag over
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (supportsVision) {
+      setIsDragging(true);
+    }
+  }, [supportsVision]);
+
+  // Handle drag leave
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  // Handle paste
+  const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!supportsVision) return;
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const [header, data] = dataUrl.split(',');
+            const mediaType = header.match(/data:([^;]+)/)?.[1] || 'image/png';
+
+            setPendingImages(prev => [...prev, {
+              id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+              data,
+              mediaType,
+              preview: dataUrl
+            }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  }, [supportsVision]);
+
+  // Remove a pending image
+  const removeImage = useCallback((imageId: string) => {
+    setPendingImages(prev => prev.filter(img => img.id !== imageId));
+  }, []);
+
+  // Handle send with images
+  const handleSend = useCallback(() => {
+    if (pendingImages.length > 0) {
+      onGenerate(pendingImages);
+      setPendingImages([]);
+    } else {
+      onGenerate();
+    }
+  }, [onGenerate, pendingImages]);
 
   // Listen for tour event to open provider settings
   useEffect(() => {
@@ -635,7 +770,52 @@ export function ChatPanel({
       {/* Input */}
       <div className="p-3 space-y-2">
         {focusContextHint}
-        <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+        <div
+          className={`bg-card border rounded-lg shadow-sm overflow-hidden transition-all ${
+            isDragging ? 'border-primary border-2 bg-primary/5' : 'border-border'
+          }`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+        >
+          {/* Image previews */}
+          {pendingImages.length > 0 && (
+            <div className="px-3 pt-2 flex flex-wrap gap-2">
+              {pendingImages.map((img) => (
+                <div
+                  key={img.id}
+                  className="relative group"
+                >
+                  <img
+                    src={img.preview}
+                    alt="Pending upload"
+                    className="h-12 w-12 object-cover rounded border border-border"
+                  />
+                  <button
+                    onClick={() => removeImage(img.id)}
+                    className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Remove image"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              <span className="text-xs text-muted-foreground self-end pb-1">
+                {pendingImages.length} image{pendingImages.length !== 1 ? 's' : ''} attached
+              </span>
+            </div>
+          )}
+
+          {/* Drop overlay */}
+          {isDragging && supportsVision && (
+            <div className="absolute inset-0 flex items-center justify-center bg-primary/10 z-10 pointer-events-none">
+              <div className="text-primary font-medium flex items-center gap-2">
+                <ImageIcon className="h-5 w-5" />
+                Drop image here
+              </div>
+            </div>
+          )}
+
           <div className="relative flex bg-card rounded-lg transition-all">
             <Textarea
               value={prompt}
@@ -646,18 +826,19 @@ export function ChatPanel({
                 }
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                   e.preventDefault();
-                  onGenerate();
+                  handleSend();
                 }
               }}
-              placeholder="Describe what you want to build..."
+              onPaste={handlePaste}
+              placeholder={supportsVision ? "Describe what you want to build... (paste or drop images)" : "Describe what you want to build..."}
               className="flex-1 px-3 py-2 bg-transparent border-0 resize-none focus:outline-none text-sm placeholder:text-muted-foreground text-foreground"
               rows={3}
               disabled={generating || isTourLockingInput}
             />
             <div className="flex flex-col p-2 gap-2">
               <Button
-                onClick={generating ? onStop : onGenerate}
-                disabled={isTourLockingInput ? !generating : (!generating && !prompt.trim())}
+                onClick={generating ? onStop : handleSend}
+                disabled={isTourLockingInput ? !generating : (!generating && !prompt.trim() && pendingImages.length === 0)}
                 size="sm"
                 className="flex items-center gap-2"
               >
@@ -818,9 +999,7 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
             return (
               <div key={item.id} className="text-sm text-foreground bg-primary/10 px-3 py-2 rounded border border-primary/20">
                 <div className="font-semibold text-primary mb-1 text-xs">User</div>
-                <div className="whitespace-pre-wrap">
-                  {item.data}
-                </div>
+                <UserMessageContent content={item.data} />
               </div>
             );
 

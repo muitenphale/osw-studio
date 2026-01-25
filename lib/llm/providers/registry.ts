@@ -143,3 +143,72 @@ export function getProvider(id: ProviderId): ProviderConfig {
 export function getAllProviders(): ProviderConfig[] {
   return Object.values(providers);
 }
+
+/**
+ * Check if a model supports vision/image input.
+ * For providers with model discovery (OpenRouter, OpenAI), this checks cached model info.
+ * For hardcoded models (Gemini), this checks the supportsVision flag.
+ *
+ * Note: Many vision models follow naming conventions:
+ * - GPT-5.x models (gpt-5, gpt-5.1, gpt-5.2)
+ * - Claude Opus 4.5 and Claude 3+ models
+ * - Gemini models (generally all support vision)
+ * - Contains 'llava' (Ollama vision models)
+ */
+export function modelSupportsVision(providerId: ProviderId, modelId: string): boolean {
+  const provider = getProvider(providerId);
+
+  // Check hardcoded models first
+  if (provider.models) {
+    const model = provider.models.find(m => m.id === modelId);
+    if (model?.supportsVision !== undefined) {
+      return model.supportsVision;
+    }
+  }
+
+  // For providers without hardcoded models, use heuristics based on model name
+  const modelLower = modelId.toLowerCase();
+
+  // OpenAI GPT vision models (GPT-5.x, GPT-4.x with vision)
+  if (modelLower.includes('gpt-5') ||
+      modelLower.includes('gpt-4') ||
+      modelLower.includes('vision')) {
+    return true;
+  }
+
+  // Claude models with vision (Opus 4.5, Claude 3+, Claude 4+)
+  if (modelLower.includes('claude-opus') ||
+      modelLower.includes('claude-3') ||
+      modelLower.includes('claude-4') ||
+      modelLower.includes('claude-sonnet') ||
+      modelLower.includes('claude-haiku')) {
+    return true;
+  }
+
+  // Gemini models generally support vision
+  if (modelLower.includes('gemini')) {
+    return true;
+  }
+
+  // Ollama llava models
+  if (modelLower.includes('llava') || modelLower.includes('bakllava')) {
+    return true;
+  }
+
+  // Qwen-VL models
+  if (modelLower.includes('qwen') && modelLower.includes('vl')) {
+    return true;
+  }
+
+  // Pixtral (Mistral vision)
+  if (modelLower.includes('pixtral')) {
+    return true;
+  }
+
+  // GLM-4V models (Zhipu AI)
+  if (modelLower.includes('glm') && modelLower.includes('v')) {
+    return true;
+  }
+
+  return false;
+}

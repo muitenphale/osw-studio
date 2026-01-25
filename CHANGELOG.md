@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.24.0 - 2026-01-26
+- **Vision/Image Input Support**: Drop or paste images into the chat input on supported models
+  - Supported formats: PNG, JPEG, WebP, GIF
+  - Multi-provider support: OpenRouter, OpenAI, Anthropic, Gemini, Ollama (llava models)
+  - Image thumbnails shown in chat input with remove button
+  - Visual drop indicator when dragging images
+  - Automatic model capability detection (GPT-5.x, Claude Opus 4.5, Gemini 3, GLM-4.7V, llava, etc.)
+  - Images displayed in chat history at 60px height in a flex container
+- **Dismissable Toasts**: All toast notifications now have a close button
+- **Bug Fix**: Fixed orchestrator exiting prematurely without evaluation due to stale state
+- Updated Next.js to 15.5.9
+- Added defensive null checks in sync API routes
+
 ## v1.23.0 - 2026-01-18
 - **Enhanced Server Sync Modal** (Server Mode): Redesigned sync dialog with granular control
   - Tabbed interface for Projects, Skills, and Templates (previously only projects synced)

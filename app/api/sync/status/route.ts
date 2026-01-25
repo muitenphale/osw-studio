@@ -65,17 +65,17 @@ export async function GET(_request: NextRequest) {
     await adapter.init();
 
     // Get all projects (lightweight - just metadata)
-    const projects = await adapter.listProjects();
+    const projects = await adapter.listProjects() || [];
 
     // Get all sites count
     const sites = adapter.listSites ? await adapter.listSites() : [];
 
     // Get all custom skills (excluding built-in)
-    const allSkills = await adapter.getAllSkills();
+    const allSkills = await adapter.getAllSkills() || [];
     const customSkills = allSkills.filter((skill: Skill) => !skill.isBuiltIn);
 
     // Get all custom templates
-    const templates = await adapter.getAllCustomTemplates();
+    const templates = await adapter.getAllCustomTemplates() || [];
 
     // Map projects to status objects with ISO timestamps
     const projectStatuses: ItemStatus[] = projects.map((project: Project) => {

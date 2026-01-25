@@ -24,7 +24,7 @@ export async function GET() {
     await adapter.init();
 
     // Get all skills from server (only custom skills, not built-in)
-    const allSkills = await adapter.getAllSkills();
+    const allSkills = await adapter.getAllSkills() || [];
     const customSkills = allSkills.filter(skill => !skill.isBuiltIn);
 
     await adapter.close?.();

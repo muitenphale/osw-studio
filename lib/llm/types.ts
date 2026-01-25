@@ -1,3 +1,19 @@
+// Content block types for multimodal messages
+export type TextContentBlock = {
+  type: 'text';
+  text: string;
+};
+
+export type ImageContentBlock = {
+  type: 'image_url';
+  image_url: {
+    url: string;  // URL or data:image/...;base64,...
+    detail?: 'auto' | 'low' | 'high';
+  };
+};
+
+export type ContentBlock = TextContentBlock | ImageContentBlock;
+
 export interface ToolParameter {
   type?: string;
   description?: string;
@@ -55,7 +71,7 @@ export interface ReasoningDetail {
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | ContentBlock[];  // String or array of content blocks (for multimodal)
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
