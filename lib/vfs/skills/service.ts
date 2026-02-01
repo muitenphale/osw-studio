@@ -14,6 +14,7 @@ const ENABLED_STATE_KEY = 'osw_skills_enabled_state';
 
 interface EnabledState {
   globalEnabled: boolean;
+  skillEvaluationEnabled: boolean;
   disabledSkills: Set<string>; // IDs of disabled skills
 }
 
@@ -25,6 +26,7 @@ class SkillsService {
   private initialized = false;
   private enabledState: EnabledState = {
     globalEnabled: true,
+    skillEvaluationEnabled: false,
     disabledSkills: new Set(),
   };
 
@@ -53,6 +55,7 @@ class SkillsService {
         const state = JSON.parse(enabledStateStored);
         this.enabledState = {
           globalEnabled: state.globalEnabled ?? true,
+          skillEvaluationEnabled: state.skillEvaluationEnabled ?? false,
           disabledSkills: new Set(state.disabledSkills || []),
         };
       }
@@ -84,6 +87,7 @@ class SkillsService {
     try {
       const state = {
         globalEnabled: this.enabledState.globalEnabled,
+        skillEvaluationEnabled: this.enabledState.skillEvaluationEnabled,
         disabledSkills: Array.from(this.enabledState.disabledSkills),
       };
       localStorage.setItem(ENABLED_STATE_KEY, JSON.stringify(state));
@@ -370,6 +374,24 @@ class SkillsService {
     this.enabledState.globalEnabled = enabled;
     this.saveEnabledState();
     logger.info(`[SkillsService] Global enabled set to: ${enabled}`);
+  }
+
+  /**
+   * Check if skill evaluation pre-flight is enabled
+   */
+  async isEvaluationEnabled(): Promise<boolean> {
+    await this.init();
+    return this.enabledState.globalEnabled && this.enabledState.skillEvaluationEnabled;
+  }
+
+  /**
+   * Set skill evaluation pre-flight enabled state
+   */
+  async setEvaluationEnabled(enabled: boolean): Promise<void> {
+    await this.init();
+    this.enabledState.skillEvaluationEnabled = enabled;
+    this.saveEnabledState();
+    logger.info(`[SkillsService] Skill evaluation set to: ${enabled}`);
   }
 
   /**

@@ -47,6 +47,7 @@ export function SkillsManager() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [skillToDelete, setSkillToDelete] = useState<Skill | null>(null);
   const [globalEnabled, setGlobalEnabled] = useState(true);
+  const [evaluationEnabled, setEvaluationEnabled] = useState(false);
   const [enabledSkills, setEnabledSkills] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -71,6 +72,8 @@ export function SkillsManager() {
     try {
       const isGlobalEnabled = await skillsService.isGloballyEnabled();
       setGlobalEnabled(isGlobalEnabled);
+      const isEvalEnabled = await skillsService.isEvaluationEnabled();
+      setEvaluationEnabled(isEvalEnabled);
 
       // Load enabled state for all skills
       const allSkills = await skillsService.getAllSkills();
@@ -96,6 +99,16 @@ export function SkillsManager() {
       toast.success(enabled ? 'Skills enabled' : 'Skills disabled');
     } catch (error) {
       toast.error('Failed to update skills state');
+    }
+  };
+
+  const handleEvaluationToggle = async (enabled: boolean) => {
+    try {
+      await skillsService.setEvaluationEnabled(enabled);
+      setEvaluationEnabled(enabled);
+      toast.success(enabled ? 'Skill evaluation enabled' : 'Skill evaluation disabled');
+    } catch {
+      toast.error('Failed to update evaluation state');
     }
   };
 
@@ -277,6 +290,27 @@ export function SkillsManager() {
                 id="global-toggle"
                 checked={globalEnabled}
                 onCheckedChange={handleGlobalToggle}
+              />
+            </div>
+
+            {/* Skill Evaluation Toggle */}
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                <div>
+                  <Label htmlFor="eval-toggle" className="text-sm font-medium cursor-pointer">
+                    Skill Evaluation
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Pre-check which skills are relevant before each message. Increases initial token usage per message.
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="eval-toggle"
+                checked={evaluationEnabled}
+                disabled={!globalEnabled}
+                onCheckedChange={handleEvaluationToggle}
               />
             </div>
           </div>

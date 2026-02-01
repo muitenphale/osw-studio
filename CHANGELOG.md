@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.25.0 - 2026-02-02
+- **(Optional) Skill Evaluation Pass**: Pre-flight relevance check on the user message before main LLM call
+  - Non-streaming call using the selected model determines which skills match the user's prompt
+  - Matched skills are injected as explicit directives in the user message for higher adoption
+  - 5s timeout with silent fallback on any failure
+  - New `skill_evaluation` debug event in the debug panel
+  - Toggle in Skills tab (disabled by default)
+- **Non-Streaming API Support**: `/api/generate` route now respects `stream: false` parameter
+  - Returns JSON response directly instead of SSE stream when streaming is disabled
+  - Enables lightweight API calls without stream parsing overhead
+
 ## v1.24.0 - 2026-01-26
 - **Vision/Image Input Support**: Drop or paste images into the chat input on supported models
   - Supported formats: PNG, JPEG, WebP, GIF

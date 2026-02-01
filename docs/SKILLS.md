@@ -49,6 +49,23 @@ When you enable a skill, OSW Studio makes it **available** to the AI, but doesn'
 
 This approach keeps the AI's context clean while making expertise available when needed.
 
+### Skill Evaluation (Optional)
+
+By default, the AI decides on its own whether to read a skill — but it doesn't always get it right. In practice, skills can be ignored even when they're clearly relevant, because the instruction to check skills is buried in a large system prompt.
+
+**Skill Evaluation** solves this with a pre-flight check: before the main AI call, a quick non-streaming call evaluates your prompt against enabled skills. If any match, an explicit "read this skill" directive is injected into your message so the AI treats it as a high-priority instruction rather than an easily overlooked system prompt note.
+
+**To enable:**
+1. Go to **Skills** view
+2. Toggle **Skill Evaluation** on (below the global skills toggle)
+
+**What changes:**
+- Each message triggers an additional API call using your selected model
+- Matched skills appear as explicit read directives in the AI's input
+- A `skill_evaluation` event appears in the debug panel showing what was evaluated
+
+**Trade-off:** This adds an extra API call per message, increasing initial token usage. It's disabled by default — enable it if you find skills aren't being picked up consistently.
+
 ---
 
 ## Built-in Skills
@@ -336,7 +353,7 @@ A: Start with 2-3 core skills. Add more as needed. Too many can be overwhelming.
 A: Yes. If two skills give opposite guidance, AI may get confused. Keep skills complementary.
 
 **Q: Do skills slow down AI?**
-A: Minimal impact. Only skill metadata is always present. Full skill content is loaded on-demand, so you only pay for tokens when the skill is actually used.
+A: Minimal impact. Only skill metadata is always present. Full skill content is loaded on-demand, so you only pay for tokens when the skill is actually used. If you enable Skill Evaluation, there's an additional API call per message for the pre-flight check.
 
 **Q: Can I use Anthropic's SKILL.md files?**
 A: Yes! OSW Studio is compatible with the SKILL.md convention.

@@ -20,6 +20,8 @@ import { fetchAvailableModels } from './models-api';
 import { parseStreamingResponse, buildFileTree, StreamResponse, ReasoningDetail } from './streaming-parser';
 import { extractPartialContent, getContinuationMarker, PartialContentExtraction } from './json-repair';
 import { buildShellSystemPrompt } from './system-prompt';
+import { evaluateRelevantSkills } from './skill-evaluator';
+import { skillsService } from '@/lib/vfs/skills';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -501,12 +503,54 @@ export class MultiAgentOrchestrator {
         });
       }
 
+      // Skill evaluation pass - check if any enabled skills are relevant
+      let skillHint = '';
+      try {
+        const evalEnabled = await skillsService.isEvaluationEnabled();
+        if (evalEnabled) {
+          const skillsMeta = await skillsService.getEnabledSkillsMetadata();
+          if (skillsMeta.length > 0) {
+            const { provider, apiKey, model } = this.getProviderConfig();
+            const evalResult = await evaluateRelevantSkills(
+              userPrompt, skillsMeta, fileTreeStr || '', provider, apiKey, model
+            );
+
+            // Track eval usage
+            if (evalResult.usage) {
+              const evalUsage = evalResult.usage;
+              const cost = CostCalculator.calculateCost(
+                evalUsage, evalUsage.provider, evalUsage.model, true
+              );
+              this.totalCost += cost;
+              this.totalUsage.promptTokens += evalUsage.promptTokens;
+              this.totalUsage.completionTokens += evalUsage.completionTokens;
+              this.totalUsage.totalTokens += evalUsage.totalTokens;
+              configManager.updateSessionCost({ ...evalUsage, cost }, cost);
+            }
+
+            // Emit debug event
+            this.onProgress?.('skill_evaluation', {
+              skills: skillsMeta.map(s => s.id),
+              matched: evalResult.skillIds,
+              usage: evalResult.usage,
+            });
+
+            if (evalResult.skillIds.length > 0) {
+              const paths = evalResult.skillIds.map(s => `/.skills/${s}.md`).join(', ');
+              skillHint = `⚡ Skill evaluation: read ${paths} before proceeding.\n\n`;
+            }
+          }
+        }
+      } catch {
+        // Silent fallback - don't block normal execution
+      }
+
       // Build user message content - string or ContentBlock[] with images
       let userContent: string | ContentBlock[];
       if (options?.images && options.images.length > 0) {
         // Build multimodal content with text and images
         const contentBlocks: ContentBlock[] = [
-          { type: 'text', text: userPrompt }
+          { type: 'text', text: skillHint + userPrompt }
         ];
         for (const img of options.images) {
           contentBlocks.push({
@@ -518,7 +562,7 @@ export class MultiAgentOrchestrator {
         }
         userContent = contentBlocks;
       } else {
-        userContent = userPrompt;
+        userContent = skillHint + userPrompt;
       }
 
       // Add user prompt

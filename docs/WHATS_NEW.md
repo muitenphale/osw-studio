@@ -6,6 +6,21 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.25.0 - Skill Evaluation Pass (2026-02-02)
+
+A new pre-flight evaluation pass checks which skills are relevant to your prompt before the main AI call. When a match is found, the AI receives an explicit instruction to read the skill first, radically improving skill adoption rates.
+
+Enable it in **[Skills Settings](?doc=skills)** > **Skill Evaluation** toggle.
+
+- **Automatic Skill Matching** - Your selected model evaluates your prompt against enabled skills before each message
+- **Explicit Directives** - Matched skills are injected as high-priority read instructions in the user message
+- **Debug Visibility** - New `skill_evaluation` event in the debug panel shows what was evaluated and matched
+- **Non-Streaming API** - The generate API now supports `stream: false` for lightweight calls
+
+**Note:** This feature is disabled by default as it adds an extra API call per message, which increases initial token usage.
+
+---
+
 ## v1.24.0 - Vision/Image Input Support (2026-01-26)
 
 Drop or paste images directly into the chat input to share visual context with the AI on supported models.

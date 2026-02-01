@@ -72,7 +72,7 @@ function extractOllamaImages(messages: LLMMessage[]): { processedMessages: LLMMe
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning } = await request.json();
+    const { prompt, apiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning, stream: requestStream } = await request.json();
 
     const selectedProvider: ProviderId = provider || 'openrouter';
     const providerConfig = getProvider(selectedProvider);
@@ -251,10 +251,11 @@ Habits:
       ollamaImages = images;
     }
 
+    const streamEnabled = requestStream !== false;
     const requestBody: Record<string, unknown> = {
       model: model || getDefaultModel(selectedProvider),
       messages: processedMessages,
-      stream: true
+      stream: streamEnabled
     };
 
     // Add images for Ollama at request level
@@ -492,6 +493,12 @@ You can make multiple tool calls in a single response. Always include the tool_c
       );
     }
 
+    // Non-streaming: return JSON directly
+    if (!streamEnabled) {
+      const data = await response.json();
+      return NextResponse.json(data);
+    }
+
     const responseHeaders: Record<string, string> = {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -505,7 +512,7 @@ You can make multiple tool calls in a single response. Always include the tool_c
         'x-openrouter-tokens',
         'x-openrouter-cost'
       ];
-      
+
       for (const headerName of openRouterHeaders) {
         const value = response.headers.get(headerName);
         if (value) {
