@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.25.1 - 2026-02-03
+- **Bug Fix**: Fixed binary files (JPG, PNG, GIF, etc.) not publishing correctly in Server Mode
+  - SQLite adapter now properly decodes base64 content back to ArrayBuffer when reading image/video files
+
 ## v1.25.0 - 2026-02-02
 - **(Optional) Skill Evaluation Pass**: Pre-flight relevance check on the user message before main LLM call
   - Non-streaming call using the selected model determines which skills match the user's prompt

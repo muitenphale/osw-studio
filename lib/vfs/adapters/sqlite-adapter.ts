@@ -614,13 +614,28 @@ export class SQLiteAdapter implements StorageAdapter {
   }
 
   private rowToFile(row: Record<string, unknown>, projectId: string): VirtualFile {
+    const type = row.type as VirtualFile['type'];
+    const rawContent = row.content as string;
+
+    // Binary file types (image, video) are stored as base64 - convert back to ArrayBuffer
+    let content: string | ArrayBuffer = rawContent;
+    if ((type === 'image' || type === 'video') && rawContent) {
+      try {
+        const buffer = Buffer.from(rawContent, 'base64');
+        content = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+      } catch {
+        // If conversion fails, keep as string
+        content = rawContent;
+      }
+    }
+
     return {
       id: row.id as string,
       projectId,
       path: row.path as string,
       name: row.name as string,
-      type: row.type as VirtualFile['type'],
-      content: row.content as string,
+      type,
+      content,
       mimeType: row.mime_type as string,
       size: row.size as number,
       createdAt: parseDate(row.created_at as string),
