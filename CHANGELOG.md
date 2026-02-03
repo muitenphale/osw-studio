@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.25.2 - 2026-02-03
+- **Bug Fix**: Fixed binary file sync and serving in Server Mode
+  - Sync now properly serializes ArrayBuffer content to base64 before JSON transport
+  - Sites route correctly serves binary files without UTF-8 corruption
+  - Handles data URL format (`data:image/...;base64,...`) in both SQLite adapters
+- **Bug Fix**: Fixed Model Tester link not navigating correctly from sidebar
+- **Docs**: Added comprehensive VPS Deployment Guide with security hardening
+
 ## v1.25.1 - 2026-02-03
 - **Bug Fix**: Fixed binary files (JPG, PNG, GIF, etc.) not publishing correctly in Server Mode
   - SQLite adapter now properly decodes base64 content back to ArrayBuffer when reading image/video files

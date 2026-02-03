@@ -9,11 +9,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerAdapter } from '@/lib/vfs/adapters/server';
 import { Project, VirtualFile } from '@/lib/vfs/types';
+import { serializeFilesForResponse } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
 
 interface PushRequestBody {
   project: Project;
-  files: VirtualFile[];
+  files: (VirtualFile & { _isBinaryBase64?: boolean })[];
 }
 
 /**
@@ -76,7 +77,9 @@ export async function POST(
     }
 
     for (const file of files) {
-      await adapter.createFile(file);
+      // Remove the _isBinaryBase64 flag before storing (it's just for transport)
+      const { _isBinaryBase64, ...fileData } = file;
+      await adapter.createFile(fileData);
     }
 
     logger.debug(`[API /api/sync/projects/${id}] Project synced successfully`);
@@ -133,10 +136,11 @@ export async function GET(
 
     logger.debug(`[API /api/sync/projects/${id}] Project pulled successfully`);
 
+    // Serialize ArrayBuffer content to base64 for JSON response
     return NextResponse.json({
       success: true,
       project,
-      files
+      files: serializeFilesForResponse(files)
     });
   } catch (error) {
     logger.error('[API /api/sync/projects/[id] GET] Error:', error);

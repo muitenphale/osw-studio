@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerAdapter } from '@/lib/vfs/adapters/server';
 import { VirtualFile } from '@/lib/vfs/types';
+import { serializeFilesForResponse } from '@/lib/vfs/sync-utils';
 import { requireAuth } from '@/lib/auth/session';
 import { logger } from '@/lib/utils';
 
@@ -35,7 +36,8 @@ export async function GET(request: NextRequest) {
 
     await adapter.close?.();
 
-    return NextResponse.json({ files });
+    // Serialize ArrayBuffer content to base64 for JSON response
+    return NextResponse.json({ files: serializeFilesForResponse(files) });
   } catch (error) {
     logger.error('[API /api/sync/files GET] Error:', error);
 
@@ -57,7 +59,7 @@ export async function POST(request: NextRequest) {
     await requireAuth();
 
     const body = await request.json();
-    const { projectId, files } = body as { projectId: string; files: VirtualFile[] };
+    const { projectId, files } = body as { projectId: string; files: (VirtualFile & { _isBinaryBase64?: boolean })[] };
 
     if (!projectId || !Array.isArray(files)) {
       return NextResponse.json(
@@ -72,9 +74,11 @@ export async function POST(request: NextRequest) {
     // Delete existing files for the project
     await adapter.deleteProjectFiles(projectId);
 
-    // Create all files
+    // Create all files - content is already base64 for binary files
     for (const file of files) {
-      await adapter.createFile(file);
+      // Remove the _isBinaryBase64 flag before storing (it's just for transport)
+      const { _isBinaryBase64, ...fileData } = file as VirtualFile & { _isBinaryBase64?: boolean };
+      await adapter.createFile(fileData);
     }
 
     await adapter.close?.();

@@ -542,7 +542,15 @@ export class SiteDatabase {
     if (type === 'image' || type === 'video' || type === 'binary') {
       // Convert base64 back to ArrayBuffer
       try {
-        content = Buffer.from(content, 'base64').buffer;
+        // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,")
+        let base64Data = content as string;
+        if (base64Data.startsWith('data:')) {
+          const commaIndex = base64Data.indexOf(',');
+          if (commaIndex !== -1) {
+            base64Data = base64Data.slice(commaIndex + 1);
+          }
+        }
+        content = Buffer.from(base64Data, 'base64').buffer;
       } catch {
         // Keep as string if conversion fails
       }

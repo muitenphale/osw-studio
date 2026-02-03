@@ -85,7 +85,8 @@ export async function GET(
     });
 
     // Return file with correct MIME type
-    return new NextResponse(content.toString('utf-8'), {
+    // Use Uint8Array for binary compatibility with NextResponse
+    return new NextResponse(new Uint8Array(content), {
       status: 200,
       headers: {
         'Content-Type': mimeType,

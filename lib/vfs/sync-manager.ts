@@ -52,6 +52,34 @@ export interface TemplatesListSyncResult extends SyncResult {
   updated?: number;
 }
 
+// Helper: Convert ArrayBuffer to base64 for JSON transport
+function serializeFileContent(file: VirtualFile): VirtualFile & { _isBinaryBase64?: boolean } {
+  if (file.content instanceof ArrayBuffer) {
+    const bytes = new Uint8Array(file.content);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return { ...file, content: btoa(binary), _isBinaryBase64: true };
+  }
+  return file;
+}
+
+// Helper: Convert base64 back to ArrayBuffer after JSON transport
+function deserializeFileContent(file: VirtualFile & { _isBinaryBase64?: boolean }): VirtualFile {
+  if (file._isBinaryBase64 && typeof file.content === 'string') {
+    const binaryString = atob(file.content);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const { _isBinaryBase64, ...rest } = file;
+    return { ...rest, content: bytes.buffer };
+  }
+  const { _isBinaryBase64, ...rest } = file;
+  return rest;
+}
+
 /**
  * SyncManager - Client-side sync utility for Server mode
  */
@@ -131,12 +159,14 @@ export class SyncManager {
    */
   async pushFiles(projectId: string, files: VirtualFile[]): Promise<FilesSyncResult> {
     try {
+      const serializedFiles = files.map(serializeFileContent);
+
       const response = await fetch(`${this.baseUrl}/api/sync/files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ projectId, files }),
+        body: JSON.stringify({ projectId, files: serializedFiles }),
       });
 
       if (!response.ok) {
@@ -181,9 +211,10 @@ export class SyncManager {
       }
 
       const data = await response.json();
+
       return {
         success: true,
-        files: data.files,
+        files: (data.files || []).map(deserializeFileContent),
       };
     } catch (error) {
       return {
@@ -263,12 +294,14 @@ export class SyncManager {
    */
   async pushSingleProject(projectId: string, project: Project, files: VirtualFile[]): Promise<ProjectSyncResult> {
     try {
+      const serializedFiles = files.map(serializeFileContent);
+
       const response = await fetch(`${this.baseUrl}/api/sync/projects/${projectId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ project, files }),
+        body: JSON.stringify({ project, files: serializedFiles }),
       });
 
       if (!response.ok) {
@@ -315,10 +348,11 @@ export class SyncManager {
       }
 
       const data = await response.json();
+
       return {
         success: true,
         project: data.project,
-        files: data.files || [],
+        files: (data.files || []).map(deserializeFileContent),
       };
     } catch (error) {
       return {

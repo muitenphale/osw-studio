@@ -224,106 +224,19 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 **Why**: Complete control, custom domains, lowest cost at scale
 
 **Requirements:**
-- Ubuntu 22.04+ server
+- Ubuntu 22.04+ server (Hetzner, DigitalOcean, Linode, etc.)
 - SSH access
-- Domain (optional)
+- Domain (optional, but recommended for SSL)
 
-**Steps:**
+**Quick Overview:**
+1. Create server with SSH key and firewall (ports 22, 80, 443 only)
+2. Create non-root user, harden SSH, install fail2ban
+3. Install Node.js via nvm, clone repo, configure environment
+4. Build app and run with PM2
+5. Setup Nginx reverse proxy
+6. Add SSL with certbot
 
-1. **Install Dependencies:**
-   ```bash
-   # Update system
-   sudo apt update && sudo apt upgrade -y
-
-   # Install Node.js 18+
-   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-   sudo apt install -y nodejs
-
-   # Install git
-   sudo apt install -y git
-   ```
-
-2. **Clone and Configure:**
-   ```bash
-   # Clone repository
-   git clone https://github.com/o-stahl/osw-studio.git
-   cd osw-studio
-
-   # Install dependencies
-   npm install
-
-   # Create .env
-   nano .env
-   ```
-
-   Paste:
-   ```
-   NEXT_PUBLIC_SERVER_MODE=true
-   SESSION_SECRET=<generate with: openssl rand -base64 32>
-   ADMIN_PASSWORD=<your password>
-   ANALYTICS_SECRET=<generate with: openssl rand -base64 32>
-   SECRETS_ENCRYPTION_KEY=<generate with: openssl rand -base64 32>
-   NEXT_PUBLIC_APP_URL=http://your-domain.com
-   # SECURE_COOKIES=false  # Uncomment until SSL is configured
-   ```
-
-   > **Note**: If you're setting up without SSL initially, uncomment `SECURE_COOKIES=false` to allow login over HTTP. Re-comment or remove this line after configuring SSL with certbot (Step 5).
-
-3. **Build and Start:**
-   ```bash
-   # Production build
-   npm run build
-
-   # Copy static files for standalone mode
-   cp -r .next/static .next/standalone/.next/
-   cp -r public .next/standalone/
-
-   # Start with PM2 (process manager)
-   sudo npm install -g pm2
-   pm2 start .next/standalone/server.js --name "osw-studio"
-   pm2 save
-   pm2 startup
-   ```
-
-4. **Setup Nginx (Reverse Proxy):**
-   ```bash
-   sudo apt install -y nginx
-   sudo nano /etc/nginx/sites-available/osw-studio
-   ```
-
-   Paste:
-   ```nginx
-   server {
-       listen 80;
-       server_name your-domain.com;
-
-       location / {
-           proxy_pass http://localhost:3000;
-           proxy_http_version 1.1;
-           proxy_set_header Upgrade $http_upgrade;
-           proxy_set_header Connection 'upgrade';
-           proxy_set_header Host $host;
-           proxy_cache_bypass $http_upgrade;
-       }
-   }
-   ```
-
-   Enable:
-   ```bash
-   sudo ln -s /etc/nginx/sites-available/osw-studio /etc/nginx/sites-enabled/
-   sudo nginx -t
-   sudo systemctl restart nginx
-   ```
-
-5. **Setup SSL (Let's Encrypt):**
-   ```bash
-   sudo apt install -y certbot python3-certbot-nginx
-   sudo certbot --nginx -d your-domain.com
-   ```
-
-**Access:**
-- http://your-domain.com (redirects to HTTPS)
-- https://your-domain.com/admin/login
+**See the full guide:** **[VPS Deployment Guide](?doc=vps-deployment)** — includes security hardening, swap setup, PM2 auto-start, and detailed step-by-step instructions.
 
 ---
 

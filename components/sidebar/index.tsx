@@ -264,7 +264,10 @@ function SidebarContent({
     if (item.href) {
       window.open(item.href, '_blank', 'noopener,noreferrer');
     } else if (item.path) {
-      if (isServerMode) {
+      // Check if path is absolute (starts with /)
+      if (item.path.startsWith('/')) {
+        router.push(item.path);
+      } else if (isServerMode) {
         router.push(`/admin/${item.path}`);
       } else {
         // Browser Mode: Use router.push to clear query params when navigating away from docs

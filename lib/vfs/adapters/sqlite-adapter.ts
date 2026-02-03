@@ -621,7 +621,15 @@ export class SQLiteAdapter implements StorageAdapter {
     let content: string | ArrayBuffer = rawContent;
     if ((type === 'image' || type === 'video') && rawContent) {
       try {
-        const buffer = Buffer.from(rawContent, 'base64');
+        // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,")
+        let base64Data = rawContent;
+        if (rawContent.startsWith('data:')) {
+          const commaIndex = rawContent.indexOf(',');
+          if (commaIndex !== -1) {
+            base64Data = rawContent.slice(commaIndex + 1);
+          }
+        }
+        const buffer = Buffer.from(base64Data, 'base64');
         content = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
       } catch {
         // If conversion fails, keep as string
