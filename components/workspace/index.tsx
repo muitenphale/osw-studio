@@ -624,34 +624,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
     setSaveInProgress(true);
     try {
-      // Capture preview screenshot if available (with timeout)
-      let previewImage: string | undefined;
-      if (previewRef.current) {
-        try {
-          const timeoutPromise = new Promise<null>((_, reject) => {
-            setTimeout(() => reject(new Error('Screenshot capture timeout')), 5000);
-          });
-          const screenshot = await Promise.race([
-            previewRef.current.captureScreenshot(),
-            timeoutPromise
-          ]);
-          if (screenshot) {
-            previewImage = screenshot;
-          }
-        } catch (screenshotError) {
-          logger.warn('Failed to capture preview screenshot, continuing save:', screenshotError);
-        }
-      }
-
       const checkpoint = await saveManager.save(project.id);
       const latestProject = await vfs.getProject(project.id);
-
-      // Update project with preview image if captured
-      if (previewImage) {
-        latestProject.previewImage = previewImage;
-        latestProject.previewUpdatedAt = new Date();
-        await vfs.updateProject(latestProject);
-      }
 
       setLastSavedAt(latestProject.lastSavedAt ?? new Date(checkpoint.timestamp));
       setInitialCheckpointId(checkpoint.id);
@@ -661,6 +635,30 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       toast.error('Failed to save project');
     } finally {
       setSaveInProgress(false);
+    }
+
+    // Fire-and-forget: capture screenshot in background and update project thumbnail
+    if (previewRef.current) {
+      const captureRef = previewRef.current;
+      const projectId = project.id;
+      (async () => {
+        try {
+          const screenshot = await Promise.race([
+            captureRef.captureScreenshot(true),
+            new Promise<null>((_, reject) =>
+              setTimeout(() => reject(new Error('Screenshot capture timeout')), 10000)
+            ),
+          ]);
+          if (screenshot) {
+            const proj = await vfs.getProject(projectId);
+            proj.previewImage = screenshot;
+            proj.previewUpdatedAt = new Date();
+            await vfs.updateProject(proj);
+          }
+        } catch (err) {
+          logger.warn('Background screenshot capture failed, old thumbnail persists:', err);
+        }
+      })();
     }
   }, [project.id, saveInProgress]);
 

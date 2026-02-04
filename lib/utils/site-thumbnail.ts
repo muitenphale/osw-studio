@@ -3,7 +3,7 @@
  * Captures screenshot of published site and uploads to API
  */
 
-import { captureIframeScreenshot } from './screenshot';
+import { captureIframeScreenshot, waitForResources } from './screenshot';
 
 export interface ThumbnailCaptureOptions {
   captureWidth?: number;
@@ -20,7 +20,7 @@ const DEFAULT_OPTIONS: Required<ThumbnailCaptureOptions> = {
   outputWidth: 640,
   outputHeight: 360,
   quality: 0.8,
-  timeout: 10000, // Increased to 10s to allow for render + capture + upload
+  timeout: 15000, // 15s to allow for resource waiting + render + capture + upload
 };
 
 /**
@@ -81,14 +81,28 @@ export async function captureSiteThumbnail(
     // Load handler
     iframe.onload = async () => {
       try {
-        // Clear timeout immediately - iframe loaded successfully
+        // Clear the initial load timeout - iframe loaded successfully
         if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = null;
         }
 
-        // Wait a bit for any dynamic content to render
-        await new Promise(r => setTimeout(r, 500));
+        // Set a new safety timeout to cover resource waiting + capture + upload
+        timeoutId = window.setTimeout(() => {
+          fail('Timeout during resource wait / capture / upload');
+        }, 12000);
+
+        // Wait for fonts, images, and idle before capturing
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (iframeDoc) {
+            await waitForResources(iframeDoc, 2500, 8000);
+          } else {
+            await new Promise(r => setTimeout(r, 2500));
+          }
+        } catch {
+          await new Promise(r => setTimeout(r, 2500));
+        }
 
         const screenshot = await captureIframeScreenshot(
           iframe,

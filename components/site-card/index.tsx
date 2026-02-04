@@ -27,6 +27,7 @@ import {
   Folder,
   BarChart3,
   Pencil,
+  Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -88,6 +89,13 @@ export function SiteCard({
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Globe className="h-12 w-12 text-muted-foreground" />
+          </div>
+        )}
+
+        {/* Publishing spinner overlay */}
+        {isPublishing && (
+          <div className="absolute inset-0 bg-background/60 flex items-center justify-center z-10">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.26.0 - 2026-02-04
+- **Improved Screenshot Reliability**: Thumbnails now capture fully-loaded content
+  - New resource-waiting layer: waits for fonts, images, and browser idle before capture
+  - Site publish thumbnails wait ~2.5s minimum (up from 500ms) for resources to load
+  - Project save no longer blocks on screenshot — save completes instantly, thumbnail updates in background
+  - Spinner overlay shown on site card thumbnail during publish
+- **Change Source Project** (Server Mode): Site settings now allow swapping the source project via a dropdown on the General tab, with a warning that it may break the published site
+- **Sidebar Version Display**: Application version and mode now shown in sidebar below the app name
+
 ## v1.25.2 - 2026-02-03
 - **Bug Fix**: Fixed binary file sync and serving in Server Mode
   - Sync now properly serializes ArrayBuffer content to base64 before JSON transport

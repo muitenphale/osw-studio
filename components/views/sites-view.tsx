@@ -121,16 +121,34 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
     }
   };
 
-  const handleSaveSettings = async (settings: any) => {
+  const handleSaveSettings = async (settings: Partial<Site>) => {
     if (!selectedSite) return;
 
     try {
+      // If projectId changed, update it via the generic site endpoint
+      const projectIdChanged = settings.projectId && settings.projectId !== selectedSite.projectId;
+      if (projectIdChanged) {
+        const siteResponse = await fetch(`/api/sites/${selectedSite.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: settings.projectId }),
+        });
+
+        if (!siteResponse.ok) {
+          const error = await siteResponse.json();
+          throw new Error(error.error || 'Failed to update project');
+        }
+      }
+
+      // Save publishing settings (exclude projectId — handled above)
+      const { projectId: _projectId, ...publishSettings } = settings;
+
       const response = await fetch(`/api/sites/${selectedSite.id}/settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(publishSettings),
       });
 
       if (!response.ok) {
@@ -528,6 +546,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
         <>
           <SiteSettingsModal
             site={selectedSite}
+            projects={projects}
             isOpen={showSettingsModal}
             onClose={() => {
               setShowSettingsModal(false);

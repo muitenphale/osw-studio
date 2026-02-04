@@ -1,21 +1,25 @@
 'use client';
 
-import React from 'react';
-import { PublishSettings } from '@/lib/vfs/types';
+import React, { useState } from 'react';
+import { PublishSettings, Project } from '@/lib/vfs/types';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Globe } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Globe, AlertTriangle } from 'lucide-react';
 
 interface GeneralTabProps {
   settings: PublishSettings;
   onChange: (settings: PublishSettings) => void;
   projectId: string;
   siteId: string;
+  projects?: Project[];
+  onProjectChange?: (projectId: string) => void;
 }
 
-export function GeneralTab({ settings, onChange, projectId, siteId }: GeneralTabProps) {
+export function GeneralTab({ settings, onChange, projectId, siteId, projects, onProjectChange }: GeneralTabProps) {
+  const [originalProjectId] = useState(projectId);
   const handleChange = (field: keyof PublishSettings, value: any) => {
     onChange({
       ...settings,
@@ -71,6 +75,46 @@ export function GeneralTab({ settings, onChange, projectId, siteId }: GeneralTab
           />
         </div>
       </div>
+
+      {/* Source Project */}
+      {projects && projects.length > 0 && onProjectChange && (
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold mb-4">Source Project</h3>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="project-select">Project</Label>
+            <Select value={projectId} onValueChange={onProjectChange}>
+              <SelectTrigger id="project-select">
+                <SelectValue placeholder="Select a project" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              The project whose files are published to this site.
+            </p>
+          </div>
+
+          {projectId !== originalProjectId && (
+            <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+              <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                <p className="font-medium">Changing the source project may break the published site.</p>
+                <p className="mt-1 text-yellow-700 dark:text-yellow-300">
+                  The new project may have different files and structure. You will need to republish after saving.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Public URL */}
       <div className="space-y-4">

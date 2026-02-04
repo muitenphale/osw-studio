@@ -27,7 +27,7 @@ import { cn, logger } from '@/lib/utils';
 import { captureIframeScreenshot } from '@/lib/utils/screenshot';
 
 export interface MultipagePreviewHandle {
-  captureScreenshot: () => Promise<string | null>;
+  captureScreenshot: (waitForContent?: boolean) => Promise<string | null>;
 }
 
 interface MultipagePreviewProps {
@@ -84,12 +84,17 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   // Expose captureScreenshot method via ref
   useImperativeHandle(ref, () => ({
-    captureScreenshot: async () => {
+    captureScreenshot: async (waitForContent?: boolean) => {
       if (!iframeRef.current || !iframeReady) {
         logger.warn('Cannot capture screenshot: iframe not ready');
         return null;
       }
-      return await captureIframeScreenshot(iframeRef.current);
+      return await captureIframeScreenshot(
+        iframeRef.current,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        waitForContent ?? false,
+        1500
+      );
     }
   }), [iframeReady]);
 

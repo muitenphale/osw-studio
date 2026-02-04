@@ -978,7 +978,7 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.getDB();
     const stmt = db.prepare(`
       UPDATE sites SET
-        name = ?, slug = ?, enabled = ?, under_construction = ?,
+        project_id = ?, name = ?, slug = ?, enabled = ?, under_construction = ?,
         custom_domain = ?, head_scripts = ?, body_scripts = ?, cdn_links = ?,
         analytics = ?, seo = ?, compliance = ?, settings_version = ?,
         last_published_version = ?, preview_image = ?, preview_updated_at = ?,
@@ -987,6 +987,7 @@ export class SQLiteAdapter implements StorageAdapter {
     `);
 
     stmt.run(
+      site.projectId,
       site.name,
       site.slug ?? null,
       site.enabled ? 1 : 0,

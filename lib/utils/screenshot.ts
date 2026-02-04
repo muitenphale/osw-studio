@@ -2,16 +2,59 @@ import html2canvas from 'html2canvas';
 import { logger } from '@/lib/utils';
 
 /**
- * Captures a screenshot of an iframe's content at desktop resolution
- * @param iframe The iframe element to capture
- * @param captureWidth Capture width (default: 1280 - HD desktop)
- * @param captureHeight Capture height (default: 720 - HD desktop, only used if fullPage=false)
- * @param outputWidth Output width after scaling (default: 640)
- * @param outputHeight Output height after scaling (default: 360)
- * @param quality JPEG quality 0-1 (default: 0.8)
- * @param fullPage Capture full page height vs viewport only (default: true)
- * @returns Base64 data URL of the screenshot, or null if capture fails
+ * Waits for document resources (fonts, images, idle) to finish loading.
+ * All resource promises race against a timeout to prevent indefinite blocking.
+ * @param doc The document to wait on
+ * @param minDelay Minimum delay in ms regardless of resource readiness (default: 2000)
+ * @param timeout Maximum time to wait for resources in ms (default: 8000)
  */
+export async function waitForResources(doc: Document, minDelay = 2000, timeout = 8000): Promise<void> {
+  const win = doc.defaultView;
+
+  const resourcePromises: Promise<unknown>[] = [
+    // Minimum buffer delay
+    new Promise(resolve => setTimeout(resolve, minDelay)),
+  ];
+
+  // Wait for fonts
+  if (doc.fonts?.ready) {
+    resourcePromises.push(doc.fonts.ready.catch(() => {}));
+  }
+
+  // Wait for all <img> elements to load
+  const images = doc.querySelectorAll('img');
+  images.forEach((img) => {
+    if (!img.complete) {
+      resourcePromises.push(
+        new Promise<void>(resolve => {
+          img.addEventListener('load', () => resolve(), { once: true });
+          img.addEventListener('error', () => resolve(), { once: true });
+        })
+      );
+    }
+  });
+
+  // Wait for idle callback (indicates browser has finished layout/paint work)
+  if (win) {
+    resourcePromises.push(
+      new Promise<void>(resolve => {
+        if ('requestIdleCallback' in win) {
+          (win as Window & { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => void })
+            .requestIdleCallback(() => resolve(), { timeout: 500 });
+        } else {
+          setTimeout(resolve, 500);
+        }
+      })
+    );
+  }
+
+  // Race all resource promises against timeout
+  await Promise.race([
+    Promise.all(resourcePromises),
+    new Promise(resolve => setTimeout(resolve, timeout)),
+  ]);
+}
+
 /**
  * Internal function to attempt screenshot capture
  */
@@ -112,7 +155,9 @@ export async function captureIframeScreenshot(
   outputWidth: number = 640,
   outputHeight: number = 360,
   quality: number = 0.8,
-  fullPage: boolean = true
+  fullPage: boolean = true,
+  waitForContent: boolean = false,
+  minWaitDelay: number = 1500
 ): Promise<string | null> {
   try {
     // Get the iframe's document
@@ -121,6 +166,16 @@ export async function captureIframeScreenshot(
     if (!iframeDoc || !iframeDoc.body) {
       logger.warn('Cannot access iframe document');
       return null;
+    }
+
+    // Wait for resources if requested
+    if (waitForContent) {
+      try {
+        await waitForResources(iframeDoc, minWaitDelay);
+      } catch {
+        // Fall back to simple delay if resource waiting fails
+        await new Promise(resolve => setTimeout(resolve, minWaitDelay));
+      }
     }
 
     // Attempt capture with automatic retry on gradient errors

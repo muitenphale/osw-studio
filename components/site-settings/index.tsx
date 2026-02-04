@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Site } from '@/lib/vfs/types';
+import { Site, Project } from '@/lib/vfs/types';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ import { ComplianceTab } from '../publish-settings/compliance-tab';
 
 interface SiteSettingsModalProps {
   site: Site;
+  projects?: Project[];
   isOpen: boolean;
   onClose: () => void;
   onSave: (settings: Partial<Site>) => Promise<void>;
@@ -27,10 +28,12 @@ interface SiteSettingsModalProps {
 
 export function SiteSettingsModal({
   site,
+  projects,
   isOpen,
   onClose,
   onSave,
 }: SiteSettingsModalProps) {
+  const [projectId, setProjectId] = useState(site.projectId);
   const [enabled, setEnabled] = useState(site.enabled);
   const [underConstruction, setUnderConstruction] = useState(site.underConstruction);
   const [customDomain, setCustomDomain] = useState(site.customDomain);
@@ -48,6 +51,7 @@ export function SiteSettingsModal({
   // Reset state when site or isOpen changes
   useEffect(() => {
     if (isOpen) {
+      setProjectId(site.projectId);
       setEnabled(site.enabled);
       setUnderConstruction(site.underConstruction);
       setCustomDomain(site.customDomain);
@@ -65,6 +69,7 @@ export function SiteSettingsModal({
   // Track dirty state
   useEffect(() => {
     const hasChanges =
+      projectId !== site.projectId ||
       enabled !== site.enabled ||
       underConstruction !== site.underConstruction ||
       customDomain !== site.customDomain ||
@@ -75,7 +80,7 @@ export function SiteSettingsModal({
       JSON.stringify(seo) !== JSON.stringify(site.seo) ||
       JSON.stringify(compliance) !== JSON.stringify(site.compliance);
     setIsDirty(hasChanges);
-  }, [enabled, underConstruction, customDomain, headScripts, bodyScripts, cdnLinks, analytics, seo, compliance, site]);
+  }, [projectId, enabled, underConstruction, customDomain, headScripts, bodyScripts, cdnLinks, analytics, seo, compliance, site]);
 
   const handleClose = () => {
     if (isDirty) {
@@ -91,6 +96,7 @@ export function SiteSettingsModal({
     setIsSaving(true);
     try {
       await onSave({
+        projectId,
         enabled,
         underConstruction,
         customDomain,
@@ -168,7 +174,14 @@ export function SiteSettingsModal({
 
           <div className="flex-1 overflow-auto">
             <TabsContent value="general" className="mt-0 h-full">
-              <GeneralTab settings={settings} onChange={handleGeneralChange} projectId={site.projectId} siteId={site.id} />
+              <GeneralTab
+                settings={settings}
+                onChange={handleGeneralChange}
+                projectId={projectId}
+                siteId={site.id}
+                projects={projects}
+                onProjectChange={setProjectId}
+              />
             </TabsContent>
 
             <TabsContent value="scripts" className="mt-0 h-full">

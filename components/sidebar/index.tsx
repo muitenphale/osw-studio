@@ -27,6 +27,7 @@ import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
 import { cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
+import pkg from '@/package.json';
 
 // Collapsed sidebar width
 export const COLLAPSED_SIDEBAR_WIDTH = 56; // Width in pixels for icon-only buttons
@@ -381,9 +382,16 @@ function SidebarContent({
         </div>
 
         {!collapsed && (
-          <span className="text-sm font-semibold whitespace-nowrap">
-            {logoHover && !pinned ? "Pin" : "Open\u00A0Source Web\u00A0Studio"}
-          </span>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold whitespace-nowrap leading-none">
+              {logoHover && !pinned ? "Pin" : "Open\u00A0Source Web\u00A0Studio"}
+            </span>
+            {!(logoHover && !pinned) && (
+              <span className="text-[10px] leading-[10px] text-muted-foreground text-left mt-0.5">
+                {isServerMode ? `Server, v${pkg.version}` : `v${pkg.version}`}
+              </span>
+            )}
+          </div>
         )}
       </button>
 
