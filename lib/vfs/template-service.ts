@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import JSZip from 'jszip';
-import { CustomTemplate } from './types';
-import { VFSDatabase } from './database';
+import { CustomTemplate, SiteTemplateFeatures } from './types';
+import { StorageAdapter } from './adapters/types';
 import { logger } from '@/lib/utils';
 
 const MAX_TEMPLATE_SIZE = 25 * 1024 * 1024; // 25MB
@@ -25,14 +25,28 @@ export interface TemplateMetadata {
 }
 
 export class TemplateService {
-  private db: VFSDatabase;
+  private adapter: StorageAdapter | null = null;
+  private initPromise: Promise<void> | null = null;
 
-  constructor() {
-    this.db = new VFSDatabase();
+  private async doInit(): Promise<void> {
+    if (this.adapter) return;
+    const { vfs } = await import('./index');
+    await vfs.init();
+    this.adapter = vfs.getStorageAdapter();
   }
 
   async init(): Promise<void> {
-    await this.db.init();
+    if (!this.initPromise) {
+      this.initPromise = this.doInit();
+    }
+    return this.initPromise;
+  }
+
+  private getAdapter(): StorageAdapter {
+    if (!this.adapter) {
+      throw new Error('TemplateService not initialized. Call init() first.');
+    }
+    return this.adapter;
   }
 
   /**
@@ -41,7 +55,8 @@ export class TemplateService {
   async exportProjectAsTemplate(
     vfs: any,
     projectId: string,
-    metadata: TemplateMetadata
+    metadata: TemplateMetadata,
+    siteId?: string
   ): Promise<Blob> {
     try {
       logger.info('[TemplateService] Exporting project as template', { projectId, name: metadata.name });
@@ -58,9 +73,54 @@ export class TemplateService {
         .filter((item: any) => item.type === 'directory')
         .map((item: any) => item.path);
 
+      // Determine if this is a site template
+      let siteFeatures: SiteTemplateFeatures | undefined;
+      if (siteId) {
+        try {
+          // Dynamic import to avoid circular deps + server-only modules
+          const { SiteDatabase } = await import(/* webpackIgnore: true */ './adapters/site-database');
+          const siteDb = new SiteDatabase(siteId);
+
+          const edgeFunctions = siteDb.listFunctions().map(fn => ({
+            name: fn.name,
+            method: fn.method,
+            code: fn.code,
+            description: fn.description,
+            enabled: fn.enabled,
+            timeoutMs: fn.timeoutMs,
+          }));
+
+          const serverFunctions = siteDb.listServerFunctions().map(fn => ({
+            name: fn.name,
+            code: fn.code,
+            description: fn.description,
+            enabled: fn.enabled,
+          }));
+
+          const secrets = siteDb.listSecrets().map(s => ({
+            name: s.name,
+            description: s.description,
+          }));
+
+          const schema = siteDb.getSchemaForExport();
+
+          if (edgeFunctions.length > 0 || serverFunctions.length > 0 || secrets.length > 0 || schema) {
+            siteFeatures = {
+              edgeFunctions: edgeFunctions.length > 0 ? edgeFunctions : undefined,
+              serverFunctions: serverFunctions.length > 0 ? serverFunctions : undefined,
+              secrets: secrets.length > 0 ? secrets : undefined,
+              databaseSchema: schema || undefined,
+            };
+          }
+        } catch {
+          // Server-only modules not available in browser mode - skip site features
+          logger.warn('[TemplateService] Could not extract site features - server modules not available');
+        }
+      }
+
       // Create template data
       const templateData = {
-        version: '1.0.0', // Template format version
+        version: siteFeatures ? '2.0.0' : '1.0.0', // Template format version
         name: metadata.name,
         description: metadata.description,
         templateVersion: metadata.version,
@@ -78,7 +138,9 @@ export class TemplateService {
           path: file.path,
           content: file.content
         })),
-        assets: []
+        assets: [],
+        templateType: siteFeatures ? 'site' : 'project',
+        siteFeatures,
       };
 
       // Create ZIP archive
@@ -155,11 +217,14 @@ export class TemplateService {
           previewImages: templateData.previewImages || [],
           downloadUrl: templateData.downloadUrl
         },
-        importedAt: new Date()
+        importedAt: new Date(),
+        templateType: templateData.templateType || 'project',
+        siteFeatures: templateData.siteFeatures,
       };
 
       // Save to IndexedDB
-      await this.db.saveCustomTemplate(template);
+      await this.init();
+      await this.getAdapter().saveCustomTemplate(template);
 
       logger.info('[TemplateService] Template imported successfully', {
         id: template.id,
@@ -179,7 +244,7 @@ export class TemplateService {
   async listCustomTemplates(): Promise<CustomTemplate[]> {
     try {
       await this.init();
-      const templates = await this.db.getAllCustomTemplates();
+      const templates = await this.getAdapter().getAllCustomTemplates();
       return templates.sort((a, b) => b.importedAt.getTime() - a.importedAt.getTime());
     } catch (error) {
       logger.error('[TemplateService] Failed to list templates:', error);
@@ -193,7 +258,7 @@ export class TemplateService {
   async deleteCustomTemplate(id: string): Promise<void> {
     try {
       await this.init();
-      await this.db.deleteCustomTemplate(id);
+      await this.getAdapter().deleteCustomTemplate(id);
       logger.info('[TemplateService] Template deleted', { id });
     } catch (error) {
       logger.error('[TemplateService] Failed to delete template:', error);
@@ -227,17 +292,6 @@ export class TemplateService {
       logger.error('[TemplateService] Failed to re-export template:', error);
       throw new Error(`Failed to export template: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }
-
-  /**
-   * Generate a thumbnail from a project preview (placeholder for now)
-   */
-  async generateThumbnail(projectId: string): Promise<string | undefined> {
-    // NOTE: Thumbnail generation from preview requires html2canvas in browser context
-    // This would need to be moved to client-side or implemented via puppeteer/playwright
-    // For now, return undefined to indicate no thumbnail
-    logger.debug('[TemplateService] Thumbnail generation not yet implemented');
-    return undefined;
   }
 
   /**
@@ -316,6 +370,22 @@ export class TemplateService {
       }
       if (file.content === undefined) {
         throw new Error('Invalid template: file missing content');
+      }
+    }
+
+    // Validate site features if present
+    if (data.siteFeatures) {
+      if (typeof data.siteFeatures !== 'object') {
+        throw new Error('Invalid template: siteFeatures must be an object');
+      }
+      if (data.siteFeatures.edgeFunctions && !Array.isArray(data.siteFeatures.edgeFunctions)) {
+        throw new Error('Invalid template: siteFeatures.edgeFunctions must be an array');
+      }
+      if (data.siteFeatures.serverFunctions && !Array.isArray(data.siteFeatures.serverFunctions)) {
+        throw new Error('Invalid template: siteFeatures.serverFunctions must be an array');
+      }
+      if (data.siteFeatures.secrets && !Array.isArray(data.siteFeatures.secrets)) {
+        throw new Error('Invalid template: siteFeatures.secrets must be an array');
       }
     }
   }

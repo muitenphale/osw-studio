@@ -2,6 +2,7 @@ import { VirtualFileSystem } from '../vfs';
 import { VirtualFile } from '../vfs/types';
 import { ProcessedFile, Route, CompiledProject } from './types';
 import Handlebars from 'handlebars';
+import { logger } from '@/lib/utils';
 
 export class VirtualServer {
   private vfs: VirtualFileSystem;
@@ -136,7 +137,7 @@ export class VirtualServer {
         compiled = this.handlebars.compile(templateContent);
         this.templateCache.set(templatePath, compiled);
       } catch (error) {
-        console.error(`Failed to compile template ${templatePath}:`, error);
+        logger.error(`Failed to compile template ${templatePath}:`, error);
         return '';
       }
     }
@@ -696,10 +697,12 @@ export class VirtualServer {
       // Look for a data.json file for template context
       let context = {};
       try {
-        const dataFile = await this.vfs.readFile(this.projectId, '/data.json');
-        context = JSON.parse(dataFile.content as string);
+        if (await this.vfs.fileExists(this.projectId, '/data.json')) {
+          const dataFile = await this.vfs.readFile(this.projectId, '/data.json');
+          context = JSON.parse(dataFile.content as string);
+        }
       } catch {
-        // No data file, use empty context
+        // Invalid data file, use empty context
       }
 
       // Compile the content as a Handlebars template
@@ -707,7 +710,7 @@ export class VirtualServer {
       const result = template(context);
       return result;
     } catch (error) {
-      console.error('VirtualServer: Error processing Handlebars templates:', error);
+      logger.error('VirtualServer: Error processing Handlebars templates:', error);
 
       // Return a helpful error message instead of original content
       const errorMessage = error instanceof Error ? error.message : String(error);

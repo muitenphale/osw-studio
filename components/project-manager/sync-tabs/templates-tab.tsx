@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { SyncableItem } from '@/lib/vfs/sync-types';
 import { SummaryBar } from './summary-bar';
 import { SyncItemRow } from '../sync-item-row';
-import { VFSDatabase } from '@/lib/vfs/database';
+import { vfs } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
@@ -60,9 +60,8 @@ export function TemplatesTab({
     onSyncingIdsChange(new Set(syncingIdsRef.current).add(item.id));
     try {
       // Get template from IndexedDB
-      const db = new VFSDatabase();
-      await db.init();
-      const template = await db.getCustomTemplate(item.id);
+      await vfs.init();
+      const template = await vfs.getStorageAdapter().getCustomTemplate(item.id);
 
       if (!template) {
         toast.error(`Template "${item.name}" not found`);
@@ -99,8 +98,7 @@ export function TemplatesTab({
       }
 
       // Save template to IndexedDB
-      const db = new VFSDatabase();
-      await db.init();
+      await vfs.init();
 
       // Restore Date objects
       const template = {
@@ -109,7 +107,7 @@ export function TemplatesTab({
         updatedAt: result.template.updatedAt ? new Date(result.template.updatedAt) : new Date(),
       };
 
-      await db.saveCustomTemplate(template);
+      await vfs.getStorageAdapter().saveCustomTemplate(template);
 
       toast.success(`Pulled "${item.name}" from server`);
       onRefresh();

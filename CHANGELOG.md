@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.27.0 - 2026-02-06
+- **Site Templates**: New template type that bundles frontend files AND backend infrastructure
+  - Edge functions, server functions, database schema, and secrets metadata in one `.oswt` file
+  - Template format v2.0 with `siteFeatures` object for backend definitions
+  - Type filter (All, Project, Site) and badges in template browser
+- **Built-in Site Templates**: Two new site templates:
+  - **Landing Page with Contact Form** - Professional landing page with Resend email integration, contact form edge functions, and message database
+  - **Blog with Comments** - Blog platform with static HTML posts, Handlebars partials, comment system edge functions, and content moderation
+- **Automatic Backend Provisioning** (Server Mode): Creating a project from a site template automatically syncs to server, creates a site, and provisions all backend features (database schema, edge functions, server functions, secret placeholders) in one bulk request
+- **Export from Sites**: Export any published site as a site template from the Sites view; backend features are automatically captured
+- **Graceful Degradation**: Site templates work in Browser Mode (frontend files only); toast notification about Server Mode for backend features
+- **Improved Blog Template**: Blog posts are now static HTML pages with Handlebars partials instead of dynamically loaded from the database; post links work correctly under `/sites/{siteId}/`
+- **Async Edge Functions**: Edge functions now support `await` (async IIFE wrapper in QuickJS executor) for calling external APIs
+- **Improved Edge Function Errors**: Proper error message extraction from QuickJS error objects instead of generic failures
+- **Bug Fix**: Static builder missing `fileExists()` in VFS wrapper — Handlebars `data.json` context not loaded during publish
+- **Bug Fix**: IndexedDB `init()` race condition — async function was not returning its promise, causing "not initialized" errors
+
 ## v1.26.1 - 2026-02-06
 - **Bug Fix**: Fixed server sync pull failing when project doesn't exist locally
   - `vfs.getProject()` threw instead of returning null, crashing the pull flow

@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.19.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.27.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -35,7 +35,7 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 - **Dual AI modes** - Chat (exploration, planning) + Code (full implementation)
 - **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, SambaNova, Ollama, LM Studio
 - **Full IDE** - Monaco editor, live preview, file explorer, multi-tab support
-- **Templates & Skills** - Reusable project templates and AI workflow guides
+- **Templates & Skills** - Reusable project and site templates (with bundled backend infrastructure) and AI workflow guides
 - **Export anywhere** - Download as ZIP, deploy to Vercel/Netlify/GitHub Pages
 - **Optional Server Mode** - Self-host a multi-site publishing platform with built-in SEO, analytics, and admin dashboard
 
@@ -101,7 +101,15 @@ npm run dev
 | **Blogs** | Static blogs with templates and navigation |
 | **Client-side Apps** | Calculators, tools, games, interactive demos |
 
-See [Server Mode](#server-mode-optional) for REST APIs, databases, analytics, and more.
+| ✅ Server Mode | Details |
+|----------------|---------|
+| **Dynamic Websites** | Contact forms, comment systems, user submissions via Edge Functions |
+| **Database-backed Apps** | CRUD apps, dashboards, admin panels with per-site SQLite |
+| **Blogs & CMS** | Static posts with Handlebars partials, comments via Edge Functions |
+| **API Backends** | REST APIs with database access, secrets management, auth flows |
+| **Multi-site Platform** | Host multiple sites on one instance with custom domains |
+
+See [Server Mode](#server-mode-optional) for full details.
 
 ## How It Works
 
@@ -158,8 +166,6 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 
 ## Server Mode (Optional)
 
-> ⚠️ **Experimental**: Server Mode is under active development. Some features may be unstable or change in future releases.
-
 OSW Studio runs client-side by default (Browser Mode). For advanced use cases, enable **Server Mode**:
 
 ### Browser Mode (Default)
@@ -182,6 +188,8 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 - ✅ Custom scripts - Inject head/body scripts, CDN resources
 - ✅ Project sync (IndexedDB ↔ SQLite)
 - ✅ Custom domains via reverse proxy
+- ✅ Site Templates - Create from templates with automatic backend provisioning
+- ✅ Blog template - Static posts with Handlebars partials, ready for comments
 
 **Quick Start (Server Mode):**
 

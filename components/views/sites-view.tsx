@@ -9,6 +9,7 @@ import { SiteSettingsModal } from '../site-settings';
 import { ServerSettingsModal } from '../server-settings';
 import { CreateSiteModal } from '../create-site-modal';
 import { AnalyticsDashboard } from '../analytics-dashboard';
+import { TemplateExportDialog } from '../templates/template-export-dialog';
 import { Globe, Plus, Search, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { captureSiteThumbnail } from '@/lib/utils/site-thumbnail';
 import { toast } from 'sonner';
+import { logger } from '@/lib/utils';
 
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
@@ -33,6 +35,8 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
   const [showServerSettingsModal, setShowServerSettingsModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showTemplateExportModal, setShowTemplateExportModal] = useState(false);
+  const [templateExportSite, setTemplateExportSite] = useState<Site | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
@@ -76,7 +80,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
       setSites(fetchedSites);
       setProjects(fetchedProjects);
     } catch (error) {
-      console.error('[SitesView] Failed to load data:', error);
+      logger.error('[SitesView] Failed to load data:', error);
     } finally {
       setLoading(false);
     }
@@ -116,7 +120,26 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
       }
       onProjectSelect(project);
     } catch (error) {
-      console.error('[SitesView] Failed to load project:', error);
+      logger.error('[SitesView] Failed to load project:', error);
+      toast.error('Failed to load project');
+    }
+  };
+
+  const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
+
+  const handleExportAsTemplate = async (site: Site) => {
+    try {
+      await vfs.init();
+      const project = await vfs.getProject(site.projectId);
+      if (!project) {
+        toast.error('Project not found in local storage');
+        return;
+      }
+      setTemplateExportSite(site);
+      setTemplateExportProject(project);
+      setShowTemplateExportModal(true);
+    } catch (error) {
+      logger.error('[SitesView] Failed to load project for template export:', error);
       toast.error('Failed to load project');
     }
   };
@@ -173,7 +196,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
         updatedAt: new Date(),
       });
     } catch (error) {
-      console.error('[SitesView] Failed to save site settings:', error);
+      logger.error('[SitesView] Failed to save site settings:', error);
       throw error;
     }
   };
@@ -247,18 +270,18 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
                 });
               });
           } else {
-            console.warn(`[Sites View] Failed to generate thumbnail for ${siteId}`);
+            logger.warn(`[Sites View] Failed to generate thumbnail for ${siteId}`);
           }
         })
         .catch(err => {
-          console.error(`[Sites View] Thumbnail generation error:`, err);
+          logger.error(`[Sites View] Thumbnail generation error:`, err);
         })
         .finally(() => {
           // Clear publishing state after thumbnail is done (or failed)
           setPublishingStates(prev => ({ ...prev, [siteId]: false }));
         });
     } catch (error) {
-      console.error('Failed to publish:', error);
+      logger.error('Failed to publish:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to publish. Please try again.');
       // Clear publishing state on error
       setPublishingStates(prev => ({ ...prev, [siteId]: false }));
@@ -295,7 +318,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
         updatedAt: new Date(),
       });
     } catch (error) {
-      console.error('Failed to disable site:', error);
+      logger.error('Failed to disable site:', error);
       alert('Failed to disable site. Please try again.');
     }
   };
@@ -326,7 +349,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
         updatedAt: new Date(),
       });
     } catch (error) {
-      console.error('Failed to enable site:', error);
+      logger.error('Failed to enable site:', error);
       alert('Failed to enable site. Please try again.');
     }
   };
@@ -351,7 +374,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
 
       await loadData();
     } catch (error) {
-      console.error('Failed to delete site:', error);
+      logger.error('Failed to delete site:', error);
       alert('Failed to delete site. Please try again.');
     }
   };
@@ -374,7 +397,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
       await loadData();
       setShowCreateModal(false);
     } catch (error) {
-      console.error('Failed to create site:', error);
+      logger.error('Failed to create site:', error);
       throw error;
     }
   };
@@ -533,6 +556,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
                       onDisable={handleDisable}
                       onEnable={handleEnable}
                       onDelete={handleDelete}
+                      onExportAsTemplate={handleExportAsTemplate}
                     />
                   );
                 })}
@@ -580,6 +604,19 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onCreate={handleCreateSite}
+      />
+
+      <TemplateExportDialog
+        project={templateExportProject}
+        open={showTemplateExportModal}
+        onOpenChange={(open) => {
+          setShowTemplateExportModal(open);
+          if (!open) {
+            setTemplateExportSite(null);
+            setTemplateExportProject(null);
+          }
+        }}
+        siteId={templateExportSite?.id}
       />
     </>
   );

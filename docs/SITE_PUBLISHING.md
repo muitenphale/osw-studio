@@ -42,7 +42,8 @@ Server Mode lets you publish static sites directly from your OSW Studio instance
 3. Click **"Publish Now"** (or right-click site → Publish)
 4. Static builder runs:
    - Loads project files from server
-   - Compiles Handlebars templates
+   - Compiles Handlebars templates (partials from `/templates/`, context from `/data.json`)
+   - Rewrites internal links to include `/sites/{siteId}/` prefix
    - Injects configured settings (scripts, analytics, SEO)
    - Generates sitemap.xml and robots.txt
    - Writes to `/public/sites/{siteId}/`

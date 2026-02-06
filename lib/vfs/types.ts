@@ -353,6 +353,8 @@ export interface CustomTemplate {
   };
   importedAt: Date;
   updatedAt?: Date;
+  templateType?: 'project' | 'site';
+  siteFeatures?: SiteTemplateFeatures;
 }
 
 export interface LicenseOption {
@@ -421,6 +423,30 @@ export interface Secret {
   createdAt: Date;
   updatedAt: Date;
   // Note: value is never exposed in this interface - only stored encrypted
+}
+
+// Site Template Features (for site templates that include backend infrastructure)
+export interface SiteTemplateFeatures {
+  edgeFunctions?: Array<{
+    name: string;
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY';
+    code: string;
+    description?: string;
+    enabled?: boolean;
+    timeoutMs?: number;
+  }>;
+  serverFunctions?: Array<{
+    name: string;
+    code: string;
+    description?: string;
+    enabled?: boolean;
+  }>;
+  secrets?: Array<{
+    name: string;
+    description?: string;
+  }>;
+  databaseSchema?: string;
+  siteSettings?: Record<string, unknown>;
 }
 
 export const LICENSE_OPTIONS: LicenseOption[] = [

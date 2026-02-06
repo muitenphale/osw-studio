@@ -1623,6 +1623,18 @@ export class SiteDatabase {
   }
 
   // ============================================
+  // DDL Execution
+  // ============================================
+
+  /**
+   * Execute DDL statements (CREATE TABLE, etc.)
+   * Uses db.exec() which handles multiple semicolon-separated statements.
+   */
+  executeDDL(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  // ============================================
   // Schema Management & Raw SQL
   // ============================================
 
