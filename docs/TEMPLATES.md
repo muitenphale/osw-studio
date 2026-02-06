@@ -23,23 +23,27 @@ Templates are complete website projects that you can use as starting points:
 
 ---
 
+## Template Types
+
+OSW Studio has two types of templates:
+
+### Project Templates
+
+Standard website starting points with HTML, CSS, and JavaScript files. Work in both Browser Mode and Server Mode.
+
+### Site Templates
+
+Bundles frontend files **plus backend infrastructure** — edge functions, database schema, server functions, and secrets. In Server Mode, creating a project from a site template automatically provisions the full backend in one step.
+
+In Browser Mode, site templates create the frontend files normally (backend features require Server Mode).
+
+**How to tell them apart:** Site templates show a "Site" badge in the template browser.
+
+---
+
 ## Built-in Templates
 
-OSW Studio includes templates to get you started:
-
-### Example Studios
-
-A sample multi-page agency portfolio showing OSW Studio's capabilities.
-
-**Includes:**
-- Multiple HTML pages
-- Responsive design
-- Interactive elements
-- Example of good structure
-
-**Best for**: Learning how OSW Studio works
-
-### Blank
+### Blank (Project)
 
 Minimal starting point with basic structure.
 
@@ -50,6 +54,69 @@ Minimal starting point with basic structure.
 - Clean slate for building
 
 **Best for**: Starting from scratch with minimal setup
+
+### Example Studios (Project)
+
+A multi-page agency portfolio showing OSW Studio's capabilities.
+
+**Includes:**
+- Multiple HTML pages with Handlebars partials
+- `data.json` for site-wide data (site name, navigation, social links)
+- Responsive design with modern CSS
+- Interactive elements (portfolio gallery, contact form)
+
+**Best for**: Learning how OSW Studio works, understanding Handlebars partials
+
+### Landing Page with Contact Form (Site)
+
+Professional landing page with a working contact form powered by Resend email.
+
+**Includes:**
+- Single-page design with contact form
+- 2 edge functions (`submit-contact`, `list-messages`)
+- Database schema for storing messages
+- Optional Resend email integration (requires API key)
+
+**Best for**: Business landing pages, lead capture, contact forms
+
+### Blog with Comments (Site)
+
+Static blog with user authentication and moderated comments.
+
+**Includes:**
+- Static HTML blog posts in `/blog/` directory
+- Handlebars partials for navigation, footer, and comments section
+- `data.json` post index for the home page
+- 6 edge functions (comments, auth: register, login, logout, auth-status)
+- Database schema for comments, users, and sessions
+
+**File structure:**
+```
+/data.json                    — Site metadata + posts array
+/index.html                   — Blog home (renders post list via Handlebars)
+/blog/hello-world.html        — Static blog post with {{> comments}} partial
+/blog/getting-started.html    — Static blog post with {{> comments}} partial
+/styles/style.css             — All styles
+/scripts/main.js              — Comments + auth JS (no post loading)
+/templates/navigation.hbs     — Nav partial (uses {{siteName}}, {{navigation}})
+/templates/footer.hbs         — Footer partial
+/templates/comments.hbs       — Comments section partial (lazy-loaded)
+```
+
+**How it works:**
+- Blog posts are individual HTML files — no database needed for content
+- The home page uses `{{#each posts}}` from `data.json` to list posts
+- Post links like `/blog/hello-world.html` are in static HTML, so the static builder correctly rewrites them for published sites under `/sites/{siteId}/`
+- Only comments and auth remain dynamic (edge functions)
+- In Browser Mode, comments fall back to localStorage
+
+**Adding new posts:**
+1. Create a new HTML file in `/blog/` (e.g., `/blog/my-post.html`)
+2. Include `{{> navigation}}`, `{{> comments}}`, and `{{> footer}}` partials
+3. Add an entry to the `posts` array in `/data.json`
+4. Or just ask the AI to create a new post!
+
+**Best for**: Personal blogs, content sites with community interaction
 
 ---
 
@@ -67,6 +134,8 @@ Minimal starting point with basic structure.
 8. Click **Create**
 
 Your project opens with all template files ready to customize.
+
+**Site templates in Server Mode:** When you create a project from a site template, OSW Studio automatically syncs the project to the server, creates a site, and provisions all backend features (database tables, edge functions, server functions, secret placeholders). You'll see a summary of what was provisioned.
 
 ### Customize the Template
 
@@ -173,7 +242,16 @@ Share your templates with others:
 1. Go to **Templates** view
 2. Find your template
 3. Click **Export** (download icon)
-4. Save the template file (`.json`)
+4. Save the template file (`.oswt`)
+
+### Export a Site as Template
+
+In Server Mode, export a published site with its backend features:
+
+1. Go to **Sites** view
+2. Click the dropdown menu on a site card
+3. Select **Export as Site Template**
+4. Backend features (edge functions, database schema, server functions, secrets) are automatically included
 
 ### Import a Template
 
@@ -207,10 +285,15 @@ Improve them over time as you learn better patterns
 
 ## Templates vs Skills
 
-**Templates** = Starting point for a project
+**Project Templates** = Starting point for a project
 - Complete website structure
 - HTML, CSS, JavaScript files
 - Ready to customize and deploy
+
+**Site Templates** = Starting point with backend
+- Everything in project templates, plus
+- Edge functions, database schema, server functions, secrets
+- Automatic backend provisioning in Server Mode
 
 **Skills** = Instructions for AI
 - Markdown documents
@@ -236,6 +319,12 @@ A: Built-in templates are yours to use commercially. For imported templates, che
 
 **Q: How many templates can I have?**
 A: No limit. Create as many as you need.
+
+**Q: What happens if I use a site template in Browser Mode?**
+A: The frontend files are created normally. Backend features (edge functions, database, etc.) require Server Mode — you'll see a notification about this.
+
+**Q: How do blog posts work in the Blog template?**
+A: Blog posts are static HTML files in the `/blog/` directory. The home page lists them from `data.json`. Add new posts by creating HTML files and updating `data.json`, or ask the AI to do it.
 
 ---
 

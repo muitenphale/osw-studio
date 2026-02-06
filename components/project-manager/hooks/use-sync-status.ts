@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { vfs } from '@/lib/vfs';
-import { VFSDatabase } from '@/lib/vfs/database';
 import { skillsService } from '@/lib/vfs/skills/service';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import {
@@ -71,9 +70,7 @@ export function useSyncStatus() {
 
       const localSkills = await skillsService.getCustomSkills();
 
-      const db = new VFSDatabase();
-      await db.init();
-      const localTemplates = await db.getAllCustomTemplates();
+      const localTemplates = await vfs.getStorageAdapter().getAllCustomTemplates();
 
       // Build project items
       const projectItems: SyncableItem[] = [];

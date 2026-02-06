@@ -14,9 +14,12 @@ const DB_VERSION = 4; // Incremented to add skills store
 
 export class IndexedDBAdapter implements StorageAdapter {
   private db: IDBDatabase | null = null;
+  private initPromise: Promise<void> | null = null;
 
   async init(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    // Re-init if the connection was lost (e.g., close() called, HMR, or browser eviction)
+    if (this.initPromise && this.db) return this.initPromise;
+    this.initPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = () => reject(request.error);
@@ -85,6 +88,7 @@ export class IndexedDBAdapter implements StorageAdapter {
         }
       };
     });
+    return this.initPromise;
   }
 
   async close(): Promise<void> {

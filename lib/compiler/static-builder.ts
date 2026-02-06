@@ -63,6 +63,14 @@ function createServerVfs(
       }
       return file;
     },
+
+    // VirtualServer calls this to check if data.json exists for Handlebars context
+    async fileExists(pid: string, filePath: string): Promise<boolean> {
+      if (pid !== projectId) {
+        throw new Error('Invalid project ID');
+      }
+      return allFiles.some(f => f.path === filePath);
+    },
   };
 }
 
@@ -79,7 +87,7 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
     const site = await adapter.getSite?.(siteId);
     if (!site) {
       await adapter.close?.();
-      console.error(`[Static Builder] Site ${siteId} not found in database`);
+      logger.error(`[Static Builder] Site ${siteId} not found in database`);
       return {
         success: false,
         siteId,
@@ -90,29 +98,11 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
       };
     }
 
-    // Token generation disabled - tokens are optional and can cause issues if
-    // ANALYTICS_SECRET changes or tokens expire. Origin validation provides sufficient security.
-    // if (site.analytics.enabled && site.analytics.provider === 'builtin') {
-    //   const newToken = generateAnalyticsToken(siteId);
-    //   site.analytics.token = newToken;
-    //   site.analytics.tokenGeneratedAt = new Date().toISOString();
-    //
-    //   // Update site with new token
-    //   if (adapter.updateSite) {
-    //     await adapter.updateSite({
-    //       ...site,
-    //       analytics: site.analytics,
-    //     });
-    //   }
-    //
-    //   logger.info(`[Static Builder] Generated new analytics token for site ${siteId}`);
-    // }
-
     // Get project
     const project = await adapter.getProject(site.projectId);
     if (!project) {
       await adapter.close?.();
-      console.error(`[Static Builder] Project ${site.projectId} not found in database`);
+      logger.error(`[Static Builder] Project ${site.projectId} not found in database`);
       return {
         success: false,
         siteId,
@@ -124,16 +114,7 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
     }
 
     // Check if under construction - if so, replace entire site with construction page
-    console.log(`[Static Builder] Site ${siteId} build check:`, {
-      siteId,
-      siteName: site.name,
-      underConstruction: site.underConstruction,
-      customDomain: site.customDomain,
-      enabled: site.enabled,
-    });
-
     if (site.underConstruction) {
-      console.log(`[Static Builder] Building UNDER CONSTRUCTION page for site ${siteId}`);
 
       await adapter.close?.();
 
@@ -167,16 +148,13 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
 
     // Get all files from SQLite
     const allFiles = await adapter.listFiles(site.projectId);
-    console.log(`[Static Builder] Loaded ${allFiles.length} files from database for project ${site.projectId}`);
 
     // Create a minimal VFS-like wrapper for server-side compilation
     const serverVfs = createServerVfs(site.projectId, allFiles);
 
     // Compile project using VirtualServer (renders Handlebars templates)
-    console.log(`[Static Builder] Starting Handlebars compilation...`);
     const server = new VirtualServer(serverVfs as any, site.projectId);
     const compiledProject = await server.compileProject();
-    console.log(`[Static Builder] Compilation complete. ${compiledProject.files.length} files compiled`);
 
     await adapter.close?.();
 
@@ -235,24 +213,20 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
 
     // Output directory: public/sites/[siteId]
     const outputDir = path.join(process.cwd(), 'public', 'sites', siteId);
-    console.log(`[Static Builder] Output directory: ${outputDir}`);
 
     // Clean existing output directory
     try {
       await fs.rm(outputDir, { recursive: true, force: true });
-      console.log(`[Static Builder] Cleaned existing output directory`);
     } catch (error) {
-      console.log(`[Static Builder] No existing directory to clean (first build)`);
+      // Directory doesn't exist (first build), that's fine
     }
 
     // Create output directory
     await fs.mkdir(outputDir, { recursive: true });
-    console.log(`[Static Builder] Created output directory`);
 
     let filesWritten = 0;
 
     // Write compiled files
-    console.log(`[Static Builder] Writing ${compiledProject.files.length} files to disk...`);
     for (const file of compiledProject.files) {
       // Skip template files and development files (same as export)
       if (shouldExcludeFromExport(file.path)) {
@@ -336,7 +310,7 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
     // Clean up VirtualServer resources
     server.cleanupBlobUrls();
 
-    console.log(`[Static Builder] ✓ Build complete! ${filesWritten} files written to /sites/${siteId}`);
+    logger.info(`[Static Builder] Build complete: ${filesWritten} files written to /sites/${siteId}`);
 
     return {
       success: true,
@@ -346,8 +320,7 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
       outputPath: `/sites/${siteId}`,
     };
   } catch (error) {
-    console.error('[Static Builder] ✗ BUILD FAILED:', error);
-    logger.error('[Static Builder] Error building site:', error);
+    logger.error('[Static Builder] Build failed:', error);
     return {
       success: false,
       siteId: siteId || '',

@@ -4,7 +4,7 @@ import React from 'react';
 import { CustomTemplate, LICENSE_OPTIONS } from '@/lib/vfs/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical } from 'lucide-react';
+import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical, Server } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   DropdownMenu,
@@ -26,6 +26,7 @@ interface BuiltInTemplate {
   description: string;
   isBuiltIn: true;
   updatedAt: Date;
+  templateType?: 'project' | 'site';
   metadata?: {
     author?: string;
     tags?: string[];
@@ -49,6 +50,7 @@ export function TemplateCard({
 }: TemplateCardProps) {
   const isBuiltIn = 'isBuiltIn' in template && template.isBuiltIn;
   const customTemplate = !isBuiltIn ? template as CustomTemplate : null;
+  const isSiteTemplate = ('templateType' in template && template.templateType === 'site');
 
   const getLicenseLabel = (licenseValue: string): string => {
     const license = LICENSE_OPTIONS.find(opt => opt.value === licenseValue);
@@ -113,10 +115,16 @@ export function TemplateCard({
 
           {/* Template Info */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-baseline gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1">
               <h3 className="font-semibold text-base truncate" title={template.name}>
                 {template.name}
               </h3>
+              {isSiteTemplate && (
+                <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800 shrink-0">
+                  <Server className="h-3 w-3 mr-0.5" />
+                  Site
+                </Badge>
+              )}
               {customTemplate && (
                 <span className="text-xs text-muted-foreground shrink-0">
                   v{customTemplate.version}
@@ -182,7 +190,7 @@ export function TemplateCard({
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => onSelect(template)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Create Project
+                  {isSiteTemplate ? 'Create Site' : 'Create Project'}
                 </DropdownMenuItem>
                 {onExport && (
                   <>
@@ -232,7 +240,7 @@ export function TemplateCard({
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => onSelect(template)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Create Project
+                  {isSiteTemplate ? 'Create Site' : 'Create Project'}
                 </DropdownMenuItem>
                 {onExport && (
                   <>
@@ -320,10 +328,16 @@ export function TemplateCard({
       <div className="p-4 space-y-3">
         {/* Header */}
         <div className="space-y-1">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-2">
             <h3 className="font-semibold text-base line-clamp-1 flex-1" title={template.name}>
               {template.name}
             </h3>
+            {isSiteTemplate && (
+              <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800 shrink-0">
+                <Server className="h-3 w-3 mr-0.5" />
+                Site
+              </Badge>
+            )}
             {customTemplate && (
               <span className="text-xs text-muted-foreground shrink-0">
                 v{customTemplate.version}
@@ -403,7 +417,7 @@ export function TemplateCard({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => onSelect(template)}>
                 <Plus className="mr-2 h-4 w-4" />
-                Create Project
+                {isSiteTemplate ? 'Create Site' : 'Create Project'}
               </DropdownMenuItem>
               {onExport && (
                 <>

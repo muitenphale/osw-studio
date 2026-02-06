@@ -25,11 +25,14 @@ The application itself is **free and open source** (MIT license). However:
 - Documentation sites
 - Static web applications (front-end only)
 
-**You cannot build** (no backend):
-- Node.js/Python/PHP backends
-- Databases and servers
-- User authentication systems
-- Server-side processing
+**With Server Mode, you can also build:**
+- Sites with backend edge functions (REST APIs)
+- SQLite databases for dynamic content
+- User authentication and comments
+- Contact forms with email notifications
+
+**You cannot build:**
+- Node.js/Python/PHP backends (only edge functions in Server Mode)
 - Real-time applications requiring WebSocket servers
 
 ### Do I need an API key?
@@ -164,21 +167,28 @@ No, OSW Studio doesn't run Node.js build tools. Instead:
 ### How does Handlebars work?
 
 **Build-time templating**:
-- Write `.hbs` files with reusable components
-- Export compiles to static `.html`
-- Not runtime (no Handlebars.js included)
+- Write `.hbs` files in `/templates/` as reusable partials
+- Include them in HTML files with `{{> partialName}}`
+- Define data in `/data.json` — it's automatically loaded as template context
+- Export and publish compile partials into static `.html`
+- Not runtime (no Handlebars.js included in output)
 
 **Example**:
 ```handlebars
-{{!-- templates/header.hbs --}}
-<header><nav>...</nav></header>
+{{!-- /templates/header.hbs --}}
+<header><h1>{{siteName}}</h1></header>
 
-{{!-- index.hbs --}}
+{{!-- /data.json --}}
+{ "siteName": "My Site" }
+
+{{!-- /index.html --}}
 {{> header}}
 <main>Content</main>
 ```
 
-**Export** → `index.html` with header compiled in
+**Export** → `index.html` with header compiled in and `siteName` rendered
+
+**Used by**: Example Studios template, Blog template (navigation, footer, comments partials)
 
 ---
 
@@ -329,7 +339,9 @@ AI guidance documents injected into the system prompt. They teach the AI how to 
 
 Reusable project starting points with files, structure, and metadata.
 
-**Built-in**: Example Studios (portfolio example), Blank (minimal)
+**Built-in Project Templates**: Blank (minimal), Example Studios (multi-page portfolio)
+
+**Built-in Site Templates**: Landing Page with Contact Form (Resend email), Blog with Comments (auth + moderated comments)
 
 **See**: [Templates Guide](?doc=templates)
 

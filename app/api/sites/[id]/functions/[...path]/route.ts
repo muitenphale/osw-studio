@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 import { executeFunction } from '@/lib/edge-functions/executor';
 import { FunctionRequest } from '@/lib/edge-functions/types';
+import { logger } from '@/lib/utils';
 
 interface RouteParams {
   params: Promise<{
@@ -126,6 +127,7 @@ async function handleRequest(
       'referer',
       'user-agent',
       'x-requested-with',
+      'cookie',
     ];
     request.headers.forEach((value, key) => {
       if (safeHeaders.includes(key.toLowerCase())) {
@@ -156,7 +158,7 @@ async function handleRequest(
         error: result.error,
       });
     } catch (logError) {
-      console.error('[Edge Functions] Failed to log execution:', logError);
+      logger.error('[Edge Functions] Failed to log execution:', logError);
     }
 
     // Build response
@@ -184,7 +186,7 @@ async function handleRequest(
       headers: responseHeaders,
     });
   } catch (error) {
-    console.error('[Edge Functions] Unexpected error:', error);
+    logger.error('[Edge Functions] Unexpected error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

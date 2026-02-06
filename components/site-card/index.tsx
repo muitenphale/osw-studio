@@ -28,6 +28,7 @@ import {
   BarChart3,
   Pencil,
   Loader2,
+  FileBox,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -43,6 +44,7 @@ interface SiteCardProps {
   onDisable: (siteId: string) => void;
   onEnable: (siteId: string) => void;
   onDelete: (siteId: string) => void;
+  onExportAsTemplate?: (site: Site) => void;
 }
 
 export function SiteCard({
@@ -57,6 +59,7 @@ export function SiteCard({
   onDisable,
   onEnable,
   onDelete,
+  onExportAsTemplate,
 }: SiteCardProps) {
   // Determine status
   const isPublished = site.lastPublishedVersion !== null && site.lastPublishedVersion !== undefined;
@@ -68,7 +71,6 @@ export function SiteCard({
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(publicUrl);
-    // Could add a toast notification here
   };
 
   const handleViewLive = () => {
@@ -286,6 +288,12 @@ export function SiteCard({
                 <DropdownMenuItem onClick={handleCopyUrl}>
                   <Copy className="h-4 w-4 mr-2" />
                   Copy URL
+                </DropdownMenuItem>
+              )}
+              {onExportAsTemplate && (
+                <DropdownMenuItem onClick={() => onExportAsTemplate(site)}>
+                  <FileBox className="h-4 w-4 mr-2" />
+                  Export as Site Template
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Project } from '@/lib/vfs/types';
 import { PageLayout } from '@/components/page-layout';
 import { ContentArea } from '@/components/views/content-area';
@@ -16,9 +17,25 @@ interface PageWrapperProps {
   settingsTab?: 'model' | 'application';
 }
 
+const VIEW_ROUTES: Record<string, string> = {
+  dashboard: '/admin',
+  projects: '/admin/projects',
+  templates: '/admin/templates',
+  skills: '/admin/skills',
+  sites: '/admin/sites',
+  docs: '/admin/docs',
+  settings: '/admin/settings',
+};
+
 function PageWrapperInner({ view, settingsTab }: PageWrapperProps) {
+  const router = useRouter();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showAboutModal, setShowAboutModal] = useState(false);
+
+  const handleNavigate = useCallback((targetView: string) => {
+    const route = VIEW_ROUTES[targetView] || `/admin/${targetView}`;
+    router.push(route);
+  }, [router]);
 
   const content = selectedProject ? (
     <Workspace
@@ -30,6 +47,7 @@ function PageWrapperInner({ view, settingsTab }: PageWrapperProps) {
       view={view}
       onProjectSelect={setSelectedProject}
       settingsTab={settingsTab}
+      onNavigate={handleNavigate}
     />
   );
 
@@ -37,7 +55,7 @@ function PageWrapperInner({ view, settingsTab }: PageWrapperProps) {
     <>
       <PageLayout
         currentView={view}
-        onNavigate={() => {}} // Navigation handled by Next.js router
+        onNavigate={handleNavigate}
         onProjectSelect={setSelectedProject}
         onOpenAbout={() => setShowAboutModal(true)}
         showSidebar={!selectedProject}

@@ -49,7 +49,7 @@ export function ContentArea({
     case 'sites':
       return <SitesView onProjectSelect={onProjectSelect} />;
     case 'templates':
-      return <TemplatesView />;
+      return <TemplatesView onNavigate={onNavigate} />;
     case 'skills':
       return <SkillsView />;
     case 'docs':

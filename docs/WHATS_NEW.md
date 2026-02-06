@@ -6,6 +6,62 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.27.0 - Site Templates (2026-02-06)
+
+A new template type that bundles both frontend files AND backend infrastructure definitions. Site templates include edge functions, server functions, database schema, and secrets metadata — everything needed to deploy a full-stack site in Server Mode.
+
+- **Site Templates** - New template type with backend infrastructure definitions
+- **Built-in Site Templates** - Two new built-in templates:
+  - **Landing Page with Contact Form** - Professional landing page with working contact form, Resend email integration, and message database (2 edge functions, database schema)
+  - **Blog with Comments** - Blog platform with posts, comments, and content moderation (3 edge functions, server function, database schema)
+- **Automatic Backend Provisioning** - In Server Mode, creating a project from a site template automatically syncs to the server, creates a site, and provisions all backend features (database schema, edge functions, server functions, secret placeholders) in one step
+- **Export from Sites** - Export any published site as a site template directly from the Sites view; backend features are automatically captured
+- **Type Filter** - Filter templates by type (All, Project, Site) in the template browser
+- **Template Format v2.0** - Extended `.oswt` format with `siteFeatures` object for backend definitions
+- **Graceful Degradation** - Site templates work in Browser Mode (frontend files only); toast notification about Server Mode for backend features
+- **Improved Blog Template** - Blog posts are now static HTML pages with Handlebars partials (navigation, footer, comments) instead of dynamically loaded from the database. Post links work correctly when published under `/sites/{siteId}/`
+- **Async Edge Functions** - Edge functions now support `await` for calling external APIs (e.g., sending emails via Resend, webhooks)
+- **Improved Edge Function Errors** - Edge function errors now return meaningful messages instead of generic failures
+- **Bug Fix** - Fixed published sites rendering empty Handlebars variables (static builder was not loading `data.json` context)
+- **Bug Fix** - Fixed "IndexedDB not initialized" errors across pages caused by a race condition during database initialization
+
+### How It Works
+
+Site templates in **Server Mode** automatically provision the full backend when you create a project: the project is synced to the server, a site is created, and all backend features (database tables, edge functions, server functions, secret placeholders) are set up in one request. You'll see a summary of what was provisioned and a reminder to fill in any secret values via the Admin panel.
+
+In **Browser Mode**, site templates create the frontend files normally. A notification reminds you that backend features require Server Mode.
+
+### For Template Authors
+
+Export projects as site templates in two ways:
+
+1. **From the Sites view** — Use the dropdown menu on any site card and select "Export as Site Template". Backend features (edge functions, database schema, server functions, secrets) from that site are automatically included in the `.oswt` file.
+2. **From the Templates tab** — Export any project as a template using the template export dialog.
+
+---
+
+## v1.26.0 - Screenshot Reliability & Project Swap (2026-02-04)
+
+Improved reliability for project and site screenshots, plus smoother save UX.
+
+- **Improved Screenshot Reliability** - Resource-waiting before capture (fonts, images, idle network)
+- **Non-blocking Save** - Project save completes instantly; thumbnail updates in the background
+- **Publish Spinner** - Spinner overlay on site card during publish and thumbnail capture
+
+---
+
+## v1.25.2 - Binary File Sync Fix
+
+- **Bug Fix** - Fixed binary file sync and serving in Server Mode
+
+---
+
+## v1.25.1 - Binary File Publishing Fix
+
+- **Bug Fix** - Fixed binary files (JPG, PNG, GIF, etc.) not publishing correctly in Server Mode
+
+---
+
 ## v1.25.0 - Skill Evaluation Pass (2026-02-02)
 
 A new pre-flight evaluation pass checks which skills are relevant to your prompt before the main AI call. When a match is found, the AI receives an explicit instruction to read the skill first, radically improving skill adoption rates.

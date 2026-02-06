@@ -28,6 +28,7 @@ import {
 import { createDatabaseAPI } from './database-api';
 import { SiteDatabase } from '@/lib/vfs/adapters/site-database';
 import { decryptSecret, isEncryptionConfigured } from './secrets-crypto';
+import { createHash, randomUUID } from 'crypto';
 
 // Cache the QuickJS module to avoid re-initializing WASM on every request
 let quickJSModulePromise: Promise<QuickJSWASMModule> | null = null;
@@ -208,7 +209,10 @@ export async function executeFunction(
     if (result.error) {
       const errorStr = context.dump(result.error);
       result.error.dispose();
-      throw new Error(errorStr as string);
+      const message = typeof errorStr === 'object' && errorStr !== null
+        ? (errorStr as Record<string, unknown>).message as string || JSON.stringify(errorStr)
+        : String(errorStr);
+      throw new Error(message);
     }
 
     // If we got a promise, we need to execute pending jobs
@@ -232,7 +236,10 @@ export async function executeFunction(
       if (pendingResult.error) {
         const errorStr = context.dump(pendingResult.error);
         pendingResult.error.dispose();
-        throw new Error(errorStr as string);
+        const message = typeof errorStr === 'object' && errorStr !== null
+          ? (errorStr as Record<string, unknown>).message as string || JSON.stringify(errorStr)
+          : String(errorStr);
+        throw new Error(message);
       }
 
       // Continue if there are more QuickJS jobs OR pending fetches
@@ -334,6 +341,9 @@ function injectGlobals(context: QuickJSContext, config: GlobalsConfig): void {
 
   // Inject base64 helpers (atob/btoa)
   injectBase64Helpers(context);
+
+  // Inject crypto helpers (sha256, randomUUID)
+  injectCryptoHelpers(context);
 }
 
 /**
@@ -372,39 +382,42 @@ function injectConsole(context: QuickJSContext, logs: string[]): void {
 function injectResponseHelpers(context: QuickJSContext, setResponse: (response: FunctionResponse) => void): void {
   const responseObj = context.newObject();
 
-  // Response.json(data, status?)
-  const jsonFn = context.newFunction('json', (dataHandle: QuickJSHandle, statusHandle?: QuickJSHandle) => {
+  // Response.json(data, status?, headers?)
+  const jsonFn = context.newFunction('json', (dataHandle: QuickJSHandle, statusHandle?: QuickJSHandle, headersHandle?: QuickJSHandle) => {
     const data = context.dump(dataHandle);
     const status = statusHandle ? (context.dump(statusHandle) as number) : 200;
+    const extraHeaders = headersHandle ? (context.dump(headersHandle) as Record<string, string>) : {};
     setResponse({
       status,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
       body: data as object,
     });
   });
   context.setProp(responseObj, 'json', jsonFn);
   jsonFn.dispose();
 
-  // Response.text(text, status?)
-  const textFn = context.newFunction('text', (textHandle: QuickJSHandle, statusHandle?: QuickJSHandle) => {
+  // Response.text(text, status?, headers?)
+  const textFn = context.newFunction('text', (textHandle: QuickJSHandle, statusHandle?: QuickJSHandle, headersHandle?: QuickJSHandle) => {
     const text = context.dump(textHandle) as string;
     const status = statusHandle ? (context.dump(statusHandle) as number) : 200;
+    const extraHeaders = headersHandle ? (context.dump(headersHandle) as Record<string, string>) : {};
     setResponse({
       status,
-      headers: { 'Content-Type': 'text/plain' },
+      headers: { 'Content-Type': 'text/plain', ...extraHeaders },
       body: text,
     });
   });
   context.setProp(responseObj, 'text', textFn);
   textFn.dispose();
 
-  // Response.error(message, status?)
-  const errorFn = context.newFunction('error', (msgHandle: QuickJSHandle, statusHandle?: QuickJSHandle) => {
+  // Response.error(message, status?, headers?)
+  const errorFn = context.newFunction('error', (msgHandle: QuickJSHandle, statusHandle?: QuickJSHandle, headersHandle?: QuickJSHandle) => {
     const message = context.dump(msgHandle) as string;
     const status = statusHandle ? (context.dump(statusHandle) as number) : 500;
+    const extraHeaders = headersHandle ? (context.dump(headersHandle) as Record<string, string>) : {};
     setResponse({
       status,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
       body: { error: message },
     });
   });
@@ -761,11 +774,36 @@ function injectBase64Helpers(context: QuickJSContext): void {
 }
 
 /**
+ * Inject crypto helpers (sha256, randomUUID)
+ * These run in the Node.js host and are exposed as sync functions to QuickJS.
+ */
+function injectCryptoHelpers(context: QuickJSContext): void {
+  const cryptoObj = context.newObject();
+
+  const sha256Fn = context.newFunction('sha256', (dataHandle: QuickJSHandle) => {
+    const data = context.dump(dataHandle) as string;
+    const hash = createHash('sha256').update(data).digest('hex');
+    return context.newString(hash);
+  });
+  context.setProp(cryptoObj, 'sha256', sha256Fn);
+  sha256Fn.dispose();
+
+  const uuidFn = context.newFunction('randomUUID', () => {
+    return context.newString(randomUUID());
+  });
+  context.setProp(cryptoObj, 'randomUUID', uuidFn);
+  uuidFn.dispose();
+
+  context.setProp(context.global, 'crypto', cryptoObj);
+  cryptoObj.dispose();
+}
+
+/**
  * Build the wrapped code for execution
  */
 function buildWrappedCode(code: string): string {
   return `
-    (function() {
+    (async function() {
       'use strict';
       try {
         ${code}

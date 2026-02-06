@@ -17,6 +17,8 @@ export interface ProjectTemplate {
 export {
   DEMO_PROJECT_TEMPLATE,
   BAREBONES_PROJECT_TEMPLATE,
+  CONTACT_LANDING_PROJECT_TEMPLATE,
+  BLOG_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   type AssetConfig,
   BUILT_IN_TEMPLATES,

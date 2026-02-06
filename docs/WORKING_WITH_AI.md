@@ -411,8 +411,6 @@ nothing happens. Can you fix the JavaScript?
 
 ## Server Context (Server Mode Only)
 
-> ⚠️ **Experimental Feature**: Server Context Integration is experimental and may change in future versions.
-
 In Server Mode, the AI can understand your published site's server features when you select a site from the dropdown in the workspace header.
 
 ### What the AI Knows

@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { CustomTemplate } from '@/lib/vfs/types';
+import { CustomTemplate, SiteTemplateFeatures } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { createProjectFromTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
-import { BAREBONES_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
+import { BAREBONES_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
+import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TemplateCard } from './template-card';
@@ -17,7 +18,8 @@ import {
   LayoutGrid,
   List,
   ArrowUpDown,
-  Package
+  Package,
+  Filter
 } from 'lucide-react';
 import {
   Select,
@@ -33,11 +35,12 @@ import {
 } from '@/components/ui/popover';
 
 interface TemplateManagerProps {
-  onProjectCreated?: (projectId: string) => void;
+  onProjectCreated?: (projectId: string, isSiteTemplate: boolean) => void;
 }
 
 type SortOption = 'updated' | 'name' | 'author' | 'files';
 type ViewMode = 'grid' | 'list';
+type TypeFilter = 'all' | 'project' | 'site';
 
 export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
@@ -45,10 +48,12 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 
   const loadCustomTemplates = useCallback(async () => {
     try {
       setLoading(true);
+      await vfs.init();
       const templates = await templateService.listCustomTemplates();
       setCustomTemplates(templates);
     } catch (error) {
@@ -73,7 +78,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       if (!file) return;
 
       try {
-        const template = await templateService.importTemplateFile(file);
+        await templateService.importTemplateFile(file);
         toast.success('Template imported successfully!');
         await loadCustomTemplates();
       } catch (error) {
@@ -117,6 +122,10 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           await createProjectFromTemplate(vfs, tempProject.id, BAREBONES_PROJECT_TEMPLATE);
         } else if (template.id === 'demo') {
           await createProjectFromTemplate(vfs, tempProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+        } else if (template.id === 'contact-landing') {
+          await createProjectFromTemplate(vfs, tempProject.id, CONTACT_LANDING_PROJECT_TEMPLATE);
+        } else if (template.id === 'blog') {
+          await createProjectFromTemplate(vfs, tempProject.id, BLOG_PROJECT_TEMPLATE);
         }
 
         // Export as template
@@ -176,12 +185,25 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
         template.description
       );
 
+      // Determine siteFeatures and templateType for provisioning later
+      let siteFeatures: SiteTemplateFeatures | undefined;
+      let isSiteTemplate = false;
+
       // Use built-in template or custom template
       if ('isBuiltIn' in template && template.isBuiltIn) {
         if (template.id === 'blank') {
           await createProjectFromTemplate(vfs, project.id, BAREBONES_PROJECT_TEMPLATE);
         } else if (template.id === 'demo') {
           await createProjectFromTemplate(vfs, project.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+        } else if (template.id === 'contact-landing') {
+          await createProjectFromTemplate(vfs, project.id, CONTACT_LANDING_PROJECT_TEMPLATE);
+        } else if (template.id === 'blog') {
+          await createProjectFromTemplate(vfs, project.id, BLOG_PROJECT_TEMPLATE);
+        }
+
+        if ('templateType' in template && template.templateType === 'site') {
+          isSiteTemplate = true;
+          siteFeatures = template.siteFeatures;
         }
       } else {
         // Custom template
@@ -196,12 +218,81 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           directories: customTemplate.directories,
           assets: customTemplate.assets
         });
+
+        if (customTemplate.templateType === 'site') {
+          isSiteTemplate = true;
+          siteFeatures = customTemplate.siteFeatures;
+        }
+      }
+
+      // Provision backend features for site templates
+      if (isSiteTemplate && siteFeatures) {
+        const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+
+        if (isServerMode) {
+          try {
+            // Sync project + files to server (required before creating a site)
+            const files = await vfs.listFiles(project.id);
+            const syncManager = getSyncManager();
+            const syncResult = await syncManager.pushProjectWithFiles(project, files);
+            if (!syncResult.success) {
+              throw new Error(syncResult.error || 'Failed to sync project to server');
+            }
+
+            // Create site via API
+            const siteRes = await fetch('/api/sites', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ projectId: project.id, name: project.name }),
+            });
+            if (!siteRes.ok) {
+              const err = await siteRes.json();
+              throw new Error(err.error || 'Failed to create site');
+            }
+            const site = await siteRes.json();
+
+            // Provision backend features via bulk endpoint
+            const provisionRes = await fetch(`/api/admin/sites/${site.id}/provision`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteFeatures }),
+            });
+            if (!provisionRes.ok) {
+              const err = await provisionRes.json();
+              throw new Error(err.error || 'Failed to provision backend features');
+            }
+            const { provisioned } = await provisionRes.json();
+
+            // Summary toast
+            const parts: string[] = [];
+            if (provisioned.edgeFunctions > 0) parts.push(`${provisioned.edgeFunctions} edge function(s)`);
+            if (provisioned.serverFunctions > 0) parts.push(`${provisioned.serverFunctions} server function(s)`);
+            if (provisioned.secrets > 0) parts.push(`${provisioned.secrets} secret placeholder(s)`);
+            if (provisioned.databaseSchemaApplied) parts.push('database schema');
+            if (parts.length > 0) {
+              toast.success(`Site provisioned: ${parts.join(', ')}`, { duration: 5000 });
+            }
+
+            // Remind about secret placeholders
+            if (provisioned.secrets > 0) {
+              toast.info('Remember to fill in secret values in the Admin panel.', { duration: 6000 });
+            }
+          } catch (provisionError) {
+            logger.error('Failed to provision site backend:', provisionError);
+            toast.warning(
+              'Project created but backend provisioning failed. You can configure features manually in the Admin panel.',
+              { duration: 6000 }
+            );
+          }
+        } else {
+          toast.info('Site template: Backend features (edge functions, database, etc.) require Server Mode.', { duration: 5000 });
+        }
       }
 
       toast.success(`Project "${project.name}" created successfully!`);
 
       if (onProjectCreated) {
-        onProjectCreated(project.id);
+        onProjectCreated(project.id, isSiteTemplate);
       }
     } catch (error) {
       logger.error('Failed to create project from template:', error);
@@ -223,6 +314,12 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       template.description.toLowerCase().includes(query) ||
       ('metadata' in template && template.metadata?.author?.toLowerCase().includes(query)) ||
       ('metadata' in template && template.metadata?.tags?.some(tag => tag.toLowerCase().includes(query)));
+
+    // Type filter
+    if (typeFilter !== 'all') {
+      const templateType = ('templateType' in template && template.templateType) || 'project';
+      if (templateType !== typeFilter) return false;
+    }
 
     return matchesSearch;
   });
@@ -278,6 +375,19 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
 
         {/* Controls */}
         <div className="flex items-center gap-2">
+          {/* Type Filter */}
+          <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as TypeFilter)}>
+            <SelectTrigger className="w-[110px] h-9 text-sm">
+              <Filter className="h-4 w-4 mr-1 shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="project">Project</SelectItem>
+              <SelectItem value="site">Site</SelectItem>
+            </SelectContent>
+          </Select>
+
           {/* Sort */}
           <Popover>
             <PopoverTrigger asChild>
@@ -334,7 +444,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       </div>
 
       {/* Templates Grid/List */}
-      <div className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6">
         <div className="mx-auto max-w-7xl">
         {sortedTemplates.length === 0 ? (
           <div className="flex items-center justify-center h-full">

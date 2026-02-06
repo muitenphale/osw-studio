@@ -750,8 +750,6 @@ Each log entry shows:
 
 ## AI Integration
 
-> ⚠️ **Experimental Feature**: Server Context Integration is experimental and may change in future versions. Some features may not work as expected.
-
 OSW Studio's AI assistant can understand and work with your server features when you select a site in the workspace.
 
 ### How It Works

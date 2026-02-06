@@ -21,6 +21,7 @@ import { IndexedDBAdapter } from './adapters/indexeddb-adapter';
 export class VirtualFileSystem {
   private adapter: StorageAdapter;
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
   private transientFiles: Map<string, VirtualFile> = new Map();
   private syncTimeouts: Map<string, NodeJS.Timeout> = new Map(); // Debounce sync calls
 
@@ -30,10 +31,28 @@ export class VirtualFileSystem {
 
   async init(): Promise<void> {
     if (!this.initialized) {
+      if (!this.initPromise) {
+        this.initPromise = (async () => {
+          await this.adapter.init();
+          await this.mountTransientSkills();
+          this.initialized = true;
+        })();
+      }
+      await this.initPromise;
+    } else {
+      // Already initialized — re-check adapter connection (handles HMR / connection loss)
       await this.adapter.init();
-      await this.mountTransientSkills();
-      this.initialized = true;
     }
+  }
+
+  /**
+   * Get the underlying storage adapter for direct template/skill operations
+   */
+  getStorageAdapter(): StorageAdapter {
+    if (!this.initialized) {
+      throw new Error('VirtualFileSystem not initialized. Call init() first.');
+    }
+    return this.adapter;
   }
 
   /**

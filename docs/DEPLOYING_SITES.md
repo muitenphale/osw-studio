@@ -32,7 +32,7 @@ Most platforms offer free tiers for static sites, automatic HTTPS, and custom do
 3. Select **Export as ZIP**
 4. Save the file
 
-The ZIP contains compiled HTML/CSS/JS ready for deployment. Handlebars templates (`.hbs` files) are pre-compiled and excluded from the export.
+The ZIP contains compiled HTML/CSS/JS ready for deployment. Handlebars templates (`.hbs` files) are pre-compiled using data from `/data.json` and excluded from the export.
 
 ### .osws Export (For Backup)
 
