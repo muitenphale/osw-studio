@@ -1330,12 +1330,12 @@ export class VirtualFileSystem {
     }
   }
 
-  async createProject(name: string, description?: string): Promise<Project> {
+  async createProject(name: string, description?: string, id?: string): Promise<Project> {
     this.ensureInitialized();
-    
+
     try {
       const project: Project = {
-        id: uuidv4(),
+        id: id || uuidv4(),
         name,
         description,
         createdAt: new Date(),
