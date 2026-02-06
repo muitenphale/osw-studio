@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { SyncableItem } from '@/lib/vfs/sync-types';
 import { SummaryBar } from './summary-bar';
 import { SyncItemRow } from '../sync-item-row';
-import { vfs } from '@/lib/vfs';
+import { vfs, Project } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
@@ -105,7 +105,13 @@ export function ProjectsTab({
       }
 
       // Update or create local project
-      const existingProject = await vfs.getProject(item.id);
+      let existingProject: Project | null = null;
+      try {
+        existingProject = await vfs.getProject(item.id);
+      } catch {
+        // Project doesn't exist locally yet
+      }
+
       if (existingProject) {
         // Delete existing files first
         const existingFiles = await vfs.listFiles(item.id);
@@ -113,7 +119,8 @@ export function ProjectsTab({
           await vfs.deleteFile(item.id, file.path);
         }
       } else {
-        await vfs.createProject(result.project.name, result.project.description || '');
+        // Create project with the server's ID so files are linked correctly
+        await vfs.createProject(result.project.name, result.project.description || '', item.id);
       }
 
       // Create all files
@@ -122,7 +129,12 @@ export function ProjectsTab({
       }
 
       // Update project with server data and sync metadata
-      const pulledProject = await vfs.getProject(item.id);
+      let pulledProject: Project | null = null;
+      try {
+        pulledProject = await vfs.getProject(item.id);
+      } catch {
+        // Should not happen at this point
+      }
       if (pulledProject) {
         const serverUpdatedAt = result.project.updatedAt
           ? new Date(result.project.updatedAt)

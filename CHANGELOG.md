@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.26.1 - 2026-02-06
+- **Bug Fix**: Fixed server sync pull failing when project doesn't exist locally
+  - `vfs.getProject()` threw instead of returning null, crashing the pull flow
+  - New projects pulled from server were created with a new ID, orphaning synced files
+  - `createProject` now accepts an optional ID parameter to preserve server project IDs
+
 ## v1.26.0 - 2026-02-04
 - **Improved Screenshot Reliability**: Thumbnails now capture fully-loaded content
   - New resource-waiting layer: waits for fonts, images, and browser idle before capture
