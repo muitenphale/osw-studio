@@ -13,7 +13,7 @@
 
 import type { Database } from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
-import { VirtualFile, FileTreeNode, Site, EdgeFunction, FunctionLog, TableInfo, ColumnInfo, ServerFunction, Secret } from '../types';
+import { VirtualFile, FileTreeNode, Site, EdgeFunction, FunctionLog, TableInfo, ColumnInfo, ServerFunction, Secret, ScheduledFunction } from '../types';
 import { encryptSecret, isEncryptionConfigured } from '../../edge-functions/secrets-crypto';
 import { getSiteDatabase, closeSiteDatabase } from './sqlite-connection';
 
@@ -328,6 +328,36 @@ export class SiteDatabase {
 
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_secrets_name ON secrets(name)
+    `);
+
+    // Scheduled Functions (cron-triggered edge function execution)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduled_functions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        function_id TEXT NOT NULL,
+        cron_expression TEXT NOT NULL,
+        timezone TEXT NOT NULL DEFAULT 'UTC',
+        config TEXT NOT NULL DEFAULT '{}',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run_at TEXT,
+        next_run_at TEXT,
+        last_status TEXT,
+        last_error TEXT,
+        last_duration_ms INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (function_id) REFERENCES edge_functions(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_scheduled_functions_name ON scheduled_functions(name)
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_scheduled_functions_next_run ON scheduled_functions(next_run_at)
     `);
 
     this.initialized = true;
@@ -1623,6 +1653,139 @@ export class SiteDatabase {
   }
 
   // ============================================
+  // Scheduled Functions: CRUD
+  // ============================================
+
+  /**
+   * Create a new scheduled function
+   */
+  createScheduledFunction(fn: Omit<ScheduledFunction, 'id' | 'createdAt' | 'updatedAt'>): string {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO scheduled_functions (
+        id, name, description, function_id, cron_expression, timezone,
+        config, enabled, last_run_at, next_run_at, last_status, last_error,
+        last_duration_ms, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      fn.name,
+      fn.description ?? null,
+      fn.functionId,
+      fn.cronExpression,
+      fn.timezone || 'UTC',
+      JSON.stringify(fn.config || {}),
+      fn.enabled ? 1 : 0,
+      toISOString(fn.lastRunAt),
+      toISOString(fn.nextRunAt),
+      fn.lastStatus ?? null,
+      fn.lastError ?? null,
+      fn.lastDurationMs ?? null,
+      now,
+      now
+    );
+
+    return id;
+  }
+
+  /**
+   * Get a scheduled function by ID
+   */
+  getScheduledFunction(id: string): ScheduledFunction | null {
+    const row = this.db.prepare('SELECT * FROM scheduled_functions WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToScheduledFunction(row);
+  }
+
+  /**
+   * Get a scheduled function by name
+   */
+  getScheduledFunctionByName(name: string): ScheduledFunction | null {
+    const row = this.db.prepare('SELECT * FROM scheduled_functions WHERE name = ?').get(name) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToScheduledFunction(row);
+  }
+
+  /**
+   * Update a scheduled function
+   */
+  updateScheduledFunction(id: string, updates: Partial<Omit<ScheduledFunction, 'id' | 'createdAt' | 'updatedAt'>>): void {
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.name !== undefined) { setClauses.push('name = ?'); values.push(updates.name); }
+    if (updates.description !== undefined) { setClauses.push('description = ?'); values.push(updates.description); }
+    if (updates.functionId !== undefined) { setClauses.push('function_id = ?'); values.push(updates.functionId); }
+    if (updates.cronExpression !== undefined) { setClauses.push('cron_expression = ?'); values.push(updates.cronExpression); }
+    if (updates.timezone !== undefined) { setClauses.push('timezone = ?'); values.push(updates.timezone); }
+    if (updates.config !== undefined) { setClauses.push('config = ?'); values.push(JSON.stringify(updates.config)); }
+    if (updates.enabled !== undefined) { setClauses.push('enabled = ?'); values.push(updates.enabled ? 1 : 0); }
+    if (updates.lastRunAt !== undefined) { setClauses.push('last_run_at = ?'); values.push(toISOString(updates.lastRunAt)); }
+    if (updates.nextRunAt !== undefined) { setClauses.push('next_run_at = ?'); values.push(toISOString(updates.nextRunAt)); }
+    if (updates.lastStatus !== undefined) { setClauses.push('last_status = ?'); values.push(updates.lastStatus); }
+    if (updates.lastError !== undefined) { setClauses.push('last_error = ?'); values.push(updates.lastError); }
+    if (updates.lastDurationMs !== undefined) { setClauses.push('last_duration_ms = ?'); values.push(updates.lastDurationMs); }
+
+    if (setClauses.length === 0) return;
+
+    setClauses.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+
+    const sql = `UPDATE scheduled_functions SET ${setClauses.join(', ')} WHERE id = ?`;
+    this.db.prepare(sql).run(...values);
+  }
+
+  /**
+   * Delete a scheduled function
+   */
+  deleteScheduledFunction(id: string): void {
+    this.db.prepare('DELETE FROM scheduled_functions WHERE id = ?').run(id);
+  }
+
+  /**
+   * List all scheduled functions
+   */
+  listScheduledFunctions(): ScheduledFunction[] {
+    const rows = this.db.prepare('SELECT * FROM scheduled_functions ORDER BY name').all() as Record<string, unknown>[];
+    return rows.map(row => this.rowToScheduledFunction(row));
+  }
+
+  /**
+   * List scheduled functions that are due for execution
+   */
+  listDueScheduledFunctions(): ScheduledFunction[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM scheduled_functions WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+    ).all() as Record<string, unknown>[];
+    return rows.map(row => this.rowToScheduledFunction(row));
+  }
+
+  private rowToScheduledFunction(row: Record<string, unknown>): ScheduledFunction {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string | undefined,
+      functionId: row.function_id as string,
+      cronExpression: row.cron_expression as string,
+      timezone: row.timezone as string,
+      config: parseJSON(row.config as string, {}),
+      enabled: Boolean(row.enabled),
+      lastRunAt: row.last_run_at ? parseDate(row.last_run_at as string) : undefined,
+      nextRunAt: row.next_run_at ? parseDate(row.next_run_at as string) : undefined,
+      lastStatus: row.last_status as ScheduledFunction['lastStatus'],
+      lastError: row.last_error as string | undefined,
+      lastDurationMs: row.last_duration_ms as number | undefined,
+      createdAt: parseDate(row.created_at as string),
+      updatedAt: parseDate(row.updated_at as string),
+    };
+  }
+
+  // ============================================
   // DDL Execution
   // ============================================
 
@@ -1652,6 +1815,7 @@ export class SiteDatabase {
     'function_logs',
     'server_functions',
     'secrets',
+    'scheduled_functions',
   ];
 
   /**

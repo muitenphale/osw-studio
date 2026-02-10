@@ -7,8 +7,9 @@ import { SqlEditor } from './sql-editor';
 import { FunctionsManager } from './functions-manager';
 import { ServerFunctionsManager } from './server-functions-manager';
 import { SecretsManager } from './secrets-manager';
+import { ScheduledFunctionsManager } from './scheduled-functions-manager';
 import { LogsViewer } from './logs-viewer';
-import { Database, Code2, Terminal, ScrollText, Wrench, Key } from 'lucide-react';
+import { Database, Code2, Terminal, ScrollText, Wrench, Key, Clock } from 'lucide-react';
 
 interface DatabaseManagerProps {
   siteId: string;
@@ -20,7 +21,7 @@ export function DatabaseManager({ siteId }: DatabaseManagerProps) {
   return (
     <div className="h-full flex flex-col">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="schema" className="flex items-center gap-1.5">
             <Database className="h-3.5 w-3.5" />
             Schema
@@ -40,6 +41,10 @@ export function DatabaseManager({ siteId }: DatabaseManagerProps) {
           <TabsTrigger value="secrets" className="flex items-center gap-1.5">
             <Key className="h-3.5 w-3.5" />
             Secrets
+          </TabsTrigger>
+          <TabsTrigger value="schedules" className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" />
+            Schedules
           </TabsTrigger>
           <TabsTrigger value="logs" className="flex items-center gap-1.5">
             <ScrollText className="h-3.5 w-3.5" />
@@ -68,6 +73,10 @@ export function DatabaseManager({ siteId }: DatabaseManagerProps) {
             <SecretsManager siteId={siteId} />
           </TabsContent>
 
+          <TabsContent value="schedules" className="h-full m-0">
+            <ScheduledFunctionsManager siteId={siteId} />
+          </TabsContent>
+
           <TabsContent value="logs" className="h-full m-0">
             <LogsViewer siteId={siteId} />
           </TabsContent>
@@ -82,4 +91,5 @@ export { SqlEditor } from './sql-editor';
 export { FunctionsManager } from './functions-manager';
 export { ServerFunctionsManager } from './server-functions-manager';
 export { SecretsManager } from './secrets-manager';
+export { ScheduledFunctionsManager } from './scheduled-functions-manager';
 export { LogsViewer } from './logs-viewer';

@@ -180,6 +180,7 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 - ✅ Admin authentication (JWT sessions)
 - ✅ Static site publishing to `/sites/{siteId}/`
 - ✅ Edge Functions - JavaScript API endpoints with database access
+- ✅ Scheduled Functions - Run edge functions on cron schedules
 - ✅ Per-site SQLite databases (WAL mode) with SQL editor
 - ✅ Secrets management (AES-256-GCM encrypted)
 - ✅ SEO controls - Meta tags, Open Graph, Twitter Cards, auto-sitemap

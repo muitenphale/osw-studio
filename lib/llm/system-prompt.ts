@@ -8,6 +8,7 @@ export interface ServerContextMetadata {
   edgeFunctionCount: number;
   serverFunctionCount: number;
   secretCount: number;
+  scheduledFunctionCount: number;
 }
 
 export interface SystemPromptOptions {
@@ -41,6 +42,10 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
 
   if (serverContext.serverFunctionCount > 0) {
     section += `• Server Functions: ${serverContext.serverFunctionCount} helper(s) in /.server/server-functions/*.json\n`;
+  }
+
+  if (serverContext.scheduledFunctionCount > 0) {
+    section += `• Scheduled Functions: ${serverContext.scheduledFunctionCount} schedule(s) in /.server/scheduled-functions/*.json\n`;
   }
 
   // Always show secrets info (can create placeholders even if none exist yet)
@@ -82,6 +87,12 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
 
   section += `\n## Creating Server Functions\n`;
   section += `  json_patch /.server/server-functions/formatPrice.json rewrite '{"name":"formatPrice","enabled":true,"code":"const [amount, currency] = args; return currency + amount.toFixed(2);"}'\n`;
+
+  section += `\n## Creating Scheduled Functions\n`;
+  section += `Run an edge function on a cron schedule:\n`;
+  section += `  json_patch /.server/scheduled-functions/daily-cleanup.json rewrite '{"name":"daily-cleanup","functionName":"cleanup","cronExpression":"0 3 * * *","timezone":"UTC","enabled":true,"config":{}}'\n`;
+  section += `Cron patterns (minimum 5 min interval): */5 * * * * (every 5m), 0 * * * * (hourly), 0 8 * * * (daily 8am), 0 0 * * 1 (weekly Mon)\n`;
+
   section += `\nNote: echo also works for simple JSON, but json_patch handles escaping better for complex code.\n`;
 
   return section;

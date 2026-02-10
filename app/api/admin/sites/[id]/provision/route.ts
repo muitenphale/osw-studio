@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
 import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 import { SiteTemplateFeatures } from '@/lib/vfs/types';
+import cronParser from 'cron-parser';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -58,6 +59,7 @@ export async function POST(
       edgeFunctions: 0,
       serverFunctions: 0,
       secrets: 0,
+      scheduledFunctions: 0,
       databaseSchemaApplied: false,
     };
 
@@ -111,6 +113,43 @@ export async function POST(
         provisioned.secrets++;
       }
     }
+
+    // 6. Create scheduled functions (skip duplicates, must resolve edge function names)
+    let scheduledFunctionsCount = 0;
+    if (siteFeatures.scheduledFunctions) {
+      for (const sf of siteFeatures.scheduledFunctions) {
+        const existing = siteDb.getScheduledFunctionByName(sf.name);
+        if (existing) continue;
+
+        // Resolve functionName → functionId
+        const edgeFn = siteDb.getFunctionByName(sf.functionName);
+        if (!edgeFn) {
+          console.warn(`[Admin Provision API] Skipping scheduled function "${sf.name}": edge function "${sf.functionName}" not found`);
+          continue;
+        }
+
+        let nextRunAt: Date | undefined;
+        try {
+          const interval = cronParser.parseExpression(sf.cronExpression, { tz: sf.timezone || 'UTC', currentDate: new Date() });
+          nextRunAt = interval.next().toDate();
+        } catch {
+          // Leave undefined
+        }
+
+        siteDb.createScheduledFunction({
+          name: sf.name,
+          description: sf.description,
+          functionId: edgeFn.id,
+          cronExpression: sf.cronExpression,
+          timezone: sf.timezone || 'UTC',
+          config: sf.config || {},
+          enabled: sf.enabled !== false,
+          nextRunAt,
+        });
+        scheduledFunctionsCount++;
+      }
+    }
+    provisioned.scheduledFunctions = scheduledFunctionsCount;
 
     return NextResponse.json({ provisioned }, { status: 201 });
   } catch (error) {

@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth/session';
 import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
 import { SiteDatabase } from '@/lib/vfs/adapters/site-database';
 import {
   validateEdgeFunctionData,
   validateServerFunctionData,
   validateSecretData,
+  validateScheduledFunctionData,
   generateEdgeFunctionFile,
   generateServerFunctionFile,
   generateSecretFile,
+  generateScheduledFunctionFile,
 } from '@/lib/vfs/server-context';
+import cronParser from 'cron-parser';
 
 interface MutationRequest {
   operation: 'update' | 'create' | 'delete';
@@ -41,6 +45,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<MutationResponse>> {
   try {
+    await requireAuth();
     const { id: siteId } = await context.params;
     const body: MutationRequest = await request.json();
     const { operation, path, content } = body;
@@ -91,11 +96,18 @@ export async function POST(
       return handleServerFunctionUpdate(path, content, siteDb);
     }
 
+    if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
+      return handleScheduledFunctionUpdate(path, content, siteDb);
+    }
+
     return NextResponse.json({ success: false, error: `Unrecognized server context path: ${path}` }, { status: 400 });
   } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('[API] Server context mutation failed:', error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Mutation failed' },
+      { success: false, error: 'Mutation failed' },
       { status: 500 }
     );
   }
@@ -138,6 +150,19 @@ function handleDelete(path: string, siteDb: SiteDatabase): NextResponse<Mutation
     }
 
     siteDb.deleteServerFunction(fn.id);
+    return NextResponse.json({ success: true });
+  }
+
+  // Handle scheduled function deletion
+  if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
+    const filename = path.split('/').pop()!.replace('.json', '');
+
+    const fn = siteDb.getScheduledFunctionByName(filename);
+    if (!fn) {
+      return NextResponse.json({ success: false, error: `Scheduled function not found: ${filename}` }, { status: 404 });
+    }
+
+    siteDb.deleteScheduledFunction(fn.id);
     return NextResponse.json({ success: true });
   }
 
@@ -308,6 +333,101 @@ function handleServerFunctionUpdate(path: string, content: string, siteDb: SiteD
     file: {
       path: newPath,
       content: generateServerFunctionFile(updated),
+      isReadOnly: false,
+    }
+  });
+}
+
+function handleScheduledFunctionUpdate(path: string, content: string, siteDb: SiteDatabase): NextResponse<MutationResponse> {
+  // Parse JSON
+  let data: unknown;
+  try {
+    data = JSON.parse(content);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ success: false, error: `Invalid JSON: ${message}` }, { status: 400 });
+  }
+
+  // Validate
+  const validation = validateScheduledFunctionData(data);
+  if (!validation.valid) {
+    return NextResponse.json({ success: false, error: `Validation failed: ${validation.errors.join('; ')}` }, { status: 400 });
+  }
+
+  const fnData = data as { name: string; functionName: string; cronExpression: string; timezone?: string; description?: string; enabled?: boolean; config?: Record<string, unknown> };
+
+  // Validate minimum cron interval (5 minutes)
+  try {
+    const checkInterval = cronParser.parseExpression(fnData.cronExpression);
+    const first = checkInterval.next().toDate().getTime();
+    const second = checkInterval.next().toDate().getTime();
+    if (second - first < 5 * 60 * 1000 - 1000) {
+      return NextResponse.json({ success: false, error: 'Minimum interval is 5 minutes' }, { status: 400 });
+    }
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid cron expression' }, { status: 400 });
+  }
+
+  // Resolve functionName → functionId
+  const edgeFn = siteDb.getFunctionByName(fnData.functionName);
+  if (!edgeFn) {
+    return NextResponse.json({ success: false, error: `Edge function not found: ${fnData.functionName}` }, { status: 400 });
+  }
+
+  // Get filename from path to check for existing
+  const filename = path.split('/').pop()!.replace('.json', '');
+  const existingFn = siteDb.getScheduledFunctionByName(filename);
+
+  // Check limit (max 50 per site) for new functions
+  if (!existingFn) {
+    const allScheduled = siteDb.listScheduledFunctions();
+    if (allScheduled.length >= 50) {
+      return NextResponse.json({ success: false, error: 'Maximum of 50 scheduled functions per site' }, { status: 400 });
+    }
+  }
+
+  // Calculate nextRunAt
+  let nextRunAt: Date | undefined;
+  try {
+    const interval = cronParser.parseExpression(fnData.cronExpression, { tz: fnData.timezone || 'UTC', currentDate: new Date() });
+    nextRunAt = interval.next().toDate();
+  } catch {
+    // Leave undefined
+  }
+
+  if (existingFn) {
+    siteDb.updateScheduledFunction(existingFn.id, {
+      name: fnData.name,
+      functionId: edgeFn.id,
+      cronExpression: fnData.cronExpression,
+      timezone: fnData.timezone || 'UTC',
+      description: fnData.description,
+      enabled: fnData.enabled ?? true,
+      config: fnData.config || {},
+      nextRunAt,
+    });
+  } else {
+    siteDb.createScheduledFunction({
+      name: fnData.name,
+      functionId: edgeFn.id,
+      cronExpression: fnData.cronExpression,
+      timezone: fnData.timezone || 'UTC',
+      description: fnData.description,
+      enabled: fnData.enabled ?? true,
+      config: fnData.config || {},
+      nextRunAt,
+    });
+  }
+
+  // Get the updated function
+  const updated = siteDb.getScheduledFunctionByName(fnData.name)!;
+  const newPath = `/.server/scheduled-functions/${fnData.name}.json`;
+
+  return NextResponse.json({
+    success: true,
+    file: {
+      path: newPath,
+      content: generateScheduledFunctionFile(updated, edgeFn.name),
       isReadOnly: false,
     }
   });

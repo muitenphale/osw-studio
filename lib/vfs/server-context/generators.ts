@@ -9,7 +9,8 @@
  * - /.server/server-functions/{name}.json - individual server functions
  */
 
-import { EdgeFunction, ServerFunction, Secret } from '../types';
+import { EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '../types';
+import cronParser from 'cron-parser';
 
 // ============================================
 // Type Definitions
@@ -37,6 +38,19 @@ export interface SecretFileData {
   hasValue?: boolean;
 }
 
+export interface ScheduledFunctionFileData {
+  name: string;
+  description?: string;
+  functionName: string;      // Resolved name of the linked edge function
+  cronExpression: string;
+  timezone: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  lastStatus?: string;
+}
+
 export interface ServerContextMetadata {
   siteName: string;
   siteId: string;
@@ -44,6 +58,7 @@ export interface ServerContextMetadata {
   edgeFunctionCount: number;
   serverFunctionCount: number;
   secretCount: number;
+  scheduledFunctionCount: number;
 }
 
 export interface ValidationResult {
@@ -96,6 +111,28 @@ export function generateSecretFile(secret: Secret): string {
 }
 
 /**
+ * Generate scheduled function file in JSON format
+ */
+export function generateScheduledFunctionFile(
+  fn: ScheduledFunction,
+  edgeFunctionName: string
+): string {
+  const data: ScheduledFunctionFileData = {
+    name: fn.name,
+    description: fn.description,
+    functionName: edgeFunctionName,
+    cronExpression: fn.cronExpression,
+    timezone: fn.timezone,
+    enabled: fn.enabled,
+    config: fn.config,
+    lastRunAt: fn.lastRunAt?.toISOString(),
+    nextRunAt: fn.nextRunAt?.toISOString(),
+    lastStatus: fn.lastStatus,
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+/**
  * Generate metadata for system prompt
  */
 export function generateServerContextMetadata(
@@ -103,7 +140,8 @@ export function generateServerContextMetadata(
   siteId: string,
   edgeFunctions: EdgeFunction[],
   serverFunctions: ServerFunction[],
-  secrets: Secret[]
+  secrets: Secret[],
+  scheduledFunctions?: ScheduledFunction[]
 ): ServerContextMetadata {
   return {
     siteName,
@@ -112,6 +150,7 @@ export function generateServerContextMetadata(
     edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
     serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
     secretCount: secrets.length,
+    scheduledFunctionCount: scheduledFunctions ? scheduledFunctions.filter(f => f.enabled).length : 0,
   };
 }
 
@@ -247,6 +286,69 @@ export function validateSecretData(data: unknown): ValidationResult {
   // Description validation (optional)
   if (secret.description !== undefined && typeof secret.description !== 'string') {
     errors.push('"description" must be a string');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate scheduled function data before saving via server context
+ */
+export function validateScheduledFunctionData(data: unknown): ValidationResult {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Invalid JSON: expected an object'] };
+  }
+
+  const fn = data as Record<string, unknown>;
+
+  // Name validation (URL-safe)
+  if (!fn.name || typeof fn.name !== 'string') {
+    errors.push('Missing or invalid "name" field');
+  } else if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(fn.name)) {
+    errors.push('Name must be lowercase letters, numbers, and hyphens only');
+  }
+
+  // functionName validation
+  if (!fn.functionName || typeof fn.functionName !== 'string') {
+    errors.push('Missing or invalid "functionName" field');
+  }
+
+  // cronExpression validation
+  if (!fn.cronExpression || typeof fn.cronExpression !== 'string') {
+    errors.push('Missing or invalid "cronExpression" field');
+  } else {
+    try {
+      cronParser.parseExpression(fn.cronExpression);
+    } catch {
+      errors.push('Invalid cron expression');
+    }
+  }
+
+  // timezone validation (optional, defaults to UTC)
+  if (fn.timezone !== undefined) {
+    if (typeof fn.timezone !== 'string') {
+      errors.push('"timezone" must be a string');
+    } else {
+      try {
+        Intl.DateTimeFormat(undefined, { timeZone: fn.timezone });
+      } catch {
+        errors.push(`Invalid timezone: ${fn.timezone}`);
+      }
+    }
+  }
+
+  // enabled validation (optional)
+  if (fn.enabled !== undefined && typeof fn.enabled !== 'boolean') {
+    errors.push('"enabled" must be a boolean');
+  }
+
+  // config validation (optional, must be object)
+  if (fn.config !== undefined) {
+    if (typeof fn.config !== 'object' || fn.config === null || Array.isArray(fn.config)) {
+      errors.push('"config" must be a plain object');
+    }
   }
 
   return { valid: errors.length === 0, errors };

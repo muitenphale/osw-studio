@@ -142,6 +142,7 @@ export class VirtualFileSystem {
     edgeFunctionCount: number;
     serverFunctionCount: number;
     secretCount: number;
+    scheduledFunctionCount: number;
   } | null = null;
 
   /**
@@ -168,6 +169,7 @@ export class VirtualFileSystem {
     edgeFunctionCount: number;
     serverFunctionCount: number;
     secretCount: number;
+    scheduledFunctionCount: number;
   } | null {
     return this.serverContextMetadata;
   }
@@ -200,6 +202,7 @@ export class VirtualFileSystem {
         generateEdgeFunctionFile,
         generateServerFunctionFile,
         generateSecretFile,
+        generateScheduledFunctionFile,
       } = await import('./server-context');
 
       const adapter = getSQLiteAdapter();
@@ -234,6 +237,17 @@ export class VirtualFileSystem {
         this.mountTransientFile(`/.server/server-functions/${fn.name}.json`, generateServerFunctionFile(fn), false);
       }
 
+      // Mount scheduled functions - individual files
+      const scheduledFunctions = siteDb.listScheduledFunctions();
+      for (const fn of scheduledFunctions) {
+        const edgeFn = siteDb.getFunction(fn.functionId);
+        this.mountTransientFile(
+          `/.server/scheduled-functions/${fn.name}.json`,
+          generateScheduledFunctionFile(fn, edgeFn?.name ?? 'unknown'),
+          false
+        );
+      }
+
       // Store metadata for the orchestrator
       this.serverContextSiteId = siteId;
       this.serverContextMetadata = {
@@ -243,6 +257,7 @@ export class VirtualFileSystem {
         edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
         serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
         secretCount: secrets.length,
+        scheduledFunctionCount: scheduledFunctions.filter(f => f.enabled).length,
       };
 
       logger.info(`[VFS] Mounted server context for site ${siteId} (${siteName})`);

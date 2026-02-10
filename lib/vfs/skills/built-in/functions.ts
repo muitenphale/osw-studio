@@ -246,6 +246,94 @@ echo '{"name":"test","code":"const x = \"value\";"}' > file.json
 
 ---
 
+## Scheduled Functions (Cron Jobs)
+
+Run an edge function automatically on a cron schedule.
+
+### File Location
+` + "```" + `
+/.server/scheduled-functions/{schedule-name}.json
+` + "```" + `
+
+### JSON Format
+` + "```" + `json
+{
+  "name": "schedule-name",
+  "functionName": "edge-function-name",
+  "cronExpression": "0 8 * * *",
+  "timezone": "UTC",
+  "enabled": true,
+  "config": {}
+}
+` + "```" + `
+
+### Fields
+- ` + "`name`" + ` - URL-safe identifier (lowercase, numbers, hyphens)
+- ` + "`functionName`" + ` - Name of the edge function to invoke
+- ` + "`cronExpression`" + ` - Standard cron syntax (5 fields: minute hour day month weekday)
+- ` + "`timezone`" + ` - IANA timezone (e.g., "UTC", "America/New_York")
+- ` + "`config`" + ` - Custom JSON object passed as request body to the edge function
+
+### Cron Expression Reference
+
+Minimum interval: 5 minutes.
+
+` + "```" + `
+*/5 * * * *    Every 5 minutes
+0 * * * *      Every hour
+0 8 * * *      Daily at 8am
+0 0 * * 1      Every Monday at midnight
+0 0 1 * *      First of every month
+` + "```" + `
+
+### Examples
+
+**Daily database cleanup at 3am UTC:**
+` + "```" + `json
+{
+  "name": "daily-cleanup",
+  "functionName": "cleanup",
+  "cronExpression": "0 3 * * *",
+  "timezone": "UTC",
+  "enabled": true,
+  "config": { "daysToKeep": 30 }
+}
+` + "```" + `
+
+**Hourly stats aggregation:**
+` + "```" + `json
+{
+  "name": "hourly-stats",
+  "functionName": "aggregate-stats",
+  "cronExpression": "0 * * * *",
+  "timezone": "UTC",
+  "enabled": true,
+  "config": {}
+}
+` + "```" + `
+
+### Creating a Scheduled Function
+` + "```" + `javascript
+json_patch({
+  "file_path": "/.server/scheduled-functions/daily-cleanup.json",
+  "operations": [{
+    "type": "rewrite",
+    "content": JSON.stringify({
+      "name": "daily-cleanup",
+      "functionName": "cleanup",
+      "cronExpression": "0 3 * * *",
+      "timezone": "UTC",
+      "enabled": true,
+      "config": { "daysToKeep": 30 }
+    }, null, 2)
+  }]
+})
+` + "```" + `
+
+**Note:** The edge function referenced by ` + "`functionName`" + ` must exist first. The scheduled function invokes it with ` + "`config`" + ` as the request body.
+
+---
+
 ## Common Mistakes
 
 ### Forgetting return after Response
