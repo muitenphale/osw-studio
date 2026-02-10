@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.28.0 - 2026-02-10
+- **Scheduled Functions**: Run edge functions on cron schedules via the new Schedules tab in Server Settings
+  - Create, edit, enable/disable, and delete scheduled functions from the admin UI
+  - Standard 5-field cron expressions with timezone support
+  - Custom JSON config passed as request body to the linked edge function
+  - Execution tracking: next run time, last status (success/error), last run time
+  - AI integration: scheduled functions visible in `/.server/scheduled-functions/` context and documented in the `server-functions` skill
+- **Server Context**: AI system prompt now includes scheduled function count and creation instructions
+
 ## v1.27.0 - 2026-02-06
 - **Site Templates**: New template type that bundles frontend files AND backend infrastructure
   - Edge functions, server functions, database schema, and secrets metadata in one `.oswt` file

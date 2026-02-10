@@ -419,6 +419,7 @@ When a site is selected, the AI has access to:
 - **Edge Functions** - Available API endpoints
 - **Database Schema** - Tables, columns, and types
 - **Server Functions** - Reusable helper code
+- **Scheduled Functions** - Cron schedules and linked functions
 - **Secrets** - Available secret names (not values)
 
 ### Example Prompts
@@ -437,6 +438,10 @@ I need to use the STRIPE_KEY secret in a payment function
 
 ```
 Show me the current database schema
+```
+
+```
+Set up a scheduled function to clean up old records every night at 3am
 ```
 
 ### How It Works

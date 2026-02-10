@@ -284,6 +284,17 @@ ADMIN_PASSWORD=...
 
 **See**: [Server Mode Guide](?doc=server-mode) for complete setup
 
+### Can I run periodic/background tasks?
+
+Yes! **Scheduled Functions** let you run edge functions on a cron schedule. Use them for database cleanup, report generation, API syncing, or any recurring task.
+
+1. Create an edge function with the logic you want to run
+2. Go to **Server Settings → Schedules**
+3. Create a schedule with a cron expression (e.g., `0 8 * * *` for daily at 8am)
+4. Link it to your edge function and optionally pass config data
+
+**See**: [Server Features → Scheduled Functions](?doc=server-features#scheduled-functions-cron-jobs)
+
 ---
 
 ## Troubleshooting

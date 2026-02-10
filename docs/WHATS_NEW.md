@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.28.0 - Scheduled Functions (2026-02-10)
+
+Run edge functions automatically on a cron schedule. Set up daily cleanups, hourly stats aggregation, weekly report emails, or any recurring task — all managed from the admin UI.
+
+- **Scheduled Functions** - New **Schedules** tab in Server Settings to create, edit, enable/disable, and delete cron-triggered functions
+- **Cron Scheduling** - Standard 5-field cron expressions with timezone support (e.g., `0 8 * * *` for daily at 8am)
+- **Custom Config** - Pass a JSON object as the request body to the linked edge function on each run
+- **Execution Tracking** - Each schedule shows next run time, last status (success/error), and last run time
+- **AI Awareness** - The AI can see and create scheduled functions via `/.server/scheduled-functions/` context files
+
+**See**: [Server Features → Scheduled Functions](?doc=server-features#scheduled-functions-cron-jobs) for the full guide with examples.
+
+---
+
 ## v1.27.0 - Site Templates (2026-02-06)
 
 A new template type that bundles both frontend files AND backend infrastructure definitions. Site templates include edge functions, server functions, database schema, and secrets metadata — everything needed to deploy a full-stack site in Server Mode.

@@ -425,6 +425,25 @@ export interface Secret {
   // Note: value is never exposed in this interface - only stored encrypted
 }
 
+// Scheduled Functions (cron-triggered edge function execution)
+export interface ScheduledFunction {
+  id: string;
+  name: string;                          // URL-safe: lowercase, numbers, hyphens
+  description?: string;
+  functionId: string;                     // FK → edge_functions.id
+  cronExpression: string;                 // e.g. '0 8 * * *'
+  timezone: string;                       // e.g. 'UTC', 'America/New_York'
+  config: Record<string, unknown>;        // Custom body passed to edge function
+  enabled: boolean;
+  lastRunAt?: Date;
+  nextRunAt?: Date;
+  lastStatus?: 'success' | 'error';
+  lastError?: string;
+  lastDurationMs?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // Site Template Features (for site templates that include backend infrastructure)
 export interface SiteTemplateFeatures {
   edgeFunctions?: Array<{
@@ -444,6 +463,15 @@ export interface SiteTemplateFeatures {
   secrets?: Array<{
     name: string;
     description?: string;
+  }>;
+  scheduledFunctions?: Array<{
+    name: string;
+    functionName: string;   // name of the edge function to link
+    cronExpression: string;
+    timezone?: string;
+    description?: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
   }>;
   databaseSchema?: string;
   siteSettings?: Record<string, unknown>;

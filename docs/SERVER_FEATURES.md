@@ -10,6 +10,7 @@ Server Mode unlocks powerful backend capabilities for your published sites, incl
 - **Edge Functions** - REST API endpoints with JavaScript runtime
 - **Database** - Per-site SQLite with SQL editor and schema browser
 - **Server Functions** - Reusable helper code for edge functions
+- **Scheduled Functions** - Run edge functions on cron schedules
 - **Secrets** - Encrypted storage for API keys and tokens
 - **Logs** - Execution history and debugging
 - **AI Integration** - AI awareness of server features via `/.server/` folder
@@ -28,12 +29,13 @@ Server Mode unlocks powerful backend capabilities for your published sites, incl
    - The server icon only appears for published sites with database enabled
    - You can also access it via the "..." dropdown menu → "Server Settings"
 
-The Server Settings modal contains six tabs:
+The Server Settings modal contains seven tabs:
 - **Schema** - Browse tables and columns
 - **SQL** - Execute raw SQL queries
 - **Functions** - Create and manage edge functions (HTTP endpoints)
 - **Helpers** - Create and manage server functions (reusable code)
 - **Secrets** - Store encrypted API keys and tokens
+- **Schedules** - Create and manage scheduled functions (cron jobs)
 - **Logs** - View function execution history
 
 ---
@@ -550,6 +552,131 @@ Response.json({ charge });
 
 ---
 
+## Scheduled Functions (Cron Jobs)
+
+Scheduled functions run edge functions automatically on a cron schedule. Use them for periodic tasks like database cleanup, report generation, cache warming, or external API syncing.
+
+### Creating a Scheduled Function
+
+1. Go to **Server Settings → Schedules**
+2. Click **New Schedule**
+3. Configure:
+   - **Name**: Lowercase letters, numbers, and hyphens (e.g., `daily-cleanup`)
+   - **Edge Function**: Select which edge function to invoke
+   - **Cron Expression**: Standard 5-field cron syntax (e.g., `0 8 * * *`)
+   - **Timezone**: IANA timezone (default: `UTC`)
+   - **Description**: Optional description
+   - **Config**: Optional JSON object passed as the request body
+4. Click **Create Schedule**
+
+### How It Works
+
+When a scheduled function fires:
+1. The cron scheduler triggers at the specified time
+2. The linked edge function is invoked with the `config` object as `request.body`
+3. The execution result (success/error) and duration are recorded
+4. The next run time is calculated from the cron expression
+
+The edge function runs in the same QuickJS sandbox as HTTP-triggered invocations, with full access to `db`, `fetch`, `secrets`, `server`, and `console`.
+
+### Cron Expression Reference
+
+Cron expressions use 5 fields: `minute hour day-of-month month day-of-week`
+
+**Minimum interval: 5 minutes.** Expressions that resolve to intervals shorter than 5 minutes will be rejected.
+
+| Expression | Description |
+|------------|-------------|
+| `*/5 * * * *` | Every 5 minutes |
+| `0 * * * *` | Every hour (at minute 0) |
+| `0 8 * * *` | Daily at 8:00 AM |
+| `0 0 * * *` | Daily at midnight |
+| `30 9 * * 1-5` | Weekdays at 9:30 AM |
+| `0 0 * * 1` | Every Monday at midnight |
+| `0 0 1 * *` | First of every month at midnight |
+| `0 0 1 1 *` | January 1st at midnight (yearly) |
+
+**Field ranges:**
+- Minute: 0-59
+- Hour: 0-23
+- Day of month: 1-31
+- Month: 1-12
+- Day of week: 0-7 (0 and 7 = Sunday)
+
+### Example Scheduled Functions
+
+#### Daily Database Cleanup
+Clean up old records every day at 3:00 AM UTC:
+
+- **Edge Function** (`cleanup`):
+```javascript
+const daysToKeep = request.body.daysToKeep || 30;
+const cutoff = new Date(Date.now() - daysToKeep * 86400000).toISOString();
+
+const result = db.run('DELETE FROM logs WHERE created_at < ?', [cutoff]);
+Response.json({ deleted: result.changes, cutoff });
+```
+
+- **Schedule config**:
+  - Cron: `0 3 * * *`
+  - Config: `{ "daysToKeep": 30 }`
+
+#### Hourly Stats Aggregation
+Aggregate analytics data every hour:
+
+- **Edge Function** (`aggregate-stats`):
+```javascript
+const hourAgo = new Date(Date.now() - 3600000).toISOString();
+const stats = db.query('SELECT COUNT(*) as views FROM pageviews WHERE timestamp > ?', [hourAgo]);
+
+db.run('INSERT INTO hourly_stats (hour, views) VALUES (?, ?)',
+  [new Date().toISOString().slice(0, 13), stats[0].views]);
+
+Response.json({ aggregated: true, views: stats[0].views });
+```
+
+- **Schedule config**:
+  - Cron: `0 * * * *`
+  - Config: `{}`
+
+#### Weekly Report Email
+Send a weekly summary every Monday at 9:00 AM:
+
+- **Edge Function** (`send-weekly-report`):
+```javascript
+const apiKey = secrets.get('SENDGRID_KEY');
+if (!apiKey) { Response.error('Email not configured', 500); return; }
+
+const stats = db.query('SELECT COUNT(*) as total FROM orders WHERE created_at > datetime("now", "-7 days")');
+
+const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+  method: 'POST',
+  headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    personalizations: [{ to: [{ email: request.body.recipient }] }],
+    from: { email: 'reports@example.com' },
+    subject: 'Weekly Report',
+    content: [{ type: 'text/plain', value: 'Orders this week: ' + stats[0].total }]
+  })
+});
+
+Response.json({ sent: res.ok });
+```
+
+- **Schedule config**:
+  - Cron: `0 9 * * 1`
+  - Timezone: `America/New_York`
+  - Config: `{ "recipient": "admin@example.com" }`
+
+### Managing Scheduled Functions
+
+- **Enable/Disable**: Toggle from the dropdown menu. Disabled schedules won't fire.
+- **Edit**: Click Edit to modify the cron expression, linked function, timezone, or config.
+- **Delete**: Click Delete to remove (cannot be undone).
+- **Status tracking**: Each schedule card shows the next run time, last run status (success/error), and last run time.
+
+---
+
 ## SQL Editor
 
 The SQL Editor allows direct SQL query execution against your site's database.
@@ -736,6 +863,11 @@ Each log entry shows:
 | GET | `/api/admin/sites/{siteId}/server-functions/{id}` | Get server function |
 | PUT | `/api/admin/sites/{siteId}/server-functions/{id}` | Update server function |
 | DELETE | `/api/admin/sites/{siteId}/server-functions/{id}` | Delete server function |
+| GET | `/api/admin/sites/{siteId}/scheduled-functions` | List scheduled functions |
+| POST | `/api/admin/sites/{siteId}/scheduled-functions` | Create scheduled function |
+| GET | `/api/admin/sites/{siteId}/scheduled-functions/{id}` | Get scheduled function |
+| PUT | `/api/admin/sites/{siteId}/scheduled-functions/{id}` | Update scheduled function |
+| DELETE | `/api/admin/sites/{siteId}/scheduled-functions/{id}` | Delete scheduled function |
 | GET | `/api/admin/sites/{siteId}/secrets` | List secrets (metadata only) |
 | POST | `/api/admin/sites/{siteId}/secrets` | Create secret |
 | GET | `/api/admin/sites/{siteId}/secrets/{id}` | Get secret (metadata only) |
@@ -760,18 +892,20 @@ OSW Studio's AI assistant can understand and work with your server features when
    - Edge functions (endpoints, methods)
    - Database schema (tables, columns)
    - Server functions (helpers)
+   - Scheduled functions (cron schedules)
    - Secrets (names only, not values)
 
 ### The `/.server/` Folder
 
 When a site is selected, a hidden `/.server/` folder appears in the file explorer containing:
 
-| File | Contents |
-|------|----------|
-| `edge-functions.json` | List of edge function endpoints |
-| `database-schema.json` | Tables, columns, and types |
-| `server-functions.json` | Available helper functions |
-| `secrets.json` | Secret names (not values) |
+| Folder | Contents |
+|--------|----------|
+| `edge-functions/*.json` | Edge function endpoints |
+| `server-functions/*.json` | Helper functions |
+| `scheduled-functions/*.json` | Cron schedules |
+| `secrets/*.json` | Secret names (not values) |
+| `db/schema.sql` | Database schema |
 
 These files are **read-only** and **transient** - they reflect the current site's state but are not saved with the project.
 
@@ -789,6 +923,10 @@ Create an edge function to list all products
 
 ```
 I need an endpoint that validates API keys using the STRIPE_KEY secret
+```
+
+```
+Create a scheduled function to clean up old records every night
 ```
 
 ```

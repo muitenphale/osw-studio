@@ -1,0 +1,277 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { ScheduledFunction, EdgeFunction } from '@/lib/vfs/types';
+import {
+  Plus, Loader2, AlertCircle, Clock, MoreVertical, Pencil, Trash2,
+  ToggleLeft, ToggleRight
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ScheduledFunctionEditor } from './scheduled-function-editor';
+import { cn } from '@/lib/utils';
+
+interface ScheduledFunctionsManagerProps {
+  siteId: string;
+}
+
+export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerProps) {
+  const [scheduledFunctions, setScheduledFunctions] = useState<ScheduledFunction[]>([]);
+  const [edgeFunctions, setEdgeFunctions] = useState<EdgeFunction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingFunction, setEditingFunction] = useState<ScheduledFunction | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  useEffect(() => {
+    loadFunctions();
+  }, [siteId]);
+
+  const loadFunctions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [schedRes, fnRes] = await Promise.all([
+        fetch(`/api/admin/sites/${siteId}/scheduled-functions`),
+        fetch(`/api/admin/sites/${siteId}/functions`),
+      ]);
+      if (!schedRes.ok) {
+        const data = await schedRes.json();
+        throw new Error(data.error || 'Failed to load scheduled functions');
+      }
+      if (!fnRes.ok) {
+        const data = await fnRes.json();
+        throw new Error(data.error || 'Failed to load edge functions');
+      }
+      const schedData = await schedRes.json();
+      const fnData = await fnRes.json();
+      setScheduledFunctions(schedData.scheduledFunctions);
+      setEdgeFunctions(fnData.functions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load scheduled functions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleEnabled = async (fn: ScheduledFunction) => {
+    try {
+      const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions/${fn.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !fn.enabled }),
+      });
+      if (!res.ok) throw new Error('Failed to update scheduled function');
+      await loadFunctions();
+    } catch (err) {
+      console.error('Failed to toggle scheduled function:', err);
+    }
+  };
+
+  const deleteFunction = async (fn: ScheduledFunction) => {
+    if (!confirm(`Delete scheduled function "${fn.name}"? This cannot be undone.`)) return;
+
+    try {
+      const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions/${fn.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete scheduled function');
+      await loadFunctions();
+    } catch (err) {
+      console.error('Failed to delete scheduled function:', err);
+    }
+  };
+
+  const handleSave = async (data: Partial<ScheduledFunction>) => {
+    try {
+      if (editingFunction) {
+        const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions/${editingFunction.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to update scheduled function');
+        }
+      } else {
+        const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to create scheduled function');
+        }
+      }
+
+      setEditingFunction(null);
+      setIsCreating(false);
+      await loadFunctions();
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const getEdgeFunctionName = (functionId: string) => {
+    const fn = edgeFunctions.find(f => f.id === functionId);
+    return fn?.name || 'Unknown';
+  };
+
+  const formatDate = (date: Date | string | undefined) => {
+    if (!date) return 'N/A';
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" onClick={loadFunctions}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium">Scheduled Functions</h3>
+        <Button size="sm" onClick={() => setIsCreating(true)}>
+          <Plus className="h-4 w-4 mr-1" />
+          New Schedule
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        {scheduledFunctions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full p-8 text-center border rounded-lg">
+            <Clock className="h-8 w-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">No scheduled functions yet</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              Run edge functions on a cron schedule
+            </p>
+            <Button size="sm" onClick={() => setIsCreating(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Create Schedule
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {scheduledFunctions.map(fn => (
+              <div
+                key={fn.id}
+                className={cn(
+                  "border rounded-lg p-4 transition-colors",
+                  !fn.enabled && "opacity-60 bg-muted/30"
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Clock className="h-4 w-4 text-orange-500 shrink-0" />
+                      <span className="font-mono font-medium truncate">{fn.name}</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-600 shrink-0">
+                        {fn.cronExpression}
+                      </span>
+                      {!fn.enabled && (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0">disabled</span>
+                      )}
+                    </div>
+                    {fn.description && (
+                      <p className="text-sm text-muted-foreground mt-1 truncate">
+                        {fn.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
+                      <span className="shrink-0">
+                        Function: <span className="font-mono">{getEdgeFunctionName(fn.functionId)}</span>
+                      </span>
+                      <span className="shrink-0">Next: {formatDate(fn.nextRunAt)}</span>
+                      {fn.lastStatus && (
+                        <span className={cn(
+                          "shrink-0",
+                          fn.lastStatus === 'success' ? "text-green-600" : "text-red-600"
+                        )}>
+                          Last: {fn.lastStatus}
+                          {fn.lastRunAt && ` (${formatDate(fn.lastRunAt)})`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setEditingFunction(fn)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => toggleEnabled(fn)}>
+                        {fn.enabled ? (
+                          <>
+                            <ToggleLeft className="h-4 w-4 mr-2" />
+                            Disable
+                          </>
+                        ) : (
+                          <>
+                            <ToggleRight className="h-4 w-4 mr-2" />
+                            Enable
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => deleteFunction(fn)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {(isCreating || editingFunction) && (
+        <ScheduledFunctionEditor
+          scheduledFunction={editingFunction}
+          edgeFunctions={edgeFunctions}
+          isOpen={true}
+          onClose={() => {
+            setIsCreating(false);
+            setEditingFunction(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}

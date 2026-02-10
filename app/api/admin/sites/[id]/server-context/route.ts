@@ -4,6 +4,7 @@ import {
   generateEdgeFunctionFile,
   generateServerFunctionFile,
   generateSecretFile,
+  generateScheduledFunctionFile,
 } from '@/lib/vfs/server-context';
 
 interface ServerContextFile {
@@ -83,6 +84,17 @@ export async function GET(
       });
     }
 
+    // Scheduled functions - individual files
+    const scheduledFunctions = siteDb.listScheduledFunctions();
+    for (const fn of scheduledFunctions) {
+      const edgeFn = siteDb.getFunction(fn.functionId);
+      files.push({
+        path: `/.server/scheduled-functions/${fn.name}.json`,
+        content: generateScheduledFunctionFile(fn, edgeFn?.name ?? 'unknown'),
+        isReadOnly: false,
+      });
+    }
+
     // Metadata for the orchestrator
     const metadata = {
       siteName: site.name,
@@ -91,6 +103,7 @@ export async function GET(
       edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
       serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
       secretCount: secrets.length,
+      scheduledFunctionCount: scheduledFunctions.filter(f => f.enabled).length,
     };
 
     return NextResponse.json({ files, metadata });
