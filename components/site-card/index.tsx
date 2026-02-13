@@ -31,6 +31,8 @@ import {
   FileBox,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { ThumbnailArea } from '@/components/ui/thumbnail-area';
+import { captureSiteScreenshot } from '@/lib/utils/site-thumbnail';
 
 interface SiteCardProps {
   site: Site;
@@ -45,6 +47,7 @@ interface SiteCardProps {
   onEnable: (siteId: string) => void;
   onDelete: (siteId: string) => void;
   onExportAsTemplate?: (site: Site) => void;
+  onThumbnailChange?: (siteId: string, image: string | undefined) => void;
 }
 
 export function SiteCard({
@@ -60,6 +63,7 @@ export function SiteCard({
   onEnable,
   onDelete,
   onExportAsTemplate,
+  onThumbnailChange,
 }: SiteCardProps) {
   // Determine status
   const isPublished = site.lastPublishedVersion !== null && site.lastPublishedVersion !== undefined;
@@ -81,18 +85,17 @@ export function SiteCard({
     <div className="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow bg-card">
       {/* Preview Image */}
       <div className="aspect-video bg-muted relative">
-        {site.previewImage || project?.previewImage ? (
-          <img
-            key={site.previewUpdatedAt ? new Date(site.previewUpdatedAt).getTime() : 'static'}
-            src={site.previewImage || project?.previewImage}
-            alt={site.name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <Globe className="h-12 w-12 text-muted-foreground" />
-          </div>
-        )}
+        <ThumbnailArea
+          image={site.previewImage || project?.previewImage}
+          onCapture={isPublished ? async () => {
+            const siteUrl = site.customDomain
+              ? `https://${site.customDomain}`
+              : `${window.location.origin}/sites/${site.id}`;
+            return captureSiteScreenshot(siteUrl);
+          } : undefined}
+          onImageChange={(img) => onThumbnailChange?.(site.id, img)}
+          size="md"
+        />
 
         {/* Publishing spinner overlay */}
         {isPublishing && (

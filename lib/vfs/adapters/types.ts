@@ -82,6 +82,7 @@ export interface StorageAdapter {
 
   createSite?(site: Site): Promise<void>;
   getSite?(siteId: string): Promise<Site | null>;
+  getSiteBySlug?(slug: string): Promise<Site | null>;
   listSites?(): Promise<Site[]>;
   listSitesByProject?(projectId: string): Promise<Site[]>;
   updateSite?(site: Site): Promise<void>;

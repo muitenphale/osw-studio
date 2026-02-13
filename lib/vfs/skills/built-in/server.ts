@@ -39,7 +39,7 @@ Quick reference for OSW Studio Server Mode features. For detailed guidance, read
 ## Quick Reference
 
 ### Edge Functions
-API endpoints accessible at ` + "`/api/sites/{siteId}/functions/{name}`" + `
+API endpoints — call from client JS with simple paths: ` + "`fetch('/function-name')`" + ` (platform auto-routes)
 
 ` + "```" + `json
 {

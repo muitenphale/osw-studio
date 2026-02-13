@@ -4,7 +4,7 @@
  */
 
 import { ToolDefinition, ToolCall } from './types';
-import { vfs, VirtualFileSystem } from '@/lib/vfs';
+import { vfs } from '@/lib/vfs';
 import { vfsShell } from '@/lib/vfs/cli-shell';
 import { execStringPatch } from './string-patch';
 import { logger } from '../utils';
@@ -155,6 +155,13 @@ Examples:
           // Execute command via browser-side VFS shell
           const result = await vfsShell.execute(projectId, cmdArray);
 
+          // Refresh server context if shell command modified .server/ files
+          if (isWriteOperation(cmdArray) && cmdArray.some(a => a.includes('/.server/'))) {
+            if (vfs.hasServerContext()) {
+              await vfs.refreshServerContext();
+            }
+          }
+
           if (result.success) {
             return result.stdout && result.stdout.trim().length > 0
               ? result.stdout
@@ -302,10 +309,16 @@ For large file rewrites, ensure:
             });
           }
 
-          const vfs = new VirtualFileSystem();
           await vfs.init();
 
           const result = await execStringPatch(vfs, projectId, args.file_path, args.operations);
+
+          // Refresh server context if json_patch modified .server/ files
+          if (result.applied && args.file_path?.startsWith('/.server/')) {
+            if (vfs.hasServerContext()) {
+              await vfs.refreshServerContext();
+            }
+          }
 
           let resultMessage = result.summary;
           if (result.warnings && result.warnings.length > 0) {

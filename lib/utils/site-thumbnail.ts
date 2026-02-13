@@ -1,44 +1,40 @@
 /**
- * Site Thumbnail Generation Utility
- * Captures screenshot of published site and uploads to API
+ * Site Thumbnail Capture Utility
+ * Captures a screenshot of a published site via a hidden iframe.
+ * Returns a base64 data URL — caller is responsible for persisting.
  */
 
 import { captureIframeScreenshot, waitForResources } from './screenshot';
 
-export interface ThumbnailCaptureOptions {
+export interface SiteCaptureOptions {
   captureWidth?: number;
   captureHeight?: number;
   outputWidth?: number;
   outputHeight?: number;
   quality?: number;
-  timeout?: number; // ms to wait for site to load
+  timeout?: number;
 }
 
-const DEFAULT_OPTIONS: Required<ThumbnailCaptureOptions> = {
+const DEFAULTS: Required<SiteCaptureOptions> = {
   captureWidth: 1280,
   captureHeight: 720,
   outputWidth: 640,
   outputHeight: 360,
   quality: 0.8,
-  timeout: 15000, // 15s to allow for resource waiting + render + capture + upload
+  timeout: 15000,
 };
 
 /**
- * Capture a thumbnail of a published site and upload it via API
- * @param siteId - The site ID
- * @param siteUrl - Full URL to the published site (e.g., http://localhost:3000/sites/xxx)
- * @param options - Capture options
- * @returns Promise<boolean> - true if successful, false otherwise
+ * Capture a screenshot of a published site URL.
+ * @returns base64 data URL, or null on failure
  */
-export async function captureSiteThumbnail(
-  siteId: string,
+export async function captureSiteScreenshot(
   siteUrl: string,
-  options: ThumbnailCaptureOptions = {}
-): Promise<boolean> {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
+  options: SiteCaptureOptions = {}
+): Promise<string | null> {
+  const opts = { ...DEFAULTS, ...options };
 
   return new Promise((resolve) => {
-    // Create hidden iframe
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.top = '-10000px';
@@ -53,53 +49,27 @@ export async function captureSiteThumbnail(
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
-      if (iframe.parentElement) {
-        document.body.removeChild(iframe);
-      }
+      if (iframe.parentElement) document.body.removeChild(iframe);
     };
 
-    const fail = (reason: string) => {
-      if (resolved) return;
-      resolved = true;
-      console.error(`[Site Thumbnail] Failed: ${reason}`);
-      cleanup();
-      resolve(false);
-    };
-
-    const succeed = () => {
+    const done = (result: string | null) => {
       if (resolved) return;
       resolved = true;
       cleanup();
-      resolve(true);
+      resolve(result);
     };
 
-    // Timeout handler
-    timeoutId = window.setTimeout(() => {
-      fail(`Timeout after ${opts.timeout}ms`);
-    }, opts.timeout);
+    timeoutId = window.setTimeout(() => done(null), opts.timeout);
 
-    // Load handler
     iframe.onload = async () => {
       try {
-        // Clear the initial load timeout - iframe loaded successfully
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
+        if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+        timeoutId = window.setTimeout(() => done(null), 12000);
 
-        // Set a new safety timeout to cover resource waiting + capture + upload
-        timeoutId = window.setTimeout(() => {
-          fail('Timeout during resource wait / capture / upload');
-        }, 12000);
-
-        // Wait for fonts, images, and idle before capturing
         try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (iframeDoc) {
-            await waitForResources(iframeDoc, 2500, 8000);
-          } else {
-            await new Promise(r => setTimeout(r, 2500));
-          }
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (doc) await waitForResources(doc, 2500, 8000);
+          else await new Promise(r => setTimeout(r, 2500));
         } catch {
           await new Promise(r => setTimeout(r, 2500));
         }
@@ -111,42 +81,16 @@ export async function captureSiteThumbnail(
           opts.outputWidth,
           opts.outputHeight,
           opts.quality,
-          false // Viewport-only capture for thumbnails
+          false
         );
 
-        if (!screenshot) {
-          fail('Screenshot capture returned null');
-          return;
-        }
-
-        // Upload to API
-        const response = await fetch(`/api/sites/${siteId}/thumbnail`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            previewImage: screenshot,
-          }),
-        });
-
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-          fail(`API error: ${error.error || response.statusText}`);
-          return;
-        }
-
-        succeed();
-      } catch (error) {
-        fail(`Capture error: ${error instanceof Error ? error.message : String(error)}`);
+        done(screenshot);
+      } catch {
+        done(null);
       }
     };
 
-    iframe.onerror = () => {
-      fail('Failed to load site in iframe');
-    };
-
-    // Add to DOM
+    iframe.onerror = () => done(null);
     document.body.appendChild(iframe);
   });
 }

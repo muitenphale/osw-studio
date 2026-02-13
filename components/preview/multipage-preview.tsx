@@ -20,6 +20,8 @@ import {
   Home,
   Eye,
   Crosshair,
+  Camera,
+  Loader2,
   X
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -38,6 +40,7 @@ interface MultipagePreviewProps {
   hasFocusTarget?: boolean;
   onClose?: () => void;
   siteId?: string | null;
+  onCaptureScreenshot?: (screenshot: string) => void;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -55,7 +58,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   onFocusSelection,
   hasFocusTarget = false,
   onClose,
-  siteId
+  siteId,
+  onCaptureScreenshot
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -66,6 +70,23 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   const [historyIndex, setHistoryIndex] = useState(0);
   const [iframeReady, setIframeReady] = useState(false);
   const [selectorActive, setSelectorActive] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  const handleCaptureClick = useCallback(async () => {
+    if (!iframeRef.current || !iframeReady || !onCaptureScreenshot) return;
+    setIsCapturing(true);
+    try {
+      const screenshot = await captureIframeScreenshot(
+        iframeRef.current,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        false, 1500
+      );
+      if (screenshot) onCaptureScreenshot(screenshot);
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [iframeReady, onCaptureScreenshot]);
+
   const crosshairButtonStyle = useMemo(() => {
     if (selectorActive) {
       return { backgroundColor: 'var(--button-preview-active)', color: 'white' };
@@ -226,7 +247,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         setLoading(false);
       }
     }
-  }, [projectId]);
+  }, [projectId, siteId]);
 
   const compileAndLoad = useCallback((preserveCurrentPath: boolean = false, showLoading: boolean = true) => {
     if (compilingRef.current) {
@@ -844,6 +865,18 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
           >
             <Crosshair className="h-3 w-3" />
           </Button>
+          {onCaptureScreenshot && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5"
+              onClick={handleCaptureClick}
+              disabled={!iframeReady || isCapturing}
+              title="Capture screenshot as thumbnail"
+            >
+              {isCapturing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Camera className="h-3 w-3" />}
+            </Button>
+          )}
         </div>
 
         {/* Page selector takes remaining space */}
@@ -915,6 +948,18 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
           >
             <Crosshair className="h-3 w-3" />
           </Button>
+          {onCaptureScreenshot && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5"
+              onClick={handleCaptureClick}
+              disabled={!iframeReady || isCapturing}
+              title="Capture screenshot as thumbnail"
+            >
+              {isCapturing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Camera className="h-3 w-3" />}
+            </Button>
+          )}
         </div>
 
         <div className="flex-1 px-3 py-1 bg-muted rounded text-sm">

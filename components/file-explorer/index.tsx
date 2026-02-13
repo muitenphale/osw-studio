@@ -55,6 +55,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadFilesVersionRef = useRef(0);
 
   // Check if a path is a transient/read-only path (skills or server context)
   const isTransientPath = (path: string): boolean => {
@@ -73,6 +74,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
   };
 
   const loadFiles = useCallback(async () => {
+    const version = ++loadFilesVersionRef.current;
     try {
       await vfs.init();
       // Get regular files and directories
@@ -100,6 +102,9 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
 
         allItems.push(...filteredTransient);
       }
+
+      // Only update state if this is still the latest call
+      if (version !== loadFilesVersionRef.current) return;
 
       const projectFiles = allItems.filter(item => item.type !== 'directory') as VirtualFile[];
       setFiles(projectFiles);

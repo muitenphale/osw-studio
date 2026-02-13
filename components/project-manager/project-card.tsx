@@ -25,6 +25,8 @@ import {
   DollarSign,
   FileBox
 } from 'lucide-react';
+import { ThumbnailArea } from '@/components/ui/thumbnail-area';
+import { captureProjectScreenshot } from '@/lib/utils/project-thumbnail';
 import { formatDistanceToNow } from 'date-fns';
 import {
   DropdownMenu,
@@ -183,19 +185,12 @@ export function ProjectCard({
       >
         <div className="flex items-start gap-4">
           {/* Preview Thumbnail */}
-          {project.previewImage ? (
-            <div className="w-16 h-12 rounded-md overflow-hidden bg-muted shrink-0 opacity-60">
-              <img
-                src={project.previewImage}
-                alt={`${project.name} preview`}
-                className="w-full h-full object-cover"
-              />
-            </div>
-          ) : (
-            <div className="w-16 h-12 rounded-md bg-muted flex items-center justify-center shrink-0 opacity-40">
-              <FileBox className="h-6 w-6 text-muted-foreground/30" />
-            </div>
-          )}
+          <ThumbnailArea
+            image={project.previewImage}
+            onCapture={() => captureProjectScreenshot(project.id)}
+            onImageChange={(img) => onUpdate({ ...project, previewImage: img, previewUpdatedAt: img ? new Date() : undefined })}
+            size="sm"
+          />
 
           {/* Content - 2 columns on desktop, stacked on mobile */}
           <div className="flex-1 min-w-0 flex flex-col md:flex-row md:gap-6">
@@ -395,19 +390,12 @@ export function ProjectCard({
       data-tour-id="project-card"
     >
       {/* Preview Thumbnail */}
-      {project.previewImage ? (
-        <div className="w-full aspect-video bg-muted">
-          <img
-            src={project.previewImage}
-            alt={`${project.name} preview`}
-            className="w-full h-full object-cover"
-          />
-        </div>
-      ) : (
-        <div className="w-full aspect-video bg-muted flex items-center justify-center">
-          <FileBox className="h-16 w-16 text-muted-foreground/30" />
-        </div>
-      )}
+      <ThumbnailArea
+        image={project.previewImage}
+        onCapture={() => captureProjectScreenshot(project.id)}
+        onImageChange={(img) => onUpdate({ ...project, previewImage: img, previewUpdatedAt: img ? new Date() : undefined })}
+        size="md"
+      />
 
       <div className="p-4 space-y-3">
         {/* Header with name and actions */}

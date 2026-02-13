@@ -960,6 +960,14 @@ export class SQLiteAdapter implements StorageAdapter {
     return this.rowToSite(row);
   }
 
+  async getSiteBySlug(slug: string): Promise<Site | null> {
+    const db = this.getDB();
+    const row = db.prepare('SELECT * FROM sites WHERE slug = ?').get(slug) as Record<string, unknown> | undefined;
+
+    if (!row) return null;
+    return this.rowToSite(row);
+  }
+
   async listSites(): Promise<Site[]> {
     const db = this.getDB();
     const rows = db.prepare('SELECT * FROM sites ORDER BY updated_at DESC').all() as Record<string, unknown>[];

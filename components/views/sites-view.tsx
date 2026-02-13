@@ -15,7 +15,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { captureSiteThumbnail } from '@/lib/utils/site-thumbnail';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
 
@@ -255,36 +254,32 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
         databaseEnabled: true, // Site database is now enabled
       });
 
-      // Generate thumbnail after successful publish (non-blocking, but keep loading state)
-      const siteUrl = `${window.location.origin}/sites/${siteId}`;
-      captureSiteThumbnail(siteId, siteUrl)
-        .then(success => {
-          if (success) {
-            // Fetch just the updated site to get new thumbnail data (no full reload)
-            return fetch(`/api/sites/${siteId}`)
-              .then(r => r.json())
-              .then(updatedSite => {
-                updateSiteInState(siteId, {
-                  previewImage: updatedSite.previewImage,
-                  previewUpdatedAt: updatedSite.previewUpdatedAt,
-                });
-              });
-          } else {
-            logger.warn(`[Sites View] Failed to generate thumbnail for ${siteId}`);
-          }
-        })
-        .catch(err => {
-          logger.error(`[Sites View] Thumbnail generation error:`, err);
-        })
-        .finally(() => {
-          // Clear publishing state after thumbnail is done (or failed)
-          setPublishingStates(prev => ({ ...prev, [siteId]: false }));
-        });
+      // Clear publishing state immediately after successful publish
+      setPublishingStates(prev => ({ ...prev, [siteId]: false }));
     } catch (error) {
       logger.error('Failed to publish:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to publish. Please try again.');
       // Clear publishing state on error
       setPublishingStates(prev => ({ ...prev, [siteId]: false }));
+    }
+  };
+
+  const handleSiteThumbnailChange = async (siteId: string, image: string | undefined) => {
+    try {
+      const response = await fetch(`/api/sites/${siteId}/thumbnail`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ previewImage: image ?? null }),
+      });
+      if (!response.ok) throw new Error('Failed to update thumbnail');
+
+      updateSiteInState(siteId, {
+        previewImage: image,
+        previewUpdatedAt: image ? new Date() : undefined,
+      });
+    } catch (err) {
+      logger.error('[SitesView] Failed to update site thumbnail:', err);
+      toast.error('Failed to update thumbnail');
     }
   };
 
@@ -557,6 +552,7 @@ export function SitesView({ onProjectSelect }: SitesViewProps) {
                       onEnable={handleEnable}
                       onDelete={handleDelete}
                       onExportAsTemplate={handleExportAsTemplate}
+                      onThumbnailChange={handleSiteThumbnailChange}
                     />
                   );
                 })}
