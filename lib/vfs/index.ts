@@ -248,6 +248,16 @@ export class VirtualFileSystem {
         );
       }
 
+      // Ensure all known server context directories are visible (even if empty)
+      const knownDirs = ['edge-functions', 'server-functions', 'secrets', 'scheduled-functions'];
+      for (const dir of knownDirs) {
+        const dirPrefix = `/.server/${dir}/`;
+        const hasFiles = Array.from(this.transientFiles.keys()).some(p => p.startsWith(dirPrefix));
+        if (!hasFiles) {
+          this.mountTransientFile(`/.server/${dir}/.gitkeep`, '', true);
+        }
+      }
+
       // Store metadata for the orchestrator
       this.serverContextSiteId = siteId;
       this.serverContextMetadata = {
@@ -307,6 +317,16 @@ export class VirtualFileSystem {
         this.transientFiles.set(file.path, virtualFile);
       }
 
+      // Ensure all known server context directories are visible (even if empty)
+      const knownDirs = ['edge-functions', 'server-functions', 'secrets', 'scheduled-functions'];
+      for (const dir of knownDirs) {
+        const dirPrefix = `/.server/${dir}/`;
+        const hasFiles = Array.from(this.transientFiles.keys()).some(p => p.startsWith(dirPrefix));
+        if (!hasFiles) {
+          this.mountTransientFile(`/.server/${dir}/.gitkeep`, '', true);
+        }
+      }
+
       // Store metadata
       this.serverContextSiteId = siteId;
       this.serverContextMetadata = data.metadata;
@@ -322,6 +342,17 @@ export class VirtualFileSystem {
     } catch (error) {
       logger.error('[VFS] Failed to fetch server context from API', error);
     }
+  }
+
+  /**
+   * Refresh server context from API (re-fetches all files)
+   * Call after orchestrator completes to ensure file explorer is up to date
+   */
+  async refreshServerContext(): Promise<void> {
+    if (!this.serverContextSiteId) return;
+
+    const siteName = this.serverContextMetadata?.siteName || '';
+    await this.fetchServerContextFromAPI(this.serverContextSiteId, siteName);
   }
 
   /**
@@ -443,6 +474,11 @@ export class VirtualFileSystem {
       return await this.updateServerFunctionFromFile(path, content);
     }
 
+    // Handle scheduled functions
+    if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
+      return await this.updateScheduledFunctionFromFile(path, content);
+    }
+
     throw new Error(`Cannot modify ${path} - unrecognized server context path`);
   }
 
@@ -526,6 +562,14 @@ export class VirtualFileSystem {
       };
 
       this.transientFiles.set(newPath, virtualFile);
+
+      // Remove .gitkeep stub if a real file was created in this directory
+      const dirPath = newPath.substring(0, newPath.lastIndexOf('/') + 1);
+      const gitkeepPath = dirPath + '.gitkeep';
+      if (this.transientFiles.has(gitkeepPath)) {
+        this.transientFiles.delete(gitkeepPath);
+      }
+
       window.dispatchEvent(new Event('filesChanged'));
       return virtualFile;
     }
@@ -607,6 +651,12 @@ export class VirtualFileSystem {
     const updated = siteDb.getFunctionByName(fnData.name)!;
     this.mountTransientFile(path, generateEdgeFunctionFile(updated), false);
 
+    // Remove .gitkeep stub if a real file was created in this directory
+    const edgeFnGitkeep = '/.server/edge-functions/.gitkeep';
+    if (this.transientFiles.has(edgeFnGitkeep)) {
+      this.transientFiles.delete(edgeFnGitkeep);
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
     }
@@ -684,6 +734,106 @@ export class VirtualFileSystem {
     const updated = siteDb.getServerFunctionByName(fnData.name)!;
     this.mountTransientFile(path, generateServerFunctionFile(updated), false);
 
+    // Remove .gitkeep stub if a real file was created in this directory
+    const serverFnGitkeep = '/.server/server-functions/.gitkeep';
+    if (this.transientFiles.has(serverFnGitkeep)) {
+      this.transientFiles.delete(serverFnGitkeep);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('filesChanged'));
+    }
+
+    return this.transientFiles.get(path)!;
+  }
+
+  /**
+   * Update scheduled function from file content
+   * Creates or updates a scheduled function in the site database
+   */
+  private async updateScheduledFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
+    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+    const { validateScheduledFunctionData, generateScheduledFunctionFile } = await import('./server-context');
+
+    // Parse JSON
+    let data: unknown;
+    try {
+      data = JSON.parse(content);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`Invalid JSON: ${message}`);
+    }
+
+    // Validate
+    const validation = validateScheduledFunctionData(data);
+    if (!validation.valid) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    // Type-safe cast after validation
+    const fnData = data as { name: string; functionName: string; cronExpression: string; timezone?: string; enabled?: boolean; description?: string; config?: Record<string, unknown> };
+
+    // Get site database
+    const adapter = getSQLiteAdapter();
+    await adapter.init();
+    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
+    if (!siteDb) {
+      throw new Error('Site database not available');
+    }
+
+    // Resolve functionName to functionId (edge function)
+    const edgeFn = siteDb.getFunctionByName(fnData.functionName);
+    if (!edgeFn) {
+      throw new Error(`Edge function "${fnData.functionName}" not found. Create it first.`);
+    }
+
+    // Check if scheduled function exists by current filename
+    const filename = path.split('/').pop()!.replace('.json', '');
+    const existingFn = siteDb.getScheduledFunctionByName(filename);
+
+    if (existingFn) {
+      // Update existing scheduled function
+      siteDb.updateScheduledFunction(existingFn.id, {
+        name: fnData.name,
+        functionId: edgeFn.id,
+        cronExpression: fnData.cronExpression,
+        timezone: fnData.timezone || 'UTC',
+        description: fnData.description,
+        enabled: fnData.enabled ?? true,
+        config: fnData.config || {},
+      });
+
+      // If name changed, update the path
+      if (fnData.name !== filename) {
+        this.transientFiles.delete(path);
+        const newPath = `/.server/scheduled-functions/${fnData.name}.json`;
+        const updated = siteDb.getScheduledFunctionByName(fnData.name)!;
+        this.mountTransientFile(newPath, generateScheduledFunctionFile(updated, fnData.functionName), false);
+        return this.transientFiles.get(newPath)!;
+      }
+    } else {
+      // Create new scheduled function
+      siteDb.createScheduledFunction({
+        name: fnData.name,
+        functionId: edgeFn.id,
+        cronExpression: fnData.cronExpression,
+        timezone: fnData.timezone || 'UTC',
+        description: fnData.description,
+        enabled: fnData.enabled ?? true,
+        config: fnData.config || {},
+      });
+    }
+
+    // Update transient file with validated content
+    const updated = siteDb.getScheduledFunctionByName(fnData.name)!;
+    this.mountTransientFile(path, generateScheduledFunctionFile(updated, fnData.functionName), false);
+
+    // Remove .gitkeep stub if a real file was created in this directory
+    const schedFnGitkeep = '/.server/scheduled-functions/.gitkeep';
+    if (this.transientFiles.has(schedFnGitkeep)) {
+      this.transientFiles.delete(schedFnGitkeep);
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
     }
@@ -753,6 +903,12 @@ export class VirtualFileSystem {
     const updated = siteDb.getSecretByName(secretData.name)!;
     this.mountTransientFile(path, generateSecretFile(updated), false);
 
+    // Remove .gitkeep stub if a real file was created in this directory
+    const secretsGitkeep = '/.server/secrets/.gitkeep';
+    if (this.transientFiles.has(secretsGitkeep)) {
+      this.transientFiles.delete(secretsGitkeep);
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
     }
@@ -805,7 +961,12 @@ export class VirtualFileSystem {
       return await this.updateServerFunctionFromFile(path, content);
     }
 
-    throw new Error(`Cannot create ${path} - only secrets, edge functions, and server functions (.json) can be created`);
+    // Handle scheduled functions
+    if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
+      return await this.updateScheduledFunctionFromFile(path, content);
+    }
+
+    throw new Error(`Cannot create ${path} - only secrets, edge functions, server functions, and scheduled functions (.json) can be created`);
   }
 
   /**
@@ -1211,11 +1372,41 @@ export class VirtualFileSystem {
       } else {
         // Subdirectory: filter transient files by path
         const dirPath = path.endsWith('/') ? path : path + '/';
+
+        // Direct children (files at this exact level)
         const matchingTransient = transientFilesArray.filter(file => {
           return file.path.startsWith(dirPath) &&
                  file.path.slice(dirPath.length).indexOf('/') === -1;
         });
-        files = [...files, ...matchingTransient];
+
+        // Synthesize directory entries from deeper transient files
+        const synthDirs = new Set<string>();
+        for (const file of transientFilesArray) {
+          if (file.path.startsWith(dirPath)) {
+            const rest = file.path.slice(dirPath.length);
+            const slashIdx = rest.indexOf('/');
+            if (slashIdx !== -1) {
+              synthDirs.add(rest.slice(0, slashIdx));
+            }
+          }
+        }
+
+        const now = new Date();
+        const synthEntries: VirtualFile[] = Array.from(synthDirs).map(dirName => ({
+          id: `transient-dir-${dirPath}${dirName}`,
+          projectId: 'transient',
+          path: dirPath + dirName,
+          name: dirName,
+          type: 'text' as const,
+          content: '',
+          mimeType: '',
+          size: 0,
+          createdAt: now,
+          updatedAt: now,
+          metadata: { isTransient: true, isServerContext: true, isReadOnly: true },
+        }));
+
+        files = [...files, ...matchingTransient, ...synthEntries];
       }
     }
 

@@ -6,6 +6,13 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.29.0 (2026-02-13)
+
+- **User-Managed Thumbnails** - Capture, upload, or remove thumbnails on project and site cards via icon buttons in the thumbnail area. The workspace preview toolbar also has a capture button. Uploaded images are automatically compressed. Auto-capture on save/publish has been removed.
+- **Server Mode Fixes** - Edge function calls in the preview now work when a site is selected after initial load; `/.server/` folder refreshes automatically after AI operations; AI can create and modify scheduled functions; edge functions resolve by slug
+
+---
+
 ## v1.28.0 - Scheduled Functions (2026-02-10)
 
 Run edge functions automatically on a cron schedule. Set up daily cleanups, hourly stats aggregation, weekly report emails, or any recurring task — all managed from the admin UI.

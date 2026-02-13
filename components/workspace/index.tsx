@@ -637,30 +637,20 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       setSaveInProgress(false);
     }
 
-    // Fire-and-forget: capture screenshot in background and update project thumbnail
-    if (previewRef.current) {
-      const captureRef = previewRef.current;
-      const projectId = project.id;
-      (async () => {
-        try {
-          const screenshot = await Promise.race([
-            captureRef.captureScreenshot(true),
-            new Promise<null>((_, reject) =>
-              setTimeout(() => reject(new Error('Screenshot capture timeout')), 10000)
-            ),
-          ]);
-          if (screenshot) {
-            const proj = await vfs.getProject(projectId);
-            proj.previewImage = screenshot;
-            proj.previewUpdatedAt = new Date();
-            await vfs.updateProject(proj);
-          }
-        } catch (err) {
-          logger.warn('Background screenshot capture failed, old thumbnail persists:', err);
-        }
-      })();
-    }
   }, [project.id, saveInProgress]);
+
+  const handleCaptureScreenshot = useCallback(async (screenshot: string) => {
+    try {
+      const proj = await vfs.getProject(project.id);
+      proj.previewImage = screenshot;
+      proj.previewUpdatedAt = new Date();
+      await vfs.updateProject(proj);
+      toast.success('Thumbnail updated');
+    } catch (err) {
+      logger.error('Failed to save screenshot:', err);
+      toast.error('Failed to save thumbnail');
+    }
+  }, [project.id]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -925,6 +915,12 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
       if (result.success) {
         handleFilesChange();
+
+        // Re-fetch server context to ensure file explorer shows latest state
+        if (vfs.hasServerContext()) {
+          await vfs.refreshServerContext();
+        }
+
         toast.success('Task completed');
       } else {
         toast.error(result.summary || 'Generation failed', {
@@ -1343,6 +1339,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                         hasFocusTarget={Boolean(focusContext)}
                         onClose={handleClosePreview}
                         siteId={selectedSiteId}
+                        onCaptureScreenshot={handleCaptureScreenshot}
                       />
                     </div>
                 </ResizablePanel>
@@ -1424,6 +1421,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   hasFocusTarget={Boolean(focusContext)}
                   onClose={handleClosePreview}
                   siteId={selectedSiteId}
+                  onCaptureScreenshot={handleCaptureScreenshot}
                 />
               </div>
             )}

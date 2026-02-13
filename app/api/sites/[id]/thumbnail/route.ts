@@ -14,19 +14,22 @@ export async function PUT(
     const { id } = await params;
     const { previewImage } = await request.json();
 
-    if (!previewImage || typeof previewImage !== 'string') {
-      return NextResponse.json(
-        { error: 'previewImage (base64 data URL) is required' },
-        { status: 400 }
-      );
-    }
+    // Allow null / empty string to clear thumbnail
+    const isClearing = previewImage === null || previewImage === '';
 
-    // Validate base64 data URL format
-    if (!previewImage.startsWith('data:image/')) {
-      return NextResponse.json(
-        { error: 'previewImage must be a base64 data URL (data:image/...)' },
-        { status: 400 }
-      );
+    if (!isClearing) {
+      if (!previewImage || typeof previewImage !== 'string') {
+        return NextResponse.json(
+          { error: 'previewImage (base64 data URL) is required' },
+          { status: 400 }
+        );
+      }
+      if (!previewImage.startsWith('data:image/')) {
+        return NextResponse.json(
+          { error: 'previewImage must be a base64 data URL (data:image/...)' },
+          { status: 400 }
+        );
+      }
     }
 
     const adapter = await createServerAdapter();
@@ -43,8 +46,8 @@ export async function PUT(
 
     const updatedSite = {
       ...site,
-      previewImage,
-      previewUpdatedAt: new Date(),
+      previewImage: isClearing ? undefined : previewImage,
+      previewUpdatedAt: isClearing ? undefined : new Date(),
       updatedAt: new Date(),
     };
 
@@ -55,8 +58,8 @@ export async function PUT(
 
     return NextResponse.json({
       success: true,
-      previewImage: updatedSite.previewImage,
-      previewUpdatedAt: updatedSite.previewUpdatedAt,
+      previewImage: updatedSite.previewImage ?? null,
+      previewUpdatedAt: updatedSite.previewUpdatedAt ?? null,
     });
   } catch (error) {
     console.error('[Sites API] Error updating site thumbnail:', error);

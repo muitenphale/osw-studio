@@ -17,7 +17,22 @@ Complete guide for creating API endpoints (edge functions) and reusable helpers 
 
 ## Edge Functions
 
-API endpoints accessible at ` + "`/api/sites/{siteId}/functions/{name}`" + `
+API endpoints created at ` + "`/.server/edge-functions/{name}.json`" + `
+
+### Calling Edge Functions from Client Code
+
+**IMPORTANT: Use simple paths.** The platform automatically routes requests to the correct API endpoint.
+
+` + "```" + `javascript
+// CORRECT - use simple path (platform handles routing)
+fetch('/list-products')
+fetch('/create-order', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: 'Test'}) })
+
+// WRONG - never hardcode site IDs or /api/sites/ paths
+fetch('/api/sites/my-site/functions/list-products')  // BROKEN
+` + "```" + `
+
+The fetch interceptor (injected automatically in both preview and published sites) rewrites ` + "`fetch('/list-products')`" + ` → ` + "`/api/sites/{siteId}/functions/list-products`" + ` transparently. You never need to know the siteId in client code.
 
 ### File Location
 ` + "```" + `

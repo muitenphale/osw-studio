@@ -84,6 +84,11 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
   section += `\n## Creating Edge Functions\n`;
   section += `Use json_patch (preferred) to create /.server/edge-functions/{name}.json:\n`;
   section += `  json_patch /.server/edge-functions/list-products.json rewrite '{"name":"list-products","method":"GET","enabled":true,"code":"Response.json(db.query(\\"SELECT * FROM products\\"));"}'\n`;
+  section += `\n## Calling Edge Functions from Client Code\n`;
+  section += `IMPORTANT: In HTML/JS, use simple paths — the platform auto-routes to the correct API endpoint:\n`;
+  section += `  fetch('/list-products')  // CORRECT\n`;
+  section += `  fetch('/create-order', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})  // CORRECT\n`;
+  section += `  fetch('/api/sites/.../functions/list-products')  // WRONG - never hardcode site IDs\n`;
 
   section += `\n## Creating Server Functions\n`;
   section += `  json_patch /.server/server-functions/formatPrice.json rewrite '{"name":"formatPrice","enabled":true,"code":"const [amount, currency] = args; return currency + amount.toFixed(2);"}'\n`;

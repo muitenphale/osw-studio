@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.29.0 - 2026-02-13
+- **User-Managed Thumbnails**: Replaced automatic screenshot capture with user-initiated controls
+  - Camera button (capture) and upload button on project cards, site cards, and the workspace preview toolbar
+  - Remove button (X) on hover for cards that already have a thumbnail
+  - Removed fire-and-forget screenshot on project save
+  - Removed automatic thumbnail capture after site publish
+- **New Component**: `ThumbnailArea` — reusable thumbnail widget with capture, upload, and remove states (`sm`/`md` sizes)
+- **New Utility**: `captureProjectScreenshot()` — compiles project in a hidden iframe and captures a screenshot on demand
+- **Refactored**: `captureSiteScreenshot()` now returns a base64 data URL instead of uploading directly; callers handle persistence
+- **New Utility**: `compressImage()` — resizes uploaded images to max 640×360 JPEG, retries at lower quality if over 100KB
+- **API**: Site thumbnail endpoint now accepts `null` to clear thumbnails
+- Thumbnail area stops event propagation so button clicks don't navigate to the workspace
+- **Bug Fix**: Fixed edge function calls from the preview not being intercepted when a site is selected after initial render
+- **Bug Fix**: Fixed `ls /.server/` returning empty — transient subdirectories were not synthesized as directory entries
+- **Bug Fix**: Added missing scheduled function handlers to `createServerContextFile()` and `updateServerContextFile()`
+- **Improvement**: Server context in the file explorer now auto-refreshes after AI operations
+- **Improvement**: Edge function route now resolves sites by slug in addition to UUID
+- **Improvement**: AI system prompt and skills now instruct the AI to use simple fetch paths in client code
+- **Improvement**: File explorer race condition guard for concurrent `loadFiles` calls
+
 ## v1.28.0 - 2026-02-10
 - **Scheduled Functions**: Run edge functions on cron schedules via the new Schedules tab in Server Settings
   - Create, edit, enable/disable, and delete scheduled functions from the admin UI

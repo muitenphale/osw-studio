@@ -45,14 +45,20 @@ async function handleRequest(
     const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Check if site exists and has database enabled
-    const site = await adapter.getSite?.(siteId);
+    // Check if site exists — try UUID first, then slug
+    let site = await adapter.getSite?.(siteId) ?? null;
+    if (!site && adapter.getSiteBySlug) {
+      site = await adapter.getSiteBySlug(siteId);
+    }
     if (!site) {
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
       );
     }
+
+    // Use the actual site ID for subsequent lookups (in case we matched by slug)
+    const resolvedSiteId = site.id;
 
     if (!site.databaseEnabled) {
       return NextResponse.json(
@@ -62,7 +68,7 @@ async function handleRequest(
     }
 
     // Get the site database
-    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
+    const siteDb = adapter.getSiteDatabaseForAnalytics(resolvedSiteId);
     if (!siteDb) {
       return NextResponse.json(
         { error: 'Site database not available' },
