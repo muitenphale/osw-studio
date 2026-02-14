@@ -258,14 +258,12 @@ export function ChatPanel({
   const turnsStateRef = useRef<{
     result: Turn[];
     currentTurn: Turn;
-    currentToolBatch: number;
-    toolsByBatchAndIndex: Map<string, ToolCall>;
+    currentIterationTools: ToolCall[];
     itemIdCounter: number;
   }>({
     result: [],
     currentTurn: { id: `turn-${Date.now()}`, items: [] },
-    currentToolBatch: 0,
-    toolsByBatchAndIndex: new Map(),
+    currentIterationTools: [],
     itemIdCounter: 0,
   });
 
@@ -281,8 +279,7 @@ export function ChatPanel({
       turnsStateRef.current = {
         result: [],
         currentTurn: { id: `turn-${Date.now()}`, items: [] },
-        currentToolBatch: 0,
-        toolsByBatchAndIndex: new Map(),
+        currentIterationTools: [],
         itemIdCounter: 0,
       };
       return [];
@@ -376,7 +373,7 @@ export function ChatPanel({
           break;
 
         case 'toolCalls':
-          // New tool calls - increment batch number and store tools with batch prefix
+          // New tool calls - push onto flat per-iteration array
           const calls = event.data?.toolCalls || [];
 
           for (let toolIndex = 0; toolIndex < calls.length; toolIndex++) {
@@ -390,7 +387,7 @@ export function ChatPanel({
             }
 
             const tool: ToolCall = {
-              id: call.id || `tool-${state.currentToolBatch}-${toolIndex}`,
+              id: call.id || `tool-${state.currentIterationTools.length}`,
               name: call.function?.name || 'unknown',
               parameters,
               status: 'pending',
@@ -404,13 +401,8 @@ export function ChatPanel({
             };
 
             state.currentTurn.items.push(toolItem);
-            // Store with batch-index key to avoid collisions
-            const batchKey = `${state.currentToolBatch}-${toolIndex}`;
-            state.toolsByBatchAndIndex.set(batchKey, tool);
+            state.currentIterationTools.push(tool);
           }
-
-          // Increment batch counter for next toolCalls event
-          state.currentToolBatch++;
 
           // Remove waiting indicator when tools arrive
           state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
@@ -418,22 +410,25 @@ export function ChatPanel({
 
         case 'tool_status':
           // Update tool status (mutate the tool object in the item)
-          // toolIndex is relative to the most recent toolCalls batch
+          // toolIndex is the position in the flat per-iteration array
           const { toolIndex, status, result: toolStatusResult, error } = event.data || {};
-          const batchKey = `${state.currentToolBatch - 1}-${toolIndex}`;
-          const tool = state.toolsByBatchAndIndex.get(batchKey);
+          const tool = state.currentIterationTools[toolIndex];
           if (tool) {
             tool.status = status;
             if (toolStatusResult) tool.result = toolStatusResult;
             if (error) tool.error = error;
+            // Re-parse _raw when streaming is complete (tool starts executing)
+            if (status === 'executing' && tool.parameters?._raw && typeof tool.parameters._raw === 'string') {
+              try {
+                tool.parameters = JSON.parse(tool.parameters._raw);
+              } catch { /* leave _raw if still invalid */ }
+            }
           }
           break;
 
         case 'tool_result':
           // Update tool result
-          const toolResultIndex = event.data?.toolIndex;
-          const resultBatchKey = `${state.currentToolBatch - 1}-${toolResultIndex}`;
-          const toolResult = state.toolsByBatchAndIndex.get(resultBatchKey);
+          const toolResult = state.currentIterationTools[event.data?.toolIndex];
           if (toolResult && event.data?.result) {
             toolResult.result = event.data.result;
           }
@@ -592,6 +587,8 @@ export function ChatPanel({
               items: [],
             };
           }
+          // Reset tool tracking for the new iteration
+          state.currentIterationTools = [];
           break;
 
         case 'stopped':

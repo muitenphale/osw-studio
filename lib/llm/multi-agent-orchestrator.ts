@@ -1182,7 +1182,14 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
     messages: AgentMessage[],
     agent: Agent
   ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; wasTruncated?: boolean; finishReason?: string; reasoningDetails?: ReasoningDetail[] }> {
-    const { provider, apiKey, model } = this.getProviderConfig();
+    let { provider, apiKey, model } = this.getProviderConfig();
+
+    // Refresh Codex OAuth token if needed before making the API call
+    if (provider === 'openai-codex') {
+      const { ensureValidCodexToken } = await import('@/lib/auth/codex-auth');
+      apiKey = await ensureValidCodexToken();
+    }
+
     await this.ensurePricing(provider, model);
 
     const tools = toolRegistry.getDefinitions(agent.tools);
@@ -1249,10 +1256,6 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
     return this.parseStreamingResponseWithTracking(response, provider, model);
   }
 
-  // Copy helper methods from original orchestrator
-  // (parseStreamingResponse, fetchWithRetry, ensurePricing, etc.)
-  // ... [These would be copied from orchestrator-v1.ts in the archive]
-
   /**
    * Create a new conversation node
    */
@@ -1302,7 +1305,7 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
     const apiKey = configManager.getProviderApiKey(provider);
     const model = this.model || configManager.getProviderModel(provider) || undefined;
 
-    if (providerConfig.apiKeyRequired && !apiKey) {
+    if (providerConfig.apiKeyRequired && !apiKey && !providerConfig.usesOAuth) {
       throw new Error(`API key not configured for provider: ${provider}`);
     }
 

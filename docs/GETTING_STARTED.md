@@ -25,7 +25,20 @@ Use a cloud AI service. You'll need an API key and will pay per usage (typically
 
 **Note**: OSW Studio is developed using OpenRouter, so that provider has the most testing.
 
-### Option B: Local AI (Free, No API Key)
+### Option B: ChatGPT Subscription (No API Key)
+
+If you have a ChatGPT Plus or Pro subscription you can use it instead of a separate API key.
+
+1. Install the [Codex CLI](https://github.com/openai/codex): `npm i -g @openai/codex`
+2. Run `codex login` and follow the browser prompts
+3. Copy your token: `cat ~/.codex/auth.json | pbcopy` (macOS) or `cat ~/.codex/auth.json | xclip -sel c` (Linux)
+4. In Settings, select **Codex (ChatGPT Sub)** and paste the JSON
+
+The refresh token is kept in an HttpOnly cookie (not localStorage), so client-side JS never has access to it.
+
+> **Warning**: This routes through an unofficial endpoint using your ChatGPT session. OpenAI may restrict or revoke access at any time. For something more stable, use an [OpenAI API key](https://platform.openai.com/api-keys) instead.
+
+### Option C: Local AI (Free, No API Key)
 
 Run AI models on your computer. Completely free but requires installation.
 

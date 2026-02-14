@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { ProviderId } from '@/lib/llm/providers/types';
 import { getAllProviders, getProvider } from '@/lib/llm/providers/registry';
+import { CodexAuthPanel } from '@/components/settings/codex-auth-panel';
 
 interface ModelSettingsPanelProps {
   onClose?: () => void;
@@ -168,8 +169,14 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
           </Select>
         </div>
 
-        {/* API Key (required for cloud providers, optional for local) */}
-        {(providerConfig.apiKeyRequired || providerConfig.isLocal) && (
+        {/* Auth: OAuth panel for Codex, API key for others */}
+        {providerConfig.usesOAuth ? (
+          <CodexAuthPanel onAuthChange={() => {
+            window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
+              detail: { provider: selectedProvider, hasKey: !!configManager.getProviderApiKey(selectedProvider) }
+            }));
+          }} />
+        ) : (providerConfig.apiKeyRequired || providerConfig.isLocal) ? (
           <div>
             <Label htmlFor="api-key">
               {providerConfig.name} API Key
@@ -221,9 +228,9 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
           {providerConfig.apiKeyHelpUrl && (
             <p className="text-sm text-muted-foreground mt-2">
               Get your API key from{' '}
-              <a 
-                href={providerConfig.apiKeyHelpUrl} 
-                target="_blank" 
+              <a
+                href={providerConfig.apiKeyHelpUrl}
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary hover:underline inline-flex items-center gap-1"
               >
@@ -237,7 +244,7 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
             </p>
           )}
           </div>
-        )}
+        ) : null}
 
         {!providerConfig.apiKeyRequired && providerConfig.isLocal && (
           <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/50">

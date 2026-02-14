@@ -2,9 +2,10 @@
  * Provider-specific types and interfaces
  */
 
-export type ProviderId = 
+export type ProviderId =
   | 'openrouter'
   | 'openai'
+  | 'openai-codex'
   | 'anthropic'
   | 'groq'
   | 'gemini'
@@ -43,6 +44,14 @@ export interface ProviderConfig {
   supportsFunctions?: boolean;
   supportsStreaming?: boolean;
   isLocal?: boolean;
+  usesOAuth?: boolean;
+}
+
+export interface CodexAuthData {
+  access_token: string;
+  refresh_token?: string;
+  expires_at: number; // Unix timestamp in seconds
+  user_email?: string;
 }
 
 export interface ProviderSettings {

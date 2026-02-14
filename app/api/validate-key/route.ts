@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
         break;
 
       case 'openai':
+      case 'openai-codex':
         const openaiResp = await fetch('https://api.openai.com/v1/models', {
           headers: { 'Authorization': `Bearer ${apiKey}` }
         });

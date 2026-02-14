@@ -3,6 +3,7 @@ import { ProviderId } from '@/lib/llm/providers/types';
 import { getProvider } from '@/lib/llm/providers/registry';
 import { LLMMessage, ToolDefinition, ContentBlock, TextContentBlock, ImageContentBlock } from '@/lib/llm/types';
 import { logger } from '@/lib/utils';
+import { handleCodexGeneration } from '@/lib/llm/codex-adapter';
 
 // Helper to extract text content from string or ContentBlock[]
 function getTextContent(content: string | ContentBlock[]): string {
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (providerConfig.apiKeyRequired && !apiKey) {
+    if (providerConfig.apiKeyRequired && !apiKey && !providerConfig.usesOAuth) {
       return NextResponse.json(
         { error: `${providerConfig.name} API key is required. Please set it in settings.` },
         { status: 400 }
@@ -145,6 +146,22 @@ Habits:
     
     if (messages && !messages.some((m: LLMMessage) => m.role === 'system')) {
       chatMessages.unshift({ role: 'system', content: systemPrompt });
+    }
+
+    // --- Codex provider: delegate entirely to codex-adapter ---
+    if (selectedProvider === 'openai-codex') {
+      // Validate tools before passing to Codex
+      const validTools = tools?.filter((tool: { name?: string; description?: string; parameters?: unknown }) => {
+        if (!tool.name || tool.name.trim() === '') return false;
+        return true;
+      });
+
+      return handleCodexGeneration({
+        messages: chatMessages,
+        model: model || 'gpt-5.3-codex',
+        tools: validTools?.length > 0 ? validTools : undefined,
+        accessToken: apiKey,
+      });
     }
 
     const apiEndpoint = getApiEndpoint(selectedProvider, providerConfig, model);
@@ -324,7 +341,7 @@ Habits:
 
     if (selectedProvider === 'openai') {
       requestBody.max_completion_tokens = max_tokens || 4096;
-      
+
       const modelName = model || getDefaultModel(selectedProvider);
       if (modelName.includes('gpt-5-nano')) {
         requestBody.temperature = 1;
@@ -587,6 +604,8 @@ function getDefaultModel(provider: ProviderId): string {
       return 'deepseek/deepseek-chat';
     case 'openai':
       return 'gpt-4o-mini';
+    case 'openai-codex':
+      return 'gpt-5.3-codex';
     case 'anthropic':
       return 'claude-3-5-haiku-20241022';
     case 'groq':

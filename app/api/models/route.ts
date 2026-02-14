@@ -16,8 +16,8 @@ export async function POST(request: NextRequest) {
 
     const providerConfig = getProvider(provider as ProviderId);
     
-    // If no API key but required, return empty array
-    if (providerConfig.apiKeyRequired && !apiKey) {
+    // If no API key but required (and not OAuth), return empty array
+    if (providerConfig.apiKeyRequired && !apiKey && !providerConfig.usesOAuth) {
       return NextResponse.json({ models: [] });
     }
 
@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
           break;
 
         case 'openai':
+        case 'openai-codex':
           const openaiResponse = await fetch('https://api.openai.com/v1/models', {
             headers: {
               'Authorization': `Bearer ${apiKey}`

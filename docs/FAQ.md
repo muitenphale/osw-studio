@@ -38,6 +38,7 @@ The application itself is **free and open source** (MIT license). However:
 ### Do I need an API key?
 
 - **Cloud providers** (OpenAI, Anthropic, etc.): Yes, get key from provider
+- **ChatGPT subscription** (Plus/Pro): No API key needed — authenticate with your ChatGPT session via the Codex CLI. See [Getting Started](?doc=getting-started) for setup.
 - **Local providers** (Ollama, LM Studio): No, run models locally for free
 
 ### Is my data private?
@@ -55,6 +56,10 @@ The application itself is **free and open source** (MIT license). However:
 - Your code is sent to AI provider when generating
 - Check provider's privacy policy
 - Use local models (Ollama/LM Studio) for complete privacy
+
+**Token storage**:
+- API keys are stored in localStorage (browser-only, never sent to OSW Studio)
+- ChatGPT session: the refresh token is in an HttpOnly cookie so JS can't read it; only a short-lived access token (~1 hour) stays in localStorage
 
 ---
 

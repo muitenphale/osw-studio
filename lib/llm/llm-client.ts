@@ -50,6 +50,8 @@ export class LLMClient {
         return 'deepseek/deepseek-chat';
       case 'openai':
         return 'gpt-4o-mini';
+      case 'openai-codex':
+        return 'gpt-5.3-codex';
       case 'anthropic':
         return 'claude-3-5-haiku-20241022';
       case 'groq':
@@ -72,7 +74,7 @@ export class LLMClient {
     tools: ToolDefinition[],
     context?: FileContext
   ): Promise<AsyncIterable<StreamChunk>> {
-    if (this.providerConfig.apiKeyRequired && !this.apiKey) {
+    if (this.providerConfig.apiKeyRequired && !this.apiKey && !this.providerConfig.usesOAuth) {
       throw new Error(`${this.providerConfig.name} API key is required. Please set it in settings.`);
     }
 
@@ -98,7 +100,7 @@ export class LLMClient {
   }
 
   async generate(prompt: string, context?: FileContext): Promise<string> {
-    if (this.providerConfig.apiKeyRequired && !this.apiKey) {
+    if (this.providerConfig.apiKeyRequired && !this.apiKey && !this.providerConfig.usesOAuth) {
       throw new Error(`${this.providerConfig.name} API key is required. Please set it in settings.`);
     }
 
