@@ -5,7 +5,7 @@
   - Server-side adapter (`lib/llm/codex-adapter.ts`) converts between Chat Completions and Codex Responses API formats
   - Uses `@spmurrayzzz/opencode-openai-codex-auth` for JWT decode, header construction, model normalization, and error parsing
   - No client-side changes — the streaming parser, orchestrator, and UI work unchanged
-- **Model List**: Available models: `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, `gpt-5.1`, `gpt-5-codex`, `codex-mini-latest`; future model IDs are passed through without normalization
+- **Model List**: Available models: `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, `gpt-5.1`, `gpt-5-codex`, `codex-mini-latest`; future model IDs are passed through without normalization
 - **Codex Error Handling**: Usage limit errors show a clear message with estimated retry time
 - **UI**: Codex auth panel layout tightened — "Disconnect" button inline with connection status; security/stability warning banner added
 - **Codex Auth**: Refresh token stored in HttpOnly cookie (`osw_codex_rt`), not localStorage — JS never has access to it

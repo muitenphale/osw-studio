@@ -11,7 +11,7 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 Use your ChatGPT Plus/Pro subscription to generate code directly in OSW Studio. The new Codex adapter translates between our standard format and the Codex Responses API entirely server-side — the editor, preview, and chat all work exactly as before.
 
 - **Codex Generation** - The "Codex (ChatGPT Sub)" provider now supports full generation with streaming responses and tool calls (shell, json_patch).
-- **GPT-5.3 Codex** - New default model. Also available: GPT-5.3 Codex Spark (real-time coding on Cerebras at 1000+ tok/s), plus the full GPT-5.2 and GPT-5.1 families.
+- **GPT-5.3 Codex** - New default model. Also available: GPT-5.2 Codex, GPT-5.1 Codex, GPT-5.1 Codex Mini, Codex Mini, and the general-purpose GPT-5.2 and GPT-5.1.
 - **Usage Limit Handling** - Clear error messages with estimated retry time when you hit your ChatGPT subscription limits.
 - **Compact Auth Panel** - Tighter layout with the "Disconnect" button inline. A warning banner notes the experimental nature of this provider.
 - **Secure Auth** - Your ChatGPT refresh token is stored in an HttpOnly cookie, so page scripts can't read it. Only the short-lived access token (~1 hour) is kept in localStorage.

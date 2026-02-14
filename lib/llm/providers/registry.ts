@@ -11,15 +11,6 @@ const codexModels: ProviderModel[] = [
     supportsVision: true,
   },
   {
-    id: 'gpt-5.3-codex-spark',
-    name: 'GPT-5.3 Codex Spark',
-    description: 'Real-time coding, 1000+ tok/s',
-    contextLength: 272000,
-    maxTokens: 128000,
-    supportsFunctions: true,
-    supportsVision: true,
-  },
-  {
     id: 'gpt-5.2-codex',
     name: 'GPT-5.2 Codex',
     description: 'Frontier agentic coding model',
