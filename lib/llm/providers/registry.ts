@@ -1,8 +1,88 @@
-
 import { ProviderId, ProviderConfig, ProviderModel } from './types';
 
-
-
+const codexModels: ProviderModel[] = [
+  {
+    id: 'gpt-5.3-codex',
+    name: 'GPT-5.3 Codex',
+    description: 'Most capable agentic coding model',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5.3-codex-spark',
+    name: 'GPT-5.3 Codex Spark',
+    description: 'Real-time coding, 1000+ tok/s',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5.2-codex',
+    name: 'GPT-5.2 Codex',
+    description: 'Frontier agentic coding model',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5.2',
+    name: 'GPT-5.2',
+    description: 'General purpose frontier model',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5.1-codex',
+    name: 'GPT-5.1 Codex',
+    description: 'Optimized for coding tasks',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5.1-codex-mini',
+    name: 'GPT-5.1 Codex Mini',
+    description: 'Fast and lightweight coding model',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5.1',
+    name: 'GPT-5.1',
+    description: 'Broad world knowledge, general reasoning',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'gpt-5-codex',
+    name: 'GPT-5 Codex',
+    description: 'Legacy codex model',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+  {
+    id: 'codex-mini-latest',
+    name: 'Codex Mini',
+    description: 'Fast lightweight codex model',
+    contextLength: 272000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsVision: true,
+  },
+];
 
 const geminiModels: ProviderModel[] = [
   {
@@ -63,6 +143,17 @@ export const providers: Record<ProviderId, ProviderConfig> = {
     supportsModelDiscovery: true,
     supportsFunctions: true,
     supportsStreaming: true
+  },
+  'openai-codex': {
+    id: 'openai-codex',
+    name: 'Codex (ChatGPT Sub)',
+    description: 'Use your ChatGPT subscription — experimental, use at your own risk',
+    apiKeyRequired: false,
+    baseUrl: 'https://chatgpt.com/backend-api',
+    models: codexModels,
+    supportsFunctions: true,
+    supportsStreaming: true,
+    usesOAuth: true
   },
   anthropic: {
     id: 'anthropic',

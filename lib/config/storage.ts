@@ -1,5 +1,5 @@
 
-import { ProviderId, ProviderModel } from '@/lib/llm/providers/types';
+import { ProviderId, ProviderModel, CodexAuthData } from '@/lib/llm/providers/types';
 import { UsageInfo } from '@/lib/llm/types';
 
 export interface SessionCost {
@@ -55,6 +55,7 @@ export interface AppSettings {
   modelCache?: Partial<Record<ProviderId, ModelCacheEntry>>;
   modelPricing?: Partial<Record<ProviderId, Record<string, ProviderPricingEntry>>>;
   reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
+  codexAuth?: CodexAuthData;
 }
 
 class ConfigManager {
@@ -256,6 +257,8 @@ class ConfigManager {
         return 'deepseek/deepseek-chat';
       case 'openai':
         return 'gpt-4o-mini';
+      case 'openai-codex':
+        return 'gpt-5.3-codex';
       case 'anthropic':
         return 'claude-3-5-haiku-20241022';
       case 'groq':
@@ -493,6 +496,36 @@ class ConfigManager {
   isCacheValid(provider: ProviderId): boolean {
     const cache = this.getCachedModels(provider);
     return cache !== null;
+  }
+
+  // Codex auth management
+  getCodexAuth(): CodexAuthData | null {
+    return this.getSettings().codexAuth || null;
+  }
+
+  setCodexAuth(auth: CodexAuthData): void {
+    this.setSetting('codexAuth', auth);
+    // Also write access_token into providerKeys so getProviderApiKey() works
+    this.setProviderApiKey('openai-codex', auth.access_token);
+  }
+
+  clearCodexAuth(): void {
+    const settings = this.getSettings();
+    delete settings.codexAuth;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
+    }
+    // Also clear the provider key
+    const providerKeys = settings.providerKeys || {};
+    delete providerKeys['openai-codex'];
+    this.setSetting('providerKeys', providerKeys);
+  }
+
+  isCodexTokenExpired(): boolean {
+    const auth = this.getCodexAuth();
+    if (!auth) return true;
+    // Expired if within 60s of expiry
+    return Date.now() / 1000 >= auth.expires_at - 60;
   }
 
   // Reasoning toggle management

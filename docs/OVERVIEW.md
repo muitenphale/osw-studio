@@ -22,7 +22,7 @@ OSW Studio is a browser-based development environment where you describe what yo
 ## Key Features
 
 **🤖 Multiple AI Providers**
-Choose from OpenAI, Anthropic Claude, Google Gemini, or run locally with Ollama
+Choose from OpenAI, Anthropic Claude, Google Gemini, ChatGPT subscription (Plus/Pro), or run locally with Ollama
 
 **💾 Works in Your Browser**
 Everything stays private in your browser. No server required.

@@ -127,29 +127,30 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
       let newEvents: DebugEvent[];
 
-      // Check if we can coalesce with the last event
+      // Check if we can coalesce with a recent event of the same type.
+      // Search backward through the last few events to handle interleaved
+      // streaming (e.g. tool_param_delta / toolCalls / tool_param_delta).
       if (shouldCoalesce && prev.length > 0) {
-        const lastEvent = prev[prev.length - 1];
+        const searchLimit = Math.max(0, prev.length - 4);
+        for (let i = prev.length - 1; i >= searchLimit; i--) {
+          if (prev[i].event === event) {
+            const target = prev[i];
+            const updatedEvent = {
+              ...target,
+              timestamp: Date.now(),
+              version: (target.version || 1) + 1,
+              count: (target.count || 1) + 1,
+              data: {
+                all: target.data.all
+                  ? [...target.data.all, data]
+                  : [target.data, data]
+              }
+            };
 
-        // Same event type - coalesce
-        if (lastEvent.event === event) {
-          // Accumulate data in 'all' array format
-          const updatedEvent = {
-            ...lastEvent,
-            timestamp: Date.now(),
-            version: (lastEvent.version || 1) + 1, // Increment version
-            count: (lastEvent.count || 1) + 1,
-            data: {
-              all: lastEvent.data.all
-                ? [...lastEvent.data.all, data]
-                : [lastEvent.data, data]
-            }
-          };
-
-          // Return new array with updated last event (triggers React re-render)
-          newEvents = [...prev.slice(0, -1), updatedEvent];
-          debouncedSaveEvents(newEvents);
-          return newEvents;
+            newEvents = [...prev.slice(0, i), updatedEvent, ...prev.slice(i + 1)];
+            debouncedSaveEvents(newEvents);
+            return newEvents;
+          }
         }
       }
 

@@ -6,6 +6,28 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.30.0 - Codex Generation (2026-02-14)
+
+Use your ChatGPT Plus/Pro subscription to generate code directly in OSW Studio. The new Codex adapter translates between our standard format and the Codex Responses API entirely server-side — the editor, preview, and chat all work exactly as before.
+
+- **Codex Generation** - The "Codex (ChatGPT Sub)" provider now supports full generation with streaming responses and tool calls (shell, json_patch).
+- **GPT-5.3 Codex** - New default model. Also available: GPT-5.3 Codex Spark (real-time coding on Cerebras at 1000+ tok/s), plus the full GPT-5.2 and GPT-5.1 families.
+- **Usage Limit Handling** - Clear error messages with estimated retry time when you hit your ChatGPT subscription limits.
+- **Compact Auth Panel** - Tighter layout with the "Disconnect" button inline. A warning banner notes the experimental nature of this provider.
+- **Secure Auth** - Your ChatGPT refresh token is stored in an HttpOnly cookie, so page scripts can't read it. Only the short-lived access token (~1 hour) is kept in localStorage.
+- **Bug Fix** - Fixed parallel tool calls showing stuck spinners. Status updates (executing/completed) now correctly map to the right tool when the AI runs multiple tools at once.
+- **Bug Fix** - Fixed streaming parameter deltas not grouping properly during parallel tool execution.
+
+### Setup
+
+1. Install the [Codex CLI](https://github.com/openai/codex): `npm i -g @openai/codex`
+2. Run `codex login` and follow the browser prompts
+3. Copy your token: `cat ~/.codex/auth.json | pbcopy`
+4. In OSW Studio settings, select **Codex (ChatGPT Sub)** and paste the token JSON
+5. Pick a model and start building
+
+---
+
 ## v1.29.0 (2026-02-13)
 
 - **User-Managed Thumbnails** - Capture, upload, or remove thumbnails on project and site cards via icon buttons in the thumbnail area. The workspace preview toolbar also has a capture button. Uploaded images are automatically compressed. Auto-capture on save/publish has been removed.

@@ -110,7 +110,7 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 ### Features
 
 **Major Features:**
-- Multi-provider AI support (8 providers)
+- Multi-provider AI support (9 providers, including ChatGPT subscription)
 - Dual modes (Chat/Code)
 - Templates & Skills systems
 - Browser mode (IndexedDB)
