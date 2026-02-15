@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
+import { getPublicOrigin } from '../cookie';
 
 export async function GET(request: NextRequest) {
   const clientId = process.env.OAUTH_CLIENT_ID;
@@ -13,10 +14,7 @@ export async function GET(request: NextRequest) {
   // Generate CSRF state nonce
   const state = randomBytes(32).toString('hex');
 
-  // Determine redirect URI from request origin
-  const origin = request.headers.get('x-forwarded-proto')
-    ? `${request.headers.get('x-forwarded-proto')}://${request.headers.get('host')}`
-    : request.nextUrl.origin;
+  const origin = getPublicOrigin(request);
   const redirectUri = `${origin}/api/auth/hf/callback`;
 
   const params = new URLSearchParams({

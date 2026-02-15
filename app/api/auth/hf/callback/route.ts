@@ -1,26 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { HF_COOKIE_NAME, hfCookieOptions } from '../cookie';
+import { HF_COOKIE_NAME, hfCookieOptions, getPublicOrigin } from '../cookie';
 
 export async function GET(request: NextRequest) {
+  const origin = getPublicOrigin(request);
   const code = request.nextUrl.searchParams.get('code');
   const state = request.nextUrl.searchParams.get('state');
   const storedState = request.cookies.get('osw_hf_oauth_state')?.value;
 
   if (!code || !state || !storedState || state !== storedState) {
-    return NextResponse.redirect(new URL('/?hf_auth=error&reason=invalid_state', request.url));
+    return NextResponse.redirect(`${origin}/?hf_auth=error&reason=invalid_state`);
   }
 
   const clientId = process.env.OAUTH_CLIENT_ID;
   const clientSecret = process.env.OAUTH_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/?hf_auth=error&reason=not_configured', request.url));
+    return NextResponse.redirect(`${origin}/?hf_auth=error&reason=not_configured`);
   }
 
-  // Determine redirect URI (must match what was sent in /login)
-  const origin = request.headers.get('x-forwarded-proto')
-    ? `${request.headers.get('x-forwarded-proto')}://${request.headers.get('host')}`
-    : request.nextUrl.origin;
+  // Redirect URI must match what was sent in /login
   const redirectUri = `${origin}/api/auth/hf/callback`;
 
   try {
@@ -40,7 +38,7 @@ export async function GET(request: NextRequest) {
     if (!tokenRes.ok) {
       const err = await tokenRes.text();
       console.error('[HF OAuth] Token exchange failed:', err);
-      return NextResponse.redirect(new URL('/?hf_auth=error&reason=token_exchange', request.url));
+      return NextResponse.redirect(`${origin}/?hf_auth=error&reason=token_exchange`);
     }
 
     const tokenData = await tokenRes.json();
@@ -61,11 +59,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Build response: redirect back to app with success indicator
-    const successUrl = new URL('/', request.url);
+    const successUrl = new URL('/', origin);
     successUrl.searchParams.set('hf_auth', 'success');
     if (username) successUrl.searchParams.set('hf_user', username);
 
-    const response = NextResponse.redirect(successUrl);
+    const response = NextResponse.redirect(successUrl.toString());
 
     // Store access token in HttpOnly cookie
     const cookieValue = JSON.stringify({ access_token: accessToken, username });
@@ -77,6 +75,6 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (err) {
     console.error('[HF OAuth] Callback error:', err);
-    return NextResponse.redirect(new URL('/?hf_auth=error&reason=server_error', request.url));
+    return NextResponse.redirect(`${origin}/?hf_auth=error&reason=server_error`);
   }
 }
