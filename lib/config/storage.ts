@@ -1,5 +1,5 @@
 
-import { ProviderId, ProviderModel, CodexAuthData } from '@/lib/llm/providers/types';
+import { ProviderId, ProviderModel, CodexAuthData, HFAuthData } from '@/lib/llm/providers/types';
 import { UsageInfo } from '@/lib/llm/types';
 
 export interface SessionCost {
@@ -56,6 +56,7 @@ export interface AppSettings {
   modelPricing?: Partial<Record<ProviderId, Record<string, ProviderPricingEntry>>>;
   reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
   codexAuth?: CodexAuthData;
+  hfAuth?: HFAuthData;
 }
 
 class ConfigManager {
@@ -265,6 +266,8 @@ class ConfigManager {
         return 'llama-3.3-70b-versatile';
       case 'gemini':
         return 'gemini-1.5-flash';
+      case 'huggingface':
+        return 'Qwen/Qwen2.5-Coder-32B-Instruct';
       case 'ollama':
         return 'llama3.2:latest';
       case 'lmstudio':
@@ -526,6 +529,29 @@ class ConfigManager {
     if (!auth) return true;
     // Expired if within 60s of expiry
     return Date.now() / 1000 >= auth.expires_at - 60;
+  }
+
+  // HuggingFace auth management
+  getHFAuth(): HFAuthData | null {
+    return this.getSettings().hfAuth || null;
+  }
+
+  setHFAuth(auth: HFAuthData): void {
+    this.setSetting('hfAuth', auth);
+    // Also write access_token into providerKeys so getProviderApiKey() works
+    this.setProviderApiKey('huggingface', auth.access_token);
+  }
+
+  clearHFAuth(): void {
+    const settings = this.getSettings();
+    delete settings.hfAuth;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
+    }
+    // Also clear the provider key
+    const providerKeys = settings.providerKeys || {};
+    delete providerKeys['huggingface'];
+    this.setSetting('providerKeys', providerKeys);
   }
 
   // Reasoning toggle management

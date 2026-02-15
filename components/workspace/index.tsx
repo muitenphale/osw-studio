@@ -1030,7 +1030,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
             <Settings className="h-4 w-4" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-96" align="end">
+        <PopoverContent className="w-[460px] max-h-[min(720px,calc(100vh-5rem))] overflow-hidden flex flex-col" align="end">
           <SettingsPanel />
         </PopoverContent>
       </Popover>
@@ -1057,7 +1057,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
             Settings
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[calc(100vw-2rem)]" align="start">
+        <PopoverContent className="w-[460px] max-w-[calc(100vw-2rem)] max-h-[min(720px,calc(100vh-5rem))] overflow-hidden flex flex-col" align="start">
           <SettingsPanel />
         </PopoverContent>
       </Popover>

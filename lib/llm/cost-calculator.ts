@@ -200,6 +200,7 @@ export class CostCalculator {
       provider === 'anthropic' ||
       provider === 'groq' ||
       provider === 'gemini' ||
+      provider === 'huggingface' ||
       provider === 'ollama' ||
       provider === 'lmstudio' ||
       provider === 'sambanova'

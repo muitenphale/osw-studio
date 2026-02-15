@@ -21,9 +21,21 @@ Use a cloud AI service. You'll need an API key and will pay per usage (typically
 | **Anthropic** | [Get Key](https://console.anthropic.com/settings/keys) |
 | **Google** | [Get Key](https://aistudio.google.com/apikey) |
 | **Groq** | [Get Key](https://console.groq.com/keys) |
+| **HuggingFace** | [Get Token](https://huggingface.co/settings/tokens) |
 | **SambaNova** | [Get Key](https://cloud.sambanova.ai/) |
 
 **Note**: OSW Studio is developed using OpenRouter, so that provider has the most testing.
+
+### Option A2: HuggingFace (Free Tier)
+
+HuggingFace provides $0.10/month in free inference credits to all users — no payment method required.
+
+1. Create an account at [huggingface.co](https://huggingface.co)
+2. Go to [Settings → Access Tokens](https://huggingface.co/settings/tokens)
+3. Create a new token with **"Make calls to Inference Providers"** permission
+4. In Settings, select **HuggingFace** and paste the token
+
+On HuggingFace Spaces, you can also sign in with one click via OAuth (no token needed).
 
 ### Option B: ChatGPT Subscription (No API Key)
 
@@ -54,15 +66,15 @@ You can configure your AI provider in two places:
 **Option A: Global Settings**
 1. Go to **Settings > Provider & Model**
 2. Select your provider from the dropdown
-3. Enter your API key (if using cloud provider)
+3. Paste your API key and click **Connect** (validates the key)
 4. Choose a model from the list
 
 **Option B: In Workspace**
 1. Open or create a project
 2. Click the **model button** at the bottom left of the Chat panel
-3. Select provider, add API key, and choose a model
+3. Select provider, paste API key, click **Connect**, and choose a model
 
-Your selection persists automatically - no need to save. You can swap models anytime as part of normal usage.
+Your selection persists automatically. You can swap models anytime, or click **Disconnect** to remove a stored key.
 
 **That's it!** You're ready to build.
 

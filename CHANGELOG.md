@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.31.0 - 2026-02-15
+- **HuggingFace Provider**: New AI provider with free inference tier ($0.10/month free credits)
+  - Two auth methods: OAuth (HF Spaces only) and API key (everywhere)
+  - Dynamic model discovery — 120+ models with metadata (context length, tool support, vision, pricing)
+  - Full cost tracking integrated with session and project cost calculations
+  - Credit exhaustion detection with friendly error message
+- **UI Overhaul — Model Settings & Settings Popups**: Visual refresh of both settings popups
+  - Model Settings: inline model list with search, separate chat model toggle, cleaner section layout
+  - Settings: segmented theme selector, streamlined cost tracking, card-style data management
+  - Unified connection badge for all providers — HuggingFace, Codex, and API key providers all show a consistent connected/disconnected state
+  - API key providers (OpenRouter, OpenAI, Anthropic, Google, Groq, SambaNova) now validate keys on connect instead of saving on every keystroke
+- **Bug Fix**: Fixed model selector dropdown extending beyond viewport
+
 ## v1.30.0 - 2026-02-14
 - **Codex Generation**: The "Codex (ChatGPT Sub)" provider now supports full generation — streaming responses, tool calls (shell, json_patch), and usage-limit error handling
   - Server-side adapter (`lib/llm/codex-adapter.ts`) converts between Chat Completions and Codex Responses API formats

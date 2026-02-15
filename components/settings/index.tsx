@@ -5,7 +5,6 @@ import { configManager, AppSettings, CostSettings } from '@/lib/config/storage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { useTheme } from 'next-themes';
@@ -14,12 +13,13 @@ import { CostCalculator } from '@/lib/llm/cost-calculator';
 import { AboutModal } from '@/components/about-modal';
 import { BackupService } from '@/lib/vfs/backup-service';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 interface SettingsPanelProps {
   onClose?: () => void;
 }
 
-export function SettingsPanel({ onClose }: SettingsPanelProps) {
+export function SettingsPanel({ onClose: _onClose }: SettingsPanelProps) {
   const [_settings, setSettings] = useState<AppSettings>({});
   const [costSettings, setCostSettings] = useState<CostSettings>({});
   const { theme, setTheme } = useTheme();
@@ -123,9 +123,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   };
 
   return (
-    <div className="max-h-[calc(100vh-4rem)] overflow-y-auto">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="shrink-0 pb-3 mb-1 border-b">
+        <h3 className="font-semibold text-base tracking-tight">Settings</h3>
+        <p className="text-muted-foreground text-xs mt-1">
+          Application preferences and data management
+        </p>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="space-y-3 pb-4">
-        
+
         {/* Application Settings Section */}
         <Collapsible
           open={openSections.application}
@@ -136,7 +146,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <Palette className="h-4 w-4" />
               <h4 className="font-medium text-sm">Application Settings</h4>
             </div>
-            <ChevronDown 
+            <ChevronDown
               className={`h-4 w-4 transition-transform duration-200 ${
                 openSections.application ? 'rotate-180' : ''
               }`}
@@ -150,22 +160,21 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               {/* Theme */}
               <div>
                 <Label htmlFor="theme">Theme</Label>
-                <Select 
-                  value={mounted ? theme : 'dark'}
-                  onValueChange={(value: 'light' | 'dark' | 'system') => {
-                    setTheme(value);
-                    updateSetting('theme', value);
+                <ToggleGroup
+                  type="single"
+                  value={mounted ? (theme || 'dark') : 'dark'}
+                  onValueChange={(value: string) => {
+                    if (value) {
+                      setTheme(value);
+                      updateSetting('theme', value as 'light' | 'dark' | 'system');
+                    }
                   }}
+                  className="w-full mt-2"
                 >
-                  <SelectTrigger id="theme" className="mt-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="dark">Dark</SelectItem>
-                    <SelectItem value="system">System</SelectItem>
-                  </SelectContent>
-                </Select>
+                  <ToggleGroupItem value="dark" className="flex-1">Dark</ToggleGroupItem>
+                  <ToggleGroupItem value="light" className="flex-1">Light</ToggleGroupItem>
+                  <ToggleGroupItem value="system" className="flex-1">System</ToggleGroupItem>
+                </ToggleGroup>
               </div>
             </div>
           </CollapsibleContent>
@@ -181,7 +190,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <DollarSign className="h-4 w-4" />
               <h4 className="font-medium text-sm">Cost Tracking</h4>
             </div>
-            <ChevronDown 
+            <ChevronDown
               className={`h-4 w-4 transition-transform duration-200 ${
                 openSections.costTracking ? 'rotate-180' : ''
               }`}
@@ -193,7 +202,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="show-costs">Display Costs</Label>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     Show cost information in messages
                   </p>
                 </div>
@@ -208,16 +217,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
 
-              {/* Daily Limit */}
-              <div>
-                <Label htmlFor="daily-limit">Daily Cost Limit (USD)</Label>
-                <div className="flex items-center gap-2 mt-2">
+              {/* Daily + Project Limits — 2 column grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="daily-limit" className="text-xs">Daily Limit (USD)</Label>
                   <Input
                     id="daily-limit"
                     type="number"
                     min="0"
                     step="0.01"
                     placeholder="No limit"
+                    className="mt-1.5"
                     value={costSettings.dailyLimit || ''}
                     onChange={(e) => {
                       const value = e.target.value ? parseFloat(e.target.value) : undefined;
@@ -226,24 +236,16 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       setCostSettings(newCostSettings);
                     }}
                   />
-                  {costSettings.dailyLimit && (
-                    <span className="text-sm text-muted-foreground">
-                      ${costSettings.dailyLimit.toFixed(2)}/day
-                    </span>
-                  )}
                 </div>
-              </div>
-
-              {/* Project Limit */}
-              <div>
-                <Label htmlFor="project-limit">Project Cost Limit (USD)</Label>
-                <div className="flex items-center gap-2 mt-2">
+                <div>
+                  <Label htmlFor="project-limit" className="text-xs">Project Limit (USD)</Label>
                   <Input
                     id="project-limit"
                     type="number"
                     min="0"
                     step="0.01"
                     placeholder="No limit"
+                    className="mt-1.5"
                     value={costSettings.projectLimit || ''}
                     onChange={(e) => {
                       const value = e.target.value ? parseFloat(e.target.value) : undefined;
@@ -252,24 +254,20 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       setCostSettings(newCostSettings);
                     }}
                   />
-                  {costSettings.projectLimit && (
-                    <span className="text-sm text-muted-foreground">
-                      ${costSettings.projectLimit.toFixed(2)}/project
-                    </span>
-                  )}
                 </div>
               </div>
 
               {/* Warning Threshold */}
               <div>
-                <Label htmlFor="warning-threshold">Warning Threshold (%)</Label>
-                <div className="flex items-center gap-2 mt-2">
+                <Label htmlFor="warning-threshold" className="text-xs">Warning Threshold</Label>
+                <div className="flex items-center gap-3 mt-1.5">
                   <Input
                     id="warning-threshold"
                     type="number"
                     min="50"
                     max="100"
                     step="5"
+                    className="flex-1"
                     value={costSettings.warningThreshold || 80}
                     onChange={(e) => {
                       const value = parseInt(e.target.value);
@@ -278,7 +276,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       setCostSettings(newCostSettings);
                     }}
                   />
-                  <span className="text-sm text-muted-foreground flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1 whitespace-nowrap font-mono">
                     <AlertTriangle className="h-3 w-3" />
                     Warn at {costSettings.warningThreshold || 80}%
                   </span>
@@ -286,27 +284,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               </div>
 
               {/* Lifetime Costs */}
-              <div className="border-t pt-3 mt-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium">Lifetime Total</div>
-                    <div className="text-xs text-muted-foreground">
-                      {CostCalculator.formatCost(configManager.getLifetimeCosts().total)}
-                    </div>
+              <div className="flex items-center justify-between bg-muted/30 border rounded-lg p-3">
+                <div>
+                  <div className="text-xs text-muted-foreground font-medium">Lifetime Total</div>
+                  <div className="text-lg font-bold font-mono tracking-tight mt-0.5">
+                    {CostCalculator.formatCost(configManager.getLifetimeCosts().total)}
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (confirm('Reset lifetime cost tracking? This cannot be undone.')) {
-                        configManager.resetLifetimeCosts();
-                        toast.success('Lifetime costs reset');
-                      }
-                    }}
-                  >
-                    Reset Stats
-                  </Button>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (confirm('Reset lifetime cost tracking? This cannot be undone.')) {
+                      configManager.resetLifetimeCosts();
+                      toast.success('Lifetime costs reset');
+                    }
+                  }}
+                >
+                  Reset Stats
+                </Button>
               </div>
             </div>
           </CollapsibleContent>
@@ -322,7 +318,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <Database className="h-4 w-4" />
               <h4 className="font-medium text-sm">Data Management</h4>
             </div>
-            <ChevronDown 
+            <ChevronDown
               className={`h-4 w-4 transition-transform duration-200 ${
                 openSections.dataManagement ? 'rotate-180' : ''
               }`}
@@ -330,16 +326,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           </CollapsibleTrigger>
           <CollapsibleContent className="px-3 pt-2 pb-3">
             <p className="text-xs text-muted-foreground mb-4">
-              Backup and restore your projects, conversations, and settings. Use this to migrate your data to OSWStudio or create backups.
+              Backup and restore your projects, conversations, and settings.
             </p>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {/* Export Data */}
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center gap-3 p-3 rounded-lg border">
+                <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium">Export All Data</div>
                   <div className="text-xs text-muted-foreground">
-                    Download a backup file containing all your projects and data
+                    Download a backup of all projects and data
                   </div>
                 </div>
                 <Button
@@ -347,16 +344,15 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   size="sm"
                   onClick={handleExportData}
                   disabled={isExporting}
-                  className="flex items-center gap-2"
                 >
-                  <Download className="h-4 w-4" />
                   {isExporting ? 'Exporting...' : 'Export'}
                 </Button>
               </div>
 
               {/* Import Data */}
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center gap-3 p-3 rounded-lg border">
+                <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium">Import Data</div>
                   <div className="text-xs text-muted-foreground">
                     Restore from a .osws backup file
@@ -367,9 +363,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   size="sm"
                   onClick={handleImportData}
                   disabled={isImporting}
-                  className="flex items-center gap-2"
                 >
-                  <Upload className="h-4 w-4" />
                   {isImporting ? 'Importing...' : 'Import'}
                 </Button>
               </div>
@@ -382,8 +376,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     <span>{importProgress}%</span>
                   </div>
                   <div className="w-full bg-muted rounded-full h-2">
-                    <div 
-                      className="bg-primary h-2 rounded-full transition-all duration-300" 
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
                       style={{ width: `${importProgress}%` }}
                     />
                   </div>
@@ -393,35 +387,31 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           </CollapsibleContent>
         </Collapsible>
       </div>
+      </div>{/* end scrollable content */}
 
-      {/* Actions */}
-      <div className="flex justify-between pt-4 px-3 border-t mt-4">
-        <div className="flex gap-2">
-          <Button 
-            variant="destructive" 
-            onClick={clearSettings}
-          >
-            Clear All Settings
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setAboutModalOpen(true)}
-          >
-            <Info className="mr-2 h-4 w-4" />
-            About OSW Studio
-          </Button>
-        </div>
-        
-        {onClose && (
-          <Button onClick={onClose}>
-            Close
-          </Button>
-        )}
+      {/* Footer */}
+      <div className="shrink-0 flex items-center justify-between pt-4 px-3 border-t">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:text-destructive"
+          onClick={clearSettings}
+        >
+          Clear All Settings
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setAboutModalOpen(true)}
+        >
+          <Info className="mr-1.5 h-3.5 w-3.5" />
+          About OSW Studio
+        </Button>
       </div>
 
-      <AboutModal 
-        open={aboutModalOpen} 
-        onOpenChange={setAboutModalOpen} 
+      <AboutModal
+        open={aboutModalOpen}
+        onOpenChange={setAboutModalOpen}
       />
     </div>
   );

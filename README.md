@@ -33,7 +33,7 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 **What you get:**
 - **Sandboxed agent** - AI operates in a virtual file system with automatic checkpoints - explore freely, rollback anytime
 - **Dual AI modes** - Chat (exploration, planning) + Code (full implementation)
-- **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, SambaNova, Ollama, LM Studio
+- **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, SambaNova, Ollama, LM Studio
 - **Full IDE** - Monaco editor, live preview, file explorer, multi-tab support
 - **Templates & Skills** - Reusable project and site templates (with bundled backend infrastructure) and AI workflow guides
 - **Export anywhere** - Download as ZIP, deploy to Vercel/Netlify/GitHub Pages
@@ -80,7 +80,7 @@ npm run dev
 - **Dual Modes**:
   - 💬 **Chat Mode** - Exploration, planning, Q&A
   - 🔧 **Code Mode** - Full implementation with file operations
-- **8 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, SambaNova, Ollama, LM Studio
+- **9 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, HuggingFace, SambaNova, Ollama, LM Studio
 - **200+ Models** - From tiny 4B tool models to SOTA frontier models
 - **Smart Agent** - Uses shell commands, JSON patch edits, self-evaluation
 - **Skills System** - Teach AI your workflow preferences with Anthropic-style skills
@@ -154,6 +154,7 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 - [Anthropic](https://console.anthropic.com) - Claude 3/4 series
 - [Google](https://aistudio.google.com) - Gemini models
 - [Groq](https://console.groq.com) - Fast inference
+- [HuggingFace](https://huggingface.co) - Free tier ($0.10/month), 120+ models
 - [SambaNova](https://sambanova.ai) - High-performance models
 
 ## File Support

@@ -182,6 +182,19 @@ export const providers: Record<ProviderId, ProviderConfig> = {
     supportsFunctions: true,
     supportsStreaming: true
   },
+  huggingface: {
+    id: 'huggingface',
+    name: 'HuggingFace',
+    description: 'Free inference with your HuggingFace account',
+    apiKeyRequired: false,
+    apiKeyPlaceholder: 'hf_...',
+    apiKeyHelpUrl: 'https://huggingface.co/settings/tokens',
+    baseUrl: 'https://router.huggingface.co/v1',
+    supportsModelDiscovery: true,
+    supportsFunctions: true,
+    supportsStreaming: true,
+    usesOAuth: true,
+  },
   ollama: {
     id: 'ollama',
     name: 'Ollama',

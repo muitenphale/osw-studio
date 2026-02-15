@@ -437,6 +437,20 @@ Habits:
         if (rateLimitReset) headers['X-RateLimit-Reset'] = rateLimitReset;
         if (rateLimitRemaining) headers['X-RateLimit-Remaining'] = rateLimitRemaining;
       }
+      // HuggingFace credit exhaustion
+      if (selectedProvider === 'huggingface' && (
+        cleanError.includes('exceeded your monthly included credits') ||
+        cleanError.includes('reached the free monthly usage limit') ||
+        cleanError.includes('rate limit') ||
+        response.status === 402 ||
+        (response.status === 429 && cleanError.includes('limit'))
+      )) {
+        return NextResponse.json(
+          { error: 'HuggingFace free credits exhausted. You get $0.10/month in free inference. Upgrade at huggingface.co/pricing or wait for your credits to reset.' },
+          { status: 429 }
+        );
+      }
+
       if (selectedProvider === 'ollama' && cleanError.includes('does not support tools') && tools && tools.length > 0) {
         const fallbackSystemPrompt = systemPrompt + `
 
@@ -612,6 +626,8 @@ function getDefaultModel(provider: ProviderId): string {
       return 'llama-3.3-70b-versatile';
     case 'gemini':
       return 'gemini-1.5-flash';
+    case 'huggingface':
+      return 'Qwen/Qwen2.5-Coder-32B-Instruct';
     case 'ollama':
       return 'llama3.2:latest';
     case 'lmstudio':

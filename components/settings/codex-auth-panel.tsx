@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { ExternalLink, Loader2, LogOut, Terminal, TriangleAlert } from 'lucide-react';
+import { ExternalLink, Loader2, Terminal, TriangleAlert } from 'lucide-react';
+import { ConnectionBadge } from '@/components/settings/connection-badge';
 import { toast } from 'sonner';
 import { configManager } from '@/lib/config/storage';
 import { parseCodexAuthJson, connectCodex, disconnectCodex, checkCodexStatus } from '@/lib/auth/codex-auth';
@@ -133,39 +134,15 @@ export function CodexAuthPanel({ onAuthChange }: CodexAuthPanelProps) {
   if (isAuthenticated && auth) {
     return (
       <div className="space-y-3">
-        <Label>ChatGPT Authentication</Label>
-
         {warningBanner}
 
-        <div className="p-3 border rounded-md bg-muted/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <p className="text-sm font-medium text-green-600 dark:text-green-400">Connected</p>
-              {auth.user_email && (
-                <p className="text-xs text-muted-foreground">{auth.user_email}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted-foreground">
-                Expires in {formatExpiry()}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="gap-1 text-destructive h-7 px-2"
-                onClick={handleDisconnect}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <LogOut className="h-3 w-3" />
-                )}
-                Disconnect
-              </Button>
-            </div>
-          </div>
-        </div>
+        <ConnectionBadge
+          method="ChatGPT"
+          extra={auth.user_email}
+          info={auth.expires_at ? `Expires in ${formatExpiry()}` : undefined}
+          onDisconnect={handleDisconnect}
+          disconnecting={isLoading}
+        />
       </div>
     );
   }
