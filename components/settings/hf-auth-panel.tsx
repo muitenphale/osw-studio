@@ -9,7 +9,7 @@ import { ConnectionBadge } from '@/components/settings/connection-badge';
 import { toast } from 'sonner';
 import { configManager } from '@/lib/config/storage';
 import { LLMClient } from '@/lib/llm/llm-client';
-import { checkHFCapabilities, checkHFStatus, disconnectHF, loginHF } from '@/lib/auth/hf-auth';
+import { checkHFCapabilities, loginHF } from '@/lib/auth/hf-auth';
 
 interface HFAuthPanelProps {
   onAuthChange?: () => void;
@@ -17,7 +17,6 @@ interface HFAuthPanelProps {
 
 export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
   const [oauthAvailable, setOauthAvailable] = useState(false);
-  const [oauthAuthenticated, setOauthAuthenticated] = useState(false);
   const [oauthUsername, setOauthUsername] = useState<string>();
   const [tokenInput, setTokenInput] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -32,25 +31,15 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
     }));
   }, [onAuthChange]);
 
-  // Check OAuth capabilities and status on mount
+  // Check OAuth capabilities on mount, handle OAuth callback
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
       try {
-        const [capabilities, status] = await Promise.all([
-          checkHFCapabilities(),
-          checkHFStatus(),
-        ]);
+        const capabilities = await checkHFCapabilities();
         if (cancelled) return;
-
         setOauthAvailable(capabilities.oauthAvailable);
-        setOauthAuthenticated(status.authenticated);
-        if (status.username) setOauthUsername(status.username);
-
-        if (status.authenticated && !configManager.getHFAuth()) {
-          dispatchAuthEvent(true);
-        }
       } catch {
         // Network error — leave state as-is
       }
@@ -62,20 +51,45 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
     const params = new URLSearchParams(window.location.search);
     if (params.get('hf_auth') === 'success') {
       const username = params.get('hf_user') || undefined;
-      setOauthAuthenticated(true);
-      if (username) setOauthUsername(username);
-      toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
-      dispatchAuthEvent(true);
+
+      // Read token from URL fragment (never sent to server)
+      const hash = window.location.hash.slice(1); // remove #
+      const fragParams = new URLSearchParams(hash);
+      const token = fragParams.get('hf_token');
+
+      if (token) {
+        configManager.setHFAuth({ access_token: token, username });
+        setIsConnected(true);
+        if (username) setOauthUsername(username);
+        toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
+        dispatchAuthEvent(true);
+      } else {
+        toast.error('HuggingFace sign-in succeeded but no token received.');
+      }
+
+      // Clean up URL
       const url = new URL(window.location.href);
       url.searchParams.delete('hf_auth');
       url.searchParams.delete('hf_user');
+      url.hash = '';
       window.history.replaceState({}, '', url.toString());
     } else if (params.get('hf_auth') === 'error') {
-      toast.error('HuggingFace sign-in failed. Please try again.');
+      const reason = params.get('reason');
+      if (reason === 'insufficient_scope') {
+        toast.error('Your HuggingFace authorization needs to be updated. Please revoke access at huggingface.co/settings/connected-applications and try again.');
+      } else {
+        toast.error('HuggingFace sign-in failed. Please try again.');
+      }
       const url = new URL(window.location.href);
       url.searchParams.delete('hf_auth');
       url.searchParams.delete('reason');
       window.history.replaceState({}, '', url.toString());
+    } else {
+      // Check if we have a stored OAuth username
+      const hfAuth = configManager.getHFAuth();
+      if (hfAuth?.username) {
+        setOauthUsername(hfAuth.username);
+      }
     }
 
     return () => { cancelled = true; };
@@ -106,17 +120,13 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
     }
   };
 
-  const handleDisconnect = async () => {
+  const handleDisconnect = () => {
     setIsLoading(true);
     try {
-      if (oauthAuthenticated) {
-        await disconnectHF();
-        setOauthAuthenticated(false);
-        setOauthUsername(undefined);
-      }
       configManager.clearHFAuth();
       configManager.clearModelCache('huggingface');
       setIsConnected(false);
+      setOauthUsername(undefined);
       setTokenInput('');
       toast.success('Disconnected from HuggingFace');
       dispatchAuthEvent(false);
@@ -128,11 +138,11 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
   };
 
   // --- Connected state (OAuth or validated API key) ---
-  if (oauthAuthenticated || isConnected) {
+  if (isConnected) {
     return (
       <div className="space-y-3">
         <ConnectionBadge
-          method={oauthAuthenticated ? 'OAuth' : 'API Key'}
+          method={oauthUsername ? 'OAuth' : 'API Key'}
           extra={oauthUsername}
           info={
             <>

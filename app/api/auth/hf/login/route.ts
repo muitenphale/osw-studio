@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'openid profile inference-api',
+    scope: process.env.OAUTH_SCOPES || 'openid profile inference-api',
     response_type: 'code',
     state,
   });

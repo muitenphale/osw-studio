@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.31.1 - 2026-02-16
+- **Bug Fix**: Fixed HF OAuth 401 — HttpOnly cookies silently dropped on HF Spaces; tokens now stored in localStorage via URL fragment
+- **Bug Fix**: Fixed OAuth redirect using internal container hostname instead of public URL
+- **Improvement**: Token exchange uses Basic auth header; callback validates inference scope before storing
+- **Improvement**: HTML error responses from providers sanitized to clean messages
+- **Security**: Codex provider hidden on HF Spaces (refresh token too sensitive for localStorage)
+
 ## v1.31.0 - 2026-02-15
 - **HuggingFace Provider**: New AI provider with free inference tier ($0.10/month free credits)
   - Two auth methods: OAuth (HF Spaces only) and API key (everywhere)

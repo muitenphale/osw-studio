@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { HF_COOKIE_NAME, hfCookieOptions, getPublicOrigin } from '../cookie';
+import { getPublicOrigin } from '../cookie';
 
 export async function GET(request: NextRequest) {
   const origin = getPublicOrigin(request);
@@ -22,16 +22,18 @@ export async function GET(request: NextRequest) {
   const redirectUri = `${origin}/api/auth/hf/callback`;
 
   try {
-    // Exchange code for tokens
+    // Exchange code for tokens (Basic auth per HF docs)
     const tokenRes = await fetch('https://huggingface.co/oauth/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+      },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: redirectUri,
         client_id: clientId,
-        client_secret: clientSecret,
+        redirect_uri: redirectUri,
       }),
     });
 
@@ -43,6 +45,15 @@ export async function GET(request: NextRequest) {
 
     const tokenData = await tokenRes.json();
     const accessToken: string = tokenData.access_token;
+
+    // Validate token has inference-api scope by testing against router
+    const testRes = await fetch('https://router.huggingface.co/v1/models', {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (testRes.status === 401) {
+      console.error('[HF OAuth] Token lacks inference-api scope');
+      return NextResponse.redirect(`${origin}/?hf_auth=error&reason=insufficient_scope`);
+    }
 
     // Fetch user info
     let username: string | undefined;
@@ -58,16 +69,15 @@ export async function GET(request: NextRequest) {
       // Non-critical — proceed without username
     }
 
-    // Build response: redirect back to app with success indicator
+    // Build redirect URL with token in fragment (never sent to server logs)
     const successUrl = new URL('/', origin);
     successUrl.searchParams.set('hf_auth', 'success');
     if (username) successUrl.searchParams.set('hf_user', username);
 
-    const response = NextResponse.redirect(successUrl.toString());
+    const fragment = `hf_token=${encodeURIComponent(accessToken)}`;
+    const redirectUrl = `${successUrl.toString()}#${fragment}`;
 
-    // Store access token in HttpOnly cookie
-    const cookieValue = JSON.stringify({ access_token: accessToken, username });
-    response.cookies.set(HF_COOKIE_NAME, cookieValue, hfCookieOptions());
+    const response = NextResponse.redirect(redirectUrl);
 
     // Clear the state cookie
     response.cookies.delete('osw_hf_oauth_state');
