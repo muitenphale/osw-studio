@@ -6,6 +6,27 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.31.0 - HuggingFace Provider & Settings Refresh (2026-02-15)
+
+HuggingFace is now available as an AI provider. Every HuggingFace account includes $0.10/month in free inference credits.
+
+- **HuggingFace Provider** - New provider in Settings with access to 120+ models across multiple inference backends (Cerebras, Fireworks, Groq, Together, SambaNova, and more) through HuggingFace's unified API
+- **Two Auth Methods** - Sign in with OAuth (on HuggingFace Spaces) or paste an API access token (everywhere)
+- **Dynamic Model Discovery** - Models are fetched live from HuggingFace with full metadata: context length, tool support, vision capability, and per-model pricing
+- **Cost Tracking** - Pricing from the HuggingFace API is automatically registered for accurate session and project cost calculations
+- **Credit Limit Handling** - Friendly error message when your free monthly credits are exhausted, with a link to upgrade
+- **Refreshed Settings UI** - Both the Model Settings and Settings popups have been redesigned with a cleaner, more compact layout. All providers now use a unified connect/disconnect flow — paste your API key, click Connect (validates first), and see a clean connection badge with a Disconnect option.
+- **Bug Fix** - Fixed model selector dropdown overflowing past the bottom of the viewport
+
+### Setup
+
+1. In OSW Studio settings, select **HuggingFace** as your AI provider
+2. Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and create a token with "Make calls to Inference Providers" permission
+3. Paste the token and click **Connect**
+4. Pick a model and start building — no API costs until you exceed your free credits
+
+---
+
 ## v1.30.0 - Codex Generation (2026-02-14)
 
 Use your ChatGPT Plus/Pro subscription to generate code directly in OSW Studio. The new Codex adapter translates between our standard format and the Codex Responses API entirely server-side — the editor, preview, and chat all work exactly as before.
@@ -449,7 +470,7 @@ The Debug panel now includes a terminal for testing VFS shell commands directly.
 
 ## v1.0.0
 
-- 8 AI providers (OpenRouter, OpenAI, Anthropic, Google, Groq, Ollama, LM Studio, SambaNova)
+- 10 AI providers (OpenRouter, OpenAI, Codex, Anthropic, Google, Groq, HuggingFace, Ollama, LM Studio, SambaNova)
 - Virtual file system with project management
 - Live preview with real-time updates
 - Multi-tab Monaco editor

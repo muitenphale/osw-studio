@@ -9,6 +9,7 @@ export type ProviderId =
   | 'anthropic'
   | 'groq'
   | 'gemini'
+  | 'huggingface'
   | 'ollama'
   | 'lmstudio'
   | 'sambanova';
@@ -52,6 +53,12 @@ export interface CodexAuthData {
   refresh_token?: string;
   expires_at: number; // Unix timestamp in seconds
   user_email?: string;
+}
+
+export interface HFAuthData {
+  access_token: string;
+  username?: string;
+  expires_at?: number;  // OAuth tokens expire, API keys don't
 }
 
 export interface ProviderSettings {

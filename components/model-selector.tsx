@@ -42,9 +42,10 @@ interface ModelSelectorProps {
   onChange?: (modelId: string) => void;
   className?: string;
   hideModelDetails?: boolean;
+  mode?: 'popover' | 'inline';
 }
 
-export function ModelSelector({ provider, value: _value, onChange, className, hideModelDetails }: ModelSelectorProps) {
+export function ModelSelector({ provider, value: _value, onChange, className, hideModelDetails, mode = 'popover' }: ModelSelectorProps) {
   const currentProvider = provider || configManager.getSelectedProvider();
   const providerConfig = getProvider(currentProvider);
   const [models, setModels] = useState<ProviderModel[]>([]);
@@ -159,6 +160,45 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
 
           return providerModel;
         });
+      } else if (currentProvider === 'huggingface') {
+        try {
+          const hfResponse = await fetch('https://router.huggingface.co/v1/models');
+          if (hfResponse.ok) {
+            const hfData = await hfResponse.json();
+            loadedModels = (hfData.data || []).map((model: any) => {
+              const hfProviders = model.providers || [];
+              const bestProvider = hfProviders.find((p: any) => p.supports_tools && p.status === 'live')
+                || hfProviders.find((p: any) => p.status === 'live')
+                || hfProviders[0];
+
+              const contextLength = bestProvider?.context_length || 32768;
+              const supportsFunctions = hfProviders.some((p: any) => p.supports_tools);
+              const supportsVision = model.architecture?.input_modalities?.includes('image');
+
+              let pricing: { input: number; output: number } | undefined;
+              if (bestProvider?.pricing?.input != null && bestProvider?.pricing?.output != null) {
+                pricing = {
+                  input: bestProvider.pricing.input,
+                  output: bestProvider.pricing.output,
+                };
+              }
+
+              return {
+                id: model.id,
+                name: model.id.split('/').pop() || model.id,
+                contextLength,
+                supportsFunctions,
+                supportsVision,
+                pricing,
+              } as ProviderModel;
+            });
+          }
+        } catch (error) {
+          logger.error('HuggingFace models fetch error:', error);
+        }
+        if (loadedModels.length > 0) {
+          registerPricingFromProviderModels('huggingface', loadedModels);
+        }
       } else if (providerConfig.supportsModelDiscovery) {
         // Try to discover models (we know API key exists at this point)
         const modelIds = await LLMClient.getAvailableModels(apiKey || undefined, currentProvider);
@@ -276,8 +316,10 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
     setSelectedModel(modelId);
     configManager.setProviderModel(currentProvider, modelId);
     onChange?.(modelId);
-    setOpen(false);
-    setSearchQuery('');
+    if (mode === 'popover') {
+      setOpen(false);
+      setSearchQuery('');
+    }
     // Load reasoning state for the new model
     setReasoningEnabled(configManager.getReasoningEnabled(modelId));
   };
@@ -366,6 +408,142 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
     );
   }
 
+  const renderModelItem = (model: ProviderModel) => (
+    <button
+      key={model.id}
+      onClick={() => handleModelSelect(model.id)}
+      className={cn(
+        "w-full text-left px-3 py-2 transition-colors rounded-lg",
+        mode === 'inline'
+          ? selectedModel === model.id
+            ? "bg-primary/10 border border-primary/30"
+            : "hover:bg-accent border border-transparent"
+          : selectedModel === model.id
+            ? "bg-accent"
+            : "hover:bg-accent hover:text-accent-foreground"
+      )}
+    >
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          {getModelIcon(model)}
+          <span className={cn("font-medium text-sm", selectedModel === model.id && mode === 'inline' && "text-primary")}>
+            {getModelName(model)}
+          </span>
+          {currentProvider === 'openrouter' && (
+            <Badge variant="secondary" className={`text-xs ${getProviderColor(model.id)}`}>
+              {model.id.split('/')[0]}
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>Context: {Math.round(model.contextLength / 1000)}K</span>
+          {model.pricing && (
+            model.pricing.input === 0 && model.pricing.output === 0 ? (
+              <>
+                <span>·</span>
+                <span>Free</span>
+              </>
+            ) : (
+              <>
+                <span>·</span>
+                <span>
+                  {formatModelPrice(model.pricing.input)}/K | {formatModelPrice(model.pricing.output)}/K
+                </span>
+              </>
+            )
+          )}
+          {!model.pricing && currentProvider !== 'openrouter' && (
+            <>
+              <span>·</span>
+              <span>Pricing varies</span>
+            </>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+
+  const modelDetailsSection = !hideModelDetails && selectedModelData && (
+    <div className="mt-1 text-xs text-muted-foreground max-h-[150px] overflow-y-auto pr-2">
+      <div className="font-medium mb-1">
+        {selectedModelData.pricing ? (
+          selectedModelData.pricing.input === 0 && selectedModelData.pricing.output === 0 ?
+            'Free' :
+            `Input: ${formatModelPrice(selectedModelData.pricing.input)}/K • Output: ${formatModelPrice(selectedModelData.pricing.output)}/K`
+        ) : (
+          'Pricing varies by provider'
+        )}
+      </div>
+      {selectedModelData.description && (
+        <div>{selectedModelData.description}</div>
+      )}
+    </div>
+  );
+
+  const reasoningSection = selectedModelData?.supportsReasoning && (
+    <div className="mt-3 flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 border">
+      <div className="flex items-center gap-2">
+        <Lightbulb className="h-4 w-4 text-amber-500" />
+        <div>
+          <Label htmlFor="reasoning-toggle" className="text-sm font-medium cursor-pointer">
+            Enable Reasoning
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Show step-by-step thinking process
+          </p>
+        </div>
+      </div>
+      <Switch
+        id="reasoning-toggle"
+        checked={reasoningEnabled}
+        onCheckedChange={handleReasoningToggle}
+      />
+    </div>
+  );
+
+  // --- Inline mode ---
+  if (mode === 'inline') {
+    return (
+      <div className={className}>
+        <div className="border rounded-lg overflow-hidden">
+          {/* Search bar */}
+          <div className="flex items-center border-b px-3">
+            <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
+            <Input
+              placeholder="Search models..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 border-0 bg-transparent dark:bg-transparent shadow-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-sm"
+            />
+            {searchQuery && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSearchQuery('')}
+                className="h-5 w-5 p-0"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          {/* Model list */}
+          <div className="max-h-[240px] overflow-y-auto p-1">
+            {filteredModels.length === 0 ? (
+              <div className="py-5 text-center text-sm text-muted-foreground">
+                No models found
+              </div>
+            ) : (
+              filteredModels.map(renderModelItem)
+            )}
+          </div>
+        </div>
+        {modelDetailsSection}
+        {reasoningSection}
+      </div>
+    );
+  }
+
+  // --- Popover mode (default) ---
   return (
     <div className={className}>
       <Label htmlFor="model-select">AI Model</Label>
@@ -388,12 +566,11 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent 
-          className="w-[32rem] p-0" 
+        <PopoverContent
+          className="w-[32rem] p-0"
           align="start"
           side="bottom"
           sideOffset={5}
-          avoidCollisions={false}
         >
           <div className="flex items-center border-b px-3">
             <Search className="h-4 w-4 shrink-0 opacity-50" />
@@ -470,45 +647,8 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
           </div>
         </PopoverContent>
       </Popover>
-      {!hideModelDetails && selectedModelData && (
-        <div className="mt-1 text-xs text-muted-foreground max-h-[150px] overflow-y-auto pr-2">
-          {/* Pricing info */}
-          <div className="font-medium mb-1">
-            {selectedModelData.pricing ? (
-              selectedModelData.pricing.input === 0 && selectedModelData.pricing.output === 0 ?
-                'Free' :
-                `Input: ${formatModelPrice(selectedModelData.pricing.input)}/K • Output: ${formatModelPrice(selectedModelData.pricing.output)}/K`
-            ) : (
-              'Pricing varies by provider'
-            )}
-          </div>
-          {/* Description */}
-          {selectedModelData.description && (
-            <div>{selectedModelData.description}</div>
-          )}
-        </div>
-      )}
-      {/* Reasoning toggle for models that support it */}
-      {selectedModelData?.supportsReasoning && (
-        <div className="mt-3 flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 border">
-          <div className="flex items-center gap-2">
-            <Lightbulb className="h-4 w-4 text-amber-500" />
-            <div>
-              <Label htmlFor="reasoning-toggle" className="text-sm font-medium cursor-pointer">
-                Enable Reasoning
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Show step-by-step thinking process
-              </p>
-            </div>
-          </div>
-          <Switch
-            id="reasoning-toggle"
-            checked={reasoningEnabled}
-            onCheckedChange={handleReasoningToggle}
-          />
-        </div>
-      )}
+      {modelDetailsSection}
+      {reasoningSection}
     </div>
   );
 }

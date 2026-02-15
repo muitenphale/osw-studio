@@ -873,7 +873,7 @@ export function ChatPanel({
                     )}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[36rem] max-w-[calc(100vw-2rem)]" align="start" data-tour-id="provider-settings-popup">
+                <PopoverContent className="w-[460px] max-w-[calc(100vw-2rem)] max-h-[min(680px,calc(100vh-5rem))] overflow-hidden flex flex-col" align="start" data-tour-id="provider-settings-popup">
                   <ModelSettingsPanel
                     onClose={() => setShowMobileSettings(false)}
                     onModelChange={(modelId) => setCurrentModel(modelId)}

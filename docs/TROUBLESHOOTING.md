@@ -91,7 +91,7 @@ npm install --force
    - OpenRouter: Check credits balance
 
 3. **Re-enter key**:
-   - Settings → Select provider → Delete old key → Enter new key → Save
+   - Settings → Select provider → Click **Disconnect** → Paste new key → Click **Connect**
 
 ### Rate Limiting
 

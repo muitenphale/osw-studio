@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { configManager, AppSettings } from '@/lib/config/storage';
+import { configManager } from '@/lib/config/storage';
 import { LLMClient } from '@/lib/llm/llm-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Eye, EyeOff, Check, X, ExternalLink } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Eye, EyeOff, Check, X, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ModelSelector } from '@/components/model-selector';
 import {
@@ -20,6 +20,8 @@ import {
 import { ProviderId } from '@/lib/llm/providers/types';
 import { getAllProviders, getProvider } from '@/lib/llm/providers/registry';
 import { CodexAuthPanel } from '@/components/settings/codex-auth-panel';
+import { HFAuthPanel } from '@/components/settings/hf-auth-panel';
+import { ConnectionBadge } from '@/components/settings/connection-badge';
 
 interface ModelSettingsPanelProps {
   onClose?: () => void;
@@ -27,7 +29,6 @@ interface ModelSettingsPanelProps {
 }
 
 export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPanelProps) {
-  const [_settings, setSettings] = useState<AppSettings>({});
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(() =>
     configManager.getSelectedProvider()
   );
@@ -35,6 +36,10 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
   const [validatingKey, setValidatingKey] = useState(false);
   const [keyValid, setKeyValid] = useState<boolean | null>(null);
   const [currentApiKey, setCurrentApiKey] = useState('');
+  const [apiKeyStored, setApiKeyStored] = useState(() => {
+    const p = configManager.getSelectedProvider();
+    return getProvider(p).apiKeyRequired ? !!configManager.getProviderApiKey(p) : false;
+  });
   const [useSeparateChatModel, setUseSeparateChatModel] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(`osw-studio-use-separate-chat-model-${configManager.getSelectedProvider()}`);
@@ -44,18 +49,12 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
   });
 
   useEffect(() => {
-    // Load settings on mount
-    const loadedSettings = configManager.getSettings();
-    setSettings(loadedSettings);
-    const provider = configManager.getSelectedProvider();
-    setCurrentApiKey(configManager.getProviderApiKey(provider) || '');
-  }, []);
-
-  useEffect(() => {
     // Update API key when provider changes
     const key = configManager.getProviderApiKey(selectedProvider) || '';
     setCurrentApiKey(key);
     setKeyValid(null); // Reset validation
+    const providerCfg = getProvider(selectedProvider);
+    setApiKeyStored(providerCfg.apiKeyRequired ? !!key : false);
 
     // Load separate chat model setting for this provider
     if (typeof window !== 'undefined') {
@@ -71,32 +70,16 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
     }
   }, [useSeparateChatModel, selectedProvider]);
 
-  const _updateSetting = <K extends keyof AppSettings>(
-    key: K,
-    value: AppSettings[K]
-  ) => {
-    configManager.setSetting(key, value);
-    setSettings(prev => ({ ...prev, [key]: value }));
-  };
-
   const handleProviderChange = (provider: ProviderId) => {
     setSelectedProvider(provider);
     configManager.setSelectedProvider(provider);
-    // Load the API key for the new provider
-    const key = configManager.getProviderApiKey(provider) || '';
-    setCurrentApiKey(key);
-    setKeyValid(null);
   };
 
   const handleApiKeyChange = (key: string) => {
     setCurrentApiKey(key);
     configManager.setProviderApiKey(selectedProvider, key);
     setKeyValid(null);
-    
-    // Clear cached models for this provider when API key changes
     configManager.clearModelCache(selectedProvider);
-    
-    // Dispatch event to notify other components that API key was updated
     window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
       detail: { provider: selectedProvider, hasKey: !!key }
     }));
@@ -126,75 +109,201 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
     }
   };
 
+  const handleConnect = async () => {
+    const key = currentApiKey.trim();
+    if (!key) {
+      toast.error('Please enter an API key');
+      return;
+    }
+    setValidatingKey(true);
+    try {
+      const isValid = await LLMClient.validateApiKey(key, selectedProvider);
+      if (isValid) {
+        configManager.setProviderApiKey(selectedProvider, key);
+        configManager.clearModelCache(selectedProvider);
+        setApiKeyStored(true);
+        setCurrentApiKey('');
+        setKeyValid(null);
+        toast.success('API key connected!');
+        window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
+          detail: { provider: selectedProvider, hasKey: true }
+        }));
+      } else {
+        toast.error('Invalid API key. Please check and try again.');
+      }
+    } catch {
+      toast.error('Failed to validate API key');
+    } finally {
+      setValidatingKey(false);
+    }
+  };
+
+  const handleApiKeyDisconnect = () => {
+    configManager.setProviderApiKey(selectedProvider, '');
+    configManager.clearModelCache(selectedProvider);
+    setApiKeyStored(false);
+    setCurrentApiKey('');
+    setKeyValid(null);
+    toast.success(`Disconnected from ${getProvider(selectedProvider).name}`);
+    window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
+      detail: { provider: selectedProvider, hasKey: false }
+    }));
+  };
+
   const providerConfig = getProvider(selectedProvider);
 
   return (
-    <div className="space-y-6">
-        <div>
-          <h3 className="font-medium text-sm">Model Settings</h3>
-          <p className="text-muted-foreground text-xs mt-1">
-            Configure your AI model and API connection
-          </p>
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="shrink-0">
+        <h3 className="font-semibold text-base tracking-tight">Model Settings</h3>
+        <p className="text-muted-foreground text-xs mt-1">
+          Configure your AI model and API connection
+        </p>
       </div>
 
-      {/* Provider Selection */}
-      <div className="space-y-4">
-        <div>
-          <Label htmlFor="provider">AI Provider</Label>
-          <Select value={selectedProvider} onValueChange={handleProviderChange}>
-            <SelectTrigger id="provider" className="mt-2 !h-fit">
-              <SelectValue placeholder="Select a provider">
-                {selectedProvider && (
-                  <div className="flex flex-col text-left">
-                    <span className="font-medium">{providerConfig.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {providerConfig.description}
-                    </span>
-                  </div>
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="max-h-[400px]">
-              {getAllProviders().map(provider => (
-                <SelectItem key={provider.id} value={provider.id}>
-                  <div className="flex flex-col">
-                    <span className="font-medium">{provider.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {provider.description}
-                    </span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      {/* Scrollable content */}
+      <div className="flex-1 min-h-0 overflow-y-auto mt-5 space-y-5">
 
-        {/* Auth: OAuth panel for Codex, API key for others */}
-        {providerConfig.usesOAuth ? (
+      {/* Provider Selection */}
+      <div>
+        <Label htmlFor="provider" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Provider</Label>
+        <Select value={selectedProvider} onValueChange={handleProviderChange}>
+          <SelectTrigger id="provider" className="mt-2 !h-fit w-full">
+            <SelectValue placeholder="Select a provider">
+              {selectedProvider && (
+                <div className="flex flex-col text-left">
+                  <span className="font-medium">{providerConfig.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {providerConfig.description}
+                  </span>
+                </div>
+              )}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent className="max-h-[400px]">
+            {getAllProviders().map(provider => (
+              <SelectItem key={provider.id} value={provider.id} className="py-2.5">
+                <div className="flex flex-col">
+                  <span className="font-medium">{provider.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {provider.description}
+                  </span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Auth: OAuth panel for Codex/HF, API key for others */}
+      {providerConfig.usesOAuth ? (
+        selectedProvider === 'huggingface' ? (
+          <HFAuthPanel onAuthChange={() => {
+            window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
+              detail: { provider: selectedProvider, hasKey: !!configManager.getProviderApiKey(selectedProvider) }
+            }));
+          }} />
+        ) : (
           <CodexAuthPanel onAuthChange={() => {
             window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
               detail: { provider: selectedProvider, hasKey: !!configManager.getProviderApiKey(selectedProvider) }
             }));
           }} />
-        ) : (providerConfig.apiKeyRequired || providerConfig.isLocal) ? (
+        )
+      ) : providerConfig.apiKeyRequired ? (
+        apiKeyStored ? (
+          <ConnectionBadge
+            method="API Key"
+            extra={(() => { const k = configManager.getProviderApiKey(selectedProvider); return k ? `···${k.slice(-4)}` : undefined; })()}
+            info={providerConfig.apiKeyHelpUrl && (
+              <a
+                href={providerConfig.apiKeyHelpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline inline-flex items-center gap-0.5"
+              >
+                Manage on {providerConfig.name} <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            )}
+            onDisconnect={handleApiKeyDisconnect}
+          />
+        ) : (
           <div>
-            <Label htmlFor="api-key">
-              {providerConfig.name} API Key
-              {!providerConfig.apiKeyRequired && (
-                <span className="text-muted-foreground text-xs ml-1">(optional)</span>
-              )}
-            </Label>
+            <Label htmlFor="api-key">{providerConfig.name} API Key</Label>
             <div className="flex gap-2 mt-2">
               <div className="relative flex-1">
                 <Input
                   id="api-key"
                   type={showApiKey ? "text" : "password"}
                   value={currentApiKey}
-                  onChange={(e) => handleApiKeyChange(e.target.value)}
+                  onChange={(e) => { setCurrentApiKey(e.target.value); setKeyValid(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && currentApiKey.trim()) handleConnect(); }}
                   placeholder={providerConfig.apiKeyPlaceholder || 'API Key'}
                   className="pr-10"
                   data-tour-id="provider-key-input"
+                  disabled={validatingKey}
                 />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="absolute right-1 top-1 h-7 w-7"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                >
+                  {showApiKey ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              <Button
+                onClick={handleConnect}
+                disabled={validatingKey || !currentApiKey.trim()}
+                size="sm"
+              >
+                {validatingKey ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    Connecting...
+                  </>
+                ) : (
+                  'Connect'
+                )}
+              </Button>
+            </div>
+            {providerConfig.apiKeyHelpUrl && (
+              <p className="text-sm text-muted-foreground mt-2">
+                Get your API key from{' '}
+                <a
+                  href={providerConfig.apiKeyHelpUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  {providerConfig.name} <ExternalLink className="h-3 w-3" />
+                </a>
+              </p>
+            )}
+          </div>
+        )
+      ) : providerConfig.isLocal ? (
+        <div>
+          <Label htmlFor="api-key">
+            {providerConfig.name} API Key
+            <span className="text-muted-foreground text-xs ml-1">(optional)</span>
+          </Label>
+          <div className="flex gap-2 mt-2">
+            <div className="relative flex-1">
+              <Input
+                id="api-key"
+                type={showApiKey ? "text" : "password"}
+                value={currentApiKey}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
+                placeholder={providerConfig.apiKeyPlaceholder || 'API Key'}
+                className="pr-10"
+                data-tour-id="provider-key-input"
+              />
               <Button
                 size="icon"
                 variant="ghost"
@@ -225,48 +334,38 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
               </div>
             )}
           </div>
-          {providerConfig.apiKeyHelpUrl && (
-            <p className="text-sm text-muted-foreground mt-2">
-              Get your API key from{' '}
-              <a
-                href={providerConfig.apiKeyHelpUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline inline-flex items-center gap-1"
-              >
-                {providerConfig.name} <ExternalLink className="h-3 w-3" />
-              </a>
-            </p>
-          )}
-          {providerConfig.isLocal && !providerConfig.apiKeyRequired && (
-            <p className="text-sm text-muted-foreground mt-2">
-              API key is optional for {providerConfig.name}. Only needed if you&apos;ve configured authentication on your local server.
-            </p>
-          )}
-          </div>
-        ) : null}
+          <p className="text-sm text-muted-foreground mt-2">
+            API key is optional for {providerConfig.name}. Only needed if you&apos;ve configured authentication on your local server.
+          </p>
+        </div>
+      ) : null}
 
-        {!providerConfig.apiKeyRequired && providerConfig.isLocal && (
-          <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/50">
-            <p className="font-medium mb-1">Local Provider</p>
-            <p>Make sure {providerConfig.name} is running on your machine.</p>
-            <p>Default endpoint: <code className="text-xs">{providerConfig.baseUrl}</code></p>
-            {selectedProvider === 'lmstudio' && (
-              <div className="mt-2 text-xs">
-                <p className="font-medium">For tool use support:</p>
-                <p>• Load a model like qwen/qwen3-4b-thinking-2507</p>
-                <p>• Start the local server in LM Studio</p>
-                <p>• Models will be automatically discovered</p>
-              </div>
-            )}
-          </div>
-        )}
+      {!providerConfig.apiKeyRequired && providerConfig.isLocal && (
+        <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/50">
+          <p className="font-medium mb-1">Local Provider</p>
+          <p>Make sure {providerConfig.name} is running on your machine.</p>
+          <p>Default endpoint: <code className="text-xs">{providerConfig.baseUrl}</code></p>
+          {selectedProvider === 'lmstudio' && (
+            <div className="mt-2 text-xs">
+              <p className="font-medium">For tool use support:</p>
+              <p>• Load a model like qwen/qwen3-4b-thinking-2507</p>
+              <p>• Start the local server in LM Studio</p>
+              <p>• Models will be automatically discovered</p>
+            </div>
+          )}
+        </div>
+      )}
 
-        {/* Model Selection for Code Mode */}
-        <div className="space-y-3">
-          <Label className="text-sm font-medium">Code Mode Model</Label>
+      {/* Divider */}
+      <hr className="border-border" />
+
+      {/* Code Model */}
+      <div>
+        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Code Model</Label>
+        <div className="mt-2">
           <ModelSelector
             provider={selectedProvider}
+            mode="inline"
             onChange={(modelId) => {
               if (typeof window !== 'undefined') {
                 localStorage.setItem(`osw-studio-code-model-${selectedProvider}`, modelId);
@@ -278,33 +377,31 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
             className="space-y-2"
           />
         </div>
+      </div>
 
-        {/* Separate Chat Model Option */}
-        <div className="flex items-start space-x-2 pt-2">
-          <Checkbox
-            id="separate-chat-model"
-            checked={useSeparateChatModel}
-            onCheckedChange={(checked) => setUseSeparateChatModel(checked === true)}
-          />
-          <div className="grid gap-1.5 leading-none">
-            <label
-              htmlFor="separate-chat-model"
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-            >
-              Use different model for chat mode
-            </label>
-            <p className="text-xs text-muted-foreground">
-              Select a separate (usually cheaper) model for chat/planning mode
-            </p>
-          </div>
+      {/* Separate Chat Model Toggle */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Use different model for chat</div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Select a separate (usually cheaper) model for chat/planning
+          </p>
         </div>
+        <Switch
+          id="separate-chat-model"
+          checked={useSeparateChatModel}
+          onCheckedChange={(checked) => setUseSeparateChatModel(checked)}
+        />
+      </div>
 
-        {/* Model Selection for Chat Mode */}
-        {useSeparateChatModel && (
-          <div className="space-y-3 pt-2">
-            <Label className="text-sm font-medium">Chat Mode Model</Label>
+      {/* Chat Model (conditional) */}
+      {useSeparateChatModel && (
+        <div>
+          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Chat Model</Label>
+          <div className="mt-2">
             <ModelSelector
               provider={selectedProvider}
+              mode="inline"
               onChange={(modelId) => {
                 if (typeof window !== 'undefined') {
                   localStorage.setItem(`osw-studio-chat-model-${selectedProvider}`, modelId);
@@ -314,12 +411,14 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
               className="space-y-2"
             />
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Actions */}
+      </div>{/* end scrollable content */}
+
+      {/* Footer */}
       {onClose && (
-        <div className="flex justify-end pt-4 border-t">
+        <div className="shrink-0 flex justify-end pt-4 border-t mt-4">
           <Button onClick={onClose} size="sm">
             Done
           </Button>

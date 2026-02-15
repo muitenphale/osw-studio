@@ -58,6 +58,8 @@ export class LLMClient {
         return 'llama-3.3-70b-versatile';
       case 'gemini':
         return 'gemini-1.5-flash';
+      case 'huggingface':
+        return 'Qwen/Qwen2.5-Coder-32B-Instruct';
       case 'ollama':
         return 'llama3.2:latest';
       case 'lmstudio':

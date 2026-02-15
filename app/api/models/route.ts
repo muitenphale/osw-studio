@@ -117,6 +117,24 @@ export async function POST(request: NextRequest) {
           models = providerConfig.models?.map(m => m.id) || [];
           break;
 
+        case 'huggingface':
+          try {
+            const hfHeaders: Record<string, string> = {};
+            if (apiKey) {
+              hfHeaders['Authorization'] = `Bearer ${apiKey}`;
+            }
+            const hfResponse = await fetch('https://router.huggingface.co/v1/models', {
+              headers: hfHeaders,
+            });
+            if (hfResponse.ok) {
+              const hfData = await hfResponse.json();
+              models = hfData.data?.map((m: any) => m.id) || [];
+            }
+          } catch (error) {
+            logger.error('HuggingFace models fetch error:', error);
+          }
+          break;
+
         default:
           // For other OpenAI-compatible providers
           if (providerConfig.baseUrl && apiKey) {
