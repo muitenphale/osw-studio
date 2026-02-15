@@ -22,6 +22,7 @@ import { getAllProviders, getProvider } from '@/lib/llm/providers/registry';
 import { CodexAuthPanel } from '@/components/settings/codex-auth-panel';
 import { HFAuthPanel } from '@/components/settings/hf-auth-panel';
 import { ConnectionBadge } from '@/components/settings/connection-badge';
+import { checkHFCapabilities } from '@/lib/auth/hf-auth';
 
 interface ModelSettingsPanelProps {
   onClose?: () => void;
@@ -40,6 +41,7 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
     const p = configManager.getSelectedProvider();
     return getProvider(p).apiKeyRequired ? !!configManager.getProviderApiKey(p) : false;
   });
+  const [codexAvailable, setCodexAvailable] = useState(true);
   const [useSeparateChatModel, setUseSeparateChatModel] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(`osw-studio-use-separate-chat-model-${configManager.getSelectedProvider()}`);
@@ -47,6 +49,13 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
     }
     return false;
   });
+
+  // Check if Codex is available (blocked on HF Spaces — HttpOnly cookies don't work)
+  useEffect(() => {
+    checkHFCapabilities().then(caps => {
+      setCodexAvailable(caps.codexAvailable);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     // Update API key when provider changes
@@ -182,7 +191,9 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
             </SelectValue>
           </SelectTrigger>
           <SelectContent className="max-h-[400px]">
-            {getAllProviders().map(provider => (
+            {getAllProviders()
+              .filter(p => codexAvailable || p.id !== 'openai-codex')
+              .map(provider => (
               <SelectItem key={provider.id} value={provider.id} className="py-2.5">
                 <div className="flex flex-col">
                   <span className="font-medium">{provider.name}</span>

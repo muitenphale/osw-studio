@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import { HF_COOKIE_NAME } from '../cookie';
 
+// OAuth tokens are now stored client-side in localStorage.
+// This route is kept for backwards compatibility.
 export async function POST() {
-  const response = NextResponse.json({ ok: true });
-  response.cookies.delete(HF_COOKIE_NAME);
-  return response;
+  return NextResponse.json({ ok: true });
 }

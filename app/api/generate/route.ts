@@ -78,17 +78,7 @@ export async function POST(request: NextRequest) {
     const selectedProvider: ProviderId = provider || 'openrouter';
     const providerConfig = getProvider(selectedProvider);
 
-    // For HuggingFace OAuth: fall back to token from HttpOnly cookie
     let apiKey = clientApiKey;
-    if (selectedProvider === 'huggingface' && !apiKey) {
-      const hfCookie = request.cookies.get('osw_hf_token')?.value;
-      if (hfCookie) {
-        try {
-          const parsed = JSON.parse(hfCookie);
-          apiKey = parsed.access_token;
-        } catch { /* ignore malformed cookie */ }
-      }
-    }
 
     if (!prompt && !messages) {
       return NextResponse.json(
