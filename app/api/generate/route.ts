@@ -73,11 +73,23 @@ function extractOllamaImages(messages: LLMMessage[]): { processedMessages: LLMMe
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning, stream: requestStream } = await request.json();
+    const { prompt, apiKey: clientApiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning, stream: requestStream } = await request.json();
 
     const selectedProvider: ProviderId = provider || 'openrouter';
     const providerConfig = getProvider(selectedProvider);
-    
+
+    // For HuggingFace OAuth: fall back to token from HttpOnly cookie
+    let apiKey = clientApiKey;
+    if (selectedProvider === 'huggingface' && !apiKey) {
+      const hfCookie = request.cookies.get('osw_hf_token')?.value;
+      if (hfCookie) {
+        try {
+          const parsed = JSON.parse(hfCookie);
+          apiKey = parsed.access_token;
+        } catch { /* ignore malformed cookie */ }
+      }
+    }
+
     if (!prompt && !messages) {
       return NextResponse.json(
         { error: 'Either prompt or messages is required' },
@@ -423,8 +435,11 @@ Habits:
         // Log full error for debugging
         logger.error('[API] Provider error details:', JSON.stringify(parsed, null, 2));
       } catch {
-        // Not JSON, use raw text as-is
-        logger.error('[API] Provider error (raw):', errorText);
+        // Not JSON — check if it's HTML (provider returned a web page instead of API error)
+        if (errorText.trimStart().startsWith('<!') || errorText.trimStart().startsWith('<html')) {
+          cleanError = `HTTP ${response.status} — ${response.statusText || 'check your API key and try again'}`;
+        }
+        logger.error('[API] Provider error (raw):', errorText.slice(0, 500));
       }
 
       const headers: Record<string, string> = {};
@@ -499,7 +514,10 @@ You can make multiple tool calls in a single response. Always include the tool_c
         });
 
         if (!fallbackResponse.ok) {
-          const fallbackError = await fallbackResponse.text();
+          let fallbackError = await fallbackResponse.text();
+          if (fallbackError.trimStart().startsWith('<!') || fallbackError.trimStart().startsWith('<html')) {
+            fallbackError = `HTTP ${fallbackResponse.status} — ${fallbackResponse.statusText || 'unknown error'}`;
+          }
           return NextResponse.json(
             { error: `${providerConfig.name} API error (after fallback): ${fallbackError}` },
             { status: fallbackResponse.status }
