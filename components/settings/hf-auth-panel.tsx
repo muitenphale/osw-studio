@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,7 +9,8 @@ import { ConnectionBadge } from '@/components/settings/connection-badge';
 import { toast } from 'sonner';
 import { configManager } from '@/lib/config/storage';
 import { LLMClient } from '@/lib/llm/llm-client';
-import { checkHFCapabilities, loginHF } from '@/lib/auth/hf-auth';
+import { checkHFCapabilities, loginHF, oauthHandleRedirectIfPresent } from '@/lib/auth/hf-auth';
+import type { HFCapabilities } from '@/lib/auth/hf-auth';
 
 interface HFAuthPanelProps {
   onAuthChange?: () => void;
@@ -23,6 +24,7 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(() => !!configManager.getHFAuth());
+  const capabilitiesRef = useRef<HFCapabilities | null>(null);
 
   const dispatchAuthEvent = useCallback((hasKey: boolean) => {
     onAuthChange?.();
@@ -31,60 +33,52 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
     }));
   }, [onAuthChange]);
 
-  // Check OAuth capabilities on mount, handle OAuth callback
+  // Check OAuth capabilities on mount, handle OAuth redirect
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
+      // First, check if we're returning from an OAuth redirect
+      try {
+        const oauthResult = await oauthHandleRedirectIfPresent();
+        if (cancelled) return;
+
+        if (oauthResult) {
+          // Successfully exchanged code for token via PKCE
+          const username = oauthResult.userInfo?.name
+            || oauthResult.userInfo?.preferred_username
+            || oauthResult.userInfo?.sub;
+
+          configManager.setHFAuth({
+            access_token: oauthResult.accessToken,
+            username: username || undefined,
+          });
+          setIsConnected(true);
+          if (username) setOauthUsername(username);
+          toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
+          dispatchAuthEvent(true);
+
+          // Clean up URL (remove ?code= params left by OAuth)
+          const url = new URL(window.location.href);
+          url.search = '';
+          window.history.replaceState({}, '', url.toString());
+          return;
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.warn('[HF OAuth] Redirect handling failed:', err);
+      }
+
+      // No OAuth redirect — fetch capabilities
       try {
         const capabilities = await checkHFCapabilities();
         if (cancelled) return;
+        capabilitiesRef.current = capabilities;
         setOauthAvailable(capabilities.oauthAvailable);
       } catch {
         // Network error — leave state as-is
       }
-    }
 
-    init();
-
-    // Check if we just came back from OAuth callback
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('hf_auth') === 'success') {
-      const username = params.get('hf_user') || undefined;
-
-      // Read token from URL fragment (never sent to server)
-      const hash = window.location.hash.slice(1); // remove #
-      const fragParams = new URLSearchParams(hash);
-      const token = fragParams.get('hf_token');
-
-      if (token) {
-        configManager.setHFAuth({ access_token: token, username });
-        setIsConnected(true);
-        if (username) setOauthUsername(username);
-        toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
-        dispatchAuthEvent(true);
-      } else {
-        toast.error('HuggingFace sign-in succeeded but no token received.');
-      }
-
-      // Clean up URL
-      const url = new URL(window.location.href);
-      url.searchParams.delete('hf_auth');
-      url.searchParams.delete('hf_user');
-      url.hash = '';
-      window.history.replaceState({}, '', url.toString());
-    } else if (params.get('hf_auth') === 'error') {
-      const reason = params.get('reason');
-      if (reason === 'insufficient_scope') {
-        toast.error('Your HuggingFace authorization needs to be updated. Please revoke access at huggingface.co/settings/connected-applications and try again.');
-      } else {
-        toast.error('HuggingFace sign-in failed. Please try again.');
-      }
-      const url = new URL(window.location.href);
-      url.searchParams.delete('hf_auth');
-      url.searchParams.delete('reason');
-      window.history.replaceState({}, '', url.toString());
-    } else {
       // Check if we have a stored OAuth username
       const hfAuth = configManager.getHFAuth();
       if (hfAuth?.username) {
@@ -92,8 +86,31 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
       }
     }
 
+    init();
+
     return () => { cancelled = true; };
   }, [dispatchAuthEvent]);
+
+  const handleOAuthLogin = async () => {
+    // Fetch capabilities if we don't have them yet
+    let caps = capabilitiesRef.current;
+    if (!caps) {
+      try {
+        caps = await checkHFCapabilities();
+        capabilitiesRef.current = caps;
+      } catch {
+        toast.error('Failed to connect. Please try again.');
+        return;
+      }
+    }
+
+    if (!caps.clientId) {
+      toast.error('OAuth is not configured on this instance.');
+      return;
+    }
+
+    await loginHF(caps.clientId, caps.scopes);
+  };
 
   const handleConnect = async () => {
     const key = tokenInput.trim();
@@ -176,7 +193,7 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
       {oauthAvailable && (
         <>
           <Button
-            onClick={() => loginHF()}
+            onClick={handleOAuthLogin}
             className="w-full gap-2"
             variant="outline"
           >
