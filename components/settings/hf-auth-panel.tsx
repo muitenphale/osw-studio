@@ -12,6 +12,10 @@ import { LLMClient } from '@/lib/llm/llm-client';
 import { checkHFCapabilities, loginHF, oauthHandleRedirectIfPresent } from '@/lib/auth/hf-auth';
 import type { HFCapabilities } from '@/lib/auth/hf-auth';
 
+// Module-level guard: prevents double token exchange when React strict mode
+// re-runs the effect, or if the component remounts before URL cleanup.
+let oauthExchangeInFlight = false;
+
 interface HFAuthPanelProps {
   onAuthChange?: () => void;
 }
@@ -37,36 +41,42 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
   useEffect(() => {
     let cancelled = false;
 
+    function cleanOAuthUrl() {
+      const url = new URL(window.location.href);
+      url.search = '';
+      window.history.replaceState({}, '', url.toString());
+    }
+
     async function init() {
       // First, check if we're returning from an OAuth redirect
-      try {
-        const oauthResult = await oauthHandleRedirectIfPresent();
-        if (cancelled) return;
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('code') && !oauthExchangeInFlight) {
+        oauthExchangeInFlight = true;
+        try {
+          const oauthResult = await oauthHandleRedirectIfPresent();
+          if (cancelled) return;
 
-        if (oauthResult) {
-          // Successfully exchanged code for token via PKCE
-          const username = oauthResult.userInfo?.name
-            || oauthResult.userInfo?.preferred_username
-            || oauthResult.userInfo?.sub;
+          if (oauthResult) {
+            const username = oauthResult.userInfo?.name
+              || oauthResult.userInfo?.preferred_username
+              || oauthResult.userInfo?.sub;
 
-          configManager.setHFAuth({
-            access_token: oauthResult.accessToken,
-            username: username || undefined,
-          });
-          setIsConnected(true);
-          if (username) setOauthUsername(username);
-          toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
-          dispatchAuthEvent(true);
-
-          // Clean up URL (remove ?code= params left by OAuth)
-          const url = new URL(window.location.href);
-          url.search = '';
-          window.history.replaceState({}, '', url.toString());
-          return;
+            configManager.setHFAuth({
+              access_token: oauthResult.accessToken,
+              username: username || undefined,
+            });
+            setIsConnected(true);
+            if (username) setOauthUsername(username);
+            toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
+            dispatchAuthEvent(true);
+          }
+        } catch (err) {
+          if (cancelled) return;
+          console.warn('[HF OAuth] Redirect handling failed:', err);
+        } finally {
+          cleanOAuthUrl();
         }
-      } catch (err) {
-        if (cancelled) return;
-        console.warn('[HF OAuth] Redirect handling failed:', err);
+        return;
       }
 
       // No OAuth redirect — fetch capabilities
