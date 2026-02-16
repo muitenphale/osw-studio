@@ -9,6 +9,13 @@ import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { PageLayout } from '@/components/page-layout';
 import { ContentArea } from '@/components/views/content-area';
 import { AboutModal } from '@/components/about-modal';
+import { oauthHandleRedirectIfPresent } from '@/lib/auth/hf-auth';
+import { configManager } from '@/lib/config/storage';
+import { toast } from 'sonner';
+
+// Module-level guard: prevents double token exchange when React strict mode
+// re-runs the effect, or if the component remounts before URL cleanup.
+let oauthExchangeInFlight = false;
 
 function StudioInner() {
   const searchParams = useSearchParams();
@@ -31,6 +38,39 @@ function StudioInner() {
       setCurrentView('settings');
     }
   }, [docParam, settingsParam]);
+
+  // Handle HF OAuth redirect at the app level (settings panel may not be mounted)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('code') || oauthExchangeInFlight) return;
+    oauthExchangeInFlight = true;
+
+    (async () => {
+      try {
+        const oauthResult = await oauthHandleRedirectIfPresent();
+        if (oauthResult) {
+          const username = oauthResult.userInfo?.name
+            || oauthResult.userInfo?.preferred_username
+            || oauthResult.userInfo?.sub;
+          configManager.setHFAuth({
+            access_token: oauthResult.accessToken,
+            username: username || undefined,
+          });
+          toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
+          window.dispatchEvent(new CustomEvent('apiKeyUpdated', {
+            detail: { provider: 'huggingface', hasKey: true }
+          }));
+        }
+      } catch (err) {
+        console.warn('[HF OAuth] Redirect handling failed:', err);
+      } finally {
+        // Always clean OAuth params from URL
+        const url = new URL(window.location.href);
+        url.search = '';
+        window.history.replaceState({}, '', url.toString());
+      }
+    })();
+  }, []);
 
   const stepId = state.currentStep?.id;
   const isTourRunning = state.status === 'running';

@@ -9,12 +9,8 @@ import { ConnectionBadge } from '@/components/settings/connection-badge';
 import { toast } from 'sonner';
 import { configManager } from '@/lib/config/storage';
 import { LLMClient } from '@/lib/llm/llm-client';
-import { checkHFCapabilities, loginHF, oauthHandleRedirectIfPresent } from '@/lib/auth/hf-auth';
+import { checkHFCapabilities, loginHF } from '@/lib/auth/hf-auth';
 import type { HFCapabilities } from '@/lib/auth/hf-auth';
-
-// Module-level guard: prevents double token exchange when React strict mode
-// re-runs the effect, or if the component remounts before URL cleanup.
-let oauthExchangeInFlight = false;
 
 interface HFAuthPanelProps {
   onAuthChange?: () => void;
@@ -37,49 +33,19 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
     }));
   }, [onAuthChange]);
 
-  // Check OAuth capabilities on mount, handle OAuth redirect
+  // Check OAuth capabilities on mount, sync stored auth state
   useEffect(() => {
     let cancelled = false;
 
-    function cleanOAuthUrl() {
-      const url = new URL(window.location.href);
-      url.search = '';
-      window.history.replaceState({}, '', url.toString());
-    }
-
     async function init() {
-      // First, check if we're returning from an OAuth redirect
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('code') && !oauthExchangeInFlight) {
-        oauthExchangeInFlight = true;
-        try {
-          const oauthResult = await oauthHandleRedirectIfPresent();
-          if (cancelled) return;
-
-          if (oauthResult) {
-            const username = oauthResult.userInfo?.name
-              || oauthResult.userInfo?.preferred_username
-              || oauthResult.userInfo?.sub;
-
-            configManager.setHFAuth({
-              access_token: oauthResult.accessToken,
-              username: username || undefined,
-            });
-            setIsConnected(true);
-            if (username) setOauthUsername(username);
-            toast.success(`Connected to HuggingFace${username ? ` as ${username}` : ''}`);
-            dispatchAuthEvent(true);
-          }
-        } catch (err) {
-          if (cancelled) return;
-          console.warn('[HF OAuth] Redirect handling failed:', err);
-        } finally {
-          cleanOAuthUrl();
-        }
-        return;
+      // Check stored auth (may have been set by app-level OAuth handler)
+      const hfAuth = configManager.getHFAuth();
+      if (hfAuth) {
+        setIsConnected(true);
+        if (hfAuth.username) setOauthUsername(hfAuth.username);
       }
 
-      // No OAuth redirect — fetch capabilities
+      // Fetch capabilities
       try {
         const capabilities = await checkHFCapabilities();
         if (cancelled) return;
@@ -88,18 +54,26 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
       } catch {
         // Network error — leave state as-is
       }
-
-      // Check if we have a stored OAuth username
-      const hfAuth = configManager.getHFAuth();
-      if (hfAuth?.username) {
-        setOauthUsername(hfAuth.username);
-      }
     }
 
     init();
 
-    return () => { cancelled = true; };
-  }, [dispatchAuthEvent]);
+    // Listen for auth changes from app-level OAuth handler
+    const handleAuthUpdate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.provider === 'huggingface') {
+        const hfAuth = configManager.getHFAuth();
+        setIsConnected(detail.hasKey);
+        if (hfAuth?.username) setOauthUsername(hfAuth.username);
+      }
+    };
+    window.addEventListener('apiKeyUpdated', handleAuthUpdate);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('apiKeyUpdated', handleAuthUpdate);
+    };
+  }, []);
 
   const handleOAuthLogin = async () => {
     // Fetch capabilities if we don't have them yet
