@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.31.2 - 2026-02-16
+- **Fix**: HF OAuth switched to client-side PKCE via `@huggingface/hub` — no server routes, no cookies, token exchange happens entirely in browser
+- **Cleanup**: Removed server-side OAuth routes (login, callback, status, disconnect) and cookie helper
+
 ## v1.31.1 - 2026-02-16
 - **Bug Fix**: Fixed HF OAuth 401 — HttpOnly cookies silently dropped on HF Spaces; tokens now stored in localStorage via URL fragment
 - **Bug Fix**: Fixed OAuth redirect using internal container hostname instead of public URL
