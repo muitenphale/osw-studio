@@ -12,6 +12,8 @@ import { AboutModal } from '@/components/about-modal';
 import { oauthHandleRedirectIfPresent } from '@/lib/auth/hf-auth';
 import { configManager } from '@/lib/config/storage';
 import { toast } from 'sonner';
+import { initTelemetry, track } from '@/lib/telemetry';
+import { TelemetryDisclosure } from '@/components/telemetry-disclosure';
 
 // Module-level guard: prevents double token exchange when React strict mode
 // re-runs the effect, or if the component remounts before URL cleanup.
@@ -24,6 +26,7 @@ function StudioInner() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [currentView, setCurrentView] = useState<'dashboard' | 'projects' | 'sites' | 'templates' | 'skills' | 'docs' | 'settings'>('dashboard');
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [showTelemetryDisclosure, setShowTelemetryDisclosure] = useState(false);
   const { state, setActiveProjectId, start: startTour } = useGuidedTour();
 
   const settingsParam = searchParams.get('settings');
@@ -38,6 +41,22 @@ function StudioInner() {
       setCurrentView('settings');
     }
   }, [docParam, settingsParam]);
+
+  // Init telemetry + first-run disclosure
+  useEffect(() => {
+    initTelemetry();
+    track('session_start');
+
+    if (!localStorage.getItem('osw-telemetry-disclosed')) {
+      setShowTelemetryDisclosure(true);
+    }
+  }, []);
+
+  // Track pageview on view changes
+  useEffect(() => {
+    const path = selectedProject ? 'workspace' : currentView;
+    track('pageview', { path });
+  }, [currentView, selectedProject]);
 
   // Handle HF OAuth redirect at the app level (settings panel may not be mounted)
   useEffect(() => {
@@ -161,6 +180,11 @@ function StudioInner() {
     }
   }, [startTour]);
 
+  const handleDismissTelemetryDisclosure = useCallback(() => {
+    localStorage.setItem('osw-telemetry-disclosed', 'true');
+    setShowTelemetryDisclosure(false);
+  }, []);
+
   const content = useMemo(() => {
     if (selectedProject) {
       return (
@@ -196,6 +220,10 @@ function StudioInner() {
       <AboutModal
         open={showAboutModal}
         onOpenChange={setShowAboutModal}
+      />
+      <TelemetryDisclosure
+        open={showTelemetryDisclosure}
+        onDismiss={handleDismissTelemetryDisclosure}
       />
     </>
   );

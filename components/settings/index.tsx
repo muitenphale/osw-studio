@@ -12,6 +12,7 @@ import { DollarSign, AlertTriangle, Info, Download, Upload, Database, ChevronDow
 import { CostCalculator } from '@/lib/llm/cost-calculator';
 import { AboutModal } from '@/components/about-modal';
 import { BackupService } from '@/lib/vfs/backup-service';
+import { setTelemetryOptIn } from '@/lib/telemetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
@@ -29,6 +30,9 @@ export function SettingsPanel({ onClose: _onClose }: SettingsPanelProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importMessage, setImportMessage] = useState('');
+  const [telemetryOptIn, setTelemetryOptInState] = useState(() =>
+    configManager.getSettings().telemetryOptIn !== false
+  );
   const [openSections, setOpenSections] = useState({
     application: true,
     costTracking: true,
@@ -175,6 +179,24 @@ export function SettingsPanel({ onClose: _onClose }: SettingsPanelProps) {
                   <ToggleGroupItem value="light" className="flex-1">Light</ToggleGroupItem>
                   <ToggleGroupItem value="system" className="flex-1">System</ToggleGroupItem>
                 </ToggleGroup>
+              </div>
+
+              {/* Telemetry */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="telemetry">Anonymous Usage Analytics</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Help improve OSW Studio by sharing anonymous usage data
+                  </p>
+                </div>
+                <Switch
+                  id="telemetry"
+                  checked={telemetryOptIn}
+                  onCheckedChange={(checked) => {
+                    setTelemetryOptInState(checked);
+                    setTelemetryOptIn(checked);
+                  }}
+                />
               </div>
             </div>
           </CollapsibleContent>

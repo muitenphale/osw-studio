@@ -35,6 +35,7 @@ import {
 } from '@/lib/llm/models-api';
 import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from '@/lib/llm/pricing-cache';
 import { toast } from 'sonner';
+import { track } from '@/lib/telemetry';
 
 interface ModelSelectorProps {
   provider?: ProviderId;
@@ -316,6 +317,7 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
     setSelectedModel(modelId);
     configManager.setProviderModel(currentProvider, modelId);
     onChange?.(modelId);
+    track('model_selected', { provider: currentProvider, model: modelId });
     if (mode === 'popover') {
       setOpen(false);
       setSearchQuery('');

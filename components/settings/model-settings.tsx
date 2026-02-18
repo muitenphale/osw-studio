@@ -23,6 +23,7 @@ import { CodexAuthPanel } from '@/components/settings/codex-auth-panel';
 import { HFAuthPanel } from '@/components/settings/hf-auth-panel';
 import { ConnectionBadge } from '@/components/settings/connection-badge';
 import { checkHFCapabilities } from '@/lib/auth/hf-auth';
+import { track } from '@/lib/telemetry';
 
 interface ModelSettingsPanelProps {
   onClose?: () => void;
@@ -82,6 +83,7 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
   const handleProviderChange = (provider: ProviderId) => {
     setSelectedProvider(provider);
     configManager.setSelectedProvider(provider);
+    track('provider_selected', { provider });
   };
 
   const handleApiKeyChange = (key: string) => {

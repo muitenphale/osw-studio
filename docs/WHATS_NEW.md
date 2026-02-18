@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.32.0 - Anonymous Usage Analytics (2026-02-18)
+
+OSW Studio now includes lightweight, anonymous telemetry to help understand which features get used, which providers and models are popular, and where things are breaking. No prompts, code, file names, API keys, or error messages are ever collected.
+
+- **What's tracked** - Page views, provider/model selection, task success/failure rates, tool call outcomes, API error types, and session heartbeats
+- **Anonymous visitor ID** - A random UUID stored in localStorage counts unique visitors. It's not tied to any account or personal data and resets if you clear browser storage
+- **Opt-out** - Toggle "Anonymous Usage Analytics" off in Settings > Application Settings. A first-run disclosure dialog explains everything on your first visit
+- **Transparent** - Built with [osw-analytics](https://github.com/o-stahl/osw-analytics), an open-source analytics system (currently in testing, be sure to star it to get notified when it's done)
+- **Low impact** - Events are batched and sent every 30 seconds. If the analytics server is unreachable, events are silently dropped. The app never blocks on telemetry
+
+Self-hosted instances can disable telemetry entirely with `NEXT_PUBLIC_TELEMETRY_ENABLED=false` in `.env` or keep them on to help out with the development.
+
+---
+
 ## v1.31.0 - HuggingFace Provider & Settings Refresh (2026-02-15)
 
 HuggingFace is now available as an AI provider. Every HuggingFace account includes $0.10/month in free inference credits.

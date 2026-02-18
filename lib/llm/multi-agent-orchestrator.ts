@@ -22,6 +22,7 @@ import { extractPartialContent, getContinuationMarker, PartialContentExtraction 
 import { buildShellSystemPrompt } from './system-prompt';
 import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
+import { track } from '@/lib/telemetry';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1065,6 +1066,8 @@ Please revise your approach.`;
           ...(isError && { error: result })
         });
 
+        track('tool_call', { tool: toolCall.function.name, success: !isError });
+
         // Also emit tool_result for backward compatibility
         this.onProgress?.('tool_result', {
           toolIndex,
@@ -1169,6 +1172,8 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
           status: 'failed',
           error: errorMessage
         });
+
+        track('tool_call', { tool: toolCall.function.name, success: false });
       }
     }
 
@@ -1243,6 +1248,15 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
     );
 
     if (!response.ok) {
+      const status = response.status;
+      let errorType = 'unknown';
+      if (status === 429) errorType = 'rate_limit';
+      else if (status === 401 || status === 403) errorType = 'auth';
+      else if (status >= 500) errorType = 'server';
+      else if (status === 400) errorType = 'invalid_request';
+
+      track('api_error', { provider, model, error_type: errorType, status_code: status });
+
       let errorMessage = `API call failed: ${response.statusText}`;
       try {
         const errorData = await response.json();
