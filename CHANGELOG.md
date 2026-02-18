@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.32.0 - 2026-02-18
+- **Anonymous Telemetry**: Client-side usage analytics via [osw-analytics](https://github.com/o-stahl/osw-analytics)
+  - Events: session, pageview, heartbeat, provider/model selection, task lifecycle, tool calls, API errors
+  - Random anonymous visitor ID (localStorage) for unique visitor counts — no cookies, no fingerprinting
+  - Batched payloads via `fetch` with `sendBeacon` fallback on page unload
+  - Opt-out toggle in Settings, first-run disclosure dialog, env kill switch (`NEXT_PUBLIC_TELEMETRY_ENABLED=false`)
+
 ## v1.31.2 - 2026-02-16
 - **Fix**: HF OAuth switched to client-side PKCE via `@huggingface/hub` — no server routes, no cookies, token exchange happens entirely in browser
 - **Cleanup**: Removed server-side OAuth routes (login, callback, status, disconnect) and cookie helper

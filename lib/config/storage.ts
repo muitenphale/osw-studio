@@ -57,6 +57,7 @@ export interface AppSettings {
   reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
   codexAuth?: CodexAuthData;
   hfAuth?: HFAuthData;
+  telemetryOptIn?: boolean;
 }
 
 class ConfigManager {

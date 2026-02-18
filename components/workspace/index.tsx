@@ -38,6 +38,7 @@ import { SettingsPanel } from '@/components/settings';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
+import { track } from '@/lib/telemetry';
 import { FocusContextPayload } from '@/lib/preview/types';
 import { DebugPanel, DebugEvent } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
@@ -860,6 +861,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
 
     setGenerating(true);
+    track('task_started', { provider: currentProvider, model: modelToUse });
+    const taskStartTime = Date.now();
     const messageContent = focusContext
       ? `${formatFocusContextBlock(focusContext)}\n\n${trimmedPrompt}`
       : trimmedPrompt;
@@ -922,8 +925,19 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           await vfs.refreshServerContext();
         }
 
+        track('task_complete', {
+          provider: currentProvider,
+          model: modelToUse,
+          duration_ms: Date.now() - taskStartTime,
+        });
         toast.success('Task completed');
       } else {
+        track('task_fail', {
+          provider: currentProvider,
+          model: modelToUse,
+          reason: 'error',
+          duration_ms: Date.now() - taskStartTime,
+        });
         toast.error(result.summary || 'Generation failed', {
           duration: 5000,
           position: 'bottom-center'
@@ -937,6 +951,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     } catch (error) {
       logger.error('Generation error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate';
+
+      track('task_fail', {
+        provider: currentProvider,
+        model: modelToUse,
+        reason: 'error',
+        duration_ms: Date.now() - taskStartTime,
+      });
 
       // Emit error event to clear thinking indicator in chat panel
       addDebugEvent('error', { message: errorMessage });
@@ -956,6 +977,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const handleStop = useCallback(() => {
     if (currentOrchestrator) {
       currentOrchestrator.stop();
+      track('task_fail', {
+        provider: configManager.getSelectedProvider(),
+        model: configManager.getDefaultModel(),
+        reason: 'stopped',
+      });
       toast.info('Generation stopped');
     }
   }, [currentOrchestrator]);

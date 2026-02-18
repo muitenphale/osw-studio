@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.27.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.32.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -261,6 +261,7 @@ NEXT_PUBLIC_DEBUG_TOOL_STREAM=0
 - **Network calls** - Direct to AI providers or via optional proxy endpoints
 - **Data storage** - Projects stay in IndexedDB (browser mode) or SQLite (server mode)
 - **Complete privacy** - Use Ollama/LM Studio for 100% local operation
+- **Anonymous telemetry** - Lightweight usage analytics (page views, provider/model selection, task success rates) help improve OSW Studio. No prompts, code, file names, or API keys are ever collected. A random anonymous ID in localStorage counts unique visitors — no cookies, no fingerprinting. Opt out anytime in Settings, or disable entirely with `NEXT_PUBLIC_TELEMETRY_ENABLED=false`
 
 **Note:** Remote LLM providers (OpenAI, Anthropic, etc.) will receive your code during generation. For complete privacy, use local models.
 
