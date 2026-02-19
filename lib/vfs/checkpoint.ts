@@ -1,5 +1,6 @@
 import { vfs } from './index';
 import { logger } from '@/lib/utils';
+import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 
 export type CheckpointKind = 'auto' | 'manual' | 'system';
 
@@ -43,10 +44,23 @@ interface StoredCheckpoint {
   baseRevisionId?: string | null;
 }
 
+// Compressed checkpoint format — lz-string UTF-16 encoded files+directories
+interface StoredCheckpointCompressed {
+  id: string;
+  timestamp: string;
+  description: string;
+  projectId: string;
+  kind?: CheckpointKind;
+  baseRevisionId?: string | null;
+  compressed: true;
+  compressedData: string; // lz-string UTF-16 compressed JSON of { files, directories }
+}
+
+type StoredCheckpointAny = StoredCheckpoint | StoredCheckpointCompressed;
+
 interface CreateCheckpointOptions {
   kind?: CheckpointKind;
   baseRevisionId?: string | null;
-  replaceId?: string | null;
 }
 
 class CheckpointManager {
@@ -55,6 +69,9 @@ class CheckpointManager {
   private currentCheckpoint: string | null = null;
   private storeName = 'checkpoints';
   private isInitialized = false;
+
+  // Lock for system checkpoint creation to prevent race-condition duplicates
+  private systemCheckpointLocks: Map<string, Promise<Checkpoint>> = new Map();
 
   // Global limit to prevent accumulation
   private readonly MAX_TOTAL_CHECKPOINTS = 50;
@@ -87,12 +104,16 @@ class CheckpointManager {
    * Initialize by ensuring VFS database is ready
    */
   private async initDB(): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.isInitialized) {
+      return;
+    }
+    console.log(`[CP DEBUG] initDB: initializing (was not initialized)`);
 
     // Initialize VFS which also initializes the shared database
     await vfs.init();
     this.isInitialized = true;
     await this.loadCheckpointMetadataFromDB();
+    console.log(`[CP DEBUG] initDB: loaded ${this.checkpointMetadata.size} checkpoints from DB`);
   }
 
   /**
@@ -114,7 +135,7 @@ class CheckpointManager {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const storedCheckpoints = request.result as StoredCheckpoint[];
+        const storedCheckpoints = request.result as StoredCheckpointAny[];
         this.checkpointMetadata.clear();
 
         for (const stored of storedCheckpoints) {
@@ -151,10 +172,31 @@ class CheckpointManager {
       const request = store.get(checkpointId);
 
       request.onsuccess = () => {
-        const stored = request.result as StoredCheckpoint | undefined;
+        const stored = request.result as StoredCheckpointAny | undefined;
         if (!stored) {
           resolve(null);
           return;
+        }
+
+        let files: Map<string, string | CheckpointFileContent>;
+        let directories: Set<string>;
+
+        if ('compressed' in stored && stored.compressed) {
+          // Compressed format — decompress lz-string UTF-16
+          const json = decompressFromUTF16(stored.compressedData);
+          if (!json) {
+            logger.error(`[Checkpoint] Failed to decompress checkpoint ${checkpointId} (corrupt data)`);
+            resolve(null);
+            return;
+          }
+          const parsed = JSON.parse(json);
+          files = new Map(parsed.files);
+          directories = new Set(parsed.directories);
+        } else {
+          // Legacy uncompressed format
+          const legacy = stored as StoredCheckpoint;
+          files = new Map(legacy.files);
+          directories = new Set(legacy.directories);
         }
 
         const checkpoint: Checkpoint = {
@@ -164,8 +206,8 @@ class CheckpointManager {
           projectId: stored.projectId,
           kind: stored.kind || 'auto',
           baseRevisionId: stored.baseRevisionId ?? null,
-          files: new Map(stored.files),
-          directories: new Set(stored.directories)
+          files,
+          directories
         };
         resolve(checkpoint);
       };
@@ -183,22 +225,58 @@ class CheckpointManager {
   private async saveCheckpointToDB(checkpoint: Checkpoint): Promise<void> {
     await this.initDB();
 
-    const storedCheckpoint: StoredCheckpoint = {
-      ...checkpoint,
-      files: Array.from(checkpoint.files.entries()),
-      directories: Array.from(checkpoint.directories),
-      kind: checkpoint.kind,
-      baseRevisionId: checkpoint.baseRevisionId ?? null
-    };
+    let record: StoredCheckpoint | StoredCheckpointCompressed;
+
+    try {
+      const payload = JSON.stringify({
+        files: Array.from(checkpoint.files.entries()),
+        directories: Array.from(checkpoint.directories)
+      });
+      const compressedData = compressToUTF16(payload);
+
+      record = {
+        id: checkpoint.id,
+        timestamp: checkpoint.timestamp,
+        description: checkpoint.description,
+        projectId: checkpoint.projectId,
+        kind: checkpoint.kind,
+        baseRevisionId: checkpoint.baseRevisionId ?? null,
+        compressed: true,
+        compressedData
+      };
+    } catch {
+      // Fallback to uncompressed on compression failure
+      record = {
+        ...checkpoint,
+        files: Array.from(checkpoint.files.entries()),
+        directories: Array.from(checkpoint.directories),
+        kind: checkpoint.kind,
+        baseRevisionId: checkpoint.baseRevisionId ?? null
+      };
+    }
 
     return new Promise((resolve, reject) => {
-      const db = this.getDB();
+      let db: IDBDatabase;
+      try {
+        db = this.getDB();
+        console.log(`[CP DEBUG] saveCheckpointToDB: got DB, name=${db.name}, version=${db.version}, objectStoreNames=`, Array.from(db.objectStoreNames));
+      } catch (err) {
+        console.error(`[CP DEBUG] saveCheckpointToDB: getDB() threw`, err);
+        reject(err);
+        return;
+      }
       const transaction = db.transaction([this.storeName], 'readwrite');
+      transaction.onerror = () => console.error(`[CP DEBUG] saveCheckpointToDB: transaction error`, transaction.error);
+      transaction.onabort = () => console.error(`[CP DEBUG] saveCheckpointToDB: transaction ABORTED`, transaction.error);
       const store = transaction.objectStore(this.storeName);
-      const request = store.put(storedCheckpoint);
+      const request = store.put(record);
 
-      request.onsuccess = () => resolve();
+      request.onsuccess = () => {
+        console.log(`[CP DEBUG] saveCheckpointToDB: put succeeded for ${(record as any).id}`);
+        resolve();
+      };
       request.onerror = () => {
+        console.error(`[CP DEBUG] saveCheckpointToDB: put FAILED for ${(record as any).id}`, request.error);
         logger.error('Failed to save checkpoint to DB');
         reject(request.error);
       };
@@ -233,9 +311,56 @@ class CheckpointManager {
     description: string,
     options: CreateCheckpointOptions = {}
   ): Promise<Checkpoint> {
+    console.log(`[CP DEBUG] createCheckpoint called: kind=${options.kind}, project=${projectId}, desc="${description}"`);
+
+    // System checkpoints are unique per project — serialize concurrent calls
+    if (options.kind === 'system') {
+      const existing = this.systemCheckpointLocks.get(projectId);
+      if (existing) {
+        console.log(`[CP DEBUG] system lock exists, awaiting existing promise`);
+        return existing;
+      }
+
+      const promise = this.createCheckpointInternal(projectId, description, options);
+      this.systemCheckpointLocks.set(projectId, promise);
+      try {
+        const result = await promise;
+        console.log(`[CP DEBUG] system checkpoint created/reused: ${result.id}`);
+        return result;
+      } finally {
+        this.systemCheckpointLocks.delete(projectId);
+      }
+    }
+
+    const result = await this.createCheckpointInternal(projectId, description, options);
+    console.log(`[CP DEBUG] checkpoint created: ${result.id}, kind=${result.kind}`);
+    return result;
+  }
+
+  private async createCheckpointInternal(
+    projectId: string,
+    description: string,
+    options: CreateCheckpointOptions = {}
+  ): Promise<Checkpoint> {
     await this.initDB();
     await vfs.init();
-    
+
+    // System checkpoints are unique per project — reuse existing if present
+    if (options.kind === 'system') {
+      const existingSystem = Array.from(this.checkpointMetadata.values()).find(
+        cp => cp.projectId === projectId && cp.kind === 'system'
+      );
+      if (existingSystem) {
+        console.log(`[CP DEBUG] found existing system checkpoint in metadata: ${existingSystem.id}`);
+        const full = await this.loadSingleCheckpointFromDB(existingSystem.id);
+        if (full) {
+          console.log(`[CP DEBUG] reusing existing system checkpoint from DB: ${full.id}`);
+          return full;
+        }
+        console.log(`[CP DEBUG] existing system checkpoint NOT in DB, creating new one`);
+      }
+    }
+
     const files = await vfs.listDirectory(projectId, '/');
     const fileContents = new Map<string, string | CheckpointFileContent>();
     const directories = new Set<string>();
@@ -286,21 +411,6 @@ class CheckpointManager {
       baseRevisionId: options.baseRevisionId ?? null
     };
 
-    if (options.replaceId) {
-      this.checkpointMetadata.delete(options.replaceId);
-      await this.deleteCheckpointFromDB(options.replaceId);
-    }
-
-    if (checkpoint.kind === 'manual') {
-      const existingManual = Array.from(this.checkpointMetadata.values()).find(
-        (cp) => cp.projectId === projectId && cp.kind === 'manual'
-      );
-      if (existingManual && existingManual.id !== options.replaceId) {
-        this.checkpointMetadata.delete(existingManual.id);
-        await this.deleteCheckpointFromDB(existingManual.id);
-      }
-    }
-
     // LAZY LOADING: Only store metadata in RAM, full data goes to IndexedDB
     const metadata: CheckpointMetadata = {
       id: checkpoint.id,
@@ -312,9 +422,16 @@ class CheckpointManager {
     };
     this.checkpointMetadata.set(checkpoint.id, metadata);
     this.currentCheckpoint = checkpoint.id;
+    console.log(`[CP DEBUG] metadata set in RAM: ${checkpoint.id}, kind=${checkpoint.kind}, metadataSize=${this.checkpointMetadata.size}`);
 
     // Persist full checkpoint to IndexedDB (file contents stored there, not RAM)
-    await this.saveCheckpointToDB(checkpoint);
+    try {
+      await this.saveCheckpointToDB(checkpoint);
+      console.log(`[CP DEBUG] saved to IndexedDB OK: ${checkpoint.id}`);
+    } catch (err) {
+      console.error(`[CP DEBUG] FAILED to save to IndexedDB: ${checkpoint.id}`, err);
+      throw err;
+    }
 
     // Clean up old auto checkpoints (keep last 10 by timestamp)
     const autoCheckpoints = Array.from(this.checkpointMetadata.values())
@@ -354,11 +471,14 @@ class CheckpointManager {
     await this.initDB();
 
     // LAZY LOADING: Load full checkpoint from IndexedDB on-demand
+    console.log(`[CP DEBUG] restoreCheckpoint: loading ${checkpointId} from DB, inMetadata=${this.checkpointMetadata.has(checkpointId)}`);
     const checkpoint = await this.loadSingleCheckpointFromDB(checkpointId);
     if (!checkpoint) {
+      console.error(`[CP DEBUG] restoreCheckpoint: NOT FOUND in DB: ${checkpointId}, metadataKeys=`, Array.from(this.checkpointMetadata.keys()));
       logger.error(`[Checkpoint] Checkpoint not found in database: ${checkpointId}`);
       return false;
     }
+    console.log(`[CP DEBUG] restoreCheckpoint: loaded OK, files=${checkpoint.files.size}, dirs=${checkpoint.directories.size}`);
     
     await vfs.init();
     
@@ -437,9 +557,11 @@ class CheckpointManager {
   async getCheckpoints(projectId: string): Promise<CheckpointMetadata[]> {
     await this.initDB();
 
-    return Array.from(this.checkpointMetadata.values())
+    const results = Array.from(this.checkpointMetadata.values())
       .filter(cp => cp.projectId === projectId)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    console.log(`[CP DEBUG] getCheckpoints(${projectId}): ${results.length} found, kinds=[${results.map(r => r.kind).join(',')}], ids=[${results.map(r => r.id).join(',')}]`);
+    return results;
   }
   
   /**
@@ -534,7 +656,7 @@ class CheckpointManager {
   /**
    * Get all stored checkpoints from IndexedDB (raw, without processing)
    */
-  private async getAllStoredCheckpoints(): Promise<StoredCheckpoint[]> {
+  private async getAllStoredCheckpoints(): Promise<StoredCheckpointAny[]> {
     return new Promise((resolve, reject) => {
       const db = this.getDB();
       const transaction = db.transaction([this.storeName], 'readonly');
@@ -542,7 +664,7 @@ class CheckpointManager {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        resolve(request.result as StoredCheckpoint[]);
+        resolve(request.result as StoredCheckpointAny[]);
       };
 
       request.onerror = () => {
@@ -558,6 +680,7 @@ class CheckpointManager {
    * This is called when leaving a project to free up memory
    */
   unloadProject(projectId: string): void {
+    console.log(`[CP DEBUG] unloadProject(${projectId}): metadataSize=${this.checkpointMetadata.size}, isInitialized=${this.isInitialized}`);
     let unloadedCount = 0;
     for (const [id, meta] of this.checkpointMetadata) {
       if (meta.projectId === projectId) {
@@ -584,14 +707,17 @@ class CheckpointManager {
    * Deletes oldest checkpoints across all projects when limit exceeded
    */
   private async enforceGlobalLimit(): Promise<void> {
-    if (this.checkpointMetadata.size <= this.MAX_TOTAL_CHECKPOINTS) {
+    // Only count auto checkpoints toward the global limit —
+    // manual and system checkpoints are protected and don't count
+    const autoCheckpoints = Array.from(this.checkpointMetadata.values())
+      .filter(cp => cp.kind !== 'manual' && cp.kind !== 'system')
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    if (autoCheckpoints.length <= this.MAX_TOTAL_CHECKPOINTS) {
       return;
     }
 
-    const sorted = Array.from(this.checkpointMetadata.values())
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-    const toDelete = sorted.slice(0, this.checkpointMetadata.size - this.MAX_TOTAL_CHECKPOINTS);
+    const toDelete = autoCheckpoints.slice(0, autoCheckpoints.length - this.MAX_TOTAL_CHECKPOINTS);
 
     for (const cp of toDelete) {
       this.checkpointMetadata.delete(cp.id);
@@ -599,7 +725,7 @@ class CheckpointManager {
     }
 
     if (toDelete.length > 0) {
-      logger.debug(`[CheckpointManager] Enforced global limit, deleted ${toDelete.length} old checkpoints`);
+      console.log(`[CP DEBUG] enforceGlobalLimit: deleted ${toDelete.length} old auto checkpoints (${autoCheckpoints.length} auto total, ${this.checkpointMetadata.size} overall)`);
     }
   }
 }

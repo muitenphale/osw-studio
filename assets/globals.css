@@ -96,6 +96,10 @@
   --button-files-active: oklch(0.6 0.15 220); /* Blue */
   --button-editor-active: oklch(0.55 0.18 285); /* Purple */
   --button-preview-active: oklch(0.7 0.2 45); /* Orange */
+  --button-checkpoint-active: oklch(0.65 0.15 55); /* Warm amber */
+
+  /* Checkpoint panel */
+  --panel-checkpoint-rgb: 217, 119, 6; /* Amber */
 }
 
 .dark {
@@ -151,6 +155,10 @@
   --button-files-active: oklch(0.6 0.15 220); /* Blue */
   --button-editor-active: oklch(0.55 0.18 285); /* Purple */
   --button-preview-active: oklch(0.7 0.2 45); /* Orange */
+  --button-checkpoint-active: oklch(0.65 0.15 55); /* Warm amber */
+
+  /* Checkpoint panel */
+  --panel-checkpoint-rgb: 217, 119, 6; /* Amber */
 }
 
 @layer base {

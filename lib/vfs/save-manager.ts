@@ -88,8 +88,7 @@ class SaveManager {
     const fallbackDescription = `Manual save @ ${new Date().toLocaleTimeString()}`;
     const checkpoint = await checkpointManager.createCheckpoint(projectId, description || fallbackDescription, {
       kind: 'manual',
-      baseRevisionId: project.lastSavedCheckpointId ?? null,
-      replaceId: project.lastSavedCheckpointId ?? null
+      baseRevisionId: project.lastSavedCheckpointId ?? null
     });
 
     project.lastSavedCheckpointId = checkpoint.id;
