@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager } from '@/lib/config/storage';
@@ -43,6 +43,7 @@ import { FocusContextPayload } from '@/lib/preview/types';
 import { DebugPanel, DebugEvent } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
 import { SiteSelector } from '@/components/workspace/site-selector';
+import { CheckpointPanel } from '@/components/checkpoint-panel';
 
 interface WorkspaceProps {
   project: Project;
@@ -73,6 +74,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const previewRef = useRef<MultipagePreviewHandle>(null);
   const retryTriggerRef = useRef<boolean>(false);
   const [initialCheckpointId, setInitialCheckpointId] = useState<string | null>(null);
+  const [checkpointRefreshKey, setCheckpointRefreshKey] = useState(0);
   const [currentModel, setCurrentModel] = useState(configManager.getDefaultModel());
   const [showDesktopSettings, setShowDesktopSettings] = useState(false);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
@@ -91,12 +93,22 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     const modelId = currentModel || configManager.getDefaultModel();
     return modelSupportsVision(currentProvider, modelId);
   }, [currentModel]);
+
+  // Check if current provider has credentials configured
+  const providerReady = useMemo(() => {
+    const provider = configManager.getSelectedProvider();
+    const config = getProvider(provider);
+    if (config.isLocal) return true;
+    if (config.apiKeyRequired || config.usesOAuth) return !!configManager.getProviderApiKey(provider);
+    return true;
+  }, [currentModel]);
   
   const [showChat, setShowChat] = useState(true);    // Column 1: Chat v2 (event-driven)
   const [showFiles, setShowFiles] = useState(true);      // Column 2: File explorer
   const [showEditor, setShowEditor] = useState(false);   // Column 3: Monaco editor
   const [showPreview, setShowPreview] = useState(true);  // Column 4: Live preview
-  const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 5: Debug events
+  const [showCheckpoints, setShowCheckpoints] = useState(false); // Column 5: Checkpoint history
+  const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 6: Debug events
 
   // Server context state (site selection for server features)
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
@@ -187,18 +199,18 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   }, [project.id]);
   
   const getDefaultSizes = () => {
-    const visiblePanels = [showChat, showFiles, showEditor, showPreview, showDebugPanel].filter(Boolean).length;
+    const visiblePanels = [showChat, showFiles, showEditor, showPreview, showCheckpoints, showDebugPanel].filter(Boolean).length;
 
-    if (visiblePanels === 5) {
-      return { chat: 20, files: 15, editor: 25, preview: 20, debug: 20 };
+    if (visiblePanels >= 5) {
+      return { chat: 18, files: 13, editor: 22, preview: 18, checkpoints: 14, debug: 15 };
     } else if (visiblePanels === 4) {
-      return { chat: 25, files: 15, editor: 35, preview: 25, debug: 0 };
+      return { chat: 25, files: 15, editor: 35, preview: 25, checkpoints: 15, debug: 15 };
     } else if (visiblePanels === 3) {
-      return { chat: 33, files: 33, editor: 33, preview: 33, debug: 0 };
+      return { chat: 33, files: 33, editor: 33, preview: 33, checkpoints: 33, debug: 33 };
     } else if (visiblePanels === 2) {
-      return { chat: 50, files: 50, editor: 50, preview: 50, debug: 0 };
+      return { chat: 50, files: 50, editor: 50, preview: 50, checkpoints: 50, debug: 50 };
     }
-    return { chat: 100, files: 100, editor: 100, preview: 100, debug: 0 };
+    return { chat: 100, files: 100, editor: 100, preview: 100, checkpoints: 100, debug: 100 };
   };
   
   const defaultSizes = getDefaultSizes();
@@ -351,11 +363,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           const restored = await saveManager.restoreLastSaved(project.id);
           if (!restored) {
             logger.warn('[Workspace] Saved checkpoint missing or failed to restore, creating new baseline');
-            const checkpoint = await saveManager.save(project.id, 'Initial manual save');
-            savedCheckpointId = checkpoint.id;
+            savedCheckpointId = null;
           }
-        } else {
-          const checkpoint = await saveManager.save(project.id, 'Initial manual save');
+        }
+
+        // Create a "Starting point" system checkpoint (dedup handled inside createCheckpoint)
+        if (!savedCheckpointId) {
+          const checkpoint = await checkpointManager.createCheckpoint(project.id, 'Starting point', { kind: 'system' });
           savedCheckpointId = checkpoint.id;
         }
 
@@ -630,7 +644,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       const latestProject = await vfs.getProject(project.id);
 
       setLastSavedAt(latestProject.lastSavedAt ?? new Date(checkpoint.timestamp));
-      setInitialCheckpointId(checkpoint.id);
+      setCheckpointRefreshKey(prev => prev + 1);
       toast.success('Project saved');
     } catch (error) {
       logger.error('Failed to save project', error);
@@ -713,6 +727,18 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       toast.error('Failed to restore checkpoint');
     }
   }, [handleFilesChange, project.id]);
+
+  const handleScrollToCheckpoint = useCallback((checkpointId: string) => {
+    if (!showChat) setShowChat(true);
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-checkpoint-id="${checkpointId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-primary/50');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-primary/50'), 2000);
+      }
+    });
+  }, [showChat]);
 
   const handleRetry = useCallback(async (checkpointId: string) => {
     try {
@@ -1243,6 +1269,39 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
               <TooltipTrigger asChild>
                 <button
                   className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
+                    showCheckpoints
+                      ? 'shadow-sm'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  style={{
+                    backgroundColor: showCheckpoints ? 'var(--button-checkpoint-active)' : undefined,
+                    color: showCheckpoints ? 'white' : undefined
+                  }}
+                  onClick={() => setShowCheckpoints(!showCheckpoints)}
+                >
+                  <History className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="border-0"
+                style={{
+                  backgroundColor: 'var(--button-checkpoint-active)',
+                  color: 'white'
+                }}
+                arrowStyle={{
+                  backgroundColor: 'var(--button-checkpoint-active)',
+                  fill: 'var(--button-checkpoint-active)'
+                }}
+              >
+                <p>Checkpoints</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
                     showDebugPanel
                       ? 'bg-foreground shadow-sm'
                       : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
@@ -1300,10 +1359,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onClearChat={clearDebugEvents}
                   onClose={() => setShowChat(false)}
                   supportsVision={supportsVision}
+                  providerReady={providerReady}
                 />
               </ResizablePanel>
             )}
-            {showChat && (showFiles || showEditor || showPreview || showDebugPanel) && (
+            {showChat && (showFiles || showEditor || showPreview || showCheckpoints || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
@@ -1324,7 +1384,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     </div>
                 </ResizablePanel>
             )}
-            {showFiles && (showEditor || showPreview) && (
+            {showFiles && (showEditor || showPreview || showCheckpoints || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
@@ -1345,7 +1405,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     </div>
                 </ResizablePanel>
             )}
-            {showEditor && showPreview && (
+            {showEditor && (showPreview || showCheckpoints || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
@@ -1372,13 +1432,35 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 </ResizablePanel>
             )}
 
-            {showPreview && showDebugPanel && <ResizableHandle withHandle />}
+            {showPreview && (showCheckpoints || showDebugPanel) && <ResizableHandle withHandle />}
 
-            {/* Column 5: Debug Panel */}
+            {/* Column 5: Checkpoint Panel */}
+            {showCheckpoints && (
+              <ResizablePanel
+                id="checkpoints"
+                order={5}
+                defaultSize={defaultSizes.checkpoints}
+                minSize={12}
+              >
+                <CheckpointPanel
+                  projectId={project.id}
+                  events={debugEvents}
+                  currentCheckpointId={checkpointManager.getCurrentCheckpoint()?.id}
+                  onRestore={handleRestoreCheckpoint}
+                  onScrollToTurn={handleScrollToCheckpoint}
+                  onClose={() => setShowCheckpoints(false)}
+                  refreshKey={checkpointRefreshKey}
+                />
+              </ResizablePanel>
+            )}
+
+            {showCheckpoints && showDebugPanel && <ResizableHandle withHandle />}
+
+            {/* Column 6: Debug Panel */}
             {showDebugPanel && (
               <ResizablePanel
                 id="debug"
-                order={5}
+                order={6}
                 defaultSize={defaultSizes.debug}
                 minSize={15}
               >
@@ -1415,6 +1497,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 isTourLockingInput={isTourLockingInput}
                 onClearChat={clearDebugEvents}
                 supportsVision={supportsVision}
+                providerReady={providerReady}
               />
             )}
 

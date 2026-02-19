@@ -134,7 +134,9 @@ class ConfigManager {
   }
 
   getSelectedProvider(): ProviderId {
-    return this.getSettings().selectedProvider || 'openrouter';
+    return this.getSettings().selectedProvider
+      || (process.env.NEXT_PUBLIC_DEFAULT_PROVIDER as ProviderId)
+      || 'openrouter';
   }
 
   setSelectedProvider(provider: ProviderId): void {

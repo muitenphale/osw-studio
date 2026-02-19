@@ -81,6 +81,8 @@ interface ChatPanelProps {
   onClose?: () => void;
   // Vision support
   supportsVision?: boolean;
+  // Provider has credentials configured
+  providerReady?: boolean;
 }
 
 interface ToolCall {
@@ -141,6 +143,7 @@ export function ChatPanel({
   onClearChat,
   onClose,
   supportsVision = false,
+  providerReady = true,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -827,15 +830,15 @@ export function ChatPanel({
                 }
               }}
               onPaste={handlePaste}
-              placeholder={supportsVision ? "Describe what you want to build... (paste or drop images)" : "Describe what you want to build..."}
+              placeholder={!providerReady ? "Select a provider to start..." : supportsVision ? "Describe what you want to build... (paste or drop images)" : "Describe what you want to build..."}
               className="flex-1 px-3 py-2 bg-transparent border-0 resize-none focus:outline-none text-sm placeholder:text-muted-foreground text-foreground"
               rows={3}
-              disabled={generating || isTourLockingInput}
+              disabled={generating || isTourLockingInput || !providerReady}
             />
             <div className="flex flex-col p-2 gap-2">
               <Button
                 onClick={generating ? onStop : handleSend}
-                disabled={isTourLockingInput ? !generating : (!generating && !prompt.trim() && pendingImages.length === 0)}
+                disabled={isTourLockingInput ? !generating : (!generating && (!prompt.trim() && pendingImages.length === 0 || !providerReady))}
                 size="sm"
                 className="flex items-center gap-2"
               >
@@ -862,10 +865,10 @@ export function ChatPanel({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-7 text-xs"
+                    className={`h-7 text-xs ${!providerReady ? 'ring-2 ring-primary/70 animate-ring-opacity border-primary' : ''}`}
                     data-tour-id="provider-settings-trigger"
                   >
-                    <span>{getModelDisplayName(currentModel)}</span>
+                    <span>{providerReady ? getModelDisplayName(currentModel) : 'Select provider'}</span>
                     {showMobileSettings ? (
                       <ChevronDown className="h-3 w-3 ml-1" />
                     ) : (
@@ -916,7 +919,7 @@ interface TurnDisplayProps {
 
 function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded }: TurnDisplayProps) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" {...(turn.checkpointId ? { 'data-checkpoint-id': turn.checkpointId } : {})}>
       {/* Render items in chronological order */}
       {turn.items.map((item) => {
         switch (item.type) {

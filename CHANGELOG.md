@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.33.0 - 2026-02-19
+- **Checkpoint System Rework**: New checkpoint panel and redesigned checkpoint lifecycle
+  - New "Checkpoints" panel in the workspace — view, jump to, and restore any checkpoint from the session
+  - Opening a project creates an immutable "Starting point" checkpoint (`system` kind) that persists for the entire session
+  - Multiple manual save checkpoints now supported — saves accumulate instead of replacing each other
+  - "Discard Changes" always reverts to the session starting point, not the last save
+  - Global limit (50) applies only to auto-checkpoints; manual and system checkpoints are never evicted
+- **QoL**: Default provider configurable via `NEXT_PUBLIC_DEFAULT_PROVIDER` env var (used by HF deployment)
+- **QoL**: Chat input disabled when no credentials configured; model selector button highlights to guide setup
+
 ## v1.32.0 - 2026-02-18
 - **Anonymous Telemetry**: Client-side usage analytics via [osw-analytics](https://github.com/o-stahl/osw-analytics)
   - Events: session, pageview, heartbeat, provider/model selection, task lifecycle, tool calls, API errors
