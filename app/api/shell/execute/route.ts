@@ -5,7 +5,7 @@
  * orchestrator to server-side execution.
  *
  * POST /api/shell/execute
- * Body: { siteId: string, cmd: string[] }
+ * Body: { deploymentId: string, cmd: string[] }
  * Response: { stdout: string, stderr: string, exitCode: number }
  */
 
@@ -28,13 +28,13 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShellResu
     await requireAuth();
 
     const body = await request.json();
-    const { siteId, cmd } = body;
+    const { deploymentId, cmd } = body;
 
     // Validate request
-    if (!siteId || typeof siteId !== 'string') {
+    if (!deploymentId || typeof deploymentId !== 'string') {
       return NextResponse.json({
         stdout: '',
-        stderr: 'siteId is required',
+        stderr: 'deploymentId is required',
         exitCode: 1
       }, { status: 400 });
     }
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShellResu
 
     // Handle sqlite3 command
     if (command === 'sqlite3') {
-      return handleSqlite3(siteId, cmd);
+      return handleSqlite3(deploymentId, cmd);
     }
 
     // Unknown server command
@@ -82,27 +82,27 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShellResu
 /**
  * Handle sqlite3 command execution
  */
-async function handleSqlite3(siteId: string, cmd: string[]): Promise<NextResponse<ShellResult>> {
+async function handleSqlite3(deploymentId: string, cmd: string[]): Promise<NextResponse<ShellResult>> {
   try {
     const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // Check site exists
-    const site = await adapter.getSite?.(siteId);
-    if (!site) {
+    // Check deployment exists
+    const deployment = await adapter.getDeployment?.(deploymentId);
+    if (!deployment) {
       return NextResponse.json({
         stdout: '',
-        stderr: 'sqlite3: site not found',
+        stderr: 'sqlite3: deployment not found',
         exitCode: 1
       });
     }
 
-    // Get site database
-    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
-    if (!siteDb) {
+    // Get deployment database
+    const deploymentDb = adapter.getDeploymentDatabaseForAnalytics(deploymentId);
+    if (!deploymentDb) {
       return NextResponse.json({
         stdout: '',
-        stderr: 'sqlite3: site database not available',
+        stderr: 'sqlite3: deployment database not available',
         exitCode: 1
       });
     }
@@ -125,7 +125,7 @@ async function handleSqlite3(siteId: string, cmd: string[]): Promise<NextRespons
     }
 
     // Execute the query using the protected executeUserQuery method
-    const result = siteDb.executeUserQuery(query);
+    const result = deploymentDb.executeUserQuery(query);
 
     if (result.error) {
       return NextResponse.json({

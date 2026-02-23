@@ -52,9 +52,9 @@ export interface ScheduledFunctionFileData {
 }
 
 export interface ServerContextMetadata {
-  siteName: string;
-  siteId: string;
-  hasDatabase: boolean;
+  projectId: string;
+  runtimeDeploymentId?: string;  // Set when a deployment is connected for runtime (sqlite3, logs)
+  hasDatabase: boolean;          // True when runtimeDeploymentId is set
   edgeFunctionCount: number;
   serverFunctionCount: number;
   secretCount: number;
@@ -136,17 +136,17 @@ export function generateScheduledFunctionFile(
  * Generate metadata for system prompt
  */
 export function generateServerContextMetadata(
-  siteName: string,
-  siteId: string,
+  projectId: string,
   edgeFunctions: EdgeFunction[],
   serverFunctions: ServerFunction[],
   secrets: Secret[],
-  scheduledFunctions?: ScheduledFunction[]
+  scheduledFunctions?: ScheduledFunction[],
+  runtimeDeploymentId?: string
 ): ServerContextMetadata {
   return {
-    siteName,
-    siteId,
-    hasDatabase: true,
+    projectId,
+    runtimeDeploymentId,
+    hasDatabase: !!runtimeDeploymentId,
     edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
     serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
     secretCount: secrets.length,

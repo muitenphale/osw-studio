@@ -11,11 +11,9 @@ interface TemplatesViewProps {
 export function TemplatesView({ onProjectSelect, onNavigate }: TemplatesViewProps) {
   const router = useRouter();
 
-  const handleProjectCreated = (projectId: string, isSiteTemplate: boolean) => {
-    if (isSiteTemplate && onNavigate) {
-      // Site templates — navigate to the Sites view
-      onNavigate('sites');
-    } else if (onProjectSelect) {
+
+  const handleProjectCreated = (projectId: string, _hasBackendFeatures: boolean) => {
+    if (onProjectSelect) {
       onProjectSelect({ id: projectId });
     } else {
       router.push(`/workspace/${projectId}`);

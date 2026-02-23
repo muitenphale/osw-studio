@@ -2,18 +2,24 @@
  * SQLite Connection Manager
  *
  * Singleton manager for SQLite database connections with WAL mode
- * for better concurrency. Manages both:
+ * for better concurrency. Manages:
  * - Core database (data/osws.sqlite) - projects, templates, skills
- * - Site databases (sites/{siteId}/site.sqlite) - per-site data + analytics
+ * - Runtime databases (deployments/{deploymentId}/runtime.sqlite) - per-deployment runtime data
+ * - Analytics databases (deployments/{deploymentId}/analytics.sqlite) - per-deployment analytics
+ *
+ * Migration: On first access, splits old unified deployment.sqlite into
+ * runtime.sqlite + analytics.sqlite if needed.
  */
 
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-// Connection cache
+// Connection caches
 let coreDatabase: Database.Database | null = null;
-const siteDatabases = new Map<string, Database.Database>();
+const runtimeDatabases = new Map<string, Database.Database>();
+const analyticsDatabases = new Map<string, Database.Database>();
+const projectDatabases = new Map<string, Database.Database>();
 
 /**
  * Get the base directory for data storage
@@ -24,10 +30,26 @@ function getDataDir(): string {
 }
 
 /**
- * Get the base directory for site storage
+ * Get the base directory for deployment storage
+ * Includes backward compatibility: renames old sites/ dir to deployments/ if needed
  */
-function getSitesDir(): string {
-  return path.join(process.cwd(), 'sites');
+function getDeploymentsDir(): string {
+  const deploymentsDir = path.join(process.cwd(), 'deployments');
+  const oldSitesDir = path.join(process.cwd(), 'sites');
+
+  // Backward compatibility: rename sites/ to deployments/ if old dir exists and new one doesn't
+  try {
+    if (!fs.existsSync(deploymentsDir) && fs.existsSync(oldSitesDir)) {
+      fs.renameSync(oldSitesDir, deploymentsDir);
+    }
+  } catch {
+    // Race condition: another request may have already renamed the directory
+    if (!fs.existsSync(deploymentsDir)) {
+      throw new Error('Neither deployments/ nor sites/ directory exists');
+    }
+  }
+
+  return deploymentsDir;
 }
 
 /**
@@ -36,6 +58,15 @@ function getSitesDir(): string {
 function ensureDir(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+/**
+ * Validate that an ID is safe for use in file paths (prevents path traversal)
+ */
+function validateIdFormat(id: string, label: string): void {
+  if (!/^[a-f0-9-]+$/i.test(id)) {
+    throw new Error(`Invalid ${label} format: ${id}`);
   }
 }
 
@@ -51,6 +82,142 @@ function configureDatabase(db: Database.Database): void {
   db.pragma('synchronous = NORMAL');
   db.pragma('cache_size = -64000'); // 64MB cache
   db.pragma('temp_store = MEMORY');
+}
+
+/**
+ * Rename helper for SQLite files including WAL and SHM
+ */
+function renameSqliteFile(oldPath: string, newPath: string): void {
+  fs.renameSync(oldPath, newPath);
+  for (const ext of ['-wal', '-shm']) {
+    const oldExt = oldPath + ext;
+    if (fs.existsSync(oldExt)) {
+      fs.renameSync(oldExt, newPath + ext);
+    }
+  }
+}
+
+/**
+ * Migrate old unified deployment.sqlite to split runtime.sqlite + analytics.sqlite
+ * Called on first access to a deployment's database.
+ *
+ * Migration steps:
+ * 1. Rename deployment.sqlite → runtime.sqlite
+ * 2. Create analytics.sqlite with analytics tables
+ * 3. Copy analytics data from runtime to analytics
+ * 4. Drop analytics tables from runtime
+ */
+function migrateDeploymentDatabase(deploymentDir: string, deploymentId?: string): void {
+  // Validate deploymentId format before using in ATTACH DATABASE to prevent path injection
+  if (deploymentId && !/^[a-f0-9-]+$/i.test(deploymentId)) {
+    throw new Error(`Invalid deployment ID format: ${deploymentId}`);
+  }
+
+  const oldDeploymentPath = path.join(deploymentDir, 'deployment.sqlite');
+  const oldSitePath = path.join(deploymentDir, 'site.sqlite');
+  const runtimePath = path.join(deploymentDir, 'runtime.sqlite');
+  const analyticsPath = path.join(deploymentDir, 'analytics.sqlite');
+
+  // Already migrated or no old database exists
+  if (fs.existsSync(runtimePath)) return;
+
+  // Determine which old file to migrate from
+  let sourcePath: string | null = null;
+  if (fs.existsSync(oldDeploymentPath)) {
+    sourcePath = oldDeploymentPath;
+  } else if (fs.existsSync(oldSitePath)) {
+    sourcePath = oldSitePath;
+  }
+
+  if (!sourcePath) return; // No database to migrate
+
+  // Step 1: Rename old database to runtime.sqlite
+  renameSqliteFile(sourcePath, runtimePath);
+
+  // Step 2: Create analytics.sqlite and migrate analytics data
+  try {
+    const runtimeDb = new Database(runtimePath);
+    configureDatabase(runtimeDb);
+
+    try {
+      // Check if analytics tables exist in the old unified database
+      const hasPageviews = runtimeDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='pageviews'"
+      ).get();
+
+      if (hasPageviews) {
+        // Attach analytics database (creates file if it doesn't exist)
+        runtimeDb.exec(`ATTACH DATABASE '${analyticsPath}' AS analytics_new`);
+
+        // Create analytics tables in new database
+        runtimeDb.exec(`
+          CREATE TABLE IF NOT EXISTS analytics_new.pageviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            page_path TEXT NOT NULL,
+            referrer TEXT,
+            country TEXT,
+            user_agent TEXT,
+            device_type TEXT,
+            session_id TEXT NOT NULL,
+            load_time INTEGER,
+            timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `);
+        runtimeDb.exec(`CREATE INDEX IF NOT EXISTS analytics_new.idx_pageviews_timestamp ON pageviews(timestamp)`);
+        runtimeDb.exec(`CREATE INDEX IF NOT EXISTS analytics_new.idx_pageviews_session_id ON pageviews(session_id)`);
+
+        runtimeDb.exec(`
+          CREATE TABLE IF NOT EXISTS analytics_new.interactions (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            page_path TEXT NOT NULL,
+            interaction_type TEXT NOT NULL,
+            element_selector TEXT,
+            coordinates TEXT,
+            scroll_depth INTEGER,
+            time_on_page INTEGER,
+            timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `);
+        runtimeDb.exec(`CREATE INDEX IF NOT EXISTS analytics_new.idx_interactions_page_path ON interactions(page_path)`);
+        runtimeDb.exec(`CREATE INDEX IF NOT EXISTS analytics_new.idx_interactions_timestamp ON interactions(timestamp)`);
+
+        runtimeDb.exec(`
+          CREATE TABLE IF NOT EXISTS analytics_new.sessions (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            entry_page TEXT,
+            exit_page TEXT,
+            page_count INTEGER DEFAULT 1,
+            duration INTEGER,
+            is_bounce INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            ended_at TEXT
+          )
+        `);
+        runtimeDb.exec(`CREATE INDEX IF NOT EXISTS analytics_new.idx_sessions_session_id ON sessions(session_id)`);
+        runtimeDb.exec(`CREATE INDEX IF NOT EXISTS analytics_new.idx_sessions_created_at ON sessions(created_at)`);
+
+        // Copy analytics data
+        runtimeDb.exec(`INSERT INTO analytics_new.pageviews SELECT * FROM main.pageviews`);
+        runtimeDb.exec(`INSERT INTO analytics_new.interactions SELECT * FROM main.interactions`);
+        runtimeDb.exec(`INSERT INTO analytics_new.sessions SELECT * FROM main.sessions`);
+
+        // Detach
+        runtimeDb.exec(`DETACH DATABASE analytics_new`);
+
+        // Drop analytics tables from runtime database
+        runtimeDb.exec(`DROP TABLE IF EXISTS pageviews`);
+        runtimeDb.exec(`DROP TABLE IF EXISTS interactions`);
+        runtimeDb.exec(`DROP TABLE IF EXISTS sessions`);
+      }
+    } finally {
+      runtimeDb.close();
+    }
+  } catch (err) {
+    console.error('[SQLite Migration] Failed to split deployment database:', err);
+    // Migration failure is non-fatal — runtime.sqlite still has all data
+  }
 }
 
 /**
@@ -73,73 +240,136 @@ export function getCoreDatabase(): Database.Database {
 }
 
 /**
- * Get a site-specific database connection (cached)
- * Creates sites/{siteId}/site.sqlite if it doesn't exist
+ * Get a deployment's runtime database connection (cached)
+ * Creates deployments/{deploymentId}/runtime.sqlite if it doesn't exist
+ * Runs migration from old deployment.sqlite if needed
  */
-export function getSiteDatabase(siteId: string): Database.Database {
-  // Check cache first
-  const cached = siteDatabases.get(siteId);
+export function getRuntimeDatabaseConnection(deploymentId: string): Database.Database {
+  validateIdFormat(deploymentId, 'deployment ID');
+  const cached = runtimeDatabases.get(deploymentId);
   if (cached) {
     return cached;
   }
 
-  const sitesDir = getSitesDir();
-  const siteDir = path.join(sitesDir, siteId);
-  ensureDir(siteDir);
+  const deploymentsDir = getDeploymentsDir();
+  const deploymentDir = path.join(deploymentsDir, deploymentId);
+  ensureDir(deploymentDir);
 
-  const dbPath = path.join(siteDir, 'site.sqlite');
+  // Run migration if old unified database exists
+  migrateDeploymentDatabase(deploymentDir, deploymentId);
+
+  const dbPath = path.join(deploymentDir, 'runtime.sqlite');
   const db = new Database(dbPath);
   configureDatabase(db);
 
-  // Cache the connection
-  siteDatabases.set(siteId, db);
-
+  runtimeDatabases.set(deploymentId, db);
   return db;
 }
 
 /**
- * Check if a site database exists
+ * Get a deployment's analytics database connection (cached)
+ * Creates deployments/{deploymentId}/analytics.sqlite if it doesn't exist
  */
-export function siteExists(siteId: string): boolean {
-  const sitesDir = getSitesDir();
-  const dbPath = path.join(sitesDir, siteId, 'site.sqlite');
-  return fs.existsSync(dbPath);
+export function getAnalyticsDatabaseConnection(deploymentId: string): Database.Database {
+  validateIdFormat(deploymentId, 'deployment ID');
+  const cached = analyticsDatabases.get(deploymentId);
+  if (cached) {
+    return cached;
+  }
+
+  const deploymentsDir = getDeploymentsDir();
+  const deploymentDir = path.join(deploymentsDir, deploymentId);
+  ensureDir(deploymentDir);
+
+  // Ensure migration has run (in case analytics DB is requested first)
+  migrateDeploymentDatabase(deploymentDir, deploymentId);
+
+  const dbPath = path.join(deploymentDir, 'analytics.sqlite');
+  const db = new Database(dbPath);
+  configureDatabase(db);
+
+  analyticsDatabases.set(deploymentId, db);
+  return db;
 }
 
 /**
- * Delete a site's database and directory
+ * @deprecated Use getRuntimeDatabaseConnection instead
+ * Backward compatibility: returns runtime database connection
  */
-export function deleteSiteDatabase(siteId: string): void {
-  // Close the connection if open
-  closeSiteDatabase(siteId);
+export function getDeploymentDatabase(deploymentId: string): Database.Database {
+  return getRuntimeDatabaseConnection(deploymentId);
+}
 
-  const sitesDir = getSitesDir();
-  const siteDir = path.join(sitesDir, siteId);
+/**
+ * Check if a deployment database exists (either format)
+ */
+export function deploymentExists(deploymentId: string): boolean {
+  validateIdFormat(deploymentId, 'deployment ID');
+  const deploymentsDir = getDeploymentsDir();
+  const dir = path.join(deploymentsDir, deploymentId);
+  const runtimePath = path.join(dir, 'runtime.sqlite');
+  const oldDeploymentPath = path.join(dir, 'deployment.sqlite');
+  const oldSitePath = path.join(dir, 'site.sqlite');
+  return fs.existsSync(runtimePath) || fs.existsSync(oldDeploymentPath) || fs.existsSync(oldSitePath);
+}
 
-  if (fs.existsSync(siteDir)) {
-    // Remove all files in the directory
-    const files = fs.readdirSync(siteDir);
+/**
+ * Delete a deployment's databases and directory
+ */
+export function deleteDeploymentDatabase(deploymentId: string): void {
+  validateIdFormat(deploymentId, 'deployment ID');
+  // Close all connections
+  closeRuntimeDatabase(deploymentId);
+  closeAnalyticsDatabase(deploymentId);
+
+  const deploymentsDir = getDeploymentsDir();
+  const deploymentDir = path.join(deploymentsDir, deploymentId);
+
+  if (fs.existsSync(deploymentDir)) {
+    const files = fs.readdirSync(deploymentDir);
     for (const file of files) {
-      fs.unlinkSync(path.join(siteDir, file));
+      fs.unlinkSync(path.join(deploymentDir, file));
     }
-    // Remove the directory
-    fs.rmdirSync(siteDir);
+    fs.rmdirSync(deploymentDir);
   }
 }
 
 /**
- * Close a specific site database connection
+ * Close a specific deployment's runtime database connection
  */
-export function closeSiteDatabase(siteId: string): void {
-  const db = siteDatabases.get(siteId);
+export function closeRuntimeDatabase(deploymentId: string): void {
+  const db = runtimeDatabases.get(deploymentId);
   if (db) {
     try {
       db.close();
     } catch {
       // Ignore errors on close
     }
-    siteDatabases.delete(siteId);
+    runtimeDatabases.delete(deploymentId);
   }
+}
+
+/**
+ * Close a specific deployment's analytics database connection
+ */
+export function closeAnalyticsDatabase(deploymentId: string): void {
+  const db = analyticsDatabases.get(deploymentId);
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // Ignore errors on close
+    }
+    analyticsDatabases.delete(deploymentId);
+  }
+}
+
+/**
+ * @deprecated Use closeRuntimeDatabase instead
+ */
+export function closeDeploymentDatabase(deploymentId: string): void {
+  closeRuntimeDatabase(deploymentId);
+  closeAnalyticsDatabase(deploymentId);
 }
 
 /**
@@ -156,13 +386,100 @@ export function closeCoreDatabase(): void {
   }
 }
 
+// ============================================
+// Project Database Connections
+// ============================================
+
+/**
+ * Get the file path for a project's database
+ */
+export function getProjectDatabasePath(projectId: string): string {
+  validateIdFormat(projectId, 'project ID');
+  const dataDir = getDataDir();
+  return path.join(dataDir, 'projects', projectId, 'database.sqlite');
+}
+
+/**
+ * Check if a project database exists
+ */
+export function projectDatabaseExists(projectId: string): boolean {
+  return fs.existsSync(getProjectDatabasePath(projectId));
+}
+
+/**
+ * Get a project's database connection (cached)
+ * Creates data/projects/{projectId}/database.sqlite if it doesn't exist
+ */
+export function getProjectDatabaseConnection(projectId: string): Database.Database {
+  validateIdFormat(projectId, 'project ID');
+  const cached = projectDatabases.get(projectId);
+  if (cached) {
+    return cached;
+  }
+
+  const dataDir = getDataDir();
+  const projectDir = path.join(dataDir, 'projects', projectId);
+  ensureDir(projectDir);
+
+  const dbPath = path.join(projectDir, 'database.sqlite');
+  const db = new Database(dbPath);
+  configureDatabase(db);
+
+  projectDatabases.set(projectId, db);
+  return db;
+}
+
+/**
+ * Close a specific project's database connection
+ */
+export function closeProjectDatabase(projectId: string): void {
+  const db = projectDatabases.get(projectId);
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // Ignore errors on close
+    }
+    projectDatabases.delete(projectId);
+  }
+}
+
+/**
+ * Delete a project's database and directory
+ */
+export function deleteProjectDatabase(projectId: string): void {
+  validateIdFormat(projectId, 'project ID');
+  closeProjectDatabase(projectId);
+
+  const dataDir = getDataDir();
+  const projectDir = path.join(dataDir, 'projects', projectId);
+
+  if (fs.existsSync(projectDir)) {
+    const files = fs.readdirSync(projectDir);
+    for (const file of files) {
+      fs.unlinkSync(path.join(projectDir, file));
+    }
+    fs.rmdirSync(projectDir);
+  }
+}
+
 /**
  * Close all database connections (for cleanup/shutdown)
  */
 export function closeAllConnections(): void {
-  // Close all site databases
-  for (const [siteId] of siteDatabases) {
-    closeSiteDatabase(siteId);
+  // Close all runtime databases
+  for (const [deploymentId] of runtimeDatabases) {
+    closeRuntimeDatabase(deploymentId);
+  }
+
+  // Close all analytics databases
+  for (const [deploymentId] of analyticsDatabases) {
+    closeAnalyticsDatabase(deploymentId);
+  }
+
+  // Close all project databases
+  for (const [projectId] of projectDatabases) {
+    closeProjectDatabase(projectId);
   }
 
   // Close core database
@@ -170,28 +487,35 @@ export function closeAllConnections(): void {
 }
 
 /**
- * List all site IDs that have databases
+ * List all deployment IDs that have databases
  */
-export function listSiteIds(): string[] {
-  const sitesDir = getSitesDir();
+export function listDeploymentIds(): string[] {
+  const deploymentsDir = getDeploymentsDir();
 
-  if (!fs.existsSync(sitesDir)) {
+  if (!fs.existsSync(deploymentsDir)) {
     return [];
   }
 
-  const entries = fs.readdirSync(sitesDir, { withFileTypes: true });
+  const entries = fs.readdirSync(deploymentsDir, { withFileTypes: true });
   return entries
     .filter(entry => entry.isDirectory())
-    .filter(entry => fs.existsSync(path.join(sitesDir, entry.name, 'site.sqlite')))
+    .filter(entry => {
+      const dir = path.join(deploymentsDir, entry.name);
+      // Check for any database format
+      return fs.existsSync(path.join(dir, 'runtime.sqlite')) ||
+             fs.existsSync(path.join(dir, 'deployment.sqlite')) ||
+             fs.existsSync(path.join(dir, 'site.sqlite'));
+    })
     .map(entry => entry.name);
 }
 
 /**
- * Get the file path for a site's database (for export/backup)
+ * Get the file path for a deployment's runtime database (for export/backup)
  */
-export function getSiteDatabasePath(siteId: string): string {
-  const sitesDir = getSitesDir();
-  return path.join(sitesDir, siteId, 'site.sqlite');
+export function getDeploymentDatabasePath(deploymentId: string): string {
+  validateIdFormat(deploymentId, 'deployment ID');
+  const deploymentsDir = getDeploymentsDir();
+  return path.join(deploymentsDir, deploymentId, 'runtime.sqlite');
 }
 
 /**

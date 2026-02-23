@@ -44,10 +44,9 @@ export async function createProjectFromTemplate(
           if (response.ok) {
             const arrayBuffer = await response.arrayBuffer();
             await vfs.createFile(projectId, asset.path, arrayBuffer);
+          } else {
           }
-          // Continue without this asset if it fails - template will still work
         } catch (error) {
-          // Continue without this asset if it fails - template will still work
         }
       }
     }

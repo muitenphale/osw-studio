@@ -15,12 +15,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScheduledFunctionEditor } from './scheduled-function-editor';
 import { cn } from '@/lib/utils';
+import type { ScheduledFunctionsDataProvider } from './data-providers';
 
 interface ScheduledFunctionsManagerProps {
-  siteId: string;
+  deploymentId?: string;
+  dataProvider?: ScheduledFunctionsDataProvider;
 }
 
-export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerProps) {
+export function ScheduledFunctionsManager({ deploymentId, dataProvider }: ScheduledFunctionsManagerProps) {
   const [scheduledFunctions, setScheduledFunctions] = useState<ScheduledFunction[]>([]);
   const [edgeFunctions, setEdgeFunctions] = useState<EdgeFunction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,28 +32,37 @@ export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerP
 
   useEffect(() => {
     loadFunctions();
-  }, [siteId]);
+  }, [deploymentId, dataProvider]);
 
   const loadFunctions = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [schedRes, fnRes] = await Promise.all([
-        fetch(`/api/admin/sites/${siteId}/scheduled-functions`),
-        fetch(`/api/admin/sites/${siteId}/functions`),
-      ]);
-      if (!schedRes.ok) {
-        const data = await schedRes.json();
-        throw new Error(data.error || 'Failed to load scheduled functions');
+      if (dataProvider) {
+        const [sched, fns] = await Promise.all([
+          dataProvider.listScheduled(),
+          dataProvider.listEdgeFunctions(),
+        ]);
+        setScheduledFunctions(sched);
+        setEdgeFunctions(fns);
+      } else if (deploymentId) {
+        const [schedRes, fnRes] = await Promise.all([
+          fetch(`/api/admin/deployments/${deploymentId}/scheduled-functions`),
+          fetch(`/api/admin/deployments/${deploymentId}/functions`),
+        ]);
+        if (!schedRes.ok) {
+          const data = await schedRes.json();
+          throw new Error(data.error || 'Failed to load scheduled functions');
+        }
+        if (!fnRes.ok) {
+          const data = await fnRes.json();
+          throw new Error(data.error || 'Failed to load edge functions');
+        }
+        const schedData = await schedRes.json();
+        const fnData = await fnRes.json();
+        setScheduledFunctions(schedData.scheduledFunctions);
+        setEdgeFunctions(fnData.functions);
       }
-      if (!fnRes.ok) {
-        const data = await fnRes.json();
-        throw new Error(data.error || 'Failed to load edge functions');
-      }
-      const schedData = await schedRes.json();
-      const fnData = await fnRes.json();
-      setScheduledFunctions(schedData.scheduledFunctions);
-      setEdgeFunctions(fnData.functions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load scheduled functions');
     } finally {
@@ -61,12 +72,18 @@ export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerP
 
   const toggleEnabled = async (fn: ScheduledFunction) => {
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions/${fn.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !fn.enabled }),
-      });
-      if (!res.ok) throw new Error('Failed to update scheduled function');
+      if (dataProvider) {
+        await dataProvider.toggle(fn.id, !fn.enabled);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/scheduled-functions/${fn.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !fn.enabled }),
+        });
+        if (!res.ok) throw new Error('Failed to update scheduled function');
+      } else {
+        return;
+      }
       await loadFunctions();
     } catch (err) {
       console.error('Failed to toggle scheduled function:', err);
@@ -77,10 +94,16 @@ export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerP
     if (!confirm(`Delete scheduled function "${fn.name}"? This cannot be undone.`)) return;
 
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions/${fn.id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete scheduled function');
+      if (dataProvider) {
+        await dataProvider.remove(fn.id);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/scheduled-functions/${fn.id}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete scheduled function');
+      } else {
+        return;
+      }
       await loadFunctions();
     } catch (err) {
       console.error('Failed to delete scheduled function:', err);
@@ -89,8 +112,12 @@ export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerP
 
   const handleSave = async (data: Partial<ScheduledFunction>) => {
     try {
-      if (editingFunction) {
-        const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions/${editingFunction.id}`, {
+      if (dataProvider) {
+        await dataProvider.save(editingFunction?.id || null, data);
+      } else if (!deploymentId) {
+        throw new Error('No deployment ID available');
+      } else if (editingFunction) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/scheduled-functions/${editingFunction.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -100,7 +127,7 @@ export function ScheduledFunctionsManager({ siteId }: ScheduledFunctionsManagerP
           throw new Error(err.error || 'Failed to update scheduled function');
         }
       } else {
-        const res = await fetch(`/api/admin/sites/${siteId}/scheduled-functions`, {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/scheduled-functions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),

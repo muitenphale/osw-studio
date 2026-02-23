@@ -15,12 +15,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { FunctionEditor } from './function-editor';
 import { cn } from '@/lib/utils';
+import type { FunctionsDataProvider } from './data-providers';
 
 interface FunctionsManagerProps {
-  siteId: string;
+  deploymentId?: string;
+  dataProvider?: FunctionsDataProvider;
+  hideRuntimeFeatures?: boolean;
 }
 
-export function FunctionsManager({ siteId }: FunctionsManagerProps) {
+export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatures }: FunctionsManagerProps) {
   const [functions, setFunctions] = useState<EdgeFunction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,19 +33,23 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
 
   useEffect(() => {
     loadFunctions();
-  }, [siteId]);
+  }, [deploymentId, dataProvider]);
 
   const loadFunctions = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`/api/admin/sites/${siteId}/functions`);
-      if (!res.ok) {
+      if (dataProvider) {
+        setFunctions(await dataProvider.list());
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions`);
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Failed to load functions');
+        }
         const data = await res.json();
-        throw new Error(data.error || 'Failed to load functions');
+        setFunctions(data.functions);
       }
-      const data = await res.json();
-      setFunctions(data.functions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load functions');
     } finally {
@@ -52,12 +59,18 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
 
   const toggleEnabled = async (fn: EdgeFunction) => {
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/functions/${fn.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !fn.enabled }),
-      });
-      if (!res.ok) throw new Error('Failed to update function');
+      if (dataProvider) {
+        await dataProvider.toggle(fn.id, !fn.enabled);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions/${fn.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !fn.enabled }),
+        });
+        if (!res.ok) throw new Error('Failed to update function');
+      } else {
+        return;
+      }
       await loadFunctions();
     } catch (err) {
       console.error('Failed to toggle function:', err);
@@ -68,10 +81,16 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
     if (!confirm(`Delete function "${fn.name}"? This cannot be undone.`)) return;
 
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/functions/${fn.id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete function');
+      if (dataProvider) {
+        await dataProvider.remove(fn.id);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions/${fn.id}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete function');
+      } else {
+        return;
+      }
       await loadFunctions();
     } catch (err) {
       console.error('Failed to delete function:', err);
@@ -79,7 +98,8 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
   };
 
   const copyUrl = (fn: EdgeFunction) => {
-    const url = `${window.location.origin}/api/sites/${siteId}/functions/${fn.name}`;
+    if (!deploymentId) return;
+    const url = `${window.location.origin}/api/deployments/${deploymentId}/functions/${fn.name}`;
     navigator.clipboard.writeText(url);
     setCopiedUrl(fn.id);
     setTimeout(() => setCopiedUrl(null), 2000);
@@ -87,9 +107,12 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
 
   const handleSave = async (data: Partial<EdgeFunction>) => {
     try {
-      if (editingFunction) {
-        // Update existing
-        const res = await fetch(`/api/admin/sites/${siteId}/functions/${editingFunction.id}`, {
+      if (dataProvider) {
+        await dataProvider.save(editingFunction?.id || null, data);
+      } else if (!deploymentId) {
+        throw new Error('No deployment ID available');
+      } else if (editingFunction) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions/${editingFunction.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -99,8 +122,7 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
           throw new Error(err.error || 'Failed to update function');
         }
       } else {
-        // Create new
-        const res = await fetch(`/api/admin/sites/${siteId}/functions`, {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -115,7 +137,7 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
       setIsCreating(false);
       await loadFunctions();
     } catch (err) {
-      throw err; // Let the editor handle the error
+      throw err;
     }
   };
 
@@ -198,22 +220,24 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
                     )}
                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                       <span className="shrink-0">Timeout: {fn.timeoutMs / 1000}s</span>
-                      <button
-                        onClick={() => copyUrl(fn)}
-                        className="flex items-center gap-1 hover:text-foreground transition-colors shrink-0"
-                      >
-                        {copiedUrl === fn.id ? (
-                          <>
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
-                            Copied!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3 w-3" />
-                            Copy URL
-                          </>
-                        )}
-                      </button>
+                      {!hideRuntimeFeatures && deploymentId && (
+                        <button
+                          onClick={() => copyUrl(fn)}
+                          className="flex items-center gap-1 hover:text-foreground transition-colors shrink-0"
+                        >
+                          {copiedUrl === fn.id ? (
+                            <>
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3 w-3" />
+                              Copy URL
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -241,12 +265,14 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
                           </>
                         )}
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => window.open(`/api/sites/${siteId}/functions/${fn.name}`, '_blank')}
-                      >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Open in Browser
-                      </DropdownMenuItem>
+                      {!hideRuntimeFeatures && deploymentId && (
+                        <DropdownMenuItem
+                          onClick={() => window.open(`/api/deployments/${deploymentId}/functions/${fn.name}`, '_blank')}
+                        >
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          Open in Browser
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem
                         onClick={() => deleteFunction(fn)}
                         className="text-destructive"
@@ -266,7 +292,7 @@ export function FunctionsManager({ siteId }: FunctionsManagerProps) {
       {/* Function Editor Dialog */}
       {(isCreating || editingFunction) && (
         <FunctionEditor
-          siteId={siteId}
+          deploymentId={deploymentId || ''}
           function={editingFunction}
           isOpen={true}
           onClose={() => {

@@ -26,7 +26,7 @@ import {
   DatabaseAPI,
 } from './types';
 import { createDatabaseAPI } from './database-api';
-import { SiteDatabase } from '@/lib/vfs/adapters/site-database';
+import { RuntimeDatabase } from '@/lib/vfs/adapters/runtime-database';
 import { decryptSecret, isEncryptionConfigured } from './secrets-crypto';
 import { createHash, randomUUID } from 'crypto';
 
@@ -109,13 +109,13 @@ function isPrivateUrl(urlString: string): boolean {
  *
  * @param fn The edge function definition
  * @param request The incoming request
- * @param siteDb The site's database instance
+ * @param deploymentDb The deployment's database instance
  * @returns Execution result including response, logs, and timing
  */
 export async function executeFunction(
   fn: EdgeFunction,
   request: FunctionRequest,
-  siteDb: SiteDatabase
+  deploymentDb: RuntimeDatabase
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
   const logs: string[] = [];
@@ -129,16 +129,16 @@ export async function executeFunction(
   };
 
   // Create database API
-  const db = createDatabaseAPI(siteDb);
+  const db = createDatabaseAPI(deploymentDb);
 
   // Load enabled server functions
-  const serverFunctions = siteDb.listServerFunctions().filter(f => f.enabled);
+  const serverFunctions = deploymentDb.listServerFunctions().filter(f => f.enabled);
 
   // Load and decrypt secrets
   const decryptedSecrets: Record<string, string> = {};
   if (isEncryptionConfigured()) {
     try {
-      const secretRecords = siteDb.listSecretsWithValues();
+      const secretRecords = deploymentDb.listSecretsWithValues();
       for (const record of secretRecords) {
         try {
           decryptedSecrets[record.name] = decryptSecret(

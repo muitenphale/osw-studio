@@ -62,7 +62,7 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
       <div>
         <h3 className="text-lg font-semibold">SEO Configuration</h3>
         <p className="text-sm text-muted-foreground">
-          Optimize your site for search engines and social sharing
+          Optimize your deployment for search engines and social sharing
         </p>
       </div>
 
@@ -76,7 +76,7 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
           <Label htmlFor="seo-title">Meta Title</Label>
           <Input
             id="seo-title"
-            placeholder="Your Site Title"
+            placeholder="Your Deployment Title"
             value={settings.seo.title || ''}
             onChange={(e) => handleSeoChange('title', e.target.value || undefined)}
           />
@@ -94,7 +94,7 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
           <Label htmlFor="seo-description">Meta Description</Label>
           <Textarea
             id="seo-description"
-            placeholder="A brief description of your site"
+            placeholder="A brief description of your deployment"
             rows={3}
             value={settings.seo.description || ''}
             onChange={(e) =>
@@ -251,7 +251,7 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            How your site appears when shared on Twitter/X
+            How your deployment appears when shared on Twitter/X
           </p>
         </div>
       </div>
@@ -270,12 +270,12 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
                 https://your-domain.com
               </div>
               <h3 className="text-lg text-blue-800 dark:text-blue-400 font-medium mb-1">
-                {settings.seo.title || settings.seo.ogTitle || 'Your Site Title'}
+                {settings.seo.title || settings.seo.ogTitle || 'Your Deployment Title'}
               </h3>
               <p className="text-sm text-muted-foreground">
                 {settings.seo.description ||
                   settings.seo.ogDescription ||
-                  'Your site description will appear here in search results.'}
+                  'Your deployment description will appear here in search results.'}
               </p>
             </div>
           </div>
@@ -308,12 +308,12 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
                   your-domain.com
                 </div>
                 <h4 className="font-semibold">
-                  {settings.seo.ogTitle || settings.seo.title || 'Your Site Title'}
+                  {settings.seo.ogTitle || settings.seo.title || 'Your Deployment Title'}
                 </h4>
                 <p className="text-sm text-muted-foreground">
                   {settings.seo.ogDescription ||
                     settings.seo.description ||
-                    'Your site description'}
+                    'Your deployment description'}
                 </p>
               </div>
             </div>

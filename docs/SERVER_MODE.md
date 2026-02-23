@@ -14,7 +14,7 @@ OSW Studio supports two deployment modes:
 Server Mode adds:
 - Local database for persistent storage (no external database needed)
 - Admin authentication with JWT sessions
-- Sites publishing system with static site serving
+- Deployment publishing system with static site serving
 - Project sync between browser and server
 - Built-in analytics and compliance features
 
@@ -44,8 +44,8 @@ Server Mode adds:
 **Characteristics:**
 - Local persistence (no external database)
 - Admin authentication
-- Multiple sites per project
-- Static site publishing at `/sites/{siteId}/`
+- Multiple deployments per project
+- Static site publishing at `/deployments/{id}/`
 - Built-in analytics
 - Project sync (browser <-> server)
 - Requires persistent file system
@@ -93,14 +93,15 @@ npm run dev
 ```
 
 SQLite databases are created automatically:
-- `data/osws.sqlite` - Core database (projects, templates, skills)
-- `sites/{siteId}/site.sqlite` - Per-site databases (files, settings, analytics)
+- `data/osws.sqlite` - Core database (projects, deployments, templates, skills)
+- `deployments/{id}/runtime.sqlite` - Per-deployment runtime (edge functions, secrets, user tables)
+- `deployments/{id}/analytics.sqlite` - Per-deployment analytics (pageviews, sessions)
 
 ### 3. Access Application
 
 - **Studio**: http://localhost:3000/
 - **Admin panel**: http://localhost:3000/admin/login
-- **Published sites**: http://localhost:3000/sites/{siteId}/
+- **Published sites**: http://localhost:3000/deployments/{id}/
 
 **Login with** ADMIN_PASSWORD from .env. After login, you'll land on the **Dashboard** with server stats and traffic metrics.
 
@@ -108,12 +109,12 @@ SQLite databases are created automatically:
 
 ## Server Context Integration
 
-In Server Mode, the AI gains awareness of your site's server features through a special `/.server/` folder that appears in the file explorer.
+In Server Mode, the AI gains awareness of your deployment's backend features through a special `/.server/` folder that appears in the file explorer.
 
 ### How It Works
 
-When you select a site from the **Site Selector** dropdown (in the workspace header), OSW Studio:
-1. Loads that site's server features (edge functions, database schema, server functions, secrets)
+When you select a deployment from the **Deployment Selector** dropdown (in the workspace header), OSW Studio:
+1. Loads that deployment's backend features (edge functions, database schema, server functions, secrets)
 2. Mounts them as transient files in `/.server/`
 3. Informs the AI about these capabilities in its system prompt
 
@@ -127,15 +128,15 @@ This hidden folder contains:
 
 These files are:
 - **Transient** - They are not saved with the project
-- **Auto-updated** - They reflect the current site's state
+- **Auto-updated** - They reflect the current deployment's state
 - **Partially editable** - Schema is read-only, but functions and secrets can be modified
 
-### Using Server Features with AI
+### Using Backend Features with AI
 
-Once a site is selected, you can ask the AI to:
+Once a deployment is selected, you can ask the AI to:
 
 ```
-What edge functions are available for this site?
+What edge functions are available for this deployment?
 ```
 
 ```
@@ -146,7 +147,7 @@ Help me create an edge function that uses the products table
 Show me the database schema
 ```
 
-The AI will use the `/.server/` files to understand your site's capabilities and provide relevant assistance.
+The AI will use the `/.server/` files to understand your deployment's capabilities and provide relevant assistance.
 
 ### Viewing the `/.server/` Folder
 
@@ -184,7 +185,7 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 
 ## Deployment Options
 
-> **Important**: Server Mode requires **persistent file system** storage because published sites are written to `/public/sites/` and databases are stored locally. Serverless platforms like Vercel, Netlify, and Cloudflare Workers **will not work** for Server Mode.
+> **Important**: Server Mode requires **persistent file system** storage because published sites are written to `/public/deployments/` and databases are stored locally. Serverless platforms like Vercel, Netlify, and Cloudflare Workers **will not work** for Server Mode.
 
 ### Option 1: Railway (Recommended)
 
@@ -315,7 +316,7 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 
 ## Next Steps
 
-- **[Site Publishing](?doc=site-publishing)** - Publish sites with analytics, SEO, compliance
-- **[Server Features](?doc=server-features)** - Database, edge functions, secrets
+- **[Deployment Publishing](?doc=site-publishing)** - Publish deployments with analytics, SEO, compliance
+- **[Backend](?doc=backend-features)** - Database, edge functions, secrets
 - **[FAQ](?doc=faq)** - Common Server Mode questions
 - **[Troubleshooting](?doc=troubleshooting)** - Fix common issues

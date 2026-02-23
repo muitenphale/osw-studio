@@ -24,7 +24,7 @@ function StudioInner() {
   const docParam = searchParams.get('doc');
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'projects' | 'sites' | 'templates' | 'skills' | 'docs' | 'settings'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'projects' | 'deployments' | 'templates' | 'skills' | 'docs' | 'settings'>('dashboard');
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showTelemetryDisclosure, setShowTelemetryDisclosure] = useState(false);
   const { state, setActiveProjectId, start: startTour } = useGuidedTour();
@@ -197,7 +197,9 @@ function StudioInner() {
     return (
       <ContentArea
         view={currentView}
-        onProjectSelect={setSelectedProject}
+        onProjectSelect={(project) => {
+          setSelectedProject(project);
+        }}
         onNavigate={handleNavigate}
         onStartTour={handleStartTour}
       />

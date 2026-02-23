@@ -276,7 +276,7 @@ export function ComplianceTab({ settings, onChange }: ComplianceTabProps) {
                 <div className="space-y-1">
                   <p className="text-sm font-medium">Live Preview</p>
                   <p className="text-sm text-muted-foreground">
-                    The consent banner will appear on your published site based on the
+                    The consent banner will appear on your published deployment based on the
                     configuration above. Visitors' choices are stored in their browser's
                     localStorage.
                   </p>

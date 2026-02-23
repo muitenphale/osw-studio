@@ -5,7 +5,7 @@
 
 export const DATABASE_SKILL = String.raw`---
 name: server-database
-description: Server Mode - SQLite database operations for published sites.
+description: Server Mode - SQLite database operations for published deployments.
 ---
 
 # Database Operations
@@ -19,7 +19,7 @@ Guide for SQLite database access via edge functions.
 
 ### Option 1: sqlite3 Shell Command (Server Mode Only)
 
-In Server Mode with a published site selected, use the ` + "`sqlite3`" + ` shell command for quick queries:
+In Server Mode with a published deployment selected, use the ` + "`sqlite3`" + ` shell command for quick queries:
 
 ` + "```" + `bash
 # Query data
@@ -35,7 +35,7 @@ sqlite3 "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT)
 sqlite3 "INSERT INTO products (name) VALUES ('Test Product')"
 ` + "```" + `
 
-**Note:** sqlite3 requires Server Mode with a site context. In Browser Mode, use edge functions instead.
+**Note:** sqlite3 requires Server Mode with a deployment context. In Browser Mode, use edge functions instead.
 
 ### Option 2: Edge Functions (All Modes)
 
@@ -110,8 +110,8 @@ json_patch({
 })
 ` + "```" + `
 
-**Important**: After publishing the site, call the init endpoint to create tables:
-` + "`POST /api/sites/{siteId}/functions/init-db`" + `
+**Important**: After publishing the deployment, call the init endpoint to create tables:
+` + "`POST /api/deployments/{deploymentId}/functions/init-db`" + `
 
 ---
 
@@ -350,8 +350,8 @@ This ensures the table exists before any operation, without requiring a separate
 ## Protected Tables
 
 System tables cannot be modified:
-- ` + "`_files`" + ` - Published site files
-- ` + "`_settings`" + ` - Site configuration
+- ` + "`_files`" + ` - Published deployment files
+- ` + "`_settings`" + ` - Deployment configuration
 - ` + "`_analytics`" + ` - Analytics data
 - ` + "`_edge_functions`" + ` - Edge function definitions
 - ` + "`_server_functions`" + ` - Server function definitions

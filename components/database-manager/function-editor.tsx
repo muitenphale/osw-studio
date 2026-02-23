@@ -24,7 +24,7 @@ import { Loader2, AlertCircle, Info } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
 interface FunctionEditorProps {
-  siteId: string;
+  deploymentId: string;
   function: EdgeFunction | null;
   isOpen: boolean;
   onClose: () => void;
@@ -53,7 +53,7 @@ Response.json({ items });
 `;
 
 export function FunctionEditor({
-  siteId,
+  deploymentId,
   function: fn,
   isOpen,
   onClose,
@@ -128,7 +128,7 @@ export function FunctionEditor({
             {fn ? 'Edit Function' : 'Create Function'}
           </DialogTitle>
           <DialogDescription>
-            Define an HTTP endpoint that can access your site database.
+            Define an HTTP endpoint that can access your deployment database.
           </DialogDescription>
         </DialogHeader>
 
@@ -144,9 +144,11 @@ export function FunctionEditor({
                 placeholder="my-function"
                 disabled={!!fn}
               />
-              <p className="text-xs text-muted-foreground">
-                URL: /api/sites/{siteId}/functions/<span className="font-mono">{name || 'name'}</span>
-              </p>
+              {deploymentId && (
+                <p className="text-xs text-muted-foreground">
+                  URL: /api/deployments/{deploymentId}/functions/<span className="font-mono">{name || 'name'}</span>
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="method">HTTP Method</Label>

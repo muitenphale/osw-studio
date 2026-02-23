@@ -2,27 +2,27 @@
 
 import { useEffect, useState } from 'react';
 
-interface PublicSiteProps {
+interface PublicDeploymentProps {
   projectId?: string;
 }
 
-export function PublicSite({ projectId }: PublicSiteProps) {
+export function PublicDeployment({ projectId }: PublicDeploymentProps) {
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadSite() {
+    async function loadDeployment() {
       try {
         // Fetch the published project's index.html
         const url = projectId
-          ? `/api/sites/${projectId}/index.html`
-          : '/api/sites/published/index.html';
+          ? `/api/deployments/${projectId}/index.html`
+          : '/api/deployments/published/index.html';
 
         const response = await fetch(url);
 
         if (!response.ok) {
-          throw new Error('No published site found');
+          throw new Error('No published deployment found');
         }
 
         const content = await response.text();
@@ -34,7 +34,7 @@ export function PublicSite({ projectId }: PublicSiteProps) {
       }
     }
 
-    loadSite();
+    loadDeployment();
   }, [projectId]);
 
   if (loading) {
@@ -42,7 +42,7 @@ export function PublicSite({ projectId }: PublicSiteProps) {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading site...</p>
+          <p className="text-gray-600 dark:text-gray-400">Loading deployment...</p>
         </div>
       </div>
     );
@@ -53,7 +53,7 @@ export function PublicSite({ projectId }: PublicSiteProps) {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center max-w-md px-4">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            No Published Site
+            No Published Deployment
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mb-4">
             {error}
@@ -70,7 +70,7 @@ export function PublicSite({ projectId }: PublicSiteProps) {
   return (
     <iframe
       srcDoc={html}
-      title="Published Site"
+      title="Published Deployment"
       className="w-full h-screen border-0"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
     />

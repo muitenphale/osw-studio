@@ -31,13 +31,13 @@ OSW Studio has two types of templates:
 
 Standard website starting points with HTML, CSS, and JavaScript files. Work in both Browser Mode and Server Mode.
 
-### Site Templates
+### Backend Templates
 
-Bundles frontend files **plus backend infrastructure** — edge functions, database schema, server functions, and secrets. In Server Mode, creating a project from a site template automatically provisions the full backend in one step.
+Bundles frontend files **plus backend infrastructure** — edge functions, database schema, server functions, and secrets. In Server Mode, creating a project from a backend template automatically provisions the full backend in one step.
 
-In Browser Mode, site templates create the frontend files normally (backend features require Server Mode).
+In Browser Mode, backend templates create the frontend files normally (backend features require Server Mode).
 
-**How to tell them apart:** Site templates show a "Site" badge in the template browser.
+**How to tell them apart:** Backend templates show a "Backend" badge in the template browser.
 
 ---
 
@@ -67,7 +67,7 @@ A multi-page agency portfolio showing OSW Studio's capabilities.
 
 **Best for**: Learning how OSW Studio works, understanding Handlebars partials
 
-### Landing Page with Contact Form (Site)
+### Landing Page with Contact Form (Backend)
 
 Professional landing page with a working contact form powered by Resend email.
 
@@ -79,7 +79,7 @@ Professional landing page with a working contact form powered by Resend email.
 
 **Best for**: Business landing pages, lead capture, contact forms
 
-### Blog with Comments (Site)
+### Blog with Comments (Backend)
 
 Static blog with user authentication and moderated comments.
 
@@ -106,7 +106,7 @@ Static blog with user authentication and moderated comments.
 **How it works:**
 - Blog posts are individual HTML files — no database needed for content
 - The home page uses `{{#each posts}}` from `data.json` to list posts
-- Post links like `/blog/hello-world.html` are in static HTML, so the static builder correctly rewrites them for published sites under `/sites/{siteId}/`
+- Post links like `/blog/hello-world.html` are in static HTML, so the static builder correctly rewrites them for published deployments under `/deployments/{id}/`
 - Only comments and auth remain dynamic (edge functions)
 - In Browser Mode, comments fall back to localStorage
 
@@ -135,7 +135,7 @@ Static blog with user authentication and moderated comments.
 
 Your project opens with all template files ready to customize.
 
-**Site templates in Server Mode:** When you create a project from a site template, OSW Studio automatically syncs the project to the server, creates a site, and provisions all backend features (database tables, edge functions, server functions, secret placeholders). You'll see a summary of what was provisioned.
+**Backend templates in Server Mode:** When you create a project from a backend template, OSW Studio automatically syncs the project to the server, creates a deployment, and provisions all backend features (database tables, edge functions, server functions, secret placeholders). You'll see a summary of what was provisioned.
 
 ### Customize the Template
 
@@ -244,13 +244,13 @@ Share your templates with others:
 3. Click **Export** (download icon)
 4. Save the template file (`.oswt`)
 
-### Export a Site as Template
+### Export a Deployment as Template
 
-In Server Mode, export a published site with its backend features:
+In Server Mode, export a published deployment with its backend features:
 
-1. Go to **Sites** view
-2. Click the dropdown menu on a site card
-3. Select **Export as Site Template**
+1. Go to **Deployments** view
+2. Click the dropdown menu on a deployment card
+3. Select **Export as Template**
 4. Backend features (edge functions, database schema, server functions, secrets) are automatically included
 
 ### Import a Template
@@ -290,7 +290,7 @@ Improve them over time as you learn better patterns
 - HTML, CSS, JavaScript files
 - Ready to customize and deploy
 
-**Site Templates** = Starting point with backend
+**Backend Templates** = Starting point with backend
 - Everything in project templates, plus
 - Edge functions, database schema, server functions, secrets
 - Automatic backend provisioning in Server Mode
@@ -320,7 +320,7 @@ A: Built-in templates are yours to use commercially. For imported templates, che
 **Q: How many templates can I have?**
 A: No limit. Create as many as you need.
 
-**Q: What happens if I use a site template in Browser Mode?**
+**Q: What happens if I use a backend template in Browser Mode?**
 A: The frontend files are created normally. Backend features (edge functions, database, etc.) require Server Mode — you'll see a notification about this.
 
 **Q: How do blog posts work in the Blog template?**

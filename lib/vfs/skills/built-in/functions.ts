@@ -28,11 +28,11 @@ API endpoints created at ` + "`/.server/edge-functions/{name}.json`" + `
 fetch('/list-products')
 fetch('/create-order', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: 'Test'}) })
 
-// WRONG - never hardcode site IDs or /api/sites/ paths
-fetch('/api/sites/my-site/functions/list-products')  // BROKEN
+// WRONG - never hardcode deployment IDs or /api/deployments/ paths
+fetch('/api/deployments/my-deployment/functions/list-products')  // BROKEN
 ` + "```" + `
 
-The fetch interceptor (injected automatically in both preview and published sites) rewrites ` + "`fetch('/list-products')`" + ` → ` + "`/api/sites/{siteId}/functions/list-products`" + ` transparently. You never need to know the siteId in client code.
+The fetch interceptor (injected automatically in both preview and published deployments) rewrites ` + "`fetch('/list-products')`" + ` → ` + "`/api/deployments/{deploymentId}/functions/list-products`" + ` transparently. You never need to know the deploymentId in client code.
 
 ### File Location
 ` + "```" + `

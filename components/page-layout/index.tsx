@@ -161,8 +161,8 @@ export function PageLayout({
               <div className="text-sm">
                 <p className="font-medium">Why does this matter?</p>
                 <p className="text-muted-foreground mt-1">
-                  The <strong>Sites</strong> feature requires projects to be synced to the server database.
-                  Until you push your local projects, the Sites view won&apos;t show any projects to publish.
+                  The <strong>Deployments</strong> feature requires projects to be synced to the server database.
+                  Until you push your local projects, the Deployments view won&apos;t show any projects to publish.
                 </p>
               </div>
             </div>

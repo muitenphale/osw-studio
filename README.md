@@ -211,7 +211,7 @@ npm install && npm run dev
 
 **Documentation:**
 - [Server Mode Guide](docs/SERVER_MODE.md) - Full setup and features
-- [Server Features](docs/SERVER_FEATURES.md) - Edge Functions, Secrets, Database
+- [Backend Features](docs/BACKEND_FEATURES.md) - Edge Functions, Secrets, Database
 
 ## Tech Stack
 

@@ -51,10 +51,10 @@ interface SessionData {
 }
 
 interface SessionViewerProps {
-  siteId: string;
+  deploymentId: string;
 }
 
-export function SessionViewer({ siteId }: SessionViewerProps) {
+export function SessionViewer({ deploymentId }: SessionViewerProps) {
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedSession, setSelectedSession] = useState<SessionJourney | null>(null);
@@ -63,7 +63,7 @@ export function SessionViewer({ siteId }: SessionViewerProps) {
   const fetchSessionData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/analytics/${siteId}/sessions?limit=100`);
+      const response = await fetch(`/api/analytics/${deploymentId}/sessions?limit=100`);
       if (!response.ok) throw new Error('Failed to fetch session data');
 
       const sessionData: SessionData = await response.json();
@@ -79,7 +79,7 @@ export function SessionViewer({ siteId }: SessionViewerProps) {
   // Load data on mount
   useEffect(() => {
     fetchSessionData();
-  }, [siteId]);
+  }, [deploymentId]);
 
   // Format duration
   const formatDuration = (ms: number) => {

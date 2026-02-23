@@ -1,7 +1,7 @@
 /**
  * Project Sync API Route
  *
- * Handles syncing projects between browser (IndexedDB) and server (PostgreSQL)
+ * Handles syncing projects between browser (IndexedDB) and server (SQLite)
  * GET: Pull projects from server → browser
  * POST: Push project from browser → server
  */

@@ -35,11 +35,11 @@ export const DOCS_ITEMS: DocItem[] = [
   { id: 'working-with-ai', title: 'Working with AI', icon: Sparkles, file: 'WORKING_WITH_AI.md' },
   { id: 'templates', title: 'Templates', icon: LayoutTemplate, file: 'TEMPLATES.md' },
   { id: 'skills', title: 'Skills', icon: Sparkles, file: 'SKILLS.md' },
-  { id: 'deploying-sites', title: 'Deploying Sites', icon: Globe, file: 'DEPLOYING_SITES.md' },
+  { id: 'deploying-sites', title: 'Deploying', icon: Globe, file: 'DEPLOYING_SITES.md' },
   { id: 'server-mode', title: 'Server Mode', icon: Server, file: 'SERVER_MODE.md' },
   { id: 'vps-deployment', title: 'VPS Deployment', icon: ServerCog, file: 'VPS_DEPLOYMENT.md' },
-  { id: 'site-publishing', title: 'Site Publishing', icon: Upload, file: 'SITE_PUBLISHING.md' },
-  { id: 'server-features', title: 'Server Features', icon: Database, file: 'SERVER_FEATURES.md' },
+  { id: 'site-publishing', title: 'Deployment Publishing', icon: Upload, file: 'SITE_PUBLISHING.md' },
+  { id: 'backend-features', title: 'Backend', icon: Database, file: 'BACKEND_FEATURES.md' },
 
   // Help & Advanced
   { id: 'faq', title: 'FAQ', icon: HelpCircle, file: 'FAQ.md' },

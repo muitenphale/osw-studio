@@ -146,7 +146,7 @@ export function PublishSettingsModal({
           <DialogHeader>
             <DialogTitle>Publish Settings - {project.name}</DialogTitle>
             <DialogDescription>
-              Configure scripts, CDN resources, analytics, and SEO settings for your published site.
+              Configure scripts, CDN resources, analytics, and SEO settings for your published deployment.
             </DialogDescription>
           </DialogHeader>
 
@@ -162,7 +162,7 @@ export function PublishSettingsModal({
 
             <div className="flex-1 overflow-y-auto p-4">
               <TabsContent value="general" className="mt-0">
-                <GeneralTab settings={settings} onChange={handleSettingsChange} projectId={project.id} siteId={project.id} />
+                <GeneralTab settings={settings} onChange={handleSettingsChange} projectId={project.id} deploymentId={project.id} />
               </TabsContent>
 
               <TabsContent value="scripts" className="mt-0">

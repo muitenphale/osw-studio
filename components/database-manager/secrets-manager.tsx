@@ -15,12 +15,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SecretEditor } from './secret-editor';
 import { cn } from '@/lib/utils';
+import type { SecretsDataProvider } from './data-providers';
 
 interface SecretsManagerProps {
-  siteId: string;
+  deploymentId?: string;
+  dataProvider?: SecretsDataProvider;
 }
 
-export function SecretsManager({ siteId }: SecretsManagerProps) {
+export function SecretsManager({ deploymentId, dataProvider }: SecretsManagerProps) {
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,20 +32,26 @@ export function SecretsManager({ siteId }: SecretsManagerProps) {
 
   useEffect(() => {
     loadSecrets();
-  }, [siteId]);
+  }, [deploymentId, dataProvider]);
 
   const loadSecrets = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`/api/admin/sites/${siteId}/secrets`);
-      if (!res.ok) {
+      if (dataProvider) {
+        const result = await dataProvider.list();
+        setSecrets(result.secrets);
+        setEncryptionConfigured(result.encryptionConfigured);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets`);
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Failed to load secrets');
+        }
         const data = await res.json();
-        throw new Error(data.error || 'Failed to load secrets');
+        setSecrets(data.secrets);
+        setEncryptionConfigured(data.encryptionConfigured);
       }
-      const data = await res.json();
-      setSecrets(data.secrets);
-      setEncryptionConfigured(data.encryptionConfigured);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load secrets');
     } finally {
@@ -55,10 +63,16 @@ export function SecretsManager({ siteId }: SecretsManagerProps) {
     if (!confirm(`Delete secret "${secret.name}"? This cannot be undone.`)) return;
 
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/secrets/${secret.id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete secret');
+      if (dataProvider) {
+        await dataProvider.remove(secret.id);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets/${secret.id}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete secret');
+      } else {
+        return;
+      }
       await loadSecrets();
     } catch (err) {
       console.error('Failed to delete secret:', err);
@@ -67,9 +81,12 @@ export function SecretsManager({ siteId }: SecretsManagerProps) {
 
   const handleSave = async (data: { name: string; value?: string; description?: string }) => {
     try {
-      if (editingSecret) {
-        // Update existing
-        const res = await fetch(`/api/admin/sites/${siteId}/secrets/${editingSecret.id}`, {
+      if (dataProvider) {
+        await dataProvider.save(editingSecret?.id || null, data);
+      } else if (!deploymentId) {
+        throw new Error('No deployment ID available');
+      } else if (editingSecret) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets/${editingSecret.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -79,8 +96,7 @@ export function SecretsManager({ siteId }: SecretsManagerProps) {
           throw new Error(err.error || 'Failed to update secret');
         }
       } else {
-        // Create new
-        const res = await fetch(`/api/admin/sites/${siteId}/secrets`, {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -95,7 +111,7 @@ export function SecretsManager({ siteId }: SecretsManagerProps) {
       setIsCreating(false);
       await loadSecrets();
     } catch (err) {
-      throw err; // Let the editor handle the error
+      throw err;
     }
   };
 

@@ -12,7 +12,7 @@
 import { ComplianceConfig } from '../vfs/types';
 
 export interface ConsentBannerOptions {
-  siteId: string;
+  deploymentId: string;
   compliance: ComplianceConfig;
 }
 
@@ -20,7 +20,7 @@ export interface ConsentBannerOptions {
  * Generate the consent banner HTML, CSS, and JS
  */
 export function generateConsentBanner(options: ConsentBannerOptions): string {
-  const { siteId, compliance } = options;
+  const { deploymentId, compliance } = options;
 
   if (!compliance.enabled) {
     return '';
@@ -271,7 +271,7 @@ export function generateConsentBanner(options: ConsentBannerOptions): string {
 <script>
 (function() {
   'use strict';
-  var STORAGE_KEY = 'osw_consent_${siteId}';
+  var STORAGE_KEY = 'osw_consent_${deploymentId}';
   var MODE = '${mode}';
   var BLOCK_ANALYTICS = ${blockAnalytics};
 

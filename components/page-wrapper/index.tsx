@@ -10,7 +10,7 @@ import { GuidedTourProvider } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { AboutModal } from '@/components/about-modal';
 
-type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'sites' | 'docs' | 'settings';
+type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'deployments' | 'docs' | 'settings';
 
 interface PageWrapperProps {
   view: View;
@@ -22,7 +22,7 @@ const VIEW_ROUTES: Record<string, string> = {
   projects: '/admin/projects',
   templates: '/admin/templates',
   skills: '/admin/skills',
-  sites: '/admin/sites',
+  deployments: '/admin/deployments',
   docs: '/admin/docs',
   settings: '/admin/settings',
 };

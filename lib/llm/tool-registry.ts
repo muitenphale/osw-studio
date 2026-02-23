@@ -71,7 +71,7 @@ Available commands:
 - Directory listing: ls, tree
 - Search: grep, rg (ripgrep), find
 - File operations: mkdir, mv, cp, rm, rmdir, touch
-- Database: sqlite3 (Server Mode only, requires site context)
+- Database: sqlite3 (Server Mode only, requires deployment context)
 - Other: echo
 
 IMPORTANT: Execute ONE command at a time. Pass the complete command as a single string.
@@ -121,15 +121,15 @@ Examples:
 
           // Check if this command requires server-side execution
           const serverCommands = ['sqlite3'];
-          const siteId = vfs.getServerContextSiteId();
+          const deploymentId = vfs.getRuntimeDeploymentId();
 
-          if (serverCommands.includes(command) && siteId) {
+          if (serverCommands.includes(command) && deploymentId) {
             // Proxy to server API for server-side execution
             try {
               const response = await fetch('/api/shell/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId, cmd: cmdArray })
+                body: JSON.stringify({ deploymentId, cmd: cmdArray })
               });
 
               if (!response.ok) {

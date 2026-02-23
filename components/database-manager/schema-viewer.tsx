@@ -7,25 +7,29 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 interface SchemaViewerProps {
-  siteId: string;
+  deploymentId?: string;
+  schemaEndpoint?: string;
+  showSystemTablesToggle?: boolean;
 }
 
-export function SchemaViewer({ siteId }: SchemaViewerProps) {
+export function SchemaViewer({ deploymentId, schemaEndpoint, showSystemTablesToggle = true }: SchemaViewerProps) {
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [showSystemTables, setShowSystemTables] = useState(false);
 
+  const endpoint = schemaEndpoint || `/api/admin/deployments/${deploymentId}/database/schema`;
+
   useEffect(() => {
     loadSchema();
-  }, [siteId]);
+  }, [endpoint]);
 
   const loadSchema = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`/api/admin/sites/${siteId}/database/schema`);
+      const res = await fetch(endpoint);
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || 'Failed to load schema');
@@ -79,24 +83,26 @@ export function SchemaViewer({ siteId }: SchemaViewerProps) {
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium">Database Tables</h3>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowSystemTables(!showSystemTables)}
-          className="text-xs"
-        >
-          {showSystemTables ? (
-            <>
-              <EyeOff className="h-3.5 w-3.5 mr-1" />
-              Hide System Tables
-            </>
-          ) : (
-            <>
-              <Eye className="h-3.5 w-3.5 mr-1" />
-              Show System Tables
-            </>
-          )}
-        </Button>
+        {showSystemTablesToggle && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowSystemTables(!showSystemTables)}
+            className="text-xs"
+          >
+            {showSystemTables ? (
+              <>
+                <EyeOff className="h-3.5 w-3.5 mr-1" />
+                Hide System Tables
+              </>
+            ) : (
+              <>
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                Show System Tables
+              </>
+            )}
+          </Button>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto border rounded-lg">

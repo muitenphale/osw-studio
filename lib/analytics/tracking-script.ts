@@ -31,7 +31,7 @@
  */
 
 export interface TrackingScriptOptions {
-  siteId: string;
+  deploymentId: string;
   apiEndpoint?: string; // Default: /api/analytics/track
   interactionEndpoint?: string; // Default: /api/analytics/interaction
   features?: {
@@ -49,7 +49,7 @@ export interface TrackingScriptOptions {
  */
 export function generateTrackingScript(options: TrackingScriptOptions): string {
   const {
-    siteId,
+    deploymentId,
     apiEndpoint = '/api/analytics/track',
     interactionEndpoint = '/api/analytics/interaction',
     features = {
@@ -70,7 +70,7 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
 
   // Configuration
   var config = {
-    siteId: '${siteId}',
+    deploymentId: '${deploymentId}',
     apiEndpoint: '${apiEndpoint}',
     interactionEndpoint: '${interactionEndpoint}',
     features: ${JSON.stringify(features)}
@@ -138,7 +138,7 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
     if (!config.features.basicTracking) return;
 
     var data = {
-      siteId: config.siteId,
+      deploymentId: config.deploymentId,
       pagePath: window.location.pathname,
       referrer: document.referrer || '',
       userAgent: navigator.userAgent,
@@ -162,7 +162,7 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
     eventQueue.push({
       type: 'click',
       data: {
-        siteId: config.siteId,
+        deploymentId: config.deploymentId,
         pagePath: window.location.pathname,
         interactionType: 'click',
         elementSelector: selector,
@@ -203,7 +203,7 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
         eventQueue.push({
           type: 'scroll',
           data: {
-            siteId: config.siteId,
+            deploymentId: config.deploymentId,
             pagePath: window.location.pathname,
             interactionType: 'scroll',
             scrollDepth: milestone,
@@ -224,7 +224,7 @@ export function generateTrackingScript(options: TrackingScriptOptions): string {
     if (timeOnPage < 1000) return; // Ignore very short visits
 
     sendData(config.interactionEndpoint, {
-      siteId: config.siteId,
+      deploymentId: config.deploymentId,
       pagePath: window.location.pathname,
       interactionType: 'exit',
       timeOnPage: timeOnPage

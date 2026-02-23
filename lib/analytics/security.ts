@@ -11,16 +11,16 @@ const TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days (for static sites)
 
 /**
  * Generate a signed analytics tracking token
- * Token format (base64-encoded): siteId:timestamp:nonce:signature
+ * Token format (base64-encoded): deploymentId:timestamp:nonce:signature
  *
- * @param siteId - Site identifier
+ * @param deploymentId - Deployment identifier
  * @returns Base64-encoded signed token
  */
-export function generateAnalyticsToken(siteId: string): string {
+export function generateAnalyticsToken(deploymentId: string): string {
   const secret = getAnalyticsSecret();
   const timestamp = Date.now().toString();
   const nonce = crypto.randomBytes(8).toString('hex');
-  const payload = `${siteId}:${timestamp}:${nonce}`;
+  const payload = `${deploymentId}:${timestamp}:${nonce}`;
 
   const signature = crypto
     .createHmac('sha256', secret)
@@ -35,12 +35,12 @@ export function generateAnalyticsToken(siteId: string): string {
  * Verify an analytics tracking token
  *
  * @param token - Base64-encoded token from client
- * @param expectedSiteId - Expected site ID
+ * @param expectedDeploymentId - Expected deployment ID
  * @returns true if valid, false otherwise
  */
 export function verifyAnalyticsToken(
   token: string,
-  expectedSiteId: string
+  expectedDeploymentId: string
 ): boolean {
   try {
     const secret = getAnalyticsSecret();
@@ -53,10 +53,10 @@ export function verifyAnalyticsToken(
       return false; // Invalid format
     }
 
-    const [siteId, timestamp, nonce, signature] = parts;
+    const [deploymentId, timestamp, nonce, signature] = parts;
 
-    // Verify site ID matches
-    if (siteId !== expectedSiteId) {
+    // Verify deployment ID matches
+    if (deploymentId !== expectedDeploymentId) {
       return false;
     }
 
@@ -67,7 +67,7 @@ export function verifyAnalyticsToken(
     }
 
     // Verify signature
-    const payload = `${siteId}:${timestamp}:${nonce}`;
+    const payload = `${deploymentId}:${timestamp}:${nonce}`;
     const expectedSignature = crypto
       .createHmac('sha256', secret)
       .update(payload)
@@ -129,20 +129,20 @@ export function validateOrigin(
 }
 
 /**
- * Get allowed origins for a site
+ * Get allowed origins for a deployment
  *
- * @param siteId - Site identifier
+ * @param deploymentId - Deployment identifier
  * @param customDomain - Optional custom domain
  * @returns Array of allowed origin URLs
  */
 export function getAllowedOrigins(
-  siteId: string,
+  deploymentId: string,
   customDomain?: string | null
 ): string[] {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   const origins: string[] = [
-    `${appUrl}/sites/${siteId}`, // Published site path
+    `${appUrl}/deployments/${deploymentId}`, // Published deployment path
     appUrl // Base app URL (for development/testing)
   ];
 

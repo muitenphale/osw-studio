@@ -251,5 +251,5 @@ pm2 restart osws
 ## Next Steps
 
 - **[Server Mode](?doc=server-mode)** - Full Server Mode documentation
-- **[Site Publishing](?doc=site-publishing)** - Publish sites with analytics and SEO
-- **[Server Features](?doc=server-features)** - Database, edge functions, secrets
+- **[Deployment Publishing](?doc=site-publishing)** - Publish deployments with analytics and SEO
+- **[Backend](?doc=backend-features)** - Database, edge functions, secrets

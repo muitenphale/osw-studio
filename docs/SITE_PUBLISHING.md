@@ -1,83 +1,83 @@
-# Site Publishing
+# Deployment Publishing
 
-Publish and configure sites directly from OSW Studio in **Server Mode**.
+Publish and configure deployments directly from OSW Studio in **Server Mode**.
 
 ---
 
 ## Overview
 
-Server Mode lets you publish static sites directly from your OSW Studio instance. Each site gets its own URL, configurable settings for analytics, SEO, compliance, and more.
+Server Mode lets you publish static sites directly from your OSW Studio instance. Each deployment gets its own URL, configurable settings for analytics, SEO, compliance, and more.
 
 **Key Features:**
 - **One-click publishing** - Compile and deploy instantly
-- **Site settings** - Scripts, CDN resources, analytics
+- **Deployment settings** - Scripts, CDN resources, analytics
 - **SEO optimization** - Meta tags, Open Graph, sitemaps
 - **Compliance** - Cookie consent, GDPR/CCPA banners
 - **Custom domains** - Use your own domain (advanced)
 
 ---
 
-## Creating a Site
+## Creating a Deployment
 
 ### From Projects View
 
 1. Right-click on a project card
-2. Select **"Create Site"**
-3. Enter site name
-4. Click **"Create Site"**
+2. Select **"Create Deployment"**
+3. Enter deployment name
+4. Click **"Create Deployment"**
 
-### From Sites View
+### From Deployments View
 
-1. Click **"+ New Site"** button
+1. Click **"+ New Deployment"** button
 2. Select source project
-3. Enter site details
-4. Click **"Create Site"**
+3. Enter deployment details
+4. Click **"Create Deployment"**
 
 ---
 
 ## Publishing Workflow
 
-1. Create/edit site settings
+1. Create/edit deployment settings
 2. Click **"Save & Close"**
-3. Click **"Publish Now"** (or right-click site → Publish)
+3. Click **"Publish Now"** (or right-click deployment → Publish)
 4. Static builder runs:
    - Loads project files from server
    - Compiles Handlebars templates (partials from `/templates/`, context from `/data.json`)
-   - Rewrites internal links to include `/sites/{siteId}/` prefix
+   - Rewrites internal links to include `/deployments/{id}/` prefix
    - Injects configured settings (scripts, analytics, SEO)
    - Generates sitemap.xml and robots.txt
-   - Writes to `/public/sites/{siteId}/`
+   - Writes to `/public/deployments/{id}/`
 5. Site is live!
 
-### Accessing Published Sites
+### Accessing Published Deployments
 
 **Default URL:**
 ```
-https://your-osw-instance.com/sites/{siteId}/
+https://your-osw-instance.com/deployments/{id}/
 ```
 
 **Clean URLs** (Next.js rewrites):
 ```
-/sites/{siteId}/about → /sites/{siteId}/about.html
-/sites/{siteId}/blog/post → /sites/{siteId}/blog/post.html
+/deployments/{id}/about → /deployments/{id}/about.html
+/deployments/{id}/blog/post → /deployments/{id}/blog/post.html
 ```
 
 ---
 
-## Site Settings
+## Deployment Settings
 
-Access site settings by clicking the gear icon on any site card, or right-click → Settings.
+Access deployment settings by clicking the gear icon on any deployment card, or right-click → Settings.
 
 ### General
 
-- **Site name** - Display name for the site
+- **Deployment name** - Display name for the deployment
 - **URL slug** - Optional custom slug
 - **Custom domain** - For advanced setups (see below)
 - **Under construction** - Show maintenance page
 
 ### Scripts
 
-Add custom scripts to your site's HTML:
+Add custom scripts to your deployment's HTML:
 
 **Head Scripts:**
 - Analytics code
@@ -111,7 +111,7 @@ Load external CSS and JavaScript libraries:
 
 ### Analytics
 
-Track site visitors with built-in or third-party analytics:
+Track visitors with built-in or third-party analytics:
 
 **Built-in Analytics** (privacy-focused):
 - No cookies required
@@ -140,7 +140,7 @@ Track site visitors with built-in or third-party analytics:
 
 ### SEO
 
-Optimize your site for search engines:
+Optimize your deployment for search engines:
 
 **Meta Tags:**
 - Title
@@ -184,48 +184,48 @@ GDPR/CCPA cookie consent and privacy compliance:
 
 ---
 
-## Managing Sites
+## Managing Deployments
 
-### Site Actions
+### Deployment Actions
 
-Right-click any site card for actions:
+Right-click any deployment card for actions:
 
 | Action | Description |
 |--------|-------------|
 | **View Live** | Open published site in new tab |
-| **Settings** | Configure site options |
+| **Settings** | Configure deployment options |
 | **Republish** | Rebuild and deploy |
-| **Copy Link** | Copy site URL to clipboard |
+| **Copy Link** | Copy deployment URL to clipboard |
 | **View Source** | Open source project |
-| **Analytics** | View site analytics dashboard |
+| **Analytics** | View deployment analytics dashboard |
 | **Capture Thumbnail** | Update preview image |
-| **Unpublish** | Disable site (keeps settings) |
-| **Delete** | Permanently remove site |
+| **Unpublish** | Disable deployment (keeps settings) |
+| **Delete** | Permanently remove deployment |
 
 ### Unpublish vs Delete
 
-- **Unpublish**: Disables the site but preserves all settings. You can re-publish later.
-- **Delete**: Permanently removes the site and all its settings.
+- **Unpublish**: Disables the deployment but preserves all settings. You can re-publish later.
+- **Delete**: Permanently removes the deployment and all its settings.
 
 ### Version Tracking
 
-Each site shows:
+Each deployment shows:
 - **Settings Version**: Current configuration version
 - **Published Version**: Last published version
 
-If these differ, the site has unpublished changes.
+If these differ, the deployment has unpublished changes.
 
 ---
 
 ## Custom Domains (Advanced)
 
-Configure a custom domain for your published site.
+Configure a custom domain for your published deployment.
 
 ### Overview
 
-By default, sites are available at:
+By default, deployments are available at:
 ```
-https://your-osw-instance.com/sites/{siteId}/
+https://your-osw-instance.com/deployments/{id}/
 ```
 
 With a custom domain, visitors access your site at:
@@ -249,7 +249,7 @@ sweetcandies.com (DNS)
     ↓
 Reverse Proxy (Nginx)
     ↓
-your-osw-instance.com/sites/abc123/
+your-osw-instance.com/deployments/abc123/
     ↓
 Static files served
 ```
@@ -301,16 +301,16 @@ server {
     ssl_certificate /etc/letsencrypt/live/sweetcandies.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/sweetcandies.com/privkey.pem;
 
-    # Proxy to OSW Studio site
+    # Proxy to OSW Studio deployment
     location / {
-        proxy_pass https://your-osw-instance.com/sites/abc123/;
+        proxy_pass https://your-osw-instance.com/deployments/abc123/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
         # Rewrite location headers
-        proxy_redirect https://your-osw-instance.com/sites/abc123/ /;
+        proxy_redirect https://your-osw-instance.com/deployments/abc123/ /;
     }
 }
 ```
@@ -332,7 +332,7 @@ sudo certbot --nginx -d sweetcandies.com -d www.sweetcandies.com
 
 #### 4. Configure in OSW Studio
 
-1. Go to Sites → Your Site → Settings
+1. Go to Deployments → Your Deployment → Settings
 2. Navigate to **General** tab
 3. Enter custom domain: `sweetcandies.com`
 4. Save and republish
@@ -349,8 +349,8 @@ Caddy automatically handles HTTPS with Let's Encrypt:
 
 ```caddy
 sweetcandies.com, www.sweetcandies.com {
-    # Rewrite all requests to site path
-    rewrite * /sites/abc123{uri}
+    # Rewrite all requests to deployment path
+    rewrite * /deployments/abc123{uri}
 
     reverse_proxy your-osw-instance.com {
         header_up Host {upstream_hostport}
@@ -381,7 +381,7 @@ sweetcandies.com, www.sweetcandies.com {
 
 ### Publishing Errors
 
-**Symptoms**: Site not building, empty `/public/sites/`
+**Symptoms**: Deployment not building, empty `/public/deployments/`
 
 **Solutions**:
 1. Check build logs in terminal
@@ -397,13 +397,13 @@ sweetcandies.com, www.sweetcandies.com {
    df -h
    ```
 
-### Site Not Updating After Republish
+### Deployment Not Updating After Republish
 
 **Symptoms**: Changes not showing on published site
 
 **Solutions**:
 1. Hard refresh browser (Ctrl+Shift+R)
-2. Check `settingsVersion` vs `lastPublishedVersion` in site card
+2. Check `settingsVersion` vs `lastPublishedVersion` in deployment card
 3. Verify "Publish" was clicked (not just "Save")
 4. Check build succeeded in terminal logs
 5. Inspect HTML source for changes
@@ -433,9 +433,9 @@ sweetcandies.com, www.sweetcandies.com {
    ```bash
    sudo certbot certificates
    ```
-5. Test direct access to OSW site path:
+5. Test direct access to OSW deployment path:
    ```
-   https://your-osw-instance.com/sites/{siteId}/
+   https://your-osw-instance.com/deployments/{id}/
    ```
 6. Hard refresh browser (Ctrl+Shift+R)
 7. Clear browser cache
@@ -444,6 +444,6 @@ sweetcandies.com, www.sweetcandies.com {
 
 ## Next Steps
 
-- **[Server Features](?doc=server-features)** - Database, edge functions, secrets
+- **[Backend](?doc=backend-features)** - Database, edge functions, secrets
 - **[Server Mode](?doc=server-mode)** - Setup and deployment
 - **[Troubleshooting](?doc=troubleshooting)** - Fix common issues

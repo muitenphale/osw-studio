@@ -23,7 +23,8 @@ import {
   FolderOpen,
   HardDrive,
   DollarSign,
-  FileBox
+  FileBox,
+  Server
 } from 'lucide-react';
 import { ThumbnailArea } from '@/components/ui/thumbnail-area';
 import { captureProjectScreenshot } from '@/lib/utils/project-thumbnail';
@@ -47,6 +48,7 @@ interface ProjectCardProps {
   onPreview: (project: Project) => void;
   onUpdate: (project: Project) => void;
   onExportAsTemplate?: (project: Project) => void;
+  onBackend?: (project: Project) => void;
   viewMode?: 'grid' | 'list';
   forceMenuOpen?: boolean;
   highlightExport?: boolean;
@@ -69,6 +71,7 @@ export function ProjectCard({
   onPreview,
   onUpdate,
   onExportAsTemplate,
+  onBackend,
   viewMode = 'grid',
   forceMenuOpen = false,
   highlightExport = false,
@@ -328,6 +331,15 @@ export function ProjectCard({
                   <Eye className="mr-2 h-4 w-4" />
                   Preview
                 </DropdownMenuItem>
+                {onBackend && (
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onBackend(project);
+                  }}>
+                    <Server className="mr-2 h-4 w-4" />
+                    Backend
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={(e) => {
                   e.stopPropagation();
                   onDuplicate(project);
@@ -461,6 +473,15 @@ export function ProjectCard({
                 <Eye className="mr-2 h-4 w-4" />
                 Preview
               </DropdownMenuItem>
+              {onBackend && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation();
+                  onBackend(project);
+                }}>
+                  <Server className="mr-2 h-4 w-4" />
+                  Backend
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={(e) => {
                 e.stopPropagation();
                 onDuplicate(project);

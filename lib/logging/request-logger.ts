@@ -1,7 +1,7 @@
 /**
  * Request Logger
  *
- * Lightweight logging for site traffic hitting the origin server.
+ * Lightweight logging for deployment traffic hitting the origin server.
  * Used for the admin dashboard to monitor traffic patterns and detect anomalies.
  *
  * Features:
@@ -41,7 +41,7 @@ function hashIP(ip: string): string {
  * Fire-and-forget - don't await this in route handlers
  */
 export function logRequest(data: {
-  siteId: string;
+  deploymentId: string;
   path: string;
   statusCode: number;
   ip: string;
@@ -59,7 +59,7 @@ export function logRequest(data: {
     database.prepare(`
       INSERT INTO request_log (site_id, path, status_code, ip_hash, user_agent, timestamp)
       VALUES (?, ?, ?, ?, ?, datetime('now'))
-    `).run(data.siteId, data.path, data.statusCode, ipHash, userAgent);
+    `).run(data.deploymentId, data.path, data.statusCode, ipHash, userAgent);
   } catch (error) {
     // Silently fail - logging should never break the app
     console.error('[RequestLogger] Failed to log request:', error);
@@ -73,8 +73,8 @@ export function getRequestStats(hoursBack: number = 24): {
   requestsLastHour: number;
   requestsLastDay: number;
   errorCount: number;
-  topSites: Array<{ siteId: string; count: number }>;
-  recentErrors: Array<{ siteId: string; path: string; statusCode: number; timestamp: string }>;
+  topDeployments: Array<{ deploymentId: string; count: number }>;
+  recentErrors: Array<{ deploymentId: string; path: string; statusCode: number; timestamp: string }>;
 } {
   try {
     const database = getDB();
@@ -83,7 +83,7 @@ export function getRequestStats(hoursBack: number = 24): {
         requestsLastHour: 0,
         requestsLastDay: 0,
         errorCount: 0,
-        topSites: [],
+        topDeployments: [],
         recentErrors: [],
       };
     }
@@ -107,28 +107,28 @@ export function getRequestStats(hoursBack: number = 24): {
       AND status_code >= 400
     `).get() as { count: number };
 
-    // Top sites by request count in last 24 hours
-    const topSites = database.prepare(`
-      SELECT site_id as siteId, COUNT(*) as count FROM request_log
+    // Top deployments by request count in last 24 hours
+    const topDeployments = database.prepare(`
+      SELECT site_id as deploymentId, COUNT(*) as count FROM request_log
       WHERE timestamp > datetime('now', '-24 hours')
       GROUP BY site_id
       ORDER BY count DESC
       LIMIT 10
-    `).all() as Array<{ siteId: string; count: number }>;
+    `).all() as Array<{ deploymentId: string; count: number }>;
 
     // Recent errors
     const recentErrors = database.prepare(`
-      SELECT site_id as siteId, path, status_code as statusCode, timestamp FROM request_log
+      SELECT site_id as deploymentId, path, status_code as statusCode, timestamp FROM request_log
       WHERE status_code >= 400
       ORDER BY timestamp DESC
       LIMIT 10
-    `).all() as Array<{ siteId: string; path: string; statusCode: number; timestamp: string }>;
+    `).all() as Array<{ deploymentId: string; path: string; statusCode: number; timestamp: string }>;
 
     return {
       requestsLastHour: lastHour.count,
       requestsLastDay: lastDay.count,
       errorCount: errors.count,
-      topSites,
+      topDeployments,
       recentErrors,
     };
   } catch (error) {
@@ -137,7 +137,7 @@ export function getRequestStats(hoursBack: number = 24): {
       requestsLastHour: 0,
       requestsLastDay: 0,
       errorCount: 0,
-      topSites: [],
+      topDeployments: [],
       recentErrors: [],
     };
   }

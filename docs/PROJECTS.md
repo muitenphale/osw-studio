@@ -45,12 +45,12 @@ When you open a project, you'll see 4 panels:
 The header contains key controls:
 - **Project name** - Click to rename
 - **Mode toggle** - Switch between Chat (read-only) and Code (full access) modes
-- **Site selector** (Server Mode only) - Choose which published site's server context to load
+- **Deployment selector** (Server Mode only) - Choose which published deployment's backend context to load
 
-#### Site Selector (Server Mode)
+#### Deployment Selector (Server Mode)
 
-In Server Mode, a dropdown appears in the workspace header that lets you select a site. When selected:
-- The AI gains awareness of that site's server features
+In Server Mode, a dropdown appears in the workspace header that lets you select a deployment. When selected:
+- The AI gains awareness of that deployment's backend features
 - A `/.server/` hidden folder appears with server context files
 - You can ask the AI about edge functions, database schema, etc.
 

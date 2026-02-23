@@ -1,7 +1,7 @@
 /**
  * Server Context Module
  *
- * Provides transient context files for server features in /.server/
+ * Provides transient context files for backend features in /.server/
  */
 
 export {

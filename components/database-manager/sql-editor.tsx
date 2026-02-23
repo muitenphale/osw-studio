@@ -8,7 +8,8 @@ import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 
 interface SqlEditorProps {
-  siteId: string;
+  deploymentId?: string;
+  queryEndpoint?: string;
 }
 
 interface QueryResult {
@@ -23,7 +24,7 @@ interface QueryResult {
 const HISTORY_KEY = 'osw-sql-history';
 const MAX_HISTORY = 20;
 
-export function SqlEditor({ siteId }: SqlEditorProps) {
+export function SqlEditor({ deploymentId, queryEndpoint }: SqlEditorProps) {
   const [sql, setSql] = useState('SELECT * FROM ');
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -61,7 +62,8 @@ export function SqlEditor({ siteId }: SqlEditorProps) {
     const startTime = Date.now();
 
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/database/query`, {
+      const endpoint = queryEndpoint || `/api/admin/deployments/${deploymentId}/database/query`;
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: sql.trim() }),
@@ -95,7 +97,7 @@ export function SqlEditor({ siteId }: SqlEditorProps) {
     } finally {
       setExecuting(false);
     }
-  }, [sql, siteId, saveToHistory]);
+  }, [sql, deploymentId, saveToHistory]);
 
   // Handle keyboard shortcut
   const handleEditorMount = useCallback((editor: unknown) => {

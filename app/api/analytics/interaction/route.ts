@@ -27,7 +27,7 @@ import {
 } from '@/lib/analytics/security';
 
 interface InteractionData {
-  siteId: string;
+  deploymentId: string;
   pagePath: string;
   interactionType: 'click' | 'scroll' | 'exit' | 'custom';
   elementSelector?: string;
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     // Handle single interaction (backward compatibility)
     const {
-      siteId,
+      deploymentId,
       pagePath,
       interactionType,
       elementSelector,
@@ -99,9 +99,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Validate required fields
-    if (!siteId || !pagePath || !interactionType) {
+    if (!deploymentId || !pagePath || !interactionType) {
       return NextResponse.json(
-        { error: 'Missing required fields: siteId, pagePath, interactionType' },
+        { error: 'Missing required fields: deploymentId, pagePath, interactionType' },
         { status: 400 }
       );
     }
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
     // 3. Anomaly Detection
     if (isSuspiciousRequest({ pagePath, userAgent })) {
       console.warn('[Analytics Interaction] Suspicious request detected:', {
-        siteId,
+        deploymentId,
         pagePath,
         ip: identifier,
       });
@@ -127,34 +127,34 @@ export async function POST(request: NextRequest) {
     const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // 5. Verify site exists (from core database)
-    const site = await adapter.getSite(siteId);
-    if (!site) {
+    // 5. Verify deployment exists (from core database)
+    const deployment = await adapter.getDeployment(deploymentId);
+    if (!deployment) {
       return NextResponse.json(
-        { error: 'Site not found' },
+        { error: 'Deployment not found' },
         { status: 404 }
       );
     }
 
     // 6. Check if analytics is enabled
-    if (!site.analytics.enabled || site.analytics.provider !== 'builtin') {
+    if (!deployment.analytics.enabled || deployment.analytics.provider !== 'builtin') {
       return NextResponse.json(
-        { error: 'Built-in analytics not enabled for this site' },
+        { error: 'Built-in analytics not enabled for this deployment' },
         { status: 403 }
       );
     }
 
-    // 6b. Check if site database is enabled (created when site is published)
-    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
-    if (!siteDb) {
+    // 6b. Check if deployment database is enabled (created when deployment is published)
+    const deploymentDb = adapter.getAnalyticsDatabaseInstance(deploymentId);
+    if (!deploymentDb) {
       return NextResponse.json(
-        { error: 'Site database not enabled' },
+        { error: 'Deployment database not enabled' },
         { status: 404 }
       );
     }
 
     // 7. Check if specific feature is enabled
-    const features = site.analytics.features || {};
+    const features = deployment.analytics.features || {};
     if (interactionType === 'click' && !features.heatmaps) {
       return NextResponse.json(
         { error: 'Heatmaps feature not enabled' },
@@ -177,13 +177,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 8. CORS/Origin Validation (Primary Security Layer)
-    const allowedOrigins = getAllowedOrigins(siteId, site.customDomain);
+    const allowedOrigins = getAllowedOrigins(deploymentId, deployment.customDomain);
     if (!validateOrigin(request, allowedOrigins)) {
       console.warn('[Analytics Interaction] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         referer: request.headers.get('referer'),
         allowedOrigins,
-        siteId,
+        deploymentId,
         ip: identifier,
       });
       return NextResponse.json(
@@ -198,8 +198,8 @@ export async function POST(request: NextRequest) {
     // Normalize path for consistent tracking
     const normalizedPath = normalizePath(pagePath);
 
-    // Record interaction using SiteDatabase
-    siteDb.recordInteraction({
+    // Record interaction using DeploymentDatabase
+    deploymentDb.recordInteraction({
       sessionId,
       pagePath: normalizedPath,
       interactionType,
@@ -328,11 +328,11 @@ async function handleBatchInteractions(
 
   // 2. Extract common fields from first interaction for validation
   const firstInteraction = interactions[0];
-  const { siteId, userAgent } = firstInteraction;
+  const { deploymentId, userAgent } = firstInteraction;
 
-  if (!siteId) {
+  if (!deploymentId) {
     return NextResponse.json(
-      { error: 'Missing required field: siteId' },
+      { error: 'Missing required field: deploymentId' },
       { status: 400 }
     );
   }
@@ -346,40 +346,40 @@ async function handleBatchInteractions(
   await adapter.init();
 
   try {
-    // 4. Verify site exists (from core database)
-    const site = await adapter.getSite(siteId);
-    if (!site) {
+    // 4. Verify deployment exists (from core database)
+    const deployment = await adapter.getDeployment(deploymentId);
+    if (!deployment) {
       return NextResponse.json(
-        { error: 'Site not found' },
+        { error: 'Deployment not found' },
         { status: 404 }
       );
     }
 
     // 5. Check if analytics is enabled
-    if (!site.analytics.enabled || site.analytics.provider !== 'builtin') {
+    if (!deployment.analytics.enabled || deployment.analytics.provider !== 'builtin') {
       return NextResponse.json(
-        { error: 'Built-in analytics not enabled for this site' },
+        { error: 'Built-in analytics not enabled for this deployment' },
         { status: 403 }
       );
     }
 
-    // 5b. Check if site database is enabled (created when site is published)
-    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
-    if (!siteDb) {
+    // 5b. Check if deployment database is enabled (created when deployment is published)
+    const deploymentDb = adapter.getAnalyticsDatabaseInstance(deploymentId);
+    if (!deploymentDb) {
       return NextResponse.json(
-        { error: 'Site database not enabled' },
+        { error: 'Deployment database not enabled' },
         { status: 404 }
       );
     }
 
     // 6. CORS/Origin Validation
-    const allowedOrigins = getAllowedOrigins(siteId, site.customDomain);
+    const allowedOrigins = getAllowedOrigins(deploymentId, deployment.customDomain);
     if (!validateOrigin(request, allowedOrigins)) {
       console.warn('[Analytics Batch] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         referer: request.headers.get('referer'),
         allowedOrigins,
-        siteId,
+        deploymentId,
         ip: identifier,
       });
       return NextResponse.json(
@@ -412,7 +412,7 @@ async function handleBatchInteractions(
       }
 
       // Check feature flags for this interaction type
-      const features = site.analytics.features || {};
+      const features = deployment.analytics.features || {};
       if (interactionType === 'click' && !features.heatmaps) {
         skipCount++;
         continue;
@@ -445,7 +445,7 @@ async function handleBatchInteractions(
 
       // Record interaction
       try {
-        siteDb.recordInteraction({
+        deploymentDb.recordInteraction({
           sessionId,
           pagePath: normalizedPath,
           interactionType,

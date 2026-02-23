@@ -299,7 +299,7 @@ Yes! **Scheduled Functions** let you run edge functions on a cron schedule. Use 
 3. Create a schedule with a cron expression (e.g., `0 8 * * *` for daily at 8am)
 4. Link it to your edge function and optionally pass config data
 
-**See**: [Server Features → Scheduled Functions](?doc=server-features#scheduled-functions-cron-jobs)
+**See**: [Backend → Scheduled Functions](?doc=backend-features#scheduled-functions-cron-jobs)
 
 ---
 
@@ -358,7 +358,7 @@ Reusable project starting points with files, structure, and metadata.
 
 **Built-in Project Templates**: Blank (minimal), Example Studios (multi-page portfolio)
 
-**Built-in Site Templates**: Landing Page with Contact Form (Resend email), Blog with Comments (auth + moderated comments)
+**Built-in Templates with Backend Features**: Landing Page with Contact Form (Resend email), Blog with Comments (auth + moderated comments)
 
 **See**: [Templates Guide](?doc=templates)
 

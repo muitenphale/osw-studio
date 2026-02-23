@@ -6,6 +6,45 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.34.0 - Project-Scoped Backend & Deployments (2026-02-22)
+
+Backend features are now managed at the **project level** instead of per-deployment, and "Sites" have been renamed to **"Deployments"** throughout the app.
+
+- **Project-Scoped Backend** - Edge functions, server functions, secrets, scheduled functions, and database schema now live on the project. When you publish, they're automatically extracted into the deployment's runtime. This means one project can power multiple deployments, and your backend travels with the project
+- **Per-Project Database** - Each project can have its own SQLite database for user-defined tables. Create tables via the schema editor, query them from edge functions, and they'll be included when you publish
+- **"Sites" → "Deployments"** - What was called a "Site" is now a "Deployment" — the UI, API routes, URL paths, and admin views all reflect this. Existing databases migrate automatically
+- **"Server Features" → "Backend"** - The toolbar button, template badges, and docs now use "Backend" instead of "Server Features"
+- **Project Backend Panel** - New tabbed modal (accessible from the toolbar or project card menu) for managing all backend features in one place. The schema editor has been rewritten with three tabs: Tables (live schema viewer), SQL (query editor), and DDL (apply schema changes)
+- **Deployment Selector** - New dropdown in the workspace header to pick which deployment's runtime context the AI should know about
+- **Project Swap** - When repointing a deployment to a different project, a conflict dialog shows what will be added, removed, or changed so you can review before confirming
+- **Unified Templates** - The separate "Site template" type is gone. All templates now use a single format with an optional `backendFeatures` field. Older `.oswt` files still import correctly
+- **Split Databases** - Each deployment now has separate `runtime.sqlite` and `analytics.sqlite` files instead of one unified database. Existing deployments migrate automatically on first access
+
+### Upgrading (Server Mode)
+
+**Back up your `data/` and `sites/` directories before updating.** This release includes significant database and directory migrations that run automatically on first access:
+
+- The `sites/` directory is renamed to `deployments/`
+- Each unified `site.sqlite` is split into `runtime.sqlite` + `analytics.sqlite`
+- API routes move from `/api/sites/*` to `/api/deployments/*`
+
+The migrations are designed to be seamless, but given the scope of changes, a backup ensures you can roll back if anything goes wrong. Browser Mode users are unaffected.
+
+---
+
+## v1.33.0 - Checkpoint Rework (2026-02-19)
+
+The checkpoint system has been redesigned with a new panel and a clearer lifecycle.
+
+- **Checkpoints Panel** - New panel in the workspace to view, jump to, and restore any checkpoint from your session
+- **Starting Point** - Opening a project now creates a permanent "Starting point" checkpoint. "Discard Changes" always takes you back here, no matter how many saves you've made
+- **Stacking Saves** - Manual saves now accumulate instead of replacing each other, so you can jump between any saved state
+- **Smart Eviction** - Only auto-checkpoints count toward the 50-checkpoint limit. Your manual saves and the starting point are never removed
+- **Default Provider** - Self-hosted instances can set a default AI provider via `NEXT_PUBLIC_DEFAULT_PROVIDER`
+- **Setup Guidance** - Chat input is now disabled when no API key is configured, and the model selector button highlights to guide you to settings
+
+---
+
 ## v1.32.0 - Anonymous Usage Analytics (2026-02-18)
 
 OSW Studio now includes lightweight, anonymous telemetry to help understand which features get used, which providers and models are popular, and where things are breaking. No prompts, code, file names, API keys, or error messages are ever collected.
@@ -80,7 +119,7 @@ Run edge functions automatically on a cron schedule. Set up daily cleanups, hour
 - **Execution Tracking** - Each schedule shows next run time, last status (success/error), and last run time
 - **AI Awareness** - The AI can see and create scheduled functions via `/.server/scheduled-functions/` context files
 
-**See**: [Server Features → Scheduled Functions](?doc=server-features#scheduled-functions-cron-jobs) for the full guide with examples.
+**See**: [Backend → Scheduled Functions](?doc=backend-features#scheduled-functions-cron-jobs) for the full guide with examples.
 
 ---
 
@@ -217,7 +256,7 @@ Traffic is logged server-side with automatic 7-day retention.
 
 ---
 
-## v1.19.0 - Server Mode Backend Features
+## v1.19.0 - Server Mode Backend
 
 This release adds complete backend functionality for published sites, including edge functions, database management, server functions, secrets, and AI integration.
 
@@ -268,7 +307,7 @@ Encrypted storage for API keys and tokens:
 
 ### Server Context Integration
 
-The AI can now understand and work with your site's server features! When you select a site:
+The AI can now understand and work with your site's backend features! When you select a site:
 
 - **Site Selector** dropdown in workspace header to choose site context
 - **`/.server/` hidden folder** with transient files containing server context
@@ -283,9 +322,9 @@ A hidden folder appears in the file explorer (right-click → "Show Hidden Files
 - `server-functions/*.json` - Server functions (editable)
 - `secrets/*.json` - Secret placeholders (editable - AI creates, user sets values)
 
-### AI Read-Write Access to Server Features
+### AI Read-Write Access to Backend Features
 
-The AI can create, modify, and delete server features:
+The AI can create, modify, and delete backend features:
 
 #### SQL Queries with `sqlite3`
 
@@ -359,7 +398,7 @@ document.addEventListener('edge-function-error', (e) => {
 
 The live preview now supports edge function routing when a site is selected. Test your edge functions directly in the preview without publishing first.
 
-**[Server Features Guide →](?doc=server-features)** | **[Server Mode Guide →](?doc=server-mode)** | **[Edge Functions Guide →](?doc=edge-functions)**
+**[Backend Features Guide →](?doc=backend-features)** | **[Server Mode Guide →](?doc=server-mode)**
 
 ---
 

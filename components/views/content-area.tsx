@@ -2,10 +2,11 @@
 
 import React from 'react';
 import { Project } from '@/lib/vfs/types';
+import { logger } from '@/lib/utils';
 import { ProjectsView } from './projects-view';
 import { TemplatesView } from './templates-view';
 import { SkillsView } from './skills-view';
-import { SitesView } from './sites-view';
+import { DeploymentsView } from './deployments-view';
 import { SettingsView } from './settings-view';
 import { DocsView } from './docs-view';
 import { DashboardView } from './dashboard-view';
@@ -27,11 +28,17 @@ export function ContentArea({
 }: ContentAreaProps) {
   // Handler to select a project by ID (for dashboard recent projects click)
   const handleProjectSelectById = async (projectId: string) => {
-    const { vfs } = await import('@/lib/vfs');
-    await vfs.init();
-    const project = await vfs.getProject(projectId);
-    if (project) {
-      onProjectSelect(project);
+    try {
+      const { vfs } = await import('@/lib/vfs');
+      await vfs.init();
+      const project = await vfs.getProject(projectId);
+      if (project) {
+        onProjectSelect(project);
+      } else {
+        logger.warn('[ContentArea] Project not found:', projectId);
+      }
+    } catch (err) {
+      logger.error('[ContentArea] Failed to load project:', err);
     }
   };
 
@@ -46,10 +53,10 @@ export function ContentArea({
       );
     case 'projects':
       return <ProjectsView onProjectSelect={onProjectSelect} />;
-    case 'sites':
-      return <SitesView onProjectSelect={onProjectSelect} />;
+    case 'deployments':
+      return <DeploymentsView onProjectSelect={onProjectSelect} />;
     case 'templates':
-      return <TemplatesView onNavigate={onNavigate} />;
+      return <TemplatesView onProjectSelect={(project) => handleProjectSelectById(project.id)} onNavigate={onNavigate} />;
     case 'skills':
       return <SkillsView />;
     case 'docs':

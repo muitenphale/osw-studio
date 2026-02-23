@@ -1,6 +1,6 @@
 /**
  * Server - Built-in Skill (Overview)
- * Brief overview of server features with references to focused skills
+ * Brief overview of backend features with references to focused skills
  */
 
 export const SERVER_SKILL = String.raw`---

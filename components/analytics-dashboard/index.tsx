@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Site } from '@/lib/vfs/types';
+import { Deployment } from '@/lib/vfs/types';
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,7 @@ import { X, BarChart3, MousePointerClick, Users, Activity, Download, Trash2 } fr
 import { toast } from 'sonner';
 
 interface AnalyticsDashboardProps {
-  site: Site;
+  deployment: Deployment;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -43,7 +43,7 @@ interface StorageInfo {
   };
 }
 
-export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboardProps) {
+export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDashboardProps) {
   const [activeTab, setActiveTab] = useState('overview');
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [storage, setStorage] = useState<StorageInfo | null>(null);
@@ -52,10 +52,10 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
   const [notPublished, setNotPublished] = useState(false);
 
   useEffect(() => {
-    if (!site) return;
+    if (!deployment) return;
 
-    // Check if site has been published (database enabled)
-    if (!site.databaseEnabled) {
+    // Check if deployment has been published (database enabled)
+    if (!deployment.databaseEnabled) {
       setNotPublished(true);
       setLoading(false);
       return;
@@ -64,13 +64,13 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
     setNotPublished(false);
     fetchOverview();
     fetchStorage();
-  }, [site?.id, site?.databaseEnabled]);
+  }, [deployment?.id, deployment?.databaseEnabled]);
 
   const fetchOverview = async () => {
-    if (!site) return;
+    if (!deployment) return;
     try {
       setLoading(true);
-      const response = await fetch(`/api/analytics/${site.id}/overview`);
+      const response = await fetch(`/api/analytics/${deployment.id}/overview`);
 
       if (response.status === 401) {
         window.location.href = '/admin/login';
@@ -97,9 +97,9 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
   };
 
   const fetchStorage = async () => {
-    if (!site) return;
+    if (!deployment) return;
     try {
-      const response = await fetch(`/api/analytics/${site.id}/storage`);
+      const response = await fetch(`/api/analytics/${deployment.id}/storage`);
 
       if (response.status === 401) {
         window.location.href = '/admin/login';
@@ -121,9 +121,9 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
   };
 
   const handleExport = async () => {
-    if (!site) return;
+    if (!deployment) return;
     try {
-      const response = await fetch(`/api/analytics/${site.id}/export`, {
+      const response = await fetch(`/api/analytics/${deployment.id}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ format: 'csv', type: 'all' }),
@@ -140,7 +140,7 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `analytics-${site.id}-${Date.now()}.csv`;
+      a.download = `analytics-${deployment.id}-${Date.now()}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -154,13 +154,13 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
   };
 
   const handleClearData = async () => {
-    if (!site) return;
+    if (!deployment) return;
     if (!confirm('Are you sure you want to clear all analytics data? This cannot be undone.')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/analytics/${site.id}/clear?type=all`, {
+      const response = await fetch(`/api/analytics/${deployment.id}/clear?type=all`, {
         method: 'DELETE',
       });
 
@@ -188,7 +188,7 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
     return `${minutes}m ${remainingSeconds}s`;
   };
 
-  if (!site) return null;
+  if (!deployment) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -196,7 +196,7 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
         <div className="border-b px-6 py-4 flex items-center justify-between">
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-2xl">Analytics Dashboard</DialogTitle>
-            <DialogDescription>{site.name || site.id}</DialogDescription>
+            <DialogDescription>{deployment.name || deployment.id}</DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport} disabled={notPublished}>
@@ -262,8 +262,8 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
                   <BarChart3 className="h-16 w-16 text-muted-foreground/50 mb-4" />
                   <h3 className="text-lg font-medium mb-2">Analytics Not Available</h3>
                   <p className="text-muted-foreground max-w-md">
-                    Analytics data will be available after you publish your site for the first time.
-                    The analytics database is created when the site is published.
+                    Analytics data will be available after you publish your deployment for the first time.
+                    The analytics database is created when the deployment is published.
                   </p>
                 </div>
               )}
@@ -348,11 +348,11 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
                   <MousePointerClick className="h-16 w-16 text-muted-foreground/50 mb-4" />
                   <h3 className="text-lg font-medium mb-2">Heatmaps Not Available</h3>
                   <p className="text-muted-foreground max-w-md">
-                    Heatmap data will be collected after you publish your site.
+                    Heatmap data will be collected after you publish your deployment.
                   </p>
                 </div>
               ) : (
-                <HeatmapViewer siteId={site.id} pages={pages} />
+                <HeatmapViewer deploymentId={deployment.id} pages={pages} />
               )}
             </TabsContent>
 
@@ -362,11 +362,11 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
                   <Users className="h-16 w-16 text-muted-foreground/50 mb-4" />
                   <h3 className="text-lg font-medium mb-2">Sessions Not Available</h3>
                   <p className="text-muted-foreground max-w-md">
-                    Session data will be collected after you publish your site.
+                    Session data will be collected after you publish your deployment.
                   </p>
                 </div>
               ) : (
-                <SessionViewer siteId={site.id} />
+                <SessionViewer deploymentId={deployment.id} />
               )}
             </TabsContent>
 
@@ -376,11 +376,11 @@ export function AnalyticsDashboard({ site, isOpen, onClose }: AnalyticsDashboard
                   <Activity className="h-16 w-16 text-muted-foreground/50 mb-4" />
                   <h3 className="text-lg font-medium mb-2">Engagement Metrics Not Available</h3>
                   <p className="text-muted-foreground max-w-md">
-                    Engagement data will be collected after you publish your site.
+                    Engagement data will be collected after you publish your deployment.
                   </p>
                 </div>
               ) : (
-                <EngagementMetrics siteId={site.id} />
+                <EngagementMetrics deploymentId={deployment.id} />
               )}
             </TabsContent>
           </div>

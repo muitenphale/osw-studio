@@ -12,10 +12,10 @@ import { LogsViewer } from './logs-viewer';
 import { Database, Code2, Terminal, ScrollText, Wrench, Key, Clock } from 'lucide-react';
 
 interface DatabaseManagerProps {
-  siteId: string;
+  deploymentId: string;
 }
 
-export function DatabaseManager({ siteId }: DatabaseManagerProps) {
+export function DatabaseManager({ deploymentId }: DatabaseManagerProps) {
   const [activeTab, setActiveTab] = useState('schema');
 
   return (
@@ -54,31 +54,31 @@ export function DatabaseManager({ siteId }: DatabaseManagerProps) {
 
         <div className="flex-1 overflow-hidden mt-4">
           <TabsContent value="schema" className="h-full m-0">
-            <SchemaViewer siteId={siteId} />
+            <SchemaViewer deploymentId={deploymentId} />
           </TabsContent>
 
           <TabsContent value="query" className="h-full m-0">
-            <SqlEditor siteId={siteId} />
+            <SqlEditor deploymentId={deploymentId} />
           </TabsContent>
 
           <TabsContent value="functions" className="h-full m-0">
-            <FunctionsManager siteId={siteId} />
+            <FunctionsManager deploymentId={deploymentId} />
           </TabsContent>
 
           <TabsContent value="helpers" className="h-full m-0">
-            <ServerFunctionsManager siteId={siteId} />
+            <ServerFunctionsManager deploymentId={deploymentId} />
           </TabsContent>
 
           <TabsContent value="secrets" className="h-full m-0">
-            <SecretsManager siteId={siteId} />
+            <SecretsManager deploymentId={deploymentId} />
           </TabsContent>
 
           <TabsContent value="schedules" className="h-full m-0">
-            <ScheduledFunctionsManager siteId={siteId} />
+            <ScheduledFunctionsManager deploymentId={deploymentId} />
           </TabsContent>
 
           <TabsContent value="logs" className="h-full m-0">
-            <LogsViewer siteId={siteId} />
+            <LogsViewer deploymentId={deploymentId} />
           </TabsContent>
         </div>
       </Tabs>
