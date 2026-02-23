@@ -52,7 +52,7 @@ interface SidebarItem {
 const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: 'dashboard' },
   { id: 'projects', label: 'Projects', icon: FolderOpen, path: 'projects', hasRecentProjects: true },
-  { id: 'sites', label: 'Sites', icon: Globe, path: 'sites', serverModeOnly: true },
+  { id: 'deployments', label: 'Deployments', icon: Globe, path: 'deployments', serverModeOnly: true },
   { id: 'templates', label: 'Templates', icon: LayoutTemplate, path: 'templates' },
   { id: 'skills', label: 'Skills', icon: Sparkles, path: 'skills' },
   {

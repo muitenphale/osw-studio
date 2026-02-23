@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.34.0 - 2026-02-22
+
+Major architectural restructure: backend features are now **project-scoped** and "Sites" have been renamed to **"Deployments"** throughout.
+
+- **Sites → Deployments**: The "Site" concept is now "Deployment" everywhere — UI, API routes (`/api/sites/*` → `/api/deployments/*`), URL paths (`/sites/{id}/` → `/deployments/{id}/`), and admin views. Existing databases migrate automatically
+- **Project-Scoped Backend**: Edge functions, server functions, secrets, and scheduled functions are now managed at the project level instead of per-deployment. On publish, features are extracted into the deployment's runtime — so one project can power multiple deployments
+- **Per-Project Database**: Each project can have its own SQLite database for user-defined tables. Template schemas are applied on project creation; on publish, schema + data are extracted to the deployment runtime
+- **Split Deployment Databases**: The old unified database is now split into `runtime.sqlite` (functions, secrets, user tables) and `analytics.sqlite` (pageviews, sessions) per deployment. Automatic migration on first access
+- **"Server Features" → "Backend"**: The umbrella term renamed to "Backend" in all UI labels, toolbar buttons, template badges, and docs
+- **Project Backend Panel**: New tabbed modal for managing backend features at the project level — edge functions, server functions, secrets, scheduled functions, and a rewritten schema editor with Tables, SQL, and DDL tabs
+- **Deployment Selector**: New dropdown in the workspace header to choose which deployment's runtime context the AI should be aware of
+- **Project Swap**: When repointing a deployment to a different project, a conflict analysis dialog shows added/removed/changed features so you can review before confirming
+- **Template Unification**: Removed the separate "Site template" type — all templates now use a single format with an optional `backendFeatures` field. Older `.oswt` files with the legacy `serverFeatures` key still import correctly
+- **Security**: Sync API no longer returns secret values in GET responses; deployment ID format validated before database path interpolation
+
+**Upgrading (Server Mode):** Back up your `data/` and `sites/` directories before updating. This release runs automatic migrations that rename `sites/` to `deployments/` and split unified databases into `runtime.sqlite` + `analytics.sqlite`. Browser Mode users are unaffected.
+
 ## v1.33.0 - 2026-02-19
 - **Checkpoint System Rework**: New checkpoint panel and redesigned checkpoint lifecycle
   - New "Checkpoints" panel in the workspace — view, jump to, and restore any checkpoint from the session
@@ -248,12 +265,12 @@
   - **SQL Editor**: Execute raw SQL queries with Monaco editor and query history
   - **Schema Viewer**: Browse database structure with expandable table/column tree
   - **Execution Logs**: Automatic logging of function invocations with status, duration, timestamps
-- **Server Context Integration** (Experimental): AI awareness of site server features
+- **Server Context Integration** (Experimental): AI awareness of site backend features
   - Site Selector dropdown in workspace header to choose site context
   - `/.server/` hidden folder with transient files containing server context
   - AI receives edge functions, database schema, server functions, and secret names
   - Hidden folder icons: purple book for `/.skills/`, orange server for `/.server/`
-- **AI Read-Write Access to Server Features**:
+- **AI Read-Write Access to Backend Features**:
   - `sqlite3` shell command for executing SQL queries on site database
     - Supports `-json` and `-header` output flags
     - System tables protected from modification

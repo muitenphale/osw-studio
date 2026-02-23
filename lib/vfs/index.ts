@@ -133,11 +133,12 @@ export class VirtualFileSystem {
     }
   }
 
-  // Track current server context site
-  private serverContextSiteId: string | null = null;
+  // Track current server context (project-scoped features + optional deployment runtime)
+  private serverContextProjectId: string | null = null;
+  private runtimeDeploymentId: string | null = null;
   private serverContextMetadata: {
-    siteName: string;
-    siteId: string;
+    projectId: string;
+    runtimeDeploymentId?: string;
     hasDatabase: boolean;
     edgeFunctionCount: number;
     serverFunctionCount: number;
@@ -146,25 +147,39 @@ export class VirtualFileSystem {
   } | null = null;
 
   /**
-   * Get current server context site ID
+   * Get current server context project ID
    */
-  getServerContextSiteId(): string | null {
-    return this.serverContextSiteId;
+  getServerContextProjectId(): string | null {
+    return this.serverContextProjectId;
+  }
+
+  /**
+   * Get runtime deployment ID (for sqlite3, logs)
+   */
+  getRuntimeDeploymentId(): string | null {
+    return this.runtimeDeploymentId;
+  }
+
+  /**
+   * @deprecated Use getServerContextProjectId() or getRuntimeDeploymentId()
+   */
+  getServerContextDeploymentId(): string | null {
+    return this.runtimeDeploymentId;
   }
 
   /**
    * Check if server context is mounted
    */
   hasServerContext(): boolean {
-    return this.serverContextSiteId !== null;
+    return this.serverContextProjectId !== null;
   }
 
   /**
    * Get server context metadata
    */
   getServerContextMetadata(): {
-    siteName: string;
-    siteId: string;
+    projectId: string;
+    runtimeDeploymentId?: string;
     hasDatabase: boolean;
     edgeFunctionCount: number;
     serverFunctionCount: number;
@@ -175,29 +190,21 @@ export class VirtualFileSystem {
   }
 
   /**
-   * Mount server context for a site
-   * Creates transient files at /.server/ with database schema, edge functions, etc.
+   * Mount project backend context
+   * Reads backend features from the project's IndexedDB/SQLite stores and creates transient files.
+   * This is auto-mounted when a project opens in the workspace.
    */
-  async mountServerContext(siteId: string, siteName: string): Promise<void> {
-    // Only works in Server Mode on client side
+  async mountProjectBackendContext(projectId: string): Promise<void> {
+    // Only works in Server Mode — Backend features exist in IndexedDB in both modes,
+    // but the /.server/ context is only mounted in Server Mode where deployments can use them
     if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
-      logger.warn('[VFS] Server context only available in Server Mode');
       return;
     }
 
-    // On client side, we need to fetch server context via API
-    if (typeof window !== 'undefined') {
-      await this.fetchServerContextFromAPI(siteId, siteName);
-      return;
-    }
-
-    // Server-side: directly import modules
     try {
       // Clear existing server context
-      this.unmountServerContext();
+      this.unmountBackendContext();
 
-      // Import server modules (webpackIgnore prevents client bundling)
-      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
       const {
         generateEdgeFunctionFile,
         generateServerFunctionFile,
@@ -205,42 +212,31 @@ export class VirtualFileSystem {
         generateScheduledFunctionFile,
       } = await import('./server-context');
 
-      const adapter = getSQLiteAdapter();
-      await adapter.init();
+      // Read backend features from the adapter (IndexedDB on client, SQLite on server)
+      const adapter = this.adapter;
+      const edgeFunctions = adapter.listEdgeFunctions ? await adapter.listEdgeFunctions(projectId) : [];
+      const serverFunctions = adapter.listServerFunctions ? await adapter.listServerFunctions(projectId) : [];
+      const secrets = adapter.listSecrets ? await adapter.listSecrets(projectId) : [];
+      const scheduledFunctions = adapter.listScheduledFunctions ? await adapter.listScheduledFunctions(projectId) : [];
 
-      // Get site database
-      const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
-      if (!siteDb) {
-        logger.warn(`[VFS] Site database not available for ${siteId}`);
-        return;
-      }
-
-      // Mount database schema (read-only)
-      const schema = siteDb.getSchemaForExport();
-      this.mountTransientFile('/.server/db/schema.sql', schema, true);
-
-      // Mount secrets - individual files per secret (SCREAMING_SNAKE_CASE names)
-      const secrets = siteDb.listSecrets();
-      for (const secret of secrets) {
-        this.mountTransientFile(`/.server/secrets/${secret.name}.json`, generateSecretFile(secret), false);
-      }
-
-      // Mount edge functions - individual files
-      const edgeFunctions = siteDb.listFunctions();
+      // Mount edge functions
       for (const fn of edgeFunctions) {
         this.mountTransientFile(`/.server/edge-functions/${fn.name}.json`, generateEdgeFunctionFile(fn), false);
       }
 
-      // Mount server functions - individual files
-      const serverFunctions = siteDb.listServerFunctions();
+      // Mount server functions
       for (const fn of serverFunctions) {
         this.mountTransientFile(`/.server/server-functions/${fn.name}.json`, generateServerFunctionFile(fn), false);
       }
 
-      // Mount scheduled functions - individual files
-      const scheduledFunctions = siteDb.listScheduledFunctions();
+      // Mount secrets
+      for (const secret of secrets) {
+        this.mountTransientFile(`/.server/secrets/${secret.name}.json`, generateSecretFile(secret), false);
+      }
+
+      // Mount scheduled functions
       for (const fn of scheduledFunctions) {
-        const edgeFn = siteDb.getFunction(fn.functionId);
+        const edgeFn = edgeFunctions.find(ef => ef.id === fn.functionId);
         this.mountTransientFile(
           `/.server/scheduled-functions/${fn.name}.json`,
           generateScheduledFunctionFile(fn, edgeFn?.name ?? 'unknown'),
@@ -248,77 +244,16 @@ export class VirtualFileSystem {
         );
       }
 
-      // Ensure all known server context directories are visible (even if empty)
-      const knownDirs = ['edge-functions', 'server-functions', 'secrets', 'scheduled-functions'];
-      for (const dir of knownDirs) {
-        const dirPrefix = `/.server/${dir}/`;
-        const hasFiles = Array.from(this.transientFiles.keys()).some(p => p.startsWith(dirPrefix));
-        if (!hasFiles) {
-          this.mountTransientFile(`/.server/${dir}/.gitkeep`, '', true);
+      // Mount database schema if present in localStorage
+      if (typeof window !== 'undefined') {
+        const dbSchema = localStorage.getItem(`osw-db-schema-${projectId}`);
+        if (dbSchema) {
+          this.mountTransientFile('/.server/db/schema.sql', dbSchema, true);
         }
       }
 
-      // Store metadata for the orchestrator
-      this.serverContextSiteId = siteId;
-      this.serverContextMetadata = {
-        siteName,
-        siteId,
-        hasDatabase: true,
-        edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
-        serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
-        secretCount: secrets.length,
-        scheduledFunctionCount: scheduledFunctions.filter(f => f.enabled).length,
-      };
-
-      logger.info(`[VFS] Mounted server context for site ${siteId} (${siteName})`);
-    } catch (error) {
-      logger.error('[VFS] Failed to mount server context', error);
-    }
-  }
-
-  /**
-   * Fetch server context from API (client-side)
-   * Creates transient files from API response
-   */
-  private async fetchServerContextFromAPI(siteId: string, siteName: string): Promise<void> {
-    try {
-      this.unmountServerContext();
-
-      const response = await fetch(`/api/admin/sites/${siteId}/server-context`);
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Failed to fetch server context' }));
-        throw new Error(error.error || 'Failed to fetch server context');
-      }
-
-      const data = await response.json();
-
-      // Mount all files from the API response
-      for (const file of data.files) {
-        const virtualFile: VirtualFile = {
-          id: `transient-server-${file.path.replace(/[^a-z0-9]/gi, '-')}`,
-          projectId: 'transient',
-          path: file.path,
-          name: file.path.split('/').pop() || '',
-          type: 'text',
-          content: file.content,
-          mimeType: file.path.endsWith('.sql') ? 'text/sql' :
-                    file.path.endsWith('.json') ? 'application/json' :
-                    file.path.endsWith('.js') ? 'application/javascript' :
-                    'text/markdown',
-          size: new Blob([file.content]).size,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          metadata: {
-            isTransient: true,
-            isServerContext: true,
-            isReadOnly: file.isReadOnly,
-          }
-        };
-        this.transientFiles.set(file.path, virtualFile);
-      }
-
       // Ensure all known server context directories are visible (even if empty)
-      const knownDirs = ['edge-functions', 'server-functions', 'secrets', 'scheduled-functions'];
+      const knownDirs = ['edge-functions', 'server-functions', 'secrets', 'scheduled-functions', 'db'];
       for (const dir of knownDirs) {
         const dirPrefix = `/.server/${dir}/`;
         const hasFiles = Array.from(this.transientFiles.keys()).some(p => p.startsWith(dirPrefix));
@@ -328,37 +263,147 @@ export class VirtualFileSystem {
       }
 
       // Store metadata
-      this.serverContextSiteId = siteId;
-      this.serverContextMetadata = data.metadata;
+      this.serverContextProjectId = projectId;
+      this.serverContextMetadata = {
+        projectId,
+        runtimeDeploymentId: this.runtimeDeploymentId || undefined,
+        hasDatabase: !!this.runtimeDeploymentId,
+        edgeFunctionCount: edgeFunctions.filter(f => f.enabled).length,
+        serverFunctionCount: serverFunctions.filter(f => f.enabled).length,
+        secretCount: secrets.length,
+        scheduledFunctionCount: scheduledFunctions.filter(f => f.enabled).length,
+      };
 
-      // Persist siteId to sessionStorage for HMR resilience
+      // Persist projectId to sessionStorage for HMR resilience
       if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem('vfs_serverContextSiteId', siteId);
+        sessionStorage.setItem('vfs_serverContextProjectId', projectId);
       }
 
-      logger.info(`[VFS] Mounted server context for site ${siteId} (${siteName}) via API`);
+      logger.info(`[VFS] Mounted project server context for project ${projectId}`);
 
-      window.dispatchEvent(new Event('filesChanged'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
     } catch (error) {
-      logger.error('[VFS] Failed to fetch server context from API', error);
+      logger.error('[VFS] Failed to mount project server context', error);
     }
   }
 
   /**
-   * Refresh server context from API (re-fetches all files)
-   * Call after orchestrator completes to ensure file explorer is up to date
+   * Mount deployment runtime context (optional, for sqlite3 and logs)
+   * Only available when a deployment exists AND is published.
    */
-  async refreshServerContext(): Promise<void> {
-    if (!this.serverContextSiteId) return;
+  async mountDeploymentRuntimeContext(deploymentId: string): Promise<void> {
+    if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
+      return;
+    }
 
-    const siteName = this.serverContextMetadata?.siteName || '';
-    await this.fetchServerContextFromAPI(this.serverContextSiteId, siteName);
+    try {
+      // On server side, get database schema
+      if (typeof window === 'undefined') {
+        const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+        const sqliteAdapter = getSQLiteAdapter();
+        await sqliteAdapter.init();
+        const deploymentDb = sqliteAdapter.getDeploymentDatabaseForAnalytics(deploymentId);
+        if (deploymentDb) {
+          const schema = deploymentDb.getSchemaForExport();
+          this.mountTransientFile('/.server/db/schema.sql', schema, true);
+        }
+      } else {
+        // Client side: fetch schema from API
+        try {
+          const response = await fetch(`/api/admin/deployments/${deploymentId}/server-context`);
+          if (response.ok) {
+            const data = await response.json();
+            const schemaFile = data.files?.find((f: { path: string }) => f.path === '/.server/db/schema.sql');
+            if (schemaFile) {
+              this.mountTransientFile('/.server/db/schema.sql', schemaFile.content, true);
+            }
+          }
+        } catch {
+          logger.warn('[VFS] Could not fetch deployment schema');
+        }
+      }
+
+      this.runtimeDeploymentId = deploymentId;
+
+      // Update metadata to include runtime info
+      if (this.serverContextMetadata) {
+        this.serverContextMetadata.runtimeDeploymentId = deploymentId;
+        this.serverContextMetadata.hasDatabase = true;
+      }
+
+      // Persist to sessionStorage for HMR resilience
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('vfs_runtimeDeploymentId', deploymentId);
+      }
+
+      logger.info(`[VFS] Connected deployment runtime: ${deploymentId}`);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
+    } catch (error) {
+      logger.error('[VFS] Failed to mount deployment runtime context', error);
+    }
   }
 
   /**
-   * Unmount server context
+   * Disconnect deployment runtime context
    */
-  unmountServerContext(): void {
+  unmountDeploymentRuntimeContext(): void {
+    if (this.runtimeDeploymentId) {
+      // Remove schema file
+      this.transientFiles.delete('/.server/db/schema.sql');
+
+      this.runtimeDeploymentId = null;
+
+      if (this.serverContextMetadata) {
+        this.serverContextMetadata.runtimeDeploymentId = undefined;
+        this.serverContextMetadata.hasDatabase = false;
+      }
+
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('vfs_runtimeDeploymentId');
+      }
+
+      logger.info('[VFS] Disconnected deployment runtime');
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
+    }
+  }
+
+  /**
+   * @deprecated Use mountProjectBackendContext(projectId). Note: this deprecated method now only
+   * mounts deployment runtime context (database schema), not the full backend features.
+   * The deploymentName parameter is ignored.
+   */
+  async mountBackendContext(deploymentId: string, deploymentName: string): Promise<void> {
+    // Backward compat: old callers mount via deployment — extract projectId from deployment
+    // For now, just mount runtime context (project context should be auto-mounted separately)
+    await this.mountDeploymentRuntimeContext(deploymentId);
+  }
+
+  /**
+   * Refresh server context (re-reads from adapter stores)
+   * Call after orchestrator completes to ensure file explorer is up to date
+   */
+  async refreshServerContext(): Promise<void> {
+    if (!this.serverContextProjectId) return;
+    await this.mountProjectBackendContext(this.serverContextProjectId);
+
+    // Re-mount runtime if connected
+    if (this.runtimeDeploymentId) {
+      await this.mountDeploymentRuntimeContext(this.runtimeDeploymentId);
+    }
+  }
+
+  /**
+   * Unmount all backend context (project features + runtime)
+   */
+  unmountBackendContext(): void {
     const removed: string[] = [];
 
     for (const path of this.transientFiles.keys()) {
@@ -368,14 +413,16 @@ export class VirtualFileSystem {
       }
     }
 
-    if (this.serverContextSiteId) {
+    if (this.serverContextProjectId || this.runtimeDeploymentId) {
       logger.info(`[VFS] Unmounted server context (${removed.length} files)`);
-      this.serverContextSiteId = null;
+      this.serverContextProjectId = null;
+      this.runtimeDeploymentId = null;
       this.serverContextMetadata = null;
 
       // Clear sessionStorage when unmounting
       if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.removeItem('vfs_serverContextSiteId');
+        sessionStorage.removeItem('vfs_serverContextProjectId');
+        sessionStorage.removeItem('vfs_runtimeDeploymentId');
       }
 
       if (typeof window !== 'undefined') {
@@ -431,21 +478,20 @@ export class VirtualFileSystem {
 
   /**
    * Update a server context file (/.server/)
-   * Validates content and syncs to site database
-   * On client side, routes through API; on server side, uses direct imports
+   * Validates content and syncs to project IndexedDB/SQLite stores
    */
   private async updateServerContextFile(path: string, content: string): Promise<VirtualFile> {
-    // Try to recover siteId from sessionStorage if not set (HMR resilience)
-    if (!this.serverContextSiteId && typeof sessionStorage !== 'undefined') {
-      const storedSiteId = sessionStorage.getItem('vfs_serverContextSiteId');
-      if (storedSiteId) {
-        logger.info(`[VFS] Recovered serverContextSiteId from sessionStorage: ${storedSiteId}`);
-        this.serverContextSiteId = storedSiteId;
+    // Recover projectId from sessionStorage if needed (HMR resilience)
+    if (!this.serverContextProjectId && typeof sessionStorage !== 'undefined') {
+      const storedProjectId = sessionStorage.getItem('vfs_serverContextProjectId');
+      if (storedProjectId) {
+        logger.info(`[VFS] Recovered serverContextProjectId from sessionStorage: ${storedProjectId}`);
+        this.serverContextProjectId = storedProjectId;
       }
     }
 
-    if (!this.serverContextSiteId) {
-      throw new Error('No site selected. Select a site from the Site Selector.');
+    if (!this.serverContextProjectId) {
+      throw new Error('No project server context mounted.');
     }
 
     // Check for read-only files
@@ -453,616 +499,355 @@ export class VirtualFileSystem {
       throw new Error(`Cannot modify ${path} - read-only file`);
     }
 
-    // On client side, use API
-    if (typeof window !== 'undefined') {
-      return await this.mutateServerContextViaAPI('update', path, content);
-    }
-
-    // Server-side: direct implementation
-    // Handle individual secret files
-    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
-      return await this.updateSecretFromFile(path, content);
-    }
-
-    // Handle edge functions
+    // Route to appropriate handler
     if (path.startsWith('/.server/edge-functions/') && path.endsWith('.json')) {
-      return await this.updateEdgeFunctionFromFile(path, content);
+      return await this.upsertEdgeFunctionFromFile(path, content);
     }
-
-    // Handle server functions
     if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
-      return await this.updateServerFunctionFromFile(path, content);
+      return await this.upsertServerFunctionFromFile(path, content);
     }
-
-    // Handle scheduled functions
+    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
+      return await this.upsertSecretFromFile(path, content);
+    }
     if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
-      return await this.updateScheduledFunctionFromFile(path, content);
+      return await this.upsertScheduledFunctionFromFile(path, content);
     }
 
     throw new Error(`Cannot modify ${path} - unrecognized server context path`);
   }
 
   /**
-   * Mutate server context via API (client-side)
+   * Upsert edge function from file content into project stores
    */
-  private async mutateServerContextViaAPI(
-    operation: 'update' | 'create' | 'delete',
-    path: string,
-    content?: string
-  ): Promise<VirtualFile> {
-    if (!this.serverContextSiteId) {
-      throw new Error('No site selected. Select a site from the Site Selector.');
-    }
-
-    const response = await fetch(`/api/admin/sites/${this.serverContextSiteId}/server-context/mutate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ operation, path, content }),
-    });
-
-    const result = await response.json();
-
-    if (!result.success) {
-      throw new Error(result.error || 'Mutation failed');
-    }
-
-    // For delete operations, remove the transient file
-    if (operation === 'delete') {
-      this.transientFiles.delete(path);
-      window.dispatchEvent(new Event('filesChanged'));
-      // Return a placeholder file for delete operations
-      return {
-        id: 'deleted',
-        projectId: 'transient',
-        path,
-        name: path.split('/').pop() || '',
-        type: 'text',
-        content: '',
-        mimeType: 'text/plain',
-        size: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        metadata: {
-          isTransient: true,
-          isServerContext: true,
-          isReadOnly: false,
-        },
-      };
-    }
-
-    // For create/update, update the transient file with the response
-    if (result.file) {
-      const oldPath = path;
-      const newPath = result.file.path;
-
-      // If path changed (e.g., function renamed), remove old entry
-      if (oldPath !== newPath) {
-        this.transientFiles.delete(oldPath);
-      }
-
-      // Create the virtual file
-      const virtualFile: VirtualFile = {
-        id: `transient-server-${newPath.replace(/[^a-z0-9]/gi, '-')}`,
-        projectId: 'transient',
-        path: newPath,
-        name: newPath.split('/').pop() || '',
-        type: 'text',
-        content: result.file.content,
-        mimeType: newPath.endsWith('.json') ? 'application/json' :
-                  newPath.endsWith('.sql') ? 'text/sql' :
-                  'text/markdown',
-        size: new Blob([result.file.content]).size,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        metadata: {
-          isTransient: true,
-          isServerContext: true,
-          isReadOnly: result.file.isReadOnly,
-        }
-      };
-
-      this.transientFiles.set(newPath, virtualFile);
-
-      // Remove .gitkeep stub if a real file was created in this directory
-      const dirPath = newPath.substring(0, newPath.lastIndexOf('/') + 1);
-      const gitkeepPath = dirPath + '.gitkeep';
-      if (this.transientFiles.has(gitkeepPath)) {
-        this.transientFiles.delete(gitkeepPath);
-      }
-
-      window.dispatchEvent(new Event('filesChanged'));
-      return virtualFile;
-    }
-
-    throw new Error('No file returned from mutation');
-  }
-
-  /**
-   * Update edge function from file content
-   */
-  private async updateEdgeFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
-    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+  private async upsertEdgeFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
     const { validateEdgeFunctionData, generateEdgeFunctionFile } = await import('./server-context');
+    const { v4: uuidv4Gen } = await import('uuid');
 
-    // Parse JSON
     let data: unknown;
-    try {
-      data = JSON.parse(content);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      throw new Error(`Invalid JSON: ${message}`);
+    try { data = JSON.parse(content); } catch (e: unknown) {
+      throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    // Validate
     const validation = validateEdgeFunctionData(data);
-    if (!validation.valid) {
-      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
-    }
+    if (!validation.valid) throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
 
-    // Type-safe cast after validation
     const fnData = data as { name: string; method: string; code: string; description?: string; enabled?: boolean; timeoutMs?: number };
+    const projectId = this.serverContextProjectId!;
+    const adapter = this.adapter;
 
-    // Get site database
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
-    if (!siteDb) {
-      throw new Error('Site database not available');
-    }
-
-    // Check if function exists by current filename
+    // Find existing by filename
     const filename = path.split('/').pop()!.replace('.json', '');
-    const existingFn = siteDb.getFunctionByName(filename);
+    const existing = adapter.listEdgeFunctions
+      ? (await adapter.listEdgeFunctions(projectId)).find(f => f.name === filename)
+      : undefined;
 
-    if (existingFn) {
-      // Update existing function
-      siteDb.updateFunction(existingFn.id, {
-        name: fnData.name,
-        code: fnData.code,
-        method: fnData.method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY',
-        description: fnData.description,
-        enabled: fnData.enabled ?? true,
-        timeoutMs: fnData.timeoutMs ?? 5000,
-      });
+    const now = new Date();
+    if (existing && adapter.updateEdgeFunction) {
+      const updated = { ...existing, name: fnData.name, code: fnData.code, method: fnData.method as any, description: fnData.description, enabled: fnData.enabled ?? true, timeoutMs: fnData.timeoutMs ?? 5000, updatedAt: now };
+      await adapter.updateEdgeFunction(updated);
 
-      // If name changed, we need to update the path
       if (fnData.name !== filename) {
-        // Remove old transient file
         this.transientFiles.delete(path);
-        // Mount with new path
         const newPath = `/.server/edge-functions/${fnData.name}.json`;
-        const updated = siteDb.getFunctionByName(fnData.name)!;
         this.mountTransientFile(newPath, generateEdgeFunctionFile(updated), false);
+        this.removeGitkeep('/.server/edge-functions/');
+        this.notifyFilesChanged();
         return this.transientFiles.get(newPath)!;
       }
-    } else {
-      // Create new function
-      siteDb.createFunction({
-        name: fnData.name,
-        code: fnData.code,
-        method: fnData.method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY',
-        description: fnData.description,
-        enabled: fnData.enabled ?? true,
-        timeoutMs: fnData.timeoutMs ?? 5000,
-      });
+
+      this.mountTransientFile(path, generateEdgeFunctionFile(updated), false);
+    } else if (adapter.createEdgeFunction) {
+      const newFn = { id: uuidv4Gen(), projectId, name: fnData.name, code: fnData.code, method: fnData.method as any, description: fnData.description, enabled: fnData.enabled ?? true, timeoutMs: fnData.timeoutMs ?? 5000, createdAt: now, updatedAt: now };
+      await adapter.createEdgeFunction(newFn);
+      this.mountTransientFile(path, generateEdgeFunctionFile(newFn), false);
     }
 
-    // Update transient file with validated content
-    const updated = siteDb.getFunctionByName(fnData.name)!;
-    this.mountTransientFile(path, generateEdgeFunctionFile(updated), false);
-
-    // Remove .gitkeep stub if a real file was created in this directory
-    const edgeFnGitkeep = '/.server/edge-functions/.gitkeep';
-    if (this.transientFiles.has(edgeFnGitkeep)) {
-      this.transientFiles.delete(edgeFnGitkeep);
-    }
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('filesChanged'));
-    }
-
-    return this.transientFiles.get(path)!;
+    this.removeGitkeep('/.server/edge-functions/');
+    this.notifyFilesChanged();
+    this.triggerServerFeatureSync(projectId);
+    const result = this.transientFiles.get(path);
+    if (!result) throw new Error(`Failed to create server context file at ${path}`);
+    return result;
   }
 
   /**
-   * Update server function from file content
+   * Upsert server function from file content into project stores
    */
-  private async updateServerFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
-    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
+  private async upsertServerFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
     const { validateServerFunctionData, generateServerFunctionFile } = await import('./server-context');
+    const { v4: uuidv4Gen } = await import('uuid');
 
-    // Parse JSON
     let data: unknown;
-    try {
-      data = JSON.parse(content);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      throw new Error(`Invalid JSON: ${message}`);
+    try { data = JSON.parse(content); } catch (e: unknown) {
+      throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    // Validate
     const validation = validateServerFunctionData(data);
-    if (!validation.valid) {
-      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
-    }
+    if (!validation.valid) throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
 
-    // Type-safe cast after validation
     const fnData = data as { name: string; code: string; description?: string; enabled?: boolean };
+    const projectId = this.serverContextProjectId!;
+    const adapter = this.adapter;
 
-    // Get site database
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
-    if (!siteDb) {
-      throw new Error('Site database not available');
-    }
-
-    // Check if function exists by current filename
     const filename = path.split('/').pop()!.replace('.json', '');
-    const existingFn = siteDb.getServerFunctionByName(filename);
+    const existing = adapter.listServerFunctions
+      ? (await adapter.listServerFunctions(projectId)).find(f => f.name === filename)
+      : undefined;
 
-    if (existingFn) {
-      // Update existing function
-      siteDb.updateServerFunction(existingFn.id, {
-        name: fnData.name,
-        code: fnData.code,
-        description: fnData.description,
-        enabled: fnData.enabled ?? true,
-      });
+    const now = new Date();
+    if (existing && adapter.updateServerFunction) {
+      const updated = { ...existing, name: fnData.name, code: fnData.code, description: fnData.description, enabled: fnData.enabled ?? true, updatedAt: now };
+      await adapter.updateServerFunction(updated);
 
-      // If name changed, we need to update the path
       if (fnData.name !== filename) {
-        // Remove old transient file
         this.transientFiles.delete(path);
-        // Mount with new path
         const newPath = `/.server/server-functions/${fnData.name}.json`;
-        const updated = siteDb.getServerFunctionByName(fnData.name)!;
         this.mountTransientFile(newPath, generateServerFunctionFile(updated), false);
+        this.removeGitkeep('/.server/server-functions/');
+        this.notifyFilesChanged();
         return this.transientFiles.get(newPath)!;
       }
-    } else {
-      // Create new function
-      siteDb.createServerFunction({
-        name: fnData.name,
-        code: fnData.code,
-        description: fnData.description,
-        enabled: fnData.enabled ?? true,
-      });
+
+      this.mountTransientFile(path, generateServerFunctionFile(updated), false);
+    } else if (adapter.createServerFunction) {
+      const newFn = { id: uuidv4Gen(), projectId, name: fnData.name, code: fnData.code, description: fnData.description, enabled: fnData.enabled ?? true, createdAt: now, updatedAt: now };
+      await adapter.createServerFunction(newFn);
+      this.mountTransientFile(path, generateServerFunctionFile(newFn), false);
     }
 
-    // Update transient file with validated content
-    const updated = siteDb.getServerFunctionByName(fnData.name)!;
-    this.mountTransientFile(path, generateServerFunctionFile(updated), false);
-
-    // Remove .gitkeep stub if a real file was created in this directory
-    const serverFnGitkeep = '/.server/server-functions/.gitkeep';
-    if (this.transientFiles.has(serverFnGitkeep)) {
-      this.transientFiles.delete(serverFnGitkeep);
-    }
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('filesChanged'));
-    }
-
-    return this.transientFiles.get(path)!;
+    this.removeGitkeep('/.server/server-functions/');
+    this.notifyFilesChanged();
+    this.triggerServerFeatureSync(projectId);
+    const result = this.transientFiles.get(path);
+    if (!result) throw new Error(`Failed to create server context file at ${path}`);
+    return result;
   }
 
   /**
-   * Update scheduled function from file content
-   * Creates or updates a scheduled function in the site database
+   * Upsert secret from file content into project stores
    */
-  private async updateScheduledFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
-    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
-    const { validateScheduledFunctionData, generateScheduledFunctionFile } = await import('./server-context');
+  private async upsertSecretFromFile(path: string, content: string): Promise<VirtualFile> {
+    const { validateSecretData, generateSecretFile } = await import('./server-context');
+    const { v4: uuidv4Gen } = await import('uuid');
 
-    // Parse JSON
     let data: unknown;
-    try {
-      data = JSON.parse(content);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      throw new Error(`Invalid JSON: ${message}`);
+    try { data = JSON.parse(content); } catch (e: unknown) {
+      throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    // Validate
+    const validation = validateSecretData(data);
+    if (!validation.valid) throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+
+    const secretData = data as { name: string; description?: string };
+    const projectId = this.serverContextProjectId!;
+    const adapter = this.adapter;
+
+    const filename = path.split('/').pop()!.replace('.json', '');
+    const existing = adapter.listSecrets
+      ? (await adapter.listSecrets(projectId)).find(s => s.name === filename)
+      : undefined;
+
+    const now = new Date();
+    if (existing && adapter.updateSecret) {
+      const updated = { ...existing, name: secretData.name, description: secretData.description, updatedAt: now };
+      await adapter.updateSecret(updated);
+
+      if (secretData.name !== filename) {
+        this.transientFiles.delete(path);
+        const newPath = `/.server/secrets/${secretData.name}.json`;
+        this.mountTransientFile(newPath, generateSecretFile(updated), false);
+        this.removeGitkeep('/.server/secrets/');
+        this.notifyFilesChanged();
+        return this.transientFiles.get(newPath)!;
+      }
+
+      this.mountTransientFile(path, generateSecretFile(updated), false);
+    } else if (adapter.createSecret) {
+      const newSecret = { id: uuidv4Gen(), projectId, name: secretData.name, description: secretData.description, hasValue: false, createdAt: now, updatedAt: now };
+      await adapter.createSecret(newSecret);
+      this.mountTransientFile(path, generateSecretFile(newSecret), false);
+    }
+
+    this.removeGitkeep('/.server/secrets/');
+    this.notifyFilesChanged();
+    this.triggerServerFeatureSync(projectId);
+    const result = this.transientFiles.get(path);
+    if (!result) throw new Error(`Failed to create server context file at ${path}`);
+    return result;
+  }
+
+  /**
+   * Upsert scheduled function from file content into project stores
+   */
+  private async upsertScheduledFunctionFromFile(path: string, content: string): Promise<VirtualFile> {
+    const { validateScheduledFunctionData, generateScheduledFunctionFile } = await import('./server-context');
+    const { v4: uuidv4Gen } = await import('uuid');
+
+    let data: unknown;
+    try { data = JSON.parse(content); } catch (e: unknown) {
+      throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     const validation = validateScheduledFunctionData(data);
-    if (!validation.valid) {
-      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
-    }
+    if (!validation.valid) throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
 
-    // Type-safe cast after validation
     const fnData = data as { name: string; functionName: string; cronExpression: string; timezone?: string; enabled?: boolean; description?: string; config?: Record<string, unknown> };
+    const projectId = this.serverContextProjectId!;
+    const adapter = this.adapter;
 
-    // Get site database
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
-    if (!siteDb) {
-      throw new Error('Site database not available');
-    }
-
-    // Resolve functionName to functionId (edge function)
-    const edgeFn = siteDb.getFunctionByName(fnData.functionName);
+    // Resolve functionName to functionId
+    const edgeFunctions = adapter.listEdgeFunctions ? await adapter.listEdgeFunctions(projectId) : [];
+    const edgeFn = edgeFunctions.find(f => f.name === fnData.functionName);
     if (!edgeFn) {
       throw new Error(`Edge function "${fnData.functionName}" not found. Create it first.`);
     }
 
-    // Check if scheduled function exists by current filename
     const filename = path.split('/').pop()!.replace('.json', '');
-    const existingFn = siteDb.getScheduledFunctionByName(filename);
+    const existing = adapter.listScheduledFunctions
+      ? (await adapter.listScheduledFunctions(projectId)).find(f => f.name === filename)
+      : undefined;
 
-    if (existingFn) {
-      // Update existing scheduled function
-      siteDb.updateScheduledFunction(existingFn.id, {
-        name: fnData.name,
-        functionId: edgeFn.id,
-        cronExpression: fnData.cronExpression,
-        timezone: fnData.timezone || 'UTC',
-        description: fnData.description,
-        enabled: fnData.enabled ?? true,
-        config: fnData.config || {},
-      });
+    const now = new Date();
+    if (existing && adapter.updateScheduledFunction) {
+      const updated = { ...existing, name: fnData.name, functionId: edgeFn.id, cronExpression: fnData.cronExpression, timezone: fnData.timezone || 'UTC', description: fnData.description, enabled: fnData.enabled ?? true, config: fnData.config || {}, updatedAt: now };
+      await adapter.updateScheduledFunction(updated);
 
-      // If name changed, update the path
       if (fnData.name !== filename) {
         this.transientFiles.delete(path);
         const newPath = `/.server/scheduled-functions/${fnData.name}.json`;
-        const updated = siteDb.getScheduledFunctionByName(fnData.name)!;
         this.mountTransientFile(newPath, generateScheduledFunctionFile(updated, fnData.functionName), false);
+        this.removeGitkeep('/.server/scheduled-functions/');
+        this.notifyFilesChanged();
         return this.transientFiles.get(newPath)!;
       }
-    } else {
-      // Create new scheduled function
-      siteDb.createScheduledFunction({
-        name: fnData.name,
-        functionId: edgeFn.id,
-        cronExpression: fnData.cronExpression,
-        timezone: fnData.timezone || 'UTC',
-        description: fnData.description,
-        enabled: fnData.enabled ?? true,
-        config: fnData.config || {},
-      });
+
+      this.mountTransientFile(path, generateScheduledFunctionFile(updated, fnData.functionName), false);
+    } else if (adapter.createScheduledFunction) {
+      const newFn = { id: uuidv4Gen(), projectId, name: fnData.name, functionId: edgeFn.id, cronExpression: fnData.cronExpression, timezone: fnData.timezone || 'UTC', description: fnData.description, enabled: fnData.enabled ?? true, config: fnData.config || {}, createdAt: now, updatedAt: now };
+      await adapter.createScheduledFunction(newFn);
+      this.mountTransientFile(path, generateScheduledFunctionFile(newFn, fnData.functionName), false);
     }
 
-    // Update transient file with validated content
-    const updated = siteDb.getScheduledFunctionByName(fnData.name)!;
-    this.mountTransientFile(path, generateScheduledFunctionFile(updated, fnData.functionName), false);
-
-    // Remove .gitkeep stub if a real file was created in this directory
-    const schedFnGitkeep = '/.server/scheduled-functions/.gitkeep';
-    if (this.transientFiles.has(schedFnGitkeep)) {
-      this.transientFiles.delete(schedFnGitkeep);
-    }
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('filesChanged'));
-    }
-
-    return this.transientFiles.get(path)!;
+    this.removeGitkeep('/.server/scheduled-functions/');
+    this.notifyFilesChanged();
+    this.triggerServerFeatureSync(projectId);
+    const result = this.transientFiles.get(path);
+    if (!result) throw new Error(`Failed to create server context file at ${path}`);
+    return result;
   }
 
   /**
-   * Update individual secret from file content
-   * Creates or updates a single secret in the database
+   * Remove .gitkeep stub from a directory if real files exist
    */
-  private async updateSecretFromFile(path: string, content: string): Promise<VirtualFile> {
-    const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
-    const { validateSecretData, generateSecretFile } = await import('./server-context');
-
-    // Parse JSON
-    let data: unknown;
-    try {
-      data = JSON.parse(content);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      throw new Error(`Invalid JSON: ${message}`);
+  private removeGitkeep(dirPath: string): void {
+    const gitkeepPath = dirPath + '.gitkeep';
+    if (this.transientFiles.has(gitkeepPath)) {
+      this.transientFiles.delete(gitkeepPath);
     }
+  }
 
-    // Validate
-    const validation = validateSecretData(data);
-    if (!validation.valid) {
-      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
-    }
-
-    // Type-safe cast after validation
-    const secretData = data as { name: string; description?: string };
-
-    // Get site database
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-    const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId!);
-    if (!siteDb) {
-      throw new Error('Site database not available');
-    }
-
-    // Check if secret exists by current filename
-    const filename = path.split('/').pop()!.replace('.json', '');
-    const existingSecret = siteDb.getSecretByName(filename);
-
-    if (existingSecret) {
-      // Update existing secret
-      siteDb.updateSecretMetadata(existingSecret.id, {
-        name: secretData.name,
-        description: secretData.description || ''
-      });
-
-      // If name changed, update the path
-      if (secretData.name !== filename) {
-        this.transientFiles.delete(path);
-        const newPath = `/.server/secrets/${secretData.name}.json`;
-        const updated = siteDb.getSecretByName(secretData.name)!;
-        this.mountTransientFile(newPath, generateSecretFile(updated), false);
-        return this.transientFiles.get(newPath)!;
-      }
-    } else {
-      // Create new secret placeholder
-      siteDb.createSecretPlaceholder(secretData.name, secretData.description || '');
-    }
-
-    // Update transient file with validated content
-    const updated = siteDb.getSecretByName(secretData.name)!;
-    this.mountTransientFile(path, generateSecretFile(updated), false);
-
-    // Remove .gitkeep stub if a real file was created in this directory
-    const secretsGitkeep = '/.server/secrets/.gitkeep';
-    if (this.transientFiles.has(secretsGitkeep)) {
-      this.transientFiles.delete(secretsGitkeep);
-    }
-
+  /**
+   * Notify file explorer of changes
+   */
+  private notifyFilesChanged(): void {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
     }
+  }
 
-    return this.transientFiles.get(path)!;
+  /**
+   * Trigger debounced backend feature sync (for server mode)
+   * After writing to IndexedDB, schedule a sync to the server
+   *
+   * WARNING: This is currently a no-op placeholder called from 5 production paths
+   * (edge functions, server functions, secrets, scheduled functions, and delete).
+   * In Server Mode, users must manually sync (push) backend features before publishing.
+   * The publish pipeline reads from core SQLite, not IndexedDB.
+   */
+  private triggerServerFeatureSync(_projectId: string): void {
+    // No-op — automatic sync not yet implemented.
+    // Users must manually push backend features via the sync panel before publishing.
   }
 
   /**
    * Create a new server context file (/.server/)
-   * Validates content and creates in site database
-   * On client side, routes through API
+   * Validates content and creates in project stores
    */
   private async createServerContextFile(path: string, content: string): Promise<VirtualFile> {
-    // Try to recover siteId from sessionStorage if not set (HMR resilience)
-    if (!this.serverContextSiteId && typeof sessionStorage !== 'undefined') {
-      const storedSiteId = sessionStorage.getItem('vfs_serverContextSiteId');
-      if (storedSiteId) {
-        logger.info(`[VFS] Recovered serverContextSiteId from sessionStorage: ${storedSiteId}`);
-        this.serverContextSiteId = storedSiteId;
+    if (!this.serverContextProjectId && typeof sessionStorage !== 'undefined') {
+      const storedProjectId = sessionStorage.getItem('vfs_serverContextProjectId');
+      if (storedProjectId) {
+        this.serverContextProjectId = storedProjectId;
       }
     }
 
-    if (!this.serverContextSiteId) {
-      throw new Error('No site selected. Select a site from the Site Selector.');
+    if (!this.serverContextProjectId) {
+      throw new Error('No project server context mounted.');
     }
 
-    // Check if file already exists in transient files
     if (this.transientFiles.has(path)) {
       throw new Error(`File already exists: ${path}`);
     }
 
-    // On client side, use API
-    if (typeof window !== 'undefined') {
-      return await this.mutateServerContextViaAPI('create', path, content);
-    }
-
-    // Server-side: direct implementation
-    // Handle individual secret files
-    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
-      return await this.updateSecretFromFile(path, content);
-    }
-
-    // Handle edge functions
-    if (path.startsWith('/.server/edge-functions/') && path.endsWith('.json')) {
-      return await this.updateEdgeFunctionFromFile(path, content);
-    }
-
-    // Handle server functions
-    if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
-      return await this.updateServerFunctionFromFile(path, content);
-    }
-
-    // Handle scheduled functions
-    if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
-      return await this.updateScheduledFunctionFromFile(path, content);
-    }
-
-    throw new Error(`Cannot create ${path} - only secrets, edge functions, server functions, and scheduled functions (.json) can be created`);
+    // Route to appropriate handler (upsert handles create too)
+    return await this.updateServerContextFile(path, content);
   }
 
   /**
    * Delete a server context file (/.server/)
-   * Deletes from site database
-   * On client side, routes through API
+   * Deletes from project stores
    */
   async deleteServerContextFile(path: string): Promise<void> {
-    // Try to recover siteId from sessionStorage if not set (HMR resilience)
-    if (!this.serverContextSiteId && typeof sessionStorage !== 'undefined') {
-      const storedSiteId = sessionStorage.getItem('vfs_serverContextSiteId');
-      if (storedSiteId) {
-        logger.info(`[VFS] Recovered serverContextSiteId from sessionStorage: ${storedSiteId}`);
-        this.serverContextSiteId = storedSiteId;
+    if (!this.serverContextProjectId && typeof sessionStorage !== 'undefined') {
+      const storedProjectId = sessionStorage.getItem('vfs_serverContextProjectId');
+      if (storedProjectId) {
+        this.serverContextProjectId = storedProjectId;
       }
     }
 
-    if (!this.serverContextSiteId) {
-      throw new Error('No site selected');
+    if (!this.serverContextProjectId) {
+      throw new Error('No project server context mounted.');
     }
 
-    // Cannot delete schema.sql - read-only
     if (path === '/.server/db/schema.sql') {
       throw new Error(`Cannot delete ${path} - read-only file`);
     }
 
-    // On client side, use API for all deletions
-    if (typeof window !== 'undefined') {
-      await this.mutateServerContextViaAPI('delete', path);
-      return;
-    }
+    const projectId = this.serverContextProjectId;
+    const adapter = this.adapter;
+    const filename = path.split('/').pop()!.replace('.json', '');
 
-    // Handle individual secret files
-    if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
-      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
-      const adapter = getSQLiteAdapter();
-      await adapter.init();
-      const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId);
-      if (!siteDb) {
-        throw new Error('Site database not available');
-      }
-
-      const filename = path.split('/').pop()!.replace('.json', '');
-      const secret = siteDb.getSecretByName(filename);
-      if (!secret) {
-        throw new Error(`Secret not found: ${filename}`);
-      }
-
-      siteDb.deleteSecret(secret.id);
-      this.transientFiles.delete(path);
-      return;
-    }
-
-    // Handle edge functions
     if (path.startsWith('/.server/edge-functions/') && path.endsWith('.json')) {
-      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
-      const adapter = getSQLiteAdapter();
-      await adapter.init();
-      const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId);
-      if (!siteDb) {
-        throw new Error('Site database not available');
+      const items = adapter.listEdgeFunctions ? await adapter.listEdgeFunctions(projectId) : [];
+      const item = items.find(f => f.name === filename);
+      if (item && adapter.deleteEdgeFunction) {
+        await adapter.deleteEdgeFunction(item.id);
       }
-
-      const filename = path.split('/').pop()!.replace('.json', '');
-      const fn = siteDb.getFunctionByName(filename);
-      if (!fn) {
-        throw new Error(`Edge function not found: ${filename}`);
+    } else if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
+      const items = adapter.listServerFunctions ? await adapter.listServerFunctions(projectId) : [];
+      const item = items.find(f => f.name === filename);
+      if (item && adapter.deleteServerFunction) {
+        await adapter.deleteServerFunction(item.id);
       }
-
-      siteDb.deleteFunction(fn.id);
-      this.transientFiles.delete(path);
-      return;
+    } else if (path.startsWith('/.server/secrets/') && path.endsWith('.json')) {
+      const items = adapter.listSecrets ? await adapter.listSecrets(projectId) : [];
+      const item = items.find(s => s.name === filename);
+      if (item && adapter.deleteSecret) {
+        await adapter.deleteSecret(item.id);
+      }
+    } else if (path.startsWith('/.server/scheduled-functions/') && path.endsWith('.json')) {
+      const items = adapter.listScheduledFunctions ? await adapter.listScheduledFunctions(projectId) : [];
+      const item = items.find(f => f.name === filename);
+      if (item && adapter.deleteScheduledFunction) {
+        await adapter.deleteScheduledFunction(item.id);
+      }
+    } else {
+      throw new Error(`Cannot delete ${path} - read-only file`);
     }
 
-    // Handle server functions
-    if (path.startsWith('/.server/server-functions/') && path.endsWith('.json')) {
-      const { getSQLiteAdapter } = await import(/* webpackIgnore: true */ './adapters/server');
-      const adapter = getSQLiteAdapter();
-      await adapter.init();
-      const siteDb = adapter.getSiteDatabaseForAnalytics(this.serverContextSiteId);
-      if (!siteDb) {
-        throw new Error('Site database not available');
-      }
-
-      const filename = path.split('/').pop()!.replace('.json', '');
-      const fn = siteDb.getServerFunctionByName(filename);
-      if (!fn) {
-        throw new Error(`Server function not found: ${filename}`);
-      }
-
-      siteDb.deleteServerFunction(fn.id);
-      this.transientFiles.delete(path);
-      return;
-    }
-
-    throw new Error(`Cannot delete ${path} - read-only file`);
+    this.transientFiles.delete(path);
+    this.notifyFilesChanged();
+    this.triggerServerFeatureSync(projectId);
   }
 
   private ensureInitialized() {

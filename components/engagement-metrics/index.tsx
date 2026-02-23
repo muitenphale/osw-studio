@@ -27,10 +27,10 @@ interface EngagementMetrics {
 }
 
 interface EngagementMetricsProps {
-  siteId: string;
+  deploymentId: string;
 }
 
-export function EngagementMetrics({ siteId }: EngagementMetricsProps) {
+export function EngagementMetrics({ deploymentId }: EngagementMetricsProps) {
   const [data, setData] = useState<EngagementMetrics | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +38,7 @@ export function EngagementMetrics({ siteId }: EngagementMetricsProps) {
   const fetchEngagementMetrics = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/analytics/${siteId}/engagement`);
+      const response = await fetch(`/api/analytics/${deploymentId}/engagement`);
       if (!response.ok) throw new Error('Failed to fetch engagement metrics');
 
       const metrics: EngagementMetrics = await response.json();
@@ -54,7 +54,7 @@ export function EngagementMetrics({ siteId }: EngagementMetricsProps) {
   // Load data on mount
   useEffect(() => {
     fetchEngagementMetrics();
-  }, [siteId]);
+  }, [deploymentId]);
 
   // Format duration
   const formatDuration = (ms: number) => {

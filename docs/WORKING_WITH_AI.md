@@ -411,11 +411,11 @@ nothing happens. Can you fix the JavaScript?
 
 ## Server Context (Server Mode Only)
 
-In Server Mode, the AI can understand your published site's server features when you select a site from the dropdown in the workspace header.
+In Server Mode, the AI can understand your published deployment's backend features when you select a deployment from the dropdown in the workspace header.
 
 ### What the AI Knows
 
-When a site is selected, the AI has access to:
+When a deployment is selected, the AI has access to:
 - **Edge Functions** - Available API endpoints
 - **Database Schema** - Tables, columns, and types
 - **Server Functions** - Reusable helper code
@@ -446,9 +446,9 @@ Set up a scheduled function to clean up old records every night at 3am
 
 ### How It Works
 
-OSW Studio mounts a `/.server/` hidden folder containing JSON files with your site's server context. The LLM reads these to understand what's exists and writes to them to extend them.
+OSW Studio mounts a `/.server/` hidden folder containing JSON files with your deployment's backend context. The LLM reads these to understand what's exists and writes to them to extend them.
 
-See **[Server Features → AI Integration](?doc=server-features#ai-integration)** for more details.
+See **[Backend → AI Integration](?doc=backend-features#ai-integration)** for more details.
 
 ---
 

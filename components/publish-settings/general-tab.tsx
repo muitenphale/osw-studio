@@ -13,12 +13,12 @@ interface GeneralTabProps {
   settings: PublishSettings;
   onChange: (settings: PublishSettings) => void;
   projectId: string;
-  siteId: string;
+  deploymentId: string;
   projects?: Project[];
   onProjectChange?: (projectId: string) => void;
 }
 
-export function GeneralTab({ settings, onChange, projectId, siteId, projects, onProjectChange }: GeneralTabProps) {
+export function GeneralTab({ settings, onChange, projectId, deploymentId, projects, onProjectChange }: GeneralTabProps) {
   const [originalProjectId] = useState(projectId);
   const handleChange = (field: keyof PublishSettings, value: any) => {
     onChange({
@@ -27,13 +27,13 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
     });
   };
 
-  // Generate public URL (uses siteId, not projectId!)
+  // Generate public URL (uses deploymentId, not projectId!)
   const publicUrl = settings.customDomain
     ? `https://${settings.customDomain}`
-    : `${typeof window !== 'undefined' ? window.location.origin : ''}/sites/${siteId}`;
+    : `${typeof window !== 'undefined' ? window.location.origin : ''}/deployments/${deploymentId}`;
 
-  // Generate OSW Studio path URL (always show for debugging - uses siteId, not projectId!)
-  const oswStudioUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/sites/${siteId}`;
+  // Generate OSW Studio path URL (always show for debugging - uses deploymentId, not projectId!)
+  const oswStudioUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/deployments/${deploymentId}`;
 
   return (
     <div className="space-y-6">
@@ -49,7 +49,7 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
               Published
             </Label>
             <p className="text-sm text-muted-foreground">
-              Make this site publicly accessible
+              Make this deployment publicly accessible
             </p>
           </div>
           <Switch
@@ -65,7 +65,7 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
               Under Construction
             </Label>
             <p className="text-sm text-muted-foreground">
-              Show maintenance overlay on live site
+              Show maintenance overlay on live deployment
             </p>
           </div>
           <Switch
@@ -98,7 +98,7 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              The project whose files are published to this site.
+              The project whose files are published to this deployment.
             </p>
           </div>
 
@@ -106,7 +106,7 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
             <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
               <div className="text-sm text-yellow-800 dark:text-yellow-200">
-                <p className="font-medium">Changing the source project may break the published site.</p>
+                <p className="font-medium">Changing the source project may break the published deployment.</p>
                 <p className="mt-1 text-yellow-700 dark:text-yellow-300">
                   The new project may have different files and structure. You will need to republish after saving.
                 </p>
@@ -140,7 +140,7 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              This is the public URL where your site will be accessible
+              This is the public URL where your deployment will be accessible
             </p>
           </div>
 
@@ -176,7 +176,7 @@ export function GeneralTab({ settings, onChange, projectId, siteId, projects, on
             onChange={(e) => handleChange('customDomain', e.target.value || undefined)}
           />
           <p className="text-xs text-muted-foreground">
-            Enter your custom domain if you've configured a reverse proxy to point it to this site. This is used for SEO meta tags and sitemaps. See documentation for setup instructions.
+            Enter your custom domain if you've configured a reverse proxy to point it to this deployment. This is used for SEO meta tags and sitemaps. See documentation for setup instructions.
           </p>
         </div>
       </div>

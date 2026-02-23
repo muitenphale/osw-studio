@@ -42,8 +42,8 @@ export interface Project {
   };
 }
 
-// Site - Published version of a project
-export interface Site {
+// Deployment - Published version of a project
+export interface Deployment {
   // Identity
   id: string;
   projectId: string;
@@ -66,7 +66,7 @@ export interface Site {
   lastPublishedVersion?: number;
 
   // Preview
-  previewImage?: string; // base64 data URL of site screenshot
+  previewImage?: string; // base64 data URL of deployment screenshot
   previewUpdatedAt?: Date;
 
   // Database feature (for edge functions - future feature)
@@ -78,7 +78,7 @@ export interface Site {
   publishedAt?: Date | null;
 }
 
-// Legacy: Publish Settings (kept for backward compatibility during transition)
+// Legacy: Publish Settings (kept for backward compatibility)
 export interface PublishSettings {
   // Status
   enabled: boolean;
@@ -353,8 +353,7 @@ export interface CustomTemplate {
   };
   importedAt: Date;
   updatedAt?: Date;
-  templateType?: 'project' | 'site';
-  siteFeatures?: SiteTemplateFeatures;
+  backendFeatures?: BackendFeatures;
 }
 
 export interface LicenseOption {
@@ -366,6 +365,7 @@ export interface LicenseOption {
 // Edge Functions Types
 export interface EdgeFunction {
   id: string;
+  projectId: string;
   name: string;          // URL-safe name (e.g., "products", "get-user")
   description?: string;
   code: string;          // JavaScript code
@@ -406,6 +406,7 @@ export interface ColumnInfo {
 // Server Functions (callable from edge functions)
 export interface ServerFunction {
   id: string;
+  projectId: string;
   name: string;          // Function name (e.g., 'validateAuth', 'formatPrice')
   description?: string;
   code: string;          // JavaScript function body (receives args, has db/fetch access)
@@ -417,17 +418,19 @@ export interface ServerFunction {
 // Secrets (encrypted key-value storage for edge functions)
 export interface Secret {
   id: string;
+  projectId: string;
   name: string;          // e.g., 'STRIPE_API_KEY', 'SENDGRID_KEY'
   description?: string;
   hasValue: boolean;     // true if user has set a value, false if placeholder
+  value?: string;        // Cleartext value for project-level storage (never sent to client in API responses)
   createdAt: Date;
   updatedAt: Date;
-  // Note: value is never exposed in this interface - only stored encrypted
 }
 
 // Scheduled Functions (cron-triggered edge function execution)
 export interface ScheduledFunction {
   id: string;
+  projectId: string;
   name: string;                          // URL-safe: lowercase, numbers, hyphens
   description?: string;
   functionId: string;                     // FK → edge_functions.id
@@ -444,8 +447,8 @@ export interface ScheduledFunction {
   updatedAt: Date;
 }
 
-// Site Template Features (for site templates that include backend infrastructure)
-export interface SiteTemplateFeatures {
+// Backend Features (for templates that include backend infrastructure)
+export interface BackendFeatures {
   edgeFunctions?: Array<{
     name: string;
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'ANY';
@@ -474,7 +477,7 @@ export interface SiteTemplateFeatures {
     enabled?: boolean;
   }>;
   databaseSchema?: string;
-  siteSettings?: Record<string, unknown>;
+  deploymentSettings?: Record<string, unknown>;
 }
 
 export const LICENSE_OPTIONS: LicenseOption[] = [

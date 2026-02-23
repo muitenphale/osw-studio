@@ -53,8 +53,8 @@ For support and self-hosters:
 - **[FAQ](?doc=faq)** - Common questions answered
 - **[Troubleshooting](?doc=troubleshooting)** - Fix common issues
 - **[Server Mode](?doc=server-mode)** - Self-hosting and deployment
-- **[Site Publishing](?doc=site-publishing)** - Analytics, SEO, compliance (Server Mode)
-- **[Server Features](?doc=server-features)** - Database, API endpoints, secrets (Server Mode)
+- **[Deployment Publishing](?doc=site-publishing)** - Analytics, SEO, compliance (Server Mode)
+- **[Backend](?doc=backend-features)** - Database, API endpoints, secrets (Server Mode)
 
 ---
 

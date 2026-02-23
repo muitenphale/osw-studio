@@ -579,3 +579,18 @@ class ConfigManager {
 }
 
 export const configManager = new ConfigManager();
+
+/**
+ * Migrate legacy 'osw-server-features-{id}' localStorage key to 'osw-backend-{id}'
+ * Returns the current backend enabled state for the project.
+ */
+export function migrateBackendKey(projectId: string): boolean {
+  if (typeof window === 'undefined') return true;
+  const legacyKey = `osw-server-features-${projectId}`;
+  const newKey = `osw-backend-${projectId}`;
+  if (localStorage.getItem(legacyKey) && !localStorage.getItem(newKey)) {
+    localStorage.setItem(newKey, localStorage.getItem(legacyKey)!);
+    localStorage.removeItem(legacyKey);
+  }
+  return localStorage.getItem(newKey) !== 'false';
+}

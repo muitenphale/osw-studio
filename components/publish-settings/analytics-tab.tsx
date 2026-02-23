@@ -450,7 +450,7 @@ export function AnalyticsTab({ settings, onChange }: AnalyticsTabProps) {
                 </code>
               </div>
               <p className="text-xs text-muted-foreground">
-                This script will be injected into the &lt;head&gt; section of your site
+                This script will be injected into the &lt;head&gt; section of your deployment
               </p>
             </div>
           )}

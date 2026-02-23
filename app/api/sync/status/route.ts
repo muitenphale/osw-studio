@@ -27,7 +27,7 @@ interface SyncStatusResponse {
     projectCount: number;
     skillCount: number;
     templateCount: number;
-    siteCount: number;
+    deploymentCount: number;
     lastUpdated: string | null;  // Most recent update across all items
     isUninitialized: boolean;    // Server has no projects
   };
@@ -57,7 +57,7 @@ export async function GET(_request: NextRequest) {
     } catch (error) {
       logger.error('[API /api/sync/status] Server adapter initialization failed:', error);
       return NextResponse.json(
-        { error: 'Server mode not configured. Check DATABASE_URL environment variable.' },
+        { error: 'Server mode not configured. Set NEXT_PUBLIC_SERVER_MODE=true to enable.' },
         { status: 500 }
       );
     }
@@ -67,8 +67,8 @@ export async function GET(_request: NextRequest) {
     // Get all projects (lightweight - just metadata)
     const projects = await adapter.listProjects() || [];
 
-    // Get all sites count
-    const sites = adapter.listSites ? await adapter.listSites() : [];
+    // Get all deployments count
+    const deployments = adapter.listDeployments ? await adapter.listDeployments() : [];
 
     // Get all custom skills (excluding built-in)
     const allSkills = await adapter.getAllSkills() || [];
@@ -123,7 +123,7 @@ export async function GET(_request: NextRequest) {
       lastUpdated = sortedTimestamps[0];
     }
 
-    logger.debug(`[API /api/sync/status] Fetched status for ${projectStatuses.length} projects, ${skillStatuses.length} skills, ${templateStatuses.length} templates, ${sites.length} sites`);
+    logger.debug(`[API /api/sync/status] Fetched status for ${projectStatuses.length} projects, ${skillStatuses.length} skills, ${templateStatuses.length} templates, ${deployments.length} deployments`);
 
     const response: SyncStatusResponse = {
       success: true,
@@ -134,7 +134,7 @@ export async function GET(_request: NextRequest) {
         projectCount: projects.length,
         skillCount: customSkills.length,
         templateCount: templates.length,
-        siteCount: sites.length,
+        deploymentCount: deployments.length,
         lastUpdated,
         isUninitialized: projects.length === 0,
       },

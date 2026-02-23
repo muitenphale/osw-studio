@@ -1,7 +1,7 @@
 /**
  * Projects API
  *
- * GET - Returns all projects from PostgreSQL (Server mode)
+ * GET - Returns all projects from SQLite (Server mode)
  */
 
 import { NextRequest, NextResponse } from 'next/server';

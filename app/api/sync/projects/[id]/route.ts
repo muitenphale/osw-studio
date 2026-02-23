@@ -1,7 +1,7 @@
 /**
  * Per-Project Sync API
  *
- * Handles syncing individual projects between browser (IndexedDB) and server (PostgreSQL).
+ * Handles syncing individual projects between browser (IndexedDB) and server (SQLite).
  * POST - Push single project + files to server
  * GET - Pull single project + files from server
  */
@@ -43,7 +43,7 @@ export async function POST(
     } catch (error) {
       logger.error('[API /api/sync/projects/[id] POST] Server adapter initialization failed:', error);
       return NextResponse.json(
-        { error: 'Server mode not configured. Check DATABASE_URL environment variable.' },
+        { error: 'Server mode not configured. Set NEXT_PUBLIC_SERVER_MODE=true to enable.' },
         { status: 500 }
       );
     }
@@ -115,7 +115,7 @@ export async function GET(
     } catch (error) {
       logger.error('[API /api/sync/projects/[id] GET] Server adapter initialization failed:', error);
       return NextResponse.json(
-        { error: 'Server mode not configured. Check DATABASE_URL environment variable.' },
+        { error: 'Server mode not configured. Set NEXT_PUBLIC_SERVER_MODE=true to enable.' },
         { status: 500 }
       );
     }

@@ -1,12 +1,12 @@
 /**
  * Sandboxed Database API for Edge Functions
  *
- * Provides a secure, limited interface to the site's SQLite database
+ * Provides a secure, limited interface to the deployment's SQLite database
  * for use within edge functions. Blocks access to system tables and
  * enforces query limits.
  */
 
-import { SiteDatabase } from '@/lib/vfs/adapters/site-database';
+import { RuntimeDatabase } from '@/lib/vfs/adapters/runtime-database';
 import { DatabaseAPI, DatabaseAPIOptions } from './types';
 
 /**
@@ -41,12 +41,12 @@ const DANGEROUS_KEYWORDS = ['attach', 'detach', 'vacuum', 'reindex'];
 /**
  * Create a sandboxed database API for edge function use
  *
- * @param siteDb The site's database instance
+ * @param deploymentDb The deployment's database instance
  * @param options Configuration options
  * @returns A DatabaseAPI that enforces security restrictions
  */
 export function createDatabaseAPI(
-  siteDb: SiteDatabase,
+  deploymentDb: RuntimeDatabase,
   options: DatabaseAPIOptions = {}
 ): DatabaseAPI {
   let queryCount = 0;
@@ -100,7 +100,7 @@ export function createDatabaseAPI(
     validateSQL(sql);
 
     try {
-      const result = siteDb.executeRawSQL(sql, params);
+      const result = deploymentDb.executeRawSQL(sql, params);
 
       // Convert row arrays to objects
       return result.rows.map(row => {
@@ -128,7 +128,7 @@ export function createDatabaseAPI(
     }
 
     try {
-      const result = siteDb.executeRawSQL(sql, params);
+      const result = deploymentDb.executeRawSQL(sql, params);
       return {
         changes: result.rowsAffected,
         lastInsertRowid: 0, // SQLite doesn't expose this through our API currently

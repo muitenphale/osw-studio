@@ -116,27 +116,27 @@ async function getDirectorySize(dirPath: string): Promise<number> {
   return totalSize;
 }
 
-// Count SQLite files in sites directory
-async function countSiteDatabases(): Promise<number> {
-  const sitesDir = path.join(process.cwd(), 'sites');
+// Count SQLite files in deployments directory (deployment databases)
+async function countDeploymentDatabases(): Promise<number> {
+  const deploymentsDir = path.join(process.cwd(), 'deployments');
   let count = 0;
 
   try {
-    const entries = await fs.readdir(sitesDir, { withFileTypes: true });
+    const entries = await fs.readdir(deploymentsDir, { withFileTypes: true });
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const dbPath = path.join(sitesDir, entry.name, 'site.sqlite');
+        const dbPath = path.join(deploymentsDir, entry.name, 'runtime.sqlite');
         try {
           await fs.access(dbPath);
           count++;
         } catch {
-          // No database for this site
+          // No database for this deployment
         }
       }
     }
   } catch {
-    // Sites directory doesn't exist
+    // Deployments directory doesn't exist
   }
 
   return count;
@@ -171,7 +171,7 @@ export async function GET() {
       skillCount,
       fileCount,
       publishedSiteCount,
-      sitesWithDb,
+      deploymentsWithDb,
       storageSize,
       trafficStats,
       whatsNew,
@@ -181,19 +181,19 @@ export async function GET() {
       Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM custom_templates').get() as { count: number }).count),
       Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM skills').get() as { count: number }).count),
       Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM files').get() as { count: number }).count),
-      Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM sites WHERE published_at IS NOT NULL').get() as { count: number }).count),
-      countSiteDatabases(),
-      getDirectorySize(path.join(process.cwd(), 'public', 'sites')),
+      Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM deployments WHERE published_at IS NOT NULL').get() as { count: number }).count),
+      countDeploymentDatabases(),
+      getDirectorySize(path.join(process.cwd(), 'public', 'deployments')),
       Promise.resolve(getRequestStats(24)),
       getWhatsNew(),
     ]);
 
-    // Get site names for top sites
-    const topSitesWithNames = trafficStats.topSites.map((site) => {
-      const siteInfo = db.prepare('SELECT name FROM sites WHERE id = ?').get(site.siteId) as { name: string } | undefined;
+    // Get deployment names for top deployments
+    const topDeploymentsWithNames = trafficStats.topDeployments.map((deployment) => {
+      const deploymentInfo = db.prepare('SELECT name FROM deployments WHERE id = ?').get(deployment.deploymentId) as { name: string } | undefined;
       return {
-        ...site,
-        siteName: siteInfo?.name || site.siteId.substring(0, 8),
+        ...deployment,
+        deploymentName: deploymentInfo?.name || deployment.deploymentId.substring(0, 8),
       };
     });
 
@@ -205,10 +205,10 @@ export async function GET() {
       LIMIT 5
     `).all() as Array<{ id: string; name: string; description: string | null; updatedAt: string }>;
 
-    // Get recent sites (last 5 by updated_at)
-    const recentSites = db.prepare(`
+    // Get recent deployments (last 5 by updated_at)
+    const recentDeployments = db.prepare(`
       SELECT id, name, slug, enabled, published_at as publishedAt, updated_at as updatedAt
-      FROM sites
+      FROM deployments
       ORDER BY updated_at DESC
       LIMIT 5
     `).all() as Array<{ id: string; name: string; slug: string; enabled: number; publishedAt: string | null; updatedAt: string }>;
@@ -231,22 +231,22 @@ export async function GET() {
         totalFiles: fileCount,
       },
       hosting: {
-        publishedSites: publishedSiteCount,
-        sitesWithDb,
+        publishedDeployments: publishedSiteCount,
+        deploymentsWithDb,
         storageUsed: storageSize,
       },
       traffic: {
         requestsLastHour: trafficStats.requestsLastHour,
         requestsLastDay: trafficStats.requestsLastDay,
         errorCount: trafficStats.errorCount,
-        topSites: topSitesWithNames,
+        topDeployments: topDeploymentsWithNames,
         recentErrors: trafficStats.recentErrors,
       },
       whatsNew,
       recentProjects,
-      recentSites: recentSites.map(site => ({
-        ...site,
-        enabled: Boolean(site.enabled),
+      recentDeployments: recentDeployments.map(deployment => ({
+        ...deployment,
+        enabled: Boolean(deployment.enabled),
       })),
     });
 

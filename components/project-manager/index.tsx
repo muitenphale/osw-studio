@@ -34,12 +34,16 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import {
   BAREBONES_PROJECT_TEMPLATE,
   DEMO_PROJECT_TEMPLATE,
+  CONTACT_LANDING_PROJECT_TEMPLATE,
+  BLOG_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   type AssetConfig,
-  BUILT_IN_TEMPLATES
+  BUILT_IN_TEMPLATES,
+  type BuiltInTemplateMetadata
 } from '@/lib/vfs/project-templates';
 import {
   Select,
@@ -57,8 +61,9 @@ import {
 } from '@/components/ui/popover';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
-import { configManager } from '@/lib/config/storage';
+import { configManager, migrateBackendKey } from '@/lib/config/storage';
 import { TemplateExportDialog } from '@/components/templates/template-export-dialog';
+import { ProjectBackendModal } from '@/components/project-backend';
 
 interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
@@ -95,6 +100,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
+  const [backendProject, setBackendProject] = useState<Project | null>(null);
   const { state: tourState, setProjectList, start: startTour, setTourDemoProjectId } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
@@ -102,6 +108,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [tourActionProjectId, setTourActionProjectId] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const demoCreationRef = useRef(false);
+
+  // Derive backend enabled state from localStorage
+  const backendProjectEnabled = backendProject ? migrateBackendKey(backendProject.id) : true;
 
   const loadCustomTemplates = useCallback(async () => {
     try {
@@ -289,10 +298,28 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
           case 'demo':
             await createProjectFromTemplate(vfs, project.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
             break;
+          case 'contact-landing':
+            await createProjectFromTemplate(vfs, project.id, CONTACT_LANDING_PROJECT_TEMPLATE);
+            break;
+          case 'blog':
+            await createProjectFromTemplate(vfs, project.id, BLOG_PROJECT_TEMPLATE);
+            break;
           case 'blank':
           default:
             await createProjectFromTemplate(vfs, project.id, BAREBONES_PROJECT_TEMPLATE);
             break;
+        }
+      }
+
+      // Provision backend features if the selected template has them
+      const builtInTemplate = BUILT_IN_TEMPLATES.find(t => t.id === newProjectTemplate) as BuiltInTemplateMetadata | undefined;
+      const backendFeatures = builtInTemplate?.backendFeatures;
+      if (backendFeatures) {
+        try {
+          await provisionBackendFeatures(project.id, backendFeatures);
+        } catch (provisionError) {
+          logger.error('Failed to provision backend features:', provisionError);
+          toast.warning('Project created but backend features provisioning failed.');
         }
       }
 
@@ -316,6 +343,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
 
     try {
       await vfs.deleteProject(project.id);
+      localStorage.removeItem(`osw-db-schema-${project.id}`);
       toast.success('Project deleted');
       await reloadProjects();
     } catch (error) {
@@ -577,6 +605,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                           onDuplicate={duplicateProject}
                           onPreview={setPreviewProject}
                           onExportAsTemplate={setTemplateExportProject}
+                          onBackend={setBackendProject}
                           onUpdate={async (updatedProject) => {
                             // Update IndexedDB to persist changes
                             await vfs.updateProject(updatedProject);
@@ -764,6 +793,21 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
           if (!open) setTemplateExportProject(null);
         }}
       />
+
+      {/* Backend Modal */}
+      {backendProject && (
+        <ProjectBackendModal
+          projectId={backendProject.id}
+          projectName={backendProject.name}
+          isOpen={true}
+          onClose={() => setBackendProject(null)}
+          enabled={backendProjectEnabled}
+          onToggleEnabled={(enabled) => {
+            localStorage.setItem(`osw-backend-${backendProject.id}`, String(enabled));
+            setBackendProject({ ...backendProject }); // Force re-derive enabled state
+          }}
+        />
+      )}
 
       {/* About Modal */}
       <AboutModal

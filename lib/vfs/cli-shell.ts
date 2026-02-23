@@ -867,18 +867,18 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
       }
       case 'sqlite3': {
-        // This case is reached when sqlite3 is called without a siteId context
-        // When siteId is available, tool-registry.ts routes the call to the server API
+        // This case is reached when sqlite3 is called without a deploymentId context
+        // When deploymentId is available, tool-registry.ts routes the call to the server API
         return {
           stdout: '',
-          stderr: `sqlite3: requires Server Mode with a published site
+          stderr: `sqlite3: requires Server Mode with a published deployment
 
 The sqlite3 command requires:
 1. Server Mode (not Browser Mode)
-2. A site to be selected and published
+2. A deployment to be selected and published
 
-If you are in Server Mode with a published site, this error indicates the site context is not set.
-Please ensure the site is selected in the workspace before using sqlite3.
+If you are in Server Mode with a published deployment, this error indicates the deployment context is not set.
+Please ensure the deployment is selected in the workspace before using sqlite3.
 
 Alternative: Use edge functions for database access via db.query() and db.run()`,
           exitCode: 1
@@ -920,7 +920,7 @@ Correct shell tool usage:
   {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 
 Note: Use json_patch tool for file editing. Use rg (ripgrep) instead of grep for better context management.
-Note: sqlite3 is only available in Server Mode and when a site context is selected.`,
+Note: sqlite3 is only available in Server Mode and when a deployment context is selected.`,
           exitCode: 127
         };
       }

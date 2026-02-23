@@ -1,5 +1,5 @@
 /**
- * Static Site Builder
+ * Static Deployment Builder
  *
  * Compiles projects from SQLite using VirtualServer (Handlebars rendering)
  * and writes compiled static files to public directory
@@ -9,14 +9,15 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createServerAdapter } from '@/lib/vfs/adapters/server';
 import { VirtualServer } from '@/lib/preview/virtual-server';
-import { VirtualFile, FileTreeNode } from '@/lib/vfs/types';
+import { VirtualFile, FileTreeNode, Deployment } from '@/lib/vfs/types';
 import { logger } from '@/lib/utils';
 import { processHtml } from '@/lib/publishing/html-processor';
 import { generateSitemap, generateRobotsTxt } from '@/lib/publishing/seo-generator';
+import { extractBackendFeatures } from './backend-feature-extractor';
 
 export interface BuildResult {
   success: boolean;
-  siteId: string;
+  deploymentId: string;
   projectId: string;
   filesWritten: number;
   outputPath: string;
@@ -75,51 +76,51 @@ function createServerVfs(
 }
 
 /**
- * Build a static site from a site entity
+ * Build a static deployment from a deployment entity
  * Uses VirtualServer to compile Handlebars templates (same as export)
  */
-export async function buildStaticSite(siteId: string): Promise<BuildResult> {
+export async function buildStaticDeployment(deploymentId: string): Promise<BuildResult> {
   try {
     const adapter = await createServerAdapter();
     await adapter.init();
 
-    // Get site
-    const site = await adapter.getSite?.(siteId);
-    if (!site) {
+    // Get deployment
+    const deployment = await adapter.getDeployment?.(deploymentId);
+    if (!deployment) {
       await adapter.close?.();
-      logger.error(`[Static Builder] Site ${siteId} not found in database`);
+      logger.error(`[Static Builder] Deployment ${deploymentId} not found in database`);
       return {
         success: false,
-        siteId,
+        deploymentId,
         projectId: '',
         filesWritten: 0,
         outputPath: '',
-        error: 'Site not found',
+        error: 'Deployment not found',
       };
     }
 
     // Get project
-    const project = await adapter.getProject(site.projectId);
+    const project = await adapter.getProject(deployment.projectId);
     if (!project) {
       await adapter.close?.();
-      logger.error(`[Static Builder] Project ${site.projectId} not found in database`);
+      logger.error(`[Static Builder] Project ${deployment.projectId} not found in database`);
       return {
         success: false,
-        siteId,
-        projectId: site.projectId,
+        deploymentId,
+        projectId: deployment.projectId,
         filesWritten: 0,
         outputPath: '',
         error: 'Project not found',
       };
     }
 
-    // Check if under construction - if so, replace entire site with construction page
-    if (site.underConstruction) {
+    // Check if under construction - if so, replace entire deployment with construction page
+    if (deployment.underConstruction) {
 
       await adapter.close?.();
 
-      // Output directory: public/sites/[siteId]
-      const outputDir = path.join(process.cwd(), 'public', 'sites', siteId);
+      // Output directory: public/deployments/[deploymentId]
+      const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
 
       // Clean existing output directory
       try {
@@ -132,28 +133,28 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
       await fs.mkdir(outputDir, { recursive: true });
 
       // Generate and write under construction page as index.html
-      const constructionHtml = generateUnderConstructionHtml(site.name);
+      const constructionHtml = generateUnderConstructionHtml(deployment.name);
       await fs.writeFile(path.join(outputDir, 'index.html'), constructionHtml, 'utf-8');
 
-      logger.info(`[Static Builder] Built under construction page for site ${siteId}`);
+      logger.info(`[Static Builder] Built under construction page for deployment ${deploymentId}`);
 
       return {
         success: true,
-        siteId,
-        projectId: site.projectId,
+        deploymentId,
+        projectId: deployment.projectId,
         filesWritten: 1,
-        outputPath: `/sites/${siteId}`,
+        outputPath: `/deployments/${deploymentId}`,
       };
     }
 
     // Get all files from SQLite
-    const allFiles = await adapter.listFiles(site.projectId);
+    const allFiles = await adapter.listFiles(deployment.projectId);
 
     // Create a minimal VFS-like wrapper for server-side compilation
-    const serverVfs = createServerVfs(site.projectId, allFiles);
+    const serverVfs = createServerVfs(deployment.projectId, allFiles);
 
     // Compile project using VirtualServer (renders Handlebars templates)
-    const server = new VirtualServer(serverVfs as any, site.projectId);
+    const server = new VirtualServer(serverVfs as any, deployment.projectId);
     const compiledProject = await server.compileProject();
 
     await adapter.close?.();
@@ -164,23 +165,23 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
       blobUrlToPath.set(blobUrl, filePath);
     }
 
-    // Determine base URL for published site
-    const baseUrl = site.customDomain
-      ? `https://${site.customDomain}`
-      : `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/sites/${siteId}`;
+    // Determine base URL for published deployment
+    const baseUrl = deployment.customDomain
+      ? `https://${deployment.customDomain}`
+      : `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/deployments/${deploymentId}`;
 
     // Post-process files to replace asset references with absolute paths
-    // and apply Site settings (scripts, CDN, SEO, etc.)
+    // and apply deployment settings (scripts, CDN, SEO, etc.)
     const htmlFiles: string[] = [];
     for (const file of compiledProject.files) {
       if (typeof file.content === 'string') {
         // Replace both blob URLs and file path references with absolute paths
-        file.content = replaceAssetPathsWithSitePrefix(
+        file.content = replaceAssetPathsWithDeploymentPrefix(
           file.content,
           blobUrlToPath,
           allFiles,
-          siteId,
-          site.customDomain
+          deploymentId,
+          deployment.customDomain
         );
 
         // Remove VFS interceptor script from HTML files
@@ -188,31 +189,31 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
           file.content = removeVfsInterceptor(file.content);
           htmlFiles.push(file.path);
 
-          // Apply Site settings to HTML files
+          // Apply deployment settings to HTML files
           file.content = processHtml(file.content, {
             publishSettings: {
-              enabled: site.enabled,
-              underConstruction: site.underConstruction,
-              customDomain: site.customDomain,
-              headScripts: site.headScripts,
-              bodyScripts: site.bodyScripts,
-              cdnLinks: site.cdnLinks,
-              analytics: site.analytics,
-              seo: site.seo,
-              compliance: site.compliance,
-              settingsVersion: site.settingsVersion,
-              lastPublishedVersion: site.lastPublishedVersion,
+              enabled: deployment.enabled,
+              underConstruction: deployment.underConstruction,
+              customDomain: deployment.customDomain,
+              headScripts: deployment.headScripts,
+              bodyScripts: deployment.bodyScripts,
+              cdnLinks: deployment.cdnLinks,
+              analytics: deployment.analytics,
+              seo: deployment.seo,
+              compliance: deployment.compliance,
+              settingsVersion: deployment.settingsVersion,
+              lastPublishedVersion: deployment.lastPublishedVersion,
             },
-            projectId: site.projectId,
+            projectId: deployment.projectId,
             baseUrl,
-            siteId,
+            deploymentId,
           });
         }
       }
     }
 
-    // Output directory: public/sites/[siteId]
-    const outputDir = path.join(process.cwd(), 'public', 'sites', siteId);
+    // Output directory: public/deployments/[deploymentId]
+    const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
 
     // Clean existing output directory
     try {
@@ -258,17 +259,17 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
         baseUrl,
         htmlFiles,
         publishSettings: {
-          enabled: site.enabled,
-          underConstruction: site.underConstruction,
-          customDomain: site.customDomain,
-          headScripts: site.headScripts,
-          bodyScripts: site.bodyScripts,
-          cdnLinks: site.cdnLinks,
-          analytics: site.analytics,
-          seo: site.seo,
-          compliance: site.compliance,
-          settingsVersion: site.settingsVersion,
-          lastPublishedVersion: site.lastPublishedVersion,
+          enabled: deployment.enabled,
+          underConstruction: deployment.underConstruction,
+          customDomain: deployment.customDomain,
+          headScripts: deployment.headScripts,
+          bodyScripts: deployment.bodyScripts,
+          cdnLinks: deployment.cdnLinks,
+          analytics: deployment.analytics,
+          seo: deployment.seo,
+          compliance: deployment.compliance,
+          settingsVersion: deployment.settingsVersion,
+          lastPublishedVersion: deployment.lastPublishedVersion,
         },
       });
       await fs.writeFile(path.join(outputDir, 'sitemap.xml'), sitemapContent, 'utf-8');
@@ -279,29 +280,39 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
     const robotsContent = generateRobotsTxt({
       baseUrl,
       publishSettings: {
-        enabled: site.enabled,
-        underConstruction: site.underConstruction,
-        customDomain: site.customDomain,
-        headScripts: site.headScripts,
-        bodyScripts: site.bodyScripts,
-        cdnLinks: site.cdnLinks,
-        analytics: site.analytics,
-        seo: site.seo,
-        compliance: site.compliance,
-        settingsVersion: site.settingsVersion,
-        lastPublishedVersion: site.lastPublishedVersion,
+        enabled: deployment.enabled,
+        underConstruction: deployment.underConstruction,
+        customDomain: deployment.customDomain,
+        headScripts: deployment.headScripts,
+        bodyScripts: deployment.bodyScripts,
+        cdnLinks: deployment.cdnLinks,
+        analytics: deployment.analytics,
+        seo: deployment.seo,
+        compliance: deployment.compliance,
+        settingsVersion: deployment.settingsVersion,
+        lastPublishedVersion: deployment.lastPublishedVersion,
       },
     });
     await fs.writeFile(path.join(outputDir, 'robots.txt'), robotsContent, 'utf-8');
     filesWritten++;
 
+    // Extract backend features from project → deployment runtime database
+    const extractionResult = await extractBackendFeatures(deployment.projectId, deploymentId);
+    if (extractionResult.errors.length > 0) {
+      logger.warn('[Static Builder] Backend feature extraction warnings:', extractionResult.errors);
+    }
+    if (extractionResult.edgeFunctions > 0 || extractionResult.serverFunctions > 0 ||
+        extractionResult.secrets > 0 || extractionResult.scheduledFunctions > 0) {
+      logger.info(`[Static Builder] Backend features provisioned: ${extractionResult.edgeFunctions} edge functions, ${extractionResult.serverFunctions} server functions, ${extractionResult.secrets} secrets, ${extractionResult.scheduledFunctions} scheduled functions`);
+    }
+
     // Update lastPublishedVersion after successful build
     const adapter2 = await createServerAdapter();
     await adapter2.init();
-    if (adapter2.updateSite) {
-      await adapter2.updateSite({
-        ...site,
-        lastPublishedVersion: site.settingsVersion,
+    if (adapter2.updateDeployment) {
+      await adapter2.updateDeployment({
+        ...deployment,
+        lastPublishedVersion: deployment.settingsVersion,
         publishedAt: new Date(),
       });
     }
@@ -310,20 +321,20 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
     // Clean up VirtualServer resources
     server.cleanupBlobUrls();
 
-    logger.info(`[Static Builder] Build complete: ${filesWritten} files written to /sites/${siteId}`);
+    logger.info(`[Static Builder] Build complete: ${filesWritten} files written to /deployments/${deploymentId}`);
 
     return {
       success: true,
-      siteId,
-      projectId: site.projectId,
+      deploymentId,
+      projectId: deployment.projectId,
       filesWritten,
-      outputPath: `/sites/${siteId}`,
+      outputPath: `/deployments/${deploymentId}`,
     };
   } catch (error) {
     logger.error('[Static Builder] Build failed:', error);
     return {
       success: false,
-      siteId: siteId || '',
+      deploymentId: deploymentId || '',
       projectId: '',
       filesWritten: 0,
       outputPath: '',
@@ -333,15 +344,15 @@ export async function buildStaticSite(siteId: string): Promise<BuildResult> {
 }
 
 /**
- * Clean up static files for a site
+ * Clean up static files for a deployment
  */
-export async function cleanStaticSite(siteId: string): Promise<boolean> {
+export async function cleanStaticDeployment(deploymentId: string): Promise<boolean> {
   try {
-    const outputDir = path.join(process.cwd(), 'public', 'sites', siteId);
+    const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
     await fs.rm(outputDir, { recursive: true, force: true });
     return true;
   } catch (error) {
-    logger.error('[Static Builder] Error cleaning site:', error);
+    logger.error('[Static Builder] Error cleaning deployment:', error);
     return false;
   }
 }
@@ -369,21 +380,21 @@ function shouldExcludeFromExport(filePath: string): boolean {
 }
 
 /**
- * Replace both blob URLs and file path references with site-prefixed absolute paths
+ * Replace both blob URLs and file path references with deployment-prefixed absolute paths
  */
-function replaceAssetPathsWithSitePrefix(
+function replaceAssetPathsWithDeploymentPrefix(
   content: string,
   blobUrlToPath: Map<string, string>,
   allFiles: VirtualFile[],
-  siteId: string,
+  deploymentId: string,
   customDomain?: string
 ): string {
   let result = content;
 
   // Determine path prefix based on custom domain
   // If custom domain is set, use root-relative paths (e.g., /styles/main.css)
-  // If no custom domain, use site-prefixed paths (e.g., /sites/{siteId}/styles/main.css)
-  const pathPrefix = customDomain ? '' : `/sites/${siteId}`;
+  // If no custom domain, use deployment-prefixed paths (e.g., /deployments/{deploymentId}/styles/main.css)
+  const pathPrefix = customDomain ? '' : `/deployments/${deploymentId}`;
 
   // First, replace all blob URLs with appropriate paths
   for (const [blobUrl, filePath] of blobUrlToPath) {
@@ -391,7 +402,7 @@ function replaceAssetPathsWithSitePrefix(
     result = result.replace(new RegExp(escapeRegex(blobUrl), 'g'), absolutePath);
   }
 
-  // Helper to check if path is already prefixed with site path
+  // Helper to check if path is already prefixed with deployment path
   const isAlreadyPrefixed = (path: string) =>
     pathPrefix && path.startsWith(pathPrefix);
 
@@ -439,7 +450,7 @@ function replaceAssetPathsWithSitePrefix(
     }
   );
 
-  // Handle root path href="/" - rewrite to site prefix
+  // Handle root path href="/" - rewrite to deployment prefix
   if (pathPrefix) {
     result = result.replace(
       /href=(["'])\/\1/g,
@@ -626,23 +637,23 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Get the primary published site ID
- * Returns the first enabled site
+ * Get the primary published deployment ID
+ * Returns the first enabled deployment
  */
-export async function getPrimaryPublishedSiteId(): Promise<string | null> {
+export async function getPrimaryPublishedDeploymentId(): Promise<string | null> {
   try {
     const adapter = await createServerAdapter();
     await adapter.init();
 
-    const sites = await adapter.listSites?.() || [];
-    // Find the first enabled site
-    const enabledSite = sites.find((s) => s.enabled === true);
+    const deployments = await adapter.listDeployments?.() || [];
+    // Find the first enabled deployment
+    const enabledDeployment = deployments.find((s: Deployment) => s.enabled === true);
 
     await adapter.close?.();
 
-    return enabledSite?.id || null;
+    return enabledDeployment?.id || null;
   } catch (error) {
-    logger.error('[Static Builder] Error getting published site:', error);
+    logger.error('[Static Builder] Error getting published deployment:', error);
     return null;
   }
 }

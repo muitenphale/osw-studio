@@ -2,8 +2,8 @@ import { skillsService } from '@/lib/vfs/skills';
 
 // Server context metadata type (matches VFS.getServerContextMetadata())
 export interface ServerContextMetadata {
-  siteName: string;
-  siteId: string;
+  projectId: string;
+  runtimeDeploymentId?: string;
   hasDatabase: boolean;
   edgeFunctionCount: number;
   serverFunctionCount: number;
@@ -28,9 +28,14 @@ export async function buildShellSystemPrompt(fileTree?: string, chatMode?: boole
  * Build the server context section for the system prompt
  */
 function buildServerContextSection(serverContext: ServerContextMetadata): string {
-  let section = `\n\n🖥️ SERVER CONTEXT - Site "${serverContext.siteName}":\n`;
-  section += `This project is linked to a site with server-side features.\n\n`;
-  section += `Available Server Features:\n`;
+  let section = `\n\n🖥️ BACKEND FEATURES:\n`;
+  section += `This project has backend features defined.\n`;
+  if (serverContext.runtimeDeploymentId) {
+    section += `Runtime deployment connected — sqlite3 commands available.\n`;
+  } else {
+    section += `No runtime deployment connected. Define backend features here. Deploy to execute them and use sqlite3.\n`;
+  }
+  section += `\nAvailable Backend Features:\n`;
 
   if (serverContext.hasDatabase) {
     section += `• Database: SQLite database accessible via sqlite3 shell command\n`;
@@ -54,7 +59,7 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
   // Add prominent sqlite3 section when database is available
   if (serverContext.hasDatabase) {
     section += `\n## 🗄️ DATABASE COMMANDS (sqlite3)\n`;
-    section += `Use the sqlite3 shell command to query/modify the site database:\n\n`;
+    section += `Use the sqlite3 shell command to query/modify the deployment database:\n\n`;
     section += `⚠️ CRITICAL: Put the COMPLETE SQL query in double quotes after sqlite3. Examples:\n\n`;
     section += `  # List all tables\n`;
     section += `  sqlite3 "SELECT name FROM sqlite_master WHERE type='table'"\n\n`;
@@ -88,7 +93,7 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
   section += `IMPORTANT: In HTML/JS, use simple paths — the platform auto-routes to the correct API endpoint:\n`;
   section += `  fetch('/list-products')  // CORRECT\n`;
   section += `  fetch('/create-order', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})  // CORRECT\n`;
-  section += `  fetch('/api/sites/.../functions/list-products')  // WRONG - never hardcode site IDs\n`;
+  section += `  fetch('/api/deployments/.../functions/list-products')  // WRONG - never hardcode deployment IDs\n`;
 
   section += `\n## Creating Server Functions\n`;
   section += `  json_patch /.server/server-functions/formatPrice.json rewrite '{"name":"formatPrice","enabled":true,"code":"const [amount, currency] = args; return currency + amount.toFixed(2);"}'\n`;

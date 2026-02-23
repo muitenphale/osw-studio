@@ -1,7 +1,7 @@
 /**
  * Files Sync API Route
  *
- * Handles syncing files between browser (IndexedDB) and server (PostgreSQL)
+ * Handles syncing files between browser (IndexedDB) and server (SQLite)
  * GET: Pull files for a project from server → browser
  * POST: Push files for a project from browser → server
  */

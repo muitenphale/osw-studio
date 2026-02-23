@@ -94,7 +94,7 @@ export interface EnhancedSyncStatusResponse {
     projectCount: number;
     skillCount: number;
     templateCount: number;
-    siteCount: number;
+    deploymentCount: number;
     lastUpdated: string | null;
     isUninitialized: boolean;
   };

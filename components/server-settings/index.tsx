@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Site } from '@/lib/vfs/types';
+import { Deployment } from '@/lib/vfs/types';
 import {
   Dialog,
   DialogContent,
@@ -12,24 +12,24 @@ import {
 import { DatabaseManager } from '@/components/database-manager';
 
 interface ServerSettingsModalProps {
-  site: Site;
+  deployment: Deployment;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function ServerSettingsModal({ site, isOpen, onClose }: ServerSettingsModalProps) {
+export function ServerSettingsModal({ deployment, isOpen, onClose }: ServerSettingsModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-4xl h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Server Settings</DialogTitle>
           <DialogDescription>
-            Manage database, edge functions, and secrets for {site.name}
+            Manage database, edge functions, and secrets for {deployment.name}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden">
-          <DatabaseManager siteId={site.id} />
+          <DatabaseManager deploymentId={deployment.id} />
         </div>
       </DialogContent>
     </Dialog>

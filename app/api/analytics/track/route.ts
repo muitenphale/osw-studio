@@ -27,7 +27,7 @@ import {
 } from '@/lib/analytics/security';
 
 interface PageviewData {
-  siteId: string;
+  deploymentId: string;
   pagePath: string;
   referrer: string;
   userAgent: string;
@@ -38,7 +38,7 @@ interface PageviewData {
 export async function POST(request: NextRequest) {
   try {
     const body: PageviewData = await request.json();
-    const { siteId, pagePath, referrer, userAgent, deviceType } = body;
+    const { deploymentId, pagePath, referrer, userAgent, deviceType } = body;
 
     // 1. Rate Limiting Check
     const identifier = getIdentifier(request);
@@ -67,9 +67,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Validate required fields
-    if (!siteId || !pagePath) {
+    if (!deploymentId || !pagePath) {
       return NextResponse.json(
-        { error: 'Missing required fields: siteId, pagePath' },
+        { error: 'Missing required fields: deploymentId, pagePath' },
         { status: 400 }
       );
     }
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     // 3. Anomaly Detection - Check for suspicious data
     if (isSuspiciousRequest({ pagePath, referrer, userAgent })) {
       console.warn('[Analytics] Suspicious request detected:', {
-        siteId,
+        deploymentId,
         pagePath,
         ip: identifier,
       });
@@ -96,28 +96,28 @@ export async function POST(request: NextRequest) {
     const adapter = getSQLiteAdapter();
     await adapter.init();
 
-    // 5. Verify site exists (from core database)
-    const site = await adapter.getSite(siteId);
-    if (!site) {
+    // 5. Verify deployment exists (from core database)
+    const deployment = await adapter.getDeployment(deploymentId);
+    if (!deployment) {
       return NextResponse.json(
-        { error: 'Site not found' },
+        { error: 'Deployment not found' },
         { status: 404 }
       );
     }
 
-    // 6. Check if analytics is enabled for this site
-    if (!site.analytics.enabled || site.analytics.provider !== 'builtin') {
+    // 6. Check if analytics is enabled for this deployment
+    if (!deployment.analytics.enabled || deployment.analytics.provider !== 'builtin') {
       return NextResponse.json(
-        { error: 'Built-in analytics not enabled for this site' },
+        { error: 'Built-in analytics not enabled for this deployment' },
         { status: 403 }
       );
     }
 
-    // 6b. Check if site database is enabled (created when site is published)
-    const siteDb = adapter.getSiteDatabaseForAnalytics(siteId);
-    if (!siteDb) {
+    // 6b. Check if deployment database is enabled (created when deployment is published)
+    const deploymentDb = adapter.getAnalyticsDatabaseInstance(deploymentId);
+    if (!deploymentDb) {
       return NextResponse.json(
-        { error: 'Site database not enabled' },
+        { error: 'Deployment database not enabled' },
         { status: 404 }
       );
     }
@@ -126,13 +126,13 @@ export async function POST(request: NextRequest) {
     // This is our main defense against abuse. Unlike Google Analytics (which must accept
     // requests from any domain), we only accept requests from our own domain paths.
     // Browser security prevents attackers from spoofing Origin/Referer across domains.
-    const allowedOrigins = getAllowedOrigins(siteId, site.customDomain);
+    const allowedOrigins = getAllowedOrigins(deploymentId, deployment.customDomain);
     if (!validateOrigin(request, allowedOrigins)) {
       console.warn('[Analytics] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         referer: request.headers.get('referer'),
         allowedOrigins,
-        siteId,
+        deploymentId,
         ip: identifier,
       });
       return NextResponse.json(
@@ -154,8 +154,8 @@ export async function POST(request: NextRequest) {
     // Normalize path for consistent tracking
     const normalizedPath = normalizePath(pagePath);
 
-    // Record pageview using SiteDatabase
-    siteDb.recordPageview({
+    // Record pageview using DeploymentDatabase
+    deploymentDb.recordPageview({
       pagePath: normalizedPath,
       referrer: referrer || undefined,
       country: country || undefined,
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Upsert session record
-    siteDb.upsertSession(sessionId, normalizedPath);
+    deploymentDb.upsertSession(sessionId, normalizedPath);
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -231,7 +231,7 @@ async function getCountryFromIP(request: NextRequest): Promise<string | null> {
  * Normalize page path for consistent tracking
  * - Strips trailing slashes
  * - Converts directory paths to index.html
- * Example: /sites/abc/ -> /sites/abc/index.html
+ * Example: /deployments/abc/ -> /deployments/abc/index.html
  */
 function normalizePath(path: string): string {
   if (!path || path === '/') return '/index.html';

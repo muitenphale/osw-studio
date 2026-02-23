@@ -719,6 +719,124 @@ export class SyncManager {
   }
 
   // ============================================
+  // Backend Features Sync (Project-scoped)
+  // ============================================
+
+  /**
+   * Push backend features from IndexedDB to server (core SQLite)
+   * Called after backend feature modifications in the workspace
+   */
+  async pushBackendFeatures(
+    projectId: string,
+    features?: {
+      edgeFunctions: import('./types').EdgeFunction[];
+      serverFunctions: import('./types').ServerFunction[];
+      secrets: import('./types').Secret[];
+      scheduledFunctions: import('./types').ScheduledFunction[];
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/backend-features/${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(features || {
+          edgeFunctions: [],
+          serverFunctions: [],
+          secrets: [],
+          scheduledFunctions: [],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || `HTTP ${response.status}` };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Network error' };
+    }
+  }
+
+  /**
+   * Pull backend features from server (core SQLite) to IndexedDB
+   * Called during project sync/pull operations
+   */
+  async pullBackendFeatures(projectId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/sync/backend-features/${projectId}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || `HTTP ${response.status}` };
+      }
+
+      const data = await response.json() as {
+        edgeFunctions?: import('./types').EdgeFunction[];
+        serverFunctions?: import('./types').ServerFunction[];
+        secrets?: import('./types').Secret[];
+        scheduledFunctions?: import('./types').ScheduledFunction[];
+      };
+
+      // Write pulled features to IndexedDB via the VFS adapter
+      try {
+        const { vfs } = await import('@/lib/vfs');
+        const adapter = vfs.getStorageAdapter();
+
+        // Clear existing features for this project, then re-create from server data
+        if (adapter.listEdgeFunctions && adapter.deleteEdgeFunction && adapter.createEdgeFunction) {
+          const existing = await adapter.listEdgeFunctions(projectId);
+          for (const fn of existing) {
+            await adapter.deleteEdgeFunction(fn.id);
+          }
+          for (const fn of data.edgeFunctions || []) {
+            await adapter.createEdgeFunction({ ...fn, projectId });
+          }
+        }
+
+        if (adapter.listServerFunctions && adapter.deleteServerFunction && adapter.createServerFunction) {
+          const existing = await adapter.listServerFunctions(projectId);
+          for (const fn of existing) {
+            await adapter.deleteServerFunction(fn.id);
+          }
+          for (const fn of data.serverFunctions || []) {
+            await adapter.createServerFunction({ ...fn, projectId });
+          }
+        }
+
+        if (adapter.listSecrets && adapter.deleteSecret && adapter.createSecret) {
+          const existing = await adapter.listSecrets(projectId);
+          for (const s of existing) {
+            await adapter.deleteSecret(s.id);
+          }
+          for (const s of data.secrets || []) {
+            await adapter.createSecret({ ...s, projectId });
+          }
+        }
+
+        if (adapter.listScheduledFunctions && adapter.deleteScheduledFunction && adapter.createScheduledFunction) {
+          const existing = await adapter.listScheduledFunctions(projectId);
+          for (const fn of existing) {
+            await adapter.deleteScheduledFunction(fn.id);
+          }
+          for (const fn of data.scheduledFunctions || []) {
+            await adapter.createScheduledFunction({ ...fn, projectId });
+          }
+        }
+      } catch (writeError) {
+        console.error('[SyncManager] Failed to write pulled backend features to IndexedDB:', writeError);
+        return { success: false, error: writeError instanceof Error ? writeError.message : 'Failed to write to IndexedDB' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Network error' };
+    }
+  }
+
+  // ============================================
   // Detailed Sync Status
   // ============================================
 

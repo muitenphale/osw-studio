@@ -1,17 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { CustomTemplate, SiteTemplateFeatures } from '@/lib/vfs/types';
+import { CustomTemplate, BackendFeatures } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { createProjectFromTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
 import { BAREBONES_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
-import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TemplateCard } from './template-card';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
+import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import {
   Upload,
   Search,
@@ -35,16 +35,17 @@ import {
 } from '@/components/ui/popover';
 
 interface TemplateManagerProps {
-  onProjectCreated?: (projectId: string, isSiteTemplate: boolean) => void;
+  onProjectCreated?: (projectId: string, hasBackendFeatures: boolean) => void;
 }
 
 type SortOption = 'updated' | 'name' | 'author' | 'files';
 type ViewMode = 'grid' | 'list';
-type TypeFilter = 'all' | 'project' | 'site';
+type TypeFilter = 'all' | 'standard' | 'server';
 
 export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -176,6 +177,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
 
   const handleCreateProject = async (template: CustomTemplate | BuiltInTemplateMetadata) => {
     try {
+      setCreating(true);
+
       const projectName = template.name === 'Blank' || template.name === 'Example Studios'
         ? `New ${template.name} Project`
         : template.name;
@@ -185,11 +188,9 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
         template.description
       );
 
-      // Determine siteFeatures and templateType for provisioning later
-      let siteFeatures: SiteTemplateFeatures | undefined;
-      let isSiteTemplate = false;
-
       // Use built-in template or custom template
+      let backendFeatures: BackendFeatures | undefined;
+
       if ('isBuiltIn' in template && template.isBuiltIn) {
         if (template.id === 'blank') {
           await createProjectFromTemplate(vfs, project.id, BAREBONES_PROJECT_TEMPLATE);
@@ -201,10 +202,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           await createProjectFromTemplate(vfs, project.id, BLOG_PROJECT_TEMPLATE);
         }
 
-        if ('templateType' in template && template.templateType === 'site') {
-          isSiteTemplate = true;
-          siteFeatures = template.siteFeatures;
-        }
+        backendFeatures = template.backendFeatures;
       } else {
         // Custom template
         const customTemplate = template as CustomTemplate;
@@ -219,84 +217,42 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           assets: customTemplate.assets
         });
 
-        if (customTemplate.templateType === 'site') {
-          isSiteTemplate = true;
-          siteFeatures = customTemplate.siteFeatures;
-        }
+        backendFeatures = customTemplate.backendFeatures;
       }
 
-      // Provision backend features for site templates
-      if (isSiteTemplate && siteFeatures) {
-        const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+      // Provision backend features into project IndexedDB stores
+      if (backendFeatures) {
+        try {
+          const result = await provisionBackendFeatures(project.id, backendFeatures);
 
-        if (isServerMode) {
-          try {
-            // Sync project + files to server (required before creating a site)
-            const files = await vfs.listFiles(project.id);
-            const syncManager = getSyncManager();
-            const syncResult = await syncManager.pushProjectWithFiles(project, files);
-            if (!syncResult.success) {
-              throw new Error(syncResult.error || 'Failed to sync project to server');
-            }
-
-            // Create site via API
-            const siteRes = await fetch('/api/sites', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectId: project.id, name: project.name }),
-            });
-            if (!siteRes.ok) {
-              const err = await siteRes.json();
-              throw new Error(err.error || 'Failed to create site');
-            }
-            const site = await siteRes.json();
-
-            // Provision backend features via bulk endpoint
-            const provisionRes = await fetch(`/api/admin/sites/${site.id}/provision`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ siteFeatures }),
-            });
-            if (!provisionRes.ok) {
-              const err = await provisionRes.json();
-              throw new Error(err.error || 'Failed to provision backend features');
-            }
-            const { provisioned } = await provisionRes.json();
-
-            // Summary toast
-            const parts: string[] = [];
-            if (provisioned.edgeFunctions > 0) parts.push(`${provisioned.edgeFunctions} edge function(s)`);
-            if (provisioned.serverFunctions > 0) parts.push(`${provisioned.serverFunctions} server function(s)`);
-            if (provisioned.secrets > 0) parts.push(`${provisioned.secrets} secret placeholder(s)`);
-            if (provisioned.databaseSchemaApplied) parts.push('database schema');
-            if (parts.length > 0) {
-              toast.success(`Site provisioned: ${parts.join(', ')}`, { duration: 5000 });
-            }
-
-            // Remind about secret placeholders
-            if (provisioned.secrets > 0) {
-              toast.info('Remember to fill in secret values in the Admin panel.', { duration: 6000 });
-            }
-          } catch (provisionError) {
-            logger.error('Failed to provision site backend:', provisionError);
-            toast.warning(
-              'Project created but backend provisioning failed. You can configure features manually in the Admin panel.',
-              { duration: 6000 }
-            );
+          // Summary toast
+          const parts: string[] = [];
+          if (result.edgeFunctions > 0) parts.push(`${result.edgeFunctions} edge function(s)`);
+          if (result.serverFunctions > 0) parts.push(`${result.serverFunctions} server function(s)`);
+          if (result.secrets > 0) parts.push(`${result.secrets} secret placeholder(s)`);
+          if (result.hasDatabaseSchema) parts.push('database schema');
+          if (parts.length > 0) {
+            toast.success(`Backend features provisioned: ${parts.join(', ')}`, { duration: 5000 });
           }
-        } else {
-          toast.info('Site template: Backend features (edge functions, database, etc.) require Server Mode.', { duration: 5000 });
+        } catch (provisionError) {
+          logger.error('Failed to provision backend features:', provisionError);
+          toast.warning(
+            'Project created but backend features provisioning failed. You can configure features manually.',
+            { duration: 6000 }
+          );
         }
       }
 
       toast.success(`Project "${project.name}" created successfully!`);
 
       if (onProjectCreated) {
-        onProjectCreated(project.id, isSiteTemplate);
+        onProjectCreated(project.id, !!backendFeatures);
       }
     } catch (error) {
       logger.error('Failed to create project from template:', error);
       toast.error('Failed to create project');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -317,8 +273,9 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
 
     // Type filter
     if (typeFilter !== 'all') {
-      const templateType = ('templateType' in template && template.templateType) || 'project';
-      if (templateType !== typeFilter) return false;
+      const hasBackendFeatures = 'backendFeatures' in template && !!template.backendFeatures;
+      if (typeFilter === 'server' && !hasBackendFeatures) return false;
+      if (typeFilter === 'standard' && hasBackendFeatures) return false;
     }
 
     return matchesSearch;
@@ -346,12 +303,12 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     }
   });
 
-  if (loading) {
+  if (loading || creating) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4">Loading templates...</p>
+          <p className="mt-4">{creating ? 'Setting up your project...' : 'Loading templates...'}</p>
         </div>
       </div>
     );
@@ -383,8 +340,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="project">Project</SelectItem>
-              <SelectItem value="site">Site</SelectItem>
+              <SelectItem value="standard">Standard</SelectItem>
+              <SelectItem value="server">Backend</SelectItem>
             </SelectContent>
           </Select>
 

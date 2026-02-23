@@ -6,7 +6,7 @@ export interface HtmlProcessingOptions {
   publishSettings: PublishSettings;
   projectId: string;
   baseUrl: string;
-  siteId: string;
+  deploymentId: string;
 }
 
 /**
@@ -16,7 +16,7 @@ export interface HtmlProcessingOptions {
  * not by overlaying content
  */
 export function processHtml(html: string, options: HtmlProcessingOptions): string {
-  const { publishSettings, projectId, baseUrl, siteId } = options;
+  const { publishSettings, projectId, baseUrl, deploymentId } = options;
 
   let processed = html;
 
@@ -30,16 +30,16 @@ export function processHtml(html: string, options: HtmlProcessingOptions): strin
   processed = injectHeadScripts(processed, publishSettings);
 
   // 4. Inject edge function interceptor into <head> (early execution)
-  processed = injectEdgeFunctionInterceptor(processed, siteId);
+  processed = injectEdgeFunctionInterceptor(processed, deploymentId);
 
   // 5. Inject body scripts before </body>
   processed = injectBodyScripts(processed, publishSettings);
 
   // 6. Inject analytics tracking (if enabled and builtin)
-  processed = injectAnalytics(processed, siteId, publishSettings);
+  processed = injectAnalytics(processed, deploymentId, publishSettings);
 
   // 7. Inject compliance banner (if enabled)
-  processed = injectComplianceBanner(processed, siteId, publishSettings);
+  processed = injectComplianceBanner(processed, deploymentId, publishSettings);
 
   return processed;
 }
@@ -211,7 +211,7 @@ function injectIntoHead(html: string, content: string): string {
 /**
  * Inject analytics tracking script (if enabled and provider is builtin)
  */
-function injectAnalytics(html: string, siteId: string, settings: PublishSettings): string {
+function injectAnalytics(html: string, deploymentId: string, settings: PublishSettings): string {
   if (!settings.analytics.enabled || settings.analytics.provider !== 'builtin') {
     return html;
   }
@@ -219,7 +219,7 @@ function injectAnalytics(html: string, siteId: string, settings: PublishSettings
   // Get analytics config with token and features
   const { analytics } = settings;
   const trackingOptions = {
-    siteId,
+    deploymentId: deploymentId,
     token: analytics.token,
     features: {
       basicTracking: analytics.features?.basicTracking !== false, // Default to true
@@ -252,13 +252,13 @@ if (!window.oswAnalyticsBlocked) {
 /**
  * Inject compliance/consent banner (if enabled)
  */
-function injectComplianceBanner(html: string, siteId: string, settings: PublishSettings): string {
+function injectComplianceBanner(html: string, deploymentId: string, settings: PublishSettings): string {
   if (!settings.compliance.enabled) {
     return html;
   }
 
   const banner = generateConsentBanner({
-    siteId,
+    deploymentId,
     compliance: settings.compliance,
   });
 
@@ -288,14 +288,14 @@ function injectBeforeBodyClose(html: string, content: string): string {
  * Inject edge function interceptor script into <head>
  * Routes fetch/form requests to edge function API endpoints
  */
-function injectEdgeFunctionInterceptor(html: string, siteId: string): string {
-  if (!siteId) {
+function injectEdgeFunctionInterceptor(html: string, deploymentId: string): string {
+  if (!deploymentId) {
     return html;
   }
 
   // Minified interceptor script for production
   const interceptorScript = `<script>
-(function(){var s="${siteId}";function e(u){if(!u||typeof u!=="string")return false;if(u.startsWith("http://")||u.startsWith("https://")||u.startsWith("blob:")||u.startsWith("data:")||u.startsWith("//")||u.startsWith("#"))return false;if(u.startsWith("/api/"))return false;var p=u.split("?")[0].split("#")[0];var l=p.split("/").pop()||"";if(l.includes("."))return false;return true}function a(u){var p=u;if(!p.startsWith("/"))p="/"+p;return"/api/sites/"+s+"/functions"+p}var f=window.fetch;window.fetch=function(i,o){var u=typeof i==="string"?i:i.url;if(e(u))return f(a(u),o);return f(i,o)};var X=window.XMLHttpRequest;window.XMLHttpRequest=function(){var x=new X();var op=x.open;x.open=function(m,u){if(e(u))return op.call(this,m,a(u));return op.apply(this,arguments)};return x};document.addEventListener("submit",function(ev){var fm=ev.target;if(!(fm instanceof HTMLFormElement))return;var ac=fm.getAttribute("action")||"";if(!e(ac))return;ev.preventDefault();var m=(fm.method||"POST").toUpperCase();var fd=new FormData(fm);var d={};fd.forEach(function(v,k){d[k]=v});fetch(a(ac),{method:m,headers:{"Content-Type":"application/json"},body:m!=="GET"?JSON.stringify(d):undefined}).then(function(r){return r.json().catch(function(){return r.text()})}).then(function(r){var ev=new CustomEvent("edge-function-response",{detail:{action:ac,result:r}});fm.dispatchEvent(ev);document.dispatchEvent(ev)}).catch(function(err){console.error("[Edge Function]",err);var ev=new CustomEvent("edge-function-error",{detail:{action:ac,error:err.message}});fm.dispatchEvent(ev);document.dispatchEvent(ev)})},true)})();
+(function(){var s="${deploymentId}";function e(u){if(!u||typeof u!=="string")return false;if(u.startsWith("http://")||u.startsWith("https://")||u.startsWith("blob:")||u.startsWith("data:")||u.startsWith("//")||u.startsWith("#"))return false;if(u.startsWith("/api/"))return false;var p=u.split("?")[0].split("#")[0];var l=p.split("/").pop()||"";if(l.includes("."))return false;return true}function a(u){var p=u;if(!p.startsWith("/"))p="/"+p;return"/api/deployments/"+s+"/functions"+p}var f=window.fetch;window.fetch=function(i,o){var u=typeof i==="string"?i:i.url;if(e(u))return f(a(u),o);return f(i,o)};var X=window.XMLHttpRequest;window.XMLHttpRequest=function(){var x=new X();var op=x.open;x.open=function(m,u){if(e(u))return op.call(this,m,a(u));return op.apply(this,arguments)};return x};document.addEventListener("submit",function(ev){var fm=ev.target;if(!(fm instanceof HTMLFormElement))return;var ac=fm.getAttribute("action")||"";if(!e(ac))return;ev.preventDefault();var m=(fm.method||"POST").toUpperCase();var fd=new FormData(fm);var d={};fd.forEach(function(v,k){d[k]=v});fetch(a(ac),{method:m,headers:{"Content-Type":"application/json"},body:m!=="GET"?JSON.stringify(d):undefined}).then(function(r){return r.json().catch(function(){return r.text()})}).then(function(r){var ev=new CustomEvent("edge-function-response",{detail:{action:ac,result:r}});fm.dispatchEvent(ev);document.dispatchEvent(ev)}).catch(function(err){console.error("[Edge Function]",err);var ev=new CustomEvent("edge-function-error",{detail:{action:ac,error:err.message}});fm.dispatchEvent(ev);document.dispatchEvent(ev)})},true)})();
 </script>`;
 
   return injectIntoHead(html, interceptorScript);

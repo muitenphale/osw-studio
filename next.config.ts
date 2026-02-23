@@ -36,20 +36,20 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
-      // Handle published site URLs with standard web server behavior
-      // /sites/{projectId}/ -> index.html
+      // Handle published deployment URLs with standard web server behavior
+      // /deployments/{projectId}/ -> index.html
       {
-        source: '/sites/:projectId',
-        destination: '/sites/:projectId/index.html',
+        source: '/deployments/:projectId',
+        destination: '/deployments/:projectId/index.html',
       },
       {
-        source: '/sites/:projectId/',
-        destination: '/sites/:projectId/index.html',
+        source: '/deployments/:projectId/',
+        destination: '/deployments/:projectId/index.html',
       },
-      // /sites/{projectId}/page -> page.html (if no extension)
+      // /deployments/{projectId}/page -> page.html (if no extension)
       {
-        source: '/sites/:projectId/:path([^.]+)',
-        destination: '/sites/:projectId/:path.html',
+        source: '/deployments/:projectId/:path([^.]+)',
+        destination: '/deployments/:projectId/:path.html',
       },
     ];
   },

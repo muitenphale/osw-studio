@@ -2,7 +2,7 @@
  * Server-only adapter factory
  *
  * This module is marked server-only to prevent bundling in client code.
- * Uses SQLite for persistence (data/osws.sqlite for core, sites/{id}/site.sqlite per site)
+ * Uses SQLite for persistence (data/osws.sqlite for core, deployments/{id}/ for analytics + runtime)
  */
 
 import 'server-only';
@@ -26,7 +26,7 @@ export async function createServerAdapter(): Promise<StorageAdapter> {
 
 /**
  * Get the SQLiteAdapter instance directly (for analytics access)
- * This allows API routes to access site-specific analytics methods
+ * This allows API routes to access deployment-specific analytics methods
  */
 export function getSQLiteAdapter(): SQLiteAdapter {
   if (!adapterInstance) {

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import JSZip from 'jszip';
-import { CustomTemplate, SiteTemplateFeatures } from './types';
+import { CustomTemplate, BackendFeatures, EdgeFunction, ServerFunction, Secret } from './types';
 import { StorageAdapter } from './adapters/types';
 import { logger } from '@/lib/utils';
 
@@ -55,8 +55,7 @@ export class TemplateService {
   async exportProjectAsTemplate(
     vfs: any,
     projectId: string,
-    metadata: TemplateMetadata,
-    siteId?: string
+    metadata: TemplateMetadata
   ): Promise<Blob> {
     try {
       logger.info('[TemplateService] Exporting project as template', { projectId, name: metadata.name });
@@ -73,54 +72,43 @@ export class TemplateService {
         .filter((item: any) => item.type === 'directory')
         .map((item: any) => item.path);
 
-      // Determine if this is a site template
-      let siteFeatures: SiteTemplateFeatures | undefined;
-      if (siteId) {
-        try {
-          // Dynamic import to avoid circular deps + server-only modules
-          const { SiteDatabase } = await import(/* webpackIgnore: true */ './adapters/site-database');
-          const siteDb = new SiteDatabase(siteId);
+      // Extract backend features from project IndexedDB stores
+      let backendFeatures: BackendFeatures | undefined;
+      try {
+        const adapter = vfs.getStorageAdapter();
+        const edgeFunctions = adapter.listEdgeFunctions ? await adapter.listEdgeFunctions(projectId) : [];
+        const serverFunctions = adapter.listServerFunctions ? await adapter.listServerFunctions(projectId) : [];
+        const secrets = adapter.listSecrets ? await adapter.listSecrets(projectId) : [];
 
-          const edgeFunctions = siteDb.listFunctions().map(fn => ({
-            name: fn.name,
-            method: fn.method,
-            code: fn.code,
-            description: fn.description,
-            enabled: fn.enabled,
-            timeoutMs: fn.timeoutMs,
-          }));
-
-          const serverFunctions = siteDb.listServerFunctions().map(fn => ({
-            name: fn.name,
-            code: fn.code,
-            description: fn.description,
-            enabled: fn.enabled,
-          }));
-
-          const secrets = siteDb.listSecrets().map(s => ({
-            name: s.name,
-            description: s.description,
-          }));
-
-          const schema = siteDb.getSchemaForExport();
-
-          if (edgeFunctions.length > 0 || serverFunctions.length > 0 || secrets.length > 0 || schema) {
-            siteFeatures = {
-              edgeFunctions: edgeFunctions.length > 0 ? edgeFunctions : undefined,
-              serverFunctions: serverFunctions.length > 0 ? serverFunctions : undefined,
-              secrets: secrets.length > 0 ? secrets : undefined,
-              databaseSchema: schema || undefined,
-            };
-          }
-        } catch {
-          // Server-only modules not available in browser mode - skip site features
-          logger.warn('[TemplateService] Could not extract site features - server modules not available');
+        if (edgeFunctions.length > 0 || serverFunctions.length > 0 || secrets.length > 0) {
+          backendFeatures = {
+            edgeFunctions: edgeFunctions.length > 0 ? edgeFunctions.map((fn: EdgeFunction) => ({
+              name: fn.name,
+              method: fn.method,
+              code: fn.code,
+              description: fn.description,
+              enabled: fn.enabled,
+              timeoutMs: fn.timeoutMs,
+            })) : undefined,
+            serverFunctions: serverFunctions.length > 0 ? serverFunctions.map((fn: ServerFunction) => ({
+              name: fn.name,
+              code: fn.code,
+              description: fn.description,
+              enabled: fn.enabled,
+            })) : undefined,
+            secrets: secrets.length > 0 ? secrets.map((s: Secret) => ({
+              name: s.name,
+              description: s.description,
+            })) : undefined,
+          };
         }
+      } catch {
+        logger.warn('[TemplateService] Could not extract backend features from project stores');
       }
 
       // Create template data
       const templateData = {
-        version: siteFeatures ? '2.0.0' : '1.0.0', // Template format version
+        version: backendFeatures ? '2.0.0' : '1.0.0', // Template format version
         name: metadata.name,
         description: metadata.description,
         templateVersion: metadata.version,
@@ -139,8 +127,7 @@ export class TemplateService {
           content: file.content
         })),
         assets: [],
-        templateType: siteFeatures ? 'site' : 'project',
-        siteFeatures,
+        backendFeatures,
       };
 
       // Create ZIP archive
@@ -218,8 +205,7 @@ export class TemplateService {
           downloadUrl: templateData.downloadUrl
         },
         importedAt: new Date(),
-        templateType: templateData.templateType || 'project',
-        siteFeatures: templateData.siteFeatures,
+        backendFeatures: templateData.backendFeatures || templateData.serverFeatures,
       };
 
       // Save to IndexedDB
@@ -373,19 +359,20 @@ export class TemplateService {
       }
     }
 
-    // Validate site features if present
-    if (data.siteFeatures) {
-      if (typeof data.siteFeatures !== 'object') {
-        throw new Error('Invalid template: siteFeatures must be an object');
+    // Validate backend features if present (accept legacy "serverFeatures" key too)
+    const bf = data.backendFeatures || data.serverFeatures;
+    if (bf) {
+      if (typeof bf !== 'object') {
+        throw new Error('Invalid template: backendFeatures must be an object');
       }
-      if (data.siteFeatures.edgeFunctions && !Array.isArray(data.siteFeatures.edgeFunctions)) {
-        throw new Error('Invalid template: siteFeatures.edgeFunctions must be an array');
+      if (bf.edgeFunctions && !Array.isArray(bf.edgeFunctions)) {
+        throw new Error('Invalid template: backendFeatures.edgeFunctions must be an array');
       }
-      if (data.siteFeatures.serverFunctions && !Array.isArray(data.siteFeatures.serverFunctions)) {
-        throw new Error('Invalid template: siteFeatures.serverFunctions must be an array');
+      if (bf.serverFunctions && !Array.isArray(bf.serverFunctions)) {
+        throw new Error('Invalid template: backendFeatures.serverFunctions must be an array');
       }
-      if (data.siteFeatures.secrets && !Array.isArray(data.siteFeatures.secrets)) {
-        throw new Error('Invalid template: siteFeatures.secrets must be an array');
+      if (bf.secrets && !Array.isArray(bf.secrets)) {
+        throw new Error('Invalid template: backendFeatures.secrets must be an array');
       }
     }
   }

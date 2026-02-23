@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CustomTemplate, LICENSE_OPTIONS } from '@/lib/vfs/types';
+import { CustomTemplate, LICENSE_OPTIONS, BackendFeatures } from '@/lib/vfs/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical, Server } from 'lucide-react';
@@ -26,7 +26,7 @@ interface BuiltInTemplate {
   description: string;
   isBuiltIn: true;
   updatedAt: Date;
-  templateType?: 'project' | 'site';
+  backendFeatures?: BackendFeatures;
   metadata?: {
     author?: string;
     tags?: string[];
@@ -50,7 +50,7 @@ export function TemplateCard({
 }: TemplateCardProps) {
   const isBuiltIn = 'isBuiltIn' in template && template.isBuiltIn;
   const customTemplate = !isBuiltIn ? template as CustomTemplate : null;
-  const isSiteTemplate = ('templateType' in template && template.templateType === 'site');
+  const hasBackendFeatures = 'backendFeatures' in template && !!template.backendFeatures;
 
   const getLicenseLabel = (licenseValue: string): string => {
     const license = LICENSE_OPTIONS.find(opt => opt.value === licenseValue);
@@ -119,10 +119,10 @@ export function TemplateCard({
               <h3 className="font-semibold text-base truncate" title={template.name}>
                 {template.name}
               </h3>
-              {isSiteTemplate && (
+              {hasBackendFeatures && (
                 <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800 shrink-0">
                   <Server className="h-3 w-3 mr-0.5" />
-                  Site
+                  Backend
                 </Badge>
               )}
               {customTemplate && (
@@ -190,7 +190,7 @@ export function TemplateCard({
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => onSelect(template)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  {isSiteTemplate ? 'Create Site' : 'Create Project'}
+                  Create Project
                 </DropdownMenuItem>
                 {onExport && (
                   <>
@@ -240,7 +240,7 @@ export function TemplateCard({
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => onSelect(template)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  {isSiteTemplate ? 'Create Site' : 'Create Project'}
+                  Create Project
                 </DropdownMenuItem>
                 {onExport && (
                   <>
@@ -332,10 +332,10 @@ export function TemplateCard({
             <h3 className="font-semibold text-base line-clamp-1 flex-1" title={template.name}>
               {template.name}
             </h3>
-            {isSiteTemplate && (
+            {hasBackendFeatures && (
               <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800 shrink-0">
                 <Server className="h-3 w-3 mr-0.5" />
-                Site
+                Backend
               </Badge>
             )}
             {customTemplate && (
@@ -417,7 +417,7 @@ export function TemplateCard({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => onSelect(template)}>
                 <Plus className="mr-2 h-4 w-4" />
-                {isSiteTemplate ? 'Create Site' : 'Create Project'}
+                Create Project
               </DropdownMenuItem>
               {onExport && (
                 <>

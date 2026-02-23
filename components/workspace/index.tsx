@@ -8,10 +8,10 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Server } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
-import { configManager } from '@/lib/config/storage';
+import { configManager, migrateBackendKey } from '@/lib/config/storage';
 import { useCostSettings } from '@/lib/hooks/use-cost-settings';
 import { getProvider, modelSupportsVision } from '@/lib/llm/providers/registry';
 import { toast } from 'sonner';
@@ -42,8 +42,9 @@ import { track } from '@/lib/telemetry';
 import { FocusContextPayload } from '@/lib/preview/types';
 import { DebugPanel, DebugEvent } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
-import { SiteSelector } from '@/components/workspace/site-selector';
+import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
+import { ProjectBackendModal } from '@/components/project-backend';
 
 interface WorkspaceProps {
   project: Project;
@@ -109,10 +110,16 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [showPreview, setShowPreview] = useState(true);  // Column 4: Live preview
   const [showCheckpoints, setShowCheckpoints] = useState(false); // Column 5: Checkpoint history
   const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 6: Debug events
+  const [showBackendModal, setShowBackendModal] = useState(false); // Backend modal
 
-  // Server context state (site selection for server features)
-  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
-  const [selectedSiteName, setSelectedSiteName] = useState<string | null>(null);
+  // Backend enabled state (persisted per-project in localStorage)
+  const [backendEnabled, setBackendEnabled] = useState<boolean>(() => {
+    return migrateBackendKey(project.id);
+  });
+
+  // Backend context state (deployment selection for backend features)
+  const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
+  const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | null>(null);
 
   // Debug events state
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
@@ -557,6 +564,22 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setPersistedOrchestrator(null);
   }, [project.id, chatMode]);
 
+  // Auto-mount/unmount project backend context based on enabled toggle
+  useEffect(() => {
+    let cancelled = false;
+    if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true' && backendEnabled) {
+      vfs.mountProjectBackendContext(project.id).then(() => {
+        if (!cancelled) {
+          setRefreshTrigger(prev => prev + 1);
+        }
+      });
+    } else {
+      vfs.unmountBackendContext();
+      setRefreshTrigger(prev => prev + 1);
+    }
+    return () => { cancelled = true; };
+  }, [project.id, backendEnabled]);
+
   // MEMORY CLEANUP: Unload project data from singletons when leaving the workspace
   // This prevents memory accumulation across project switches
   useEffect(() => {
@@ -578,32 +601,38 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       // Clear VFS sync timeout for this project
       vfs.clearSyncTimeout(projectId);
 
-      // Unmount server context when leaving workspace
-      vfs.unmountServerContext();
+      // Unmount backend context when leaving workspace
+      vfs.unmountBackendContext();
 
       logger.debug(`[Workspace] Cleaned up memory for project ${projectId}`);
     };
   }, [project.id]);
 
-  // Handle site selection change - mount/unmount server context
-  const handleSiteChange = useCallback(async (siteId: string | null, siteName: string | null) => {
-    setSelectedSiteId(siteId);
-    setSelectedSiteName(siteName);
+  // Handle deployment selection change - mount/unmount backend context
+  const handleDeploymentChange = useCallback(async (deploymentId: string | null, deploymentName: string | null) => {
+    setSelectedDeploymentId(deploymentId);
+    setSelectedDeploymentName(deploymentName);
 
-    // Reset orchestrator so it picks up new server context on next message
+    // Reset orchestrator so it picks up new backend context on next message
     setPersistedOrchestrator(null);
 
-    if (siteId && siteName) {
-      await vfs.mountServerContext(siteId, siteName);
-      logger.info(`[Workspace] Mounted server context for site: ${siteName}`);
+    if (deploymentId && deploymentName) {
+      await vfs.mountDeploymentRuntimeContext(deploymentId);
+      logger.info(`[Workspace] Connected deployment runtime: ${deploymentName}`);
     } else {
-      vfs.unmountServerContext();
-      logger.info('[Workspace] Unmounted server context');
+      vfs.unmountDeploymentRuntimeContext();
+      logger.info('[Workspace] Disconnected deployment runtime');
     }
 
     // Refresh file tree
     setRefreshTrigger(prev => prev + 1);
   }, []);
+
+  // Handle backend toggle
+  const handleBackendToggle = useCallback((enabled: boolean) => {
+    setBackendEnabled(enabled);
+    localStorage.setItem(`osw-backend-${project.id}`, String(enabled));
+  }, [project.id]);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)
@@ -946,7 +975,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       if (result.success) {
         handleFilesChange();
 
-        // Re-fetch server context to ensure file explorer shows latest state
+        // Re-fetch backend context to ensure file explorer shows latest state
         if (vfs.hasServerContext()) {
           await vfs.refreshServerContext();
         }
@@ -1055,15 +1084,27 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     });
   }
 
-  // Desktop header content: Site selector + Settings
+  // Desktop header content: Deployment selector + Settings
   const desktopHeaderContent = (
     <div className="flex items-center gap-3">
-      {/* Site selector for server context */}
-      <SiteSelector
+      {/* Deployment selector for backend context */}
+      <DeploymentSelector
         projectId={project.id}
-        selectedSiteId={selectedSiteId}
-        onSiteChange={handleSiteChange}
+        selectedDeploymentId={selectedDeploymentId}
+        onDeploymentChange={handleDeploymentChange}
       />
+
+      {/* Backend button */}
+      <Button
+        variant="outline"
+        size="sm"
+        className={`h-8 px-3 flex items-center gap-2 ${backendEnabled ? 'border-primary/50 bg-primary/10' : ''}`}
+        onClick={() => setShowBackendModal(true)}
+        title="Backend"
+      >
+        <Server className="h-4 w-4" />
+        <span className="text-sm hidden lg:inline">Backend</span>
+      </Button>
 
       {/* Settings popover */}
       <Popover>
@@ -1098,6 +1139,15 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           </span>
         </div>
       )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full justify-start"
+        onClick={() => setShowBackendModal(true)}
+      >
+        <Server className="h-4 w-4 mr-2" />
+        Backend
+      </Button>
       <Popover>
         <PopoverTrigger asChild>
           <Button
@@ -1325,6 +1375,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 <p>Debug Events</p>
               </TooltipContent>
             </Tooltip>
+
           </div>
           
           {/* Main content area */}
@@ -1425,7 +1476,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                         onFocusSelection={handleFocusSelection}
                         hasFocusTarget={Boolean(focusContext)}
                         onClose={handleClosePreview}
-                        siteId={selectedSiteId}
+                        deploymentId={selectedDeploymentId}
                         onCaptureScreenshot={handleCaptureScreenshot}
                       />
                     </div>
@@ -1530,7 +1581,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onFocusSelection={handleFocusSelection}
                   hasFocusTarget={Boolean(focusContext)}
                   onClose={handleClosePreview}
-                  siteId={selectedSiteId}
+                  deploymentId={selectedDeploymentId}
                   onCaptureScreenshot={handleCaptureScreenshot}
                 />
               </div>
@@ -1602,6 +1653,15 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
       <GuidedTourOverlay location="workspace" />
       <GuidedTourOverlay location="settings" />
+
+      <ProjectBackendModal
+        projectId={project.id}
+        projectName={project.name}
+        isOpen={showBackendModal}
+        onClose={() => setShowBackendModal(false)}
+        enabled={backendEnabled}
+        onToggleEnabled={handleBackendToggle}
+      />
     </TooltipProvider>
   );
 }

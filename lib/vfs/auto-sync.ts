@@ -22,7 +22,7 @@ interface SyncStatusResult {
  */
 export interface SyncOverviewStatus {
   serverProjectCount: number;
-  serverSiteCount: number;
+  serverDeploymentCount: number;
   serverLastUpdated: Date | null;
   localProjectCount: number;
   isUninitialized: boolean;  // Server has no projects
@@ -281,7 +281,7 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
     return {
       serverProjectCount: 0,
-      serverSiteCount: 0,
+      serverDeploymentCount: 0,
       serverLastUpdated: null,
       localProjectCount: 0,
       isUninitialized: false,
@@ -301,7 +301,7 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
     const data = await response.json();
     const summary = data.summary || {
       projectCount: 0,
-      siteCount: 0,
+      deploymentCount: 0,
       lastUpdated: null,
       isUninitialized: true,
     };
@@ -317,7 +317,7 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
 
     return {
       serverProjectCount: summary.projectCount,
-      serverSiteCount: summary.siteCount,
+      serverDeploymentCount: summary.deploymentCount,
       serverLastUpdated: summary.lastUpdated ? new Date(summary.lastUpdated) : null,
       localProjectCount,
       isUninitialized,
@@ -329,7 +329,7 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
     logger.error('[AutoSync] Failed to get sync overview status:', error);
     return {
       serverProjectCount: 0,
-      serverSiteCount: 0,
+      serverDeploymentCount: 0,
       serverLastUpdated: null,
       localProjectCount: 0,
       isUninitialized: true,

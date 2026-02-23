@@ -15,12 +15,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ServerFunctionEditor } from './server-function-editor';
 import { cn } from '@/lib/utils';
+import type { ServerFunctionsDataProvider } from './data-providers';
 
 interface ServerFunctionsManagerProps {
-  siteId: string;
+  deploymentId?: string;
+  dataProvider?: ServerFunctionsDataProvider;
 }
 
-export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) {
+export function ServerFunctionsManager({ deploymentId, dataProvider }: ServerFunctionsManagerProps) {
   const [functions, setFunctions] = useState<ServerFunction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,19 +31,23 @@ export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) 
 
   useEffect(() => {
     loadFunctions();
-  }, [siteId]);
+  }, [deploymentId, dataProvider]);
 
   const loadFunctions = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`/api/admin/sites/${siteId}/server-functions`);
-      if (!res.ok) {
+      if (dataProvider) {
+        setFunctions(await dataProvider.list());
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/server-functions`);
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Failed to load server functions');
+        }
         const data = await res.json();
-        throw new Error(data.error || 'Failed to load server functions');
+        setFunctions(data.functions);
       }
-      const data = await res.json();
-      setFunctions(data.functions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load server functions');
     } finally {
@@ -51,12 +57,18 @@ export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) 
 
   const toggleEnabled = async (fn: ServerFunction) => {
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/server-functions/${fn.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !fn.enabled }),
-      });
-      if (!res.ok) throw new Error('Failed to update server function');
+      if (dataProvider) {
+        await dataProvider.toggle(fn.id, !fn.enabled);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/server-functions/${fn.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !fn.enabled }),
+        });
+        if (!res.ok) throw new Error('Failed to update server function');
+      } else {
+        return;
+      }
       await loadFunctions();
     } catch (err) {
       console.error('Failed to toggle server function:', err);
@@ -67,10 +79,16 @@ export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) 
     if (!confirm(`Delete server function "${fn.name}"? This cannot be undone.`)) return;
 
     try {
-      const res = await fetch(`/api/admin/sites/${siteId}/server-functions/${fn.id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete server function');
+      if (dataProvider) {
+        await dataProvider.remove(fn.id);
+      } else if (deploymentId) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/server-functions/${fn.id}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete server function');
+      } else {
+        return;
+      }
       await loadFunctions();
     } catch (err) {
       console.error('Failed to delete server function:', err);
@@ -79,9 +97,12 @@ export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) 
 
   const handleSave = async (data: Partial<ServerFunction>) => {
     try {
-      if (editingFunction) {
-        // Update existing
-        const res = await fetch(`/api/admin/sites/${siteId}/server-functions/${editingFunction.id}`, {
+      if (dataProvider) {
+        await dataProvider.save(editingFunction?.id || null, data);
+      } else if (!deploymentId) {
+        throw new Error('No deployment ID available');
+      } else if (editingFunction) {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/server-functions/${editingFunction.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -91,8 +112,7 @@ export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) 
           throw new Error(err.error || 'Failed to update server function');
         }
       } else {
-        // Create new
-        const res = await fetch(`/api/admin/sites/${siteId}/server-functions`, {
+        const res = await fetch(`/api/admin/deployments/${deploymentId}/server-functions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -107,7 +127,7 @@ export function ServerFunctionsManager({ siteId }: ServerFunctionsManagerProps) 
       setIsCreating(false);
       await loadFunctions();
     } catch (err) {
-      throw err; // Let the editor handle the error
+      throw err;
     }
   };
 

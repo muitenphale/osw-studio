@@ -39,7 +39,7 @@ interface MultipagePreviewProps {
   onFocusSelection?: (selection: FocusContextPayload | null) => void;
   hasFocusTarget?: boolean;
   onClose?: () => void;
-  siteId?: string | null;
+  deploymentId?: string | null;
   onCaptureScreenshot?: (screenshot: string) => void;
 }
 
@@ -58,7 +58,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   onFocusSelection,
   hasFocusTarget = false,
   onClose,
-  siteId,
+  deploymentId,
   onCaptureScreenshot
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
@@ -224,7 +224,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         serverRef.current.cleanupBlobUrls();
       }
       
-      const server = new VirtualServer(vfs, projectId, undefined, siteId || undefined);
+      const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined);
       serverRef.current = server;
       
       const compiled = await server.compileProject();
@@ -247,7 +247,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         setLoading(false);
       }
     }
-  }, [projectId, siteId]);
+  }, [projectId, deploymentId]);
 
   const compileAndLoad = useCallback((preserveCurrentPath: boolean = false, showLoading: boolean = true) => {
     if (compilingRef.current) {

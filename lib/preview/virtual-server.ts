@@ -7,7 +7,7 @@ import { logger } from '@/lib/utils';
 export class VirtualServer {
   private vfs: VirtualFileSystem;
   private projectId: string;
-  private siteId?: string;
+  private deploymentId?: string;
   private baseUrl: string;
   private blobUrls: Map<string, string> = new Map();
   private fileHashes: Map<string, string> = new Map();
@@ -15,10 +15,10 @@ export class VirtualServer {
   private templateCache: Map<string, HandlebarsTemplateDelegate> = new Map();
   private partialsRegistered: boolean = false;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, siteId?: string) {
+  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, deploymentId?: string) {
     this.vfs = vfs;
     this.projectId = projectId;
-    this.siteId = siteId;
+    this.deploymentId = deploymentId;
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     if (existingBlobUrls) {
       this.blobUrls = new Map(existingBlobUrls);
@@ -331,12 +331,12 @@ export class VirtualServer {
     // Inject VFS asset interceptor for transparent HTTP requests
     // Always inject the interceptor, even if no blob URLs yet (for future dynamic loading)
     const blobUrlMap = blobUrls ? Object.fromEntries(blobUrls) : {};
-    const siteIdForScript = this.siteId || '';
+    const deploymentIdForScript = this.deploymentId || '';
     const vfsScript = `<script>
 // VFS Asset Interceptor - Auto-injected by OSW Studio
 (function() {
   const vfsBlobUrls = ${JSON.stringify(blobUrlMap)};
-  const siteId = ${JSON.stringify(siteIdForScript)};
+  const deploymentId = ${JSON.stringify(deploymentIdForScript)};
 
   // Helper function to resolve VFS paths to blob URLs
   function resolveVfsUrl(url) {
@@ -349,7 +349,7 @@ export class VirtualServer {
 
   // Helper function to check if a URL looks like an edge function call
   function isEdgeFunctionUrl(url) {
-    if (!url || typeof url !== 'string' || !siteId) return false;
+    if (!url || typeof url !== 'string' || !deploymentId) return false;
     // Skip external URLs, blob URLs, data URLs, and hash-only URLs
     if (url.startsWith('http://') || url.startsWith('https://') ||
         url.startsWith('blob:') || url.startsWith('data:') ||
@@ -368,14 +368,14 @@ export class VirtualServer {
 
   // Helper function to convert an edge function URL to the API endpoint
   function toEdgeFunctionApiUrl(url) {
-    if (!siteId) return url;
+    if (!deploymentId) return url;
     // Normalize the path
     let path = url;
     if (!path.startsWith('/')) path = '/' + path;
     // Remove leading slash for the function name
     const functionPath = path.substring(1);
     // Return the API endpoint URL
-    return '/api/sites/' + siteId + '/functions/' + functionPath;
+    return '/api/deployments/' + deploymentId + '/functions/' + functionPath;
   }
   
   // Intercept Image src setter to handle ALL image loading
@@ -516,7 +516,7 @@ export class VirtualServer {
   };
 
   // Intercept form submissions for edge functions
-  if (siteId) {
+  if (deploymentId) {
     document.addEventListener('submit', function(e) {
       const form = e.target;
       if (!(form instanceof HTMLFormElement)) return;

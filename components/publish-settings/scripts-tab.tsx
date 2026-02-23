@@ -133,7 +133,7 @@ export function ScriptsTab({ settings, onChange }: ScriptsTabProps) {
         <div>
           <h3 className="text-lg font-semibold">Script Management</h3>
           <p className="text-sm text-muted-foreground">
-            Add custom scripts to your published site
+            Add custom scripts to your published deployment
           </p>
         </div>
         <Button onClick={handleAddScript} size="sm">
@@ -147,7 +147,7 @@ export function ScriptsTab({ settings, onChange }: ScriptsTabProps) {
           <Code className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
           <h3 className="text-lg font-semibold mb-2">No Scripts Added</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            Add tracking scripts, analytics, or custom code to your site
+            Add tracking scripts, analytics, or custom code to your deployment
           </p>
           <Button onClick={handleAddScript} variant="outline">
             <Plus className="h-4 w-4 mr-2" />
@@ -212,7 +212,7 @@ export function ScriptsTab({ settings, onChange }: ScriptsTabProps) {
               {editingScript?.name ? 'Edit Script' : 'Add Script'}
             </DialogTitle>
             <DialogDescription>
-              Configure a custom script to inject into your published site
+              Configure a custom script to inject into your published deployment
             </DialogDescription>
           </DialogHeader>
 

@@ -5,12 +5,12 @@
  * Used in both browser mode (only storage) and Server mode (working storage).
  */
 
-import { Project, VirtualFile, FileTreeNode, CustomTemplate } from '../types';
+import { Project, VirtualFile, FileTreeNode, CustomTemplate, EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '../types';
 import { Skill } from '../skills/types';
 import { StorageAdapter } from './types';
 
 const DB_NAME = 'osw-studio-db';
-const DB_VERSION = 4; // Incremented to add skills store
+const DB_VERSION = 5; // Incremented to add project-scoped backend feature stores
 
 export class IndexedDBAdapter implements StorageAdapter {
   private db: IDBDatabase | null = null;
@@ -86,6 +86,34 @@ export class IndexedDBAdapter implements StorageAdapter {
           debugEventsStore.createIndex('projectId', 'projectId', { unique: false });
           debugEventsStore.createIndex('timestamp', 'timestamp', { unique: false });
         }
+
+        // Edge Functions (project-scoped backend features)
+        if (!db.objectStoreNames.contains('edgeFunctions')) {
+          const edgeFnStore = db.createObjectStore('edgeFunctions', { keyPath: 'id' });
+          edgeFnStore.createIndex('projectId', 'projectId', { unique: false });
+          edgeFnStore.createIndex('projectIdName', ['projectId', 'name'], { unique: true });
+        }
+
+        // Server Functions (project-scoped backend features)
+        if (!db.objectStoreNames.contains('serverFunctions')) {
+          const serverFnStore = db.createObjectStore('serverFunctions', { keyPath: 'id' });
+          serverFnStore.createIndex('projectId', 'projectId', { unique: false });
+          serverFnStore.createIndex('projectIdName', ['projectId', 'name'], { unique: true });
+        }
+
+        // Secrets (project-scoped backend features)
+        if (!db.objectStoreNames.contains('secrets')) {
+          const secretsStore = db.createObjectStore('secrets', { keyPath: 'id' });
+          secretsStore.createIndex('projectId', 'projectId', { unique: false });
+          secretsStore.createIndex('projectIdName', ['projectId', 'name'], { unique: true });
+        }
+
+        // Scheduled Functions (project-scoped backend features)
+        if (!db.objectStoreNames.contains('scheduledFunctions')) {
+          const schedFnStore = db.createObjectStore('scheduledFunctions', { keyPath: 'id' });
+          schedFnStore.createIndex('projectId', 'projectId', { unique: false });
+          schedFnStore.createIndex('projectIdName', ['projectId', 'name'], { unique: true });
+        }
       };
     });
     return this.initPromise;
@@ -139,12 +167,49 @@ export class IndexedDBAdapter implements StorageAdapter {
   async deleteProject(id: string): Promise<void> {
     const db = this.getDB();
 
-    // Delete all associated files first
-    await this.deleteProjectFiles(id);
+    // Phase 1 (read): Collect all item IDs to delete from each store
+    const files = await this.listFiles(id);
+    const fileIds = files.map(f => f.id);
 
-    const tx = db.transaction(['projects'], 'readwrite');
-    const store = tx.objectStore('projects');
-    await this.promisify(store.delete(id));
+    const treeNodes = await this.getAllTreeNodes(id);
+    const treeNodeIds = treeNodes.map(n => n.id);
+
+    const edgeFunctions = await this.listEdgeFunctions(id);
+    const edgeFunctionIds = edgeFunctions.map(f => f.id);
+
+    const serverFunctions = await this.listServerFunctions(id);
+    const serverFunctionIds = serverFunctions.map(f => f.id);
+
+    const secrets = await this.listSecrets(id);
+    const secretIds = secrets.map(s => s.id);
+
+    const scheduledFunctions = await this.listScheduledFunctions(id);
+    const scheduledFunctionIds = scheduledFunctions.map(f => f.id);
+
+    // Phase 2 (write): Delete all items in a single multi-store transaction for atomicity
+    const storeNames = ['projects', 'files', 'fileTree', 'edgeFunctions', 'serverFunctions', 'secrets', 'scheduledFunctions'];
+    const tx = db.transaction(storeNames, 'readwrite');
+
+    const deleteFromStore = (storeName: string, ids: string[]) => {
+      const store = tx.objectStore(storeName);
+      for (const itemId of ids) {
+        store.delete(itemId);
+      }
+    };
+
+    deleteFromStore('files', fileIds);
+    deleteFromStore('fileTree', treeNodeIds);
+    deleteFromStore('edgeFunctions', edgeFunctionIds);
+    deleteFromStore('serverFunctions', serverFunctionIds);
+    deleteFromStore('secrets', secretIds);
+    deleteFromStore('scheduledFunctions', scheduledFunctionIds);
+    tx.objectStore('projects').delete(id);
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    });
   }
 
   async listProjects(fields?: string[]): Promise<Project[]> {
@@ -341,6 +406,154 @@ export class IndexedDBAdapter implements StorageAdapter {
   }
 
   // ============================================
+  // Edge Functions (Project-scoped)
+  // ============================================
+
+  async createEdgeFunction(fn: EdgeFunction): Promise<void> {
+    const tx = this.getDB().transaction(['edgeFunctions'], 'readwrite');
+    const store = tx.objectStore('edgeFunctions');
+    await this.promisify(store.add(fn));
+  }
+
+  async getEdgeFunction(id: string): Promise<EdgeFunction | null> {
+    const tx = this.getDB().transaction(['edgeFunctions'], 'readonly');
+    const store = tx.objectStore('edgeFunctions');
+    const result = await this.promisify(store.get(id));
+    return result ? this.hydrateEdgeFunction(result as EdgeFunction) : null;
+  }
+
+  async listEdgeFunctions(projectId: string): Promise<EdgeFunction[]> {
+    const tx = this.getDB().transaction(['edgeFunctions'], 'readonly');
+    const store = tx.objectStore('edgeFunctions');
+    const index = store.index('projectId');
+    const result = await this.promisify(index.getAll(projectId));
+    return (result || []).map((fn) => this.hydrateEdgeFunction(fn as EdgeFunction));
+  }
+
+  async updateEdgeFunction(fn: EdgeFunction): Promise<void> {
+    const tx = this.getDB().transaction(['edgeFunctions'], 'readwrite');
+    const store = tx.objectStore('edgeFunctions');
+    await this.promisify(store.put(fn));
+  }
+
+  async deleteEdgeFunction(id: string): Promise<void> {
+    const tx = this.getDB().transaction(['edgeFunctions'], 'readwrite');
+    const store = tx.objectStore('edgeFunctions');
+    await this.promisify(store.delete(id));
+  }
+
+  // ============================================
+  // Server Functions (Project-scoped)
+  // ============================================
+
+  async createServerFunction(fn: ServerFunction): Promise<void> {
+    const tx = this.getDB().transaction(['serverFunctions'], 'readwrite');
+    const store = tx.objectStore('serverFunctions');
+    await this.promisify(store.add(fn));
+  }
+
+  async getServerFunction(id: string): Promise<ServerFunction | null> {
+    const tx = this.getDB().transaction(['serverFunctions'], 'readonly');
+    const store = tx.objectStore('serverFunctions');
+    const result = await this.promisify(store.get(id));
+    return result ? this.hydrateServerFunction(result as ServerFunction) : null;
+  }
+
+  async listServerFunctions(projectId: string): Promise<ServerFunction[]> {
+    const tx = this.getDB().transaction(['serverFunctions'], 'readonly');
+    const store = tx.objectStore('serverFunctions');
+    const index = store.index('projectId');
+    const result = await this.promisify(index.getAll(projectId));
+    return (result || []).map((fn) => this.hydrateServerFunction(fn as ServerFunction));
+  }
+
+  async updateServerFunction(fn: ServerFunction): Promise<void> {
+    const tx = this.getDB().transaction(['serverFunctions'], 'readwrite');
+    const store = tx.objectStore('serverFunctions');
+    await this.promisify(store.put(fn));
+  }
+
+  async deleteServerFunction(id: string): Promise<void> {
+    const tx = this.getDB().transaction(['serverFunctions'], 'readwrite');
+    const store = tx.objectStore('serverFunctions');
+    await this.promisify(store.delete(id));
+  }
+
+  // ============================================
+  // Secrets (Project-scoped)
+  // ============================================
+
+  async createSecret(secret: Secret): Promise<void> {
+    const tx = this.getDB().transaction(['secrets'], 'readwrite');
+    const store = tx.objectStore('secrets');
+    await this.promisify(store.add(secret));
+  }
+
+  async getSecret(id: string): Promise<Secret | null> {
+    const tx = this.getDB().transaction(['secrets'], 'readonly');
+    const store = tx.objectStore('secrets');
+    const result = await this.promisify(store.get(id));
+    return result ? this.hydrateSecret(result as Secret) : null;
+  }
+
+  async listSecrets(projectId: string): Promise<Secret[]> {
+    const tx = this.getDB().transaction(['secrets'], 'readonly');
+    const store = tx.objectStore('secrets');
+    const index = store.index('projectId');
+    const result = await this.promisify(index.getAll(projectId));
+    return (result || []).map((s) => this.hydrateSecret(s as Secret));
+  }
+
+  async updateSecret(secret: Secret): Promise<void> {
+    const tx = this.getDB().transaction(['secrets'], 'readwrite');
+    const store = tx.objectStore('secrets');
+    await this.promisify(store.put(secret));
+  }
+
+  async deleteSecret(id: string): Promise<void> {
+    const tx = this.getDB().transaction(['secrets'], 'readwrite');
+    const store = tx.objectStore('secrets');
+    await this.promisify(store.delete(id));
+  }
+
+  // ============================================
+  // Scheduled Functions (Project-scoped)
+  // ============================================
+
+  async createScheduledFunction(fn: ScheduledFunction): Promise<void> {
+    const tx = this.getDB().transaction(['scheduledFunctions'], 'readwrite');
+    const store = tx.objectStore('scheduledFunctions');
+    await this.promisify(store.add(fn));
+  }
+
+  async getScheduledFunction(id: string): Promise<ScheduledFunction | null> {
+    const tx = this.getDB().transaction(['scheduledFunctions'], 'readonly');
+    const store = tx.objectStore('scheduledFunctions');
+    const result = await this.promisify(store.get(id));
+    return result ? this.hydrateScheduledFunction(result as ScheduledFunction) : null;
+  }
+
+  async listScheduledFunctions(projectId: string): Promise<ScheduledFunction[]> {
+    const tx = this.getDB().transaction(['scheduledFunctions'], 'readonly');
+    const store = tx.objectStore('scheduledFunctions');
+    const index = store.index('projectId');
+    const result = await this.promisify(index.getAll(projectId));
+    return (result || []).map((fn) => this.hydrateScheduledFunction(fn as ScheduledFunction));
+  }
+
+  async updateScheduledFunction(fn: ScheduledFunction): Promise<void> {
+    const tx = this.getDB().transaction(['scheduledFunctions'], 'readwrite');
+    const store = tx.objectStore('scheduledFunctions');
+    await this.promisify(store.put(fn));
+  }
+
+  async deleteScheduledFunction(id: string): Promise<void> {
+    const tx = this.getDB().transaction(['scheduledFunctions'], 'readwrite');
+    const store = tx.objectStore('scheduledFunctions');
+    await this.promisify(store.delete(id));
+  }
+
+  // ============================================
   // Helper Methods
   // ============================================
 
@@ -372,6 +585,40 @@ export class IndexedDBAdapter implements StorageAdapter {
       ...skill,
       createdAt: skill.createdAt ? new Date(skill.createdAt) : new Date(),
       updatedAt: skill.updatedAt ? new Date(skill.updatedAt) : new Date()
+    };
+  }
+
+  private hydrateEdgeFunction(fn: EdgeFunction): EdgeFunction {
+    return {
+      ...fn,
+      createdAt: fn.createdAt ? new Date(fn.createdAt) : new Date(),
+      updatedAt: fn.updatedAt ? new Date(fn.updatedAt) : new Date(),
+    };
+  }
+
+  private hydrateServerFunction(fn: ServerFunction): ServerFunction {
+    return {
+      ...fn,
+      createdAt: fn.createdAt ? new Date(fn.createdAt) : new Date(),
+      updatedAt: fn.updatedAt ? new Date(fn.updatedAt) : new Date(),
+    };
+  }
+
+  private hydrateSecret(secret: Secret): Secret {
+    return {
+      ...secret,
+      createdAt: secret.createdAt ? new Date(secret.createdAt) : new Date(),
+      updatedAt: secret.updatedAt ? new Date(secret.updatedAt) : new Date(),
+    };
+  }
+
+  private hydrateScheduledFunction(fn: ScheduledFunction): ScheduledFunction {
+    return {
+      ...fn,
+      createdAt: fn.createdAt ? new Date(fn.createdAt) : new Date(),
+      updatedAt: fn.updatedAt ? new Date(fn.updatedAt) : new Date(),
+      lastRunAt: fn.lastRunAt ? new Date(fn.lastRunAt) : undefined,
+      nextRunAt: fn.nextRunAt ? new Date(fn.nextRunAt) : undefined,
     };
   }
 }

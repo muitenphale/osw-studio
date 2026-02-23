@@ -39,11 +39,11 @@ interface ScrollHeatmapData {
 type HeatmapData = ClickHeatmapData | ScrollHeatmapData;
 
 interface HeatmapViewerProps {
-  siteId: string;
+  deploymentId: string;
   pages: string[]; // Available pages to select from
 }
 
-export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
+export function HeatmapViewer({ deploymentId, pages }: HeatmapViewerProps) {
   const [selectedPage, setSelectedPage] = useState<string>(pages[0] || '/');
   const [deviceFilter, setDeviceFilter] = useState<'all' | 'mobile' | 'tablet' | 'desktop'>('all');
   const [data, setData] = useState<HeatmapData | null>(null);
@@ -70,7 +70,7 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
         params.set('device', deviceFilter);
       }
 
-      const response = await fetch(`/api/analytics/${siteId}/heatmap?${params}`);
+      const response = await fetch(`/api/analytics/${deploymentId}/heatmap?${params}`);
       if (!response.ok) throw new Error('Failed to fetch heatmap data');
 
       const heatmapData: HeatmapData = await response.json();
@@ -94,7 +94,7 @@ export function HeatmapViewer({ siteId, pages }: HeatmapViewerProps) {
     } else {
       setScreenshotDataUrl(null);
     }
-  }, [selectedPage, deviceFilter, siteId]);
+  }, [selectedPage, deviceFilter, deploymentId]);
 
   // Capture screenshot - use same approach as thumbnail capture
   const captureScreenshot = async () => {

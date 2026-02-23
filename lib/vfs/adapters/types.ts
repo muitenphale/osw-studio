@@ -1,4 +1,4 @@
-import { Project, VirtualFile, FileTreeNode, CustomTemplate, PublishSettings, Site } from '../types';
+import { Project, VirtualFile, FileTreeNode, CustomTemplate, PublishSettings, Deployment, EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '../types';
 import { Skill } from '../skills/types';
 
 /**
@@ -6,7 +6,7 @@ import { Skill } from '../skills/types';
  *
  * Abstracts storage operations to support multiple backends:
  * - IndexedDB (browser mode - local storage)
- * - PostgreSQL (Server mode - server persistence)
+ * - SQLite (Server mode - server persistence)
  *
  * Note: Checkpoints and conversations are NOT part of this interface.
  * They remain browser-only in IndexedDB regardless of mode.
@@ -77,14 +77,42 @@ export interface StorageAdapter {
   getAllSkills(): Promise<Skill[]>;
 
   // ============================================
-  // Sites (Server Mode Only)
+  // Deployments (Server Mode Only)
   // ============================================
 
-  createSite?(site: Site): Promise<void>;
-  getSite?(siteId: string): Promise<Site | null>;
-  getSiteBySlug?(slug: string): Promise<Site | null>;
-  listSites?(): Promise<Site[]>;
-  listSitesByProject?(projectId: string): Promise<Site[]>;
-  updateSite?(site: Site): Promise<void>;
-  deleteSite?(siteId: string): Promise<void>;
+  createDeployment?(deployment: Deployment): Promise<void>;
+  getDeployment?(deploymentId: string): Promise<Deployment | null>;
+  getDeploymentBySlug?(slug: string): Promise<Deployment | null>;
+  listDeployments?(): Promise<Deployment[]>;
+  listDeploymentsByProject?(projectId: string): Promise<Deployment[]>;
+  updateDeployment?(deployment: Deployment): Promise<void>;
+  deleteDeployment?(deploymentId: string): Promise<void>;
+
+  // ============================================
+  // Backend Features (Project-scoped)
+  // ============================================
+
+  createEdgeFunction?(fn: EdgeFunction): Promise<void>;
+  getEdgeFunction?(id: string): Promise<EdgeFunction | null>;
+  listEdgeFunctions?(projectId: string): Promise<EdgeFunction[]>;
+  updateEdgeFunction?(fn: EdgeFunction): Promise<void>;
+  deleteEdgeFunction?(id: string): Promise<void>;
+
+  createServerFunction?(fn: ServerFunction): Promise<void>;
+  getServerFunction?(id: string): Promise<ServerFunction | null>;
+  listServerFunctions?(projectId: string): Promise<ServerFunction[]>;
+  updateServerFunction?(fn: ServerFunction): Promise<void>;
+  deleteServerFunction?(id: string): Promise<void>;
+
+  createSecret?(secret: Secret): Promise<void>;
+  getSecret?(id: string): Promise<Secret | null>;
+  listSecrets?(projectId: string): Promise<Secret[]>;
+  updateSecret?(secret: Secret): Promise<void>;
+  deleteSecret?(id: string): Promise<void>;
+
+  createScheduledFunction?(fn: ScheduledFunction): Promise<void>;
+  getScheduledFunction?(id: string): Promise<ScheduledFunction | null>;
+  listScheduledFunctions?(projectId: string): Promise<ScheduledFunction[]>;
+  updateScheduledFunction?(fn: ScheduledFunction): Promise<void>;
+  deleteScheduledFunction?(id: string): Promise<void>;
 }

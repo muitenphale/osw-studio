@@ -31,14 +31,12 @@ interface TemplateExportDialogProps {
   project: Project | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  siteId?: string;
 }
 
 export function TemplateExportDialog({
   project,
   open,
   onOpenChange,
-  siteId
 }: TemplateExportDialogProps) {
   const [exporting, setExporting] = useState(false);
   const [metadata, setMetadata] = useState<TemplateMetadata>({
@@ -92,8 +90,7 @@ export function TemplateExportDialog({
       const blob = await templateService.exportProjectAsTemplate(
         vfs,
         project.id,
-        exportMetadata,
-        siteId
+        exportMetadata
       );
 
       // Download file

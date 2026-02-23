@@ -5,32 +5,35 @@
  * This adapter handles the core database (osws.sqlite) for:
  * - Projects (metadata)
  * - Files and File Tree Nodes (synced project files)
- * - Sites (publish settings and configuration)
+ * - Deployments (publish settings and configuration)
  * - Custom Templates
  * - Skills
  *
- * Site-specific databases (sites/{siteId}/site.sqlite) are ONLY created
- * when a site explicitly enables the "Database" feature for edge functions.
- * Analytics data is stored in these optional site databases.
+ * Deployment-specific databases (deployments/{deploymentId}/deployment.sqlite) are ONLY created
+ * when a deployment explicitly enables the "Database" feature for edge functions.
+ * Analytics data is stored in these optional deployment databases.
  */
 
 import type { Database } from 'better-sqlite3';
 import { StorageAdapter } from './types';
-import { Project, VirtualFile, FileTreeNode, CustomTemplate, Site } from '../types';
+import { Project, VirtualFile, FileTreeNode, CustomTemplate, Deployment, EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '../types';
 import { Skill } from '../skills/types';
 import {
   getCoreDatabase,
-  getSiteDatabase,
-  closeSiteDatabase,
-  deleteSiteDatabase,
-  listSiteIds,
-  siteExists,
+  getDeploymentDatabase,
+  closeDeploymentDatabase,
+  deleteDeploymentDatabase,
+  deleteProjectDatabase,
+  listDeploymentIds,
+  deploymentExists,
   closeAllConnections
 } from './sqlite-connection';
-import { SiteDatabase } from './site-database';
+import { DeploymentDatabase } from './deployment-database';
+import { AnalyticsDatabase } from './analytics-database';
+import { ProjectDatabase } from './project-database';
 import type { AnalyticsConfig, ComplianceConfig, SeoConfig } from '../types';
 
-// Default configs for Site
+// Default configs for Deployment
 const DEFAULT_ANALYTICS: AnalyticsConfig = {
   enabled: false,
   provider: 'builtin',
@@ -172,7 +175,7 @@ const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_tree_nodes_parent ON file_tree_nodes(project_id, parent_path)
       `);
 
-      // Sites table - site settings and publishing info (no per-site DB)
+      // Sites table - deployment settings and publishing info (renamed to deployments in v4 migration)
       db.exec(`
         CREATE TABLE IF NOT EXISTS sites (
           id TEXT PRIMARY KEY,
@@ -200,7 +203,7 @@ const MIGRATIONS: Migration[] = [
         )
       `);
 
-      // Index for site lookups
+      // Index for deployment lookups (renamed in v4 migration)
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_sites_project_id ON sites(project_id)
       `);
@@ -209,7 +212,7 @@ const MIGRATIONS: Migration[] = [
   {
     id: 'add_request_log_v3',
     up: (db) => {
-      // Request log for tracking site traffic (server-level analytics)
+      // Request log for tracking deployment traffic (server-level analytics)
       db.exec(`
         CREATE TABLE IF NOT EXISTS request_log (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,6 +232,104 @@ const MIGRATIONS: Migration[] = [
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_request_log_site_id ON request_log(site_id)
       `);
+    }
+  },
+  {
+    id: 'rename_sites_to_deployments_v4',
+    up: (db) => {
+      // Rename sites table to deployments
+      // NOTE: request_log.site_id was intentionally NOT renamed to deployment_id because
+      // SQLite ALTER TABLE does not support column renames without full table recreation.
+      // The column is correctly aliased as `deploymentId` in TypeScript queries (see request-logger.ts).
+      db.exec(`ALTER TABLE sites RENAME TO deployments`);
+
+      // Drop old index and create new one with updated name
+      db.exec(`DROP INDEX IF EXISTS idx_sites_project_id`);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)
+      `);
+    }
+  },
+  {
+    id: 'add_project_server_features_v5',
+    up: (db) => {
+      // Project-scoped edge functions
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_edge_functions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          code TEXT NOT NULL,
+          method TEXT NOT NULL DEFAULT 'GET' CHECK(method IN ('GET', 'POST', 'PUT', 'DELETE', 'ANY')),
+          enabled INTEGER DEFAULT 1,
+          timeout_ms INTEGER DEFAULT 5000,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(project_id, name),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_project_edge_functions_project_id ON project_edge_functions(project_id)`);
+
+      // Project-scoped server functions
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_server_functions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          code TEXT NOT NULL,
+          enabled INTEGER DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(project_id, name),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_project_server_functions_project_id ON project_server_functions(project_id)`);
+
+      // Project-scoped secrets
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_secrets (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          has_value INTEGER DEFAULT 0,
+          value TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(project_id, name),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_project_secrets_project_id ON project_secrets(project_id)`);
+
+      // Project-scoped scheduled functions
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_scheduled_functions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          function_id TEXT NOT NULL,
+          cron_expression TEXT NOT NULL,
+          timezone TEXT DEFAULT 'UTC',
+          config TEXT DEFAULT '{}',
+          enabled INTEGER DEFAULT 1,
+          last_run_at TEXT,
+          next_run_at TEXT,
+          last_status TEXT,
+          last_error TEXT,
+          last_duration_ms INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(project_id, name),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_project_scheduled_functions_project_id ON project_scheduled_functions(project_id)`);
     }
   }
 ];
@@ -277,7 +378,9 @@ function toISOStringRequired(value: Date | string): string {
 export class SQLiteAdapter implements StorageAdapter {
   private db: Database | null = null;
   private initialized = false;
-  private siteDatabases = new Map<string, SiteDatabase>();
+  private deploymentDatabases = new Map<string, DeploymentDatabase>();
+  private analyticsDatabases = new Map<string, AnalyticsDatabase>();
+  private projectDatabases = new Map<string, ProjectDatabase>();
 
   /**
    * Initialize the adapter - sets up database and runs migrations
@@ -294,16 +397,41 @@ export class SQLiteAdapter implements StorageAdapter {
    * Close all connections
    */
   async close(): Promise<void> {
-    // Close all site databases
-    for (const [, siteDb] of this.siteDatabases) {
-      siteDb.close();
+    // Close all deployment databases
+    for (const [, deploymentDb] of this.deploymentDatabases) {
+      deploymentDb.close();
     }
-    this.siteDatabases.clear();
+    this.deploymentDatabases.clear();
+
+    // Close all analytics databases
+    for (const [, analyticsDb] of this.analyticsDatabases) {
+      analyticsDb.close();
+    }
+    this.analyticsDatabases.clear();
+
+    // Close all project databases
+    for (const [, projectDb] of this.projectDatabases) {
+      projectDb.close();
+    }
+    this.projectDatabases.clear();
 
     // Close core database via connection manager
     closeAllConnections();
     this.db = null;
     this.initialized = false;
+  }
+
+  /**
+   * Get or create a ProjectDatabase instance for a project
+   */
+  getProjectDatabase(projectId: string): ProjectDatabase {
+    let projectDb = this.projectDatabases.get(projectId);
+    if (!projectDb) {
+      projectDb = new ProjectDatabase(projectId);
+      projectDb.init();
+      this.projectDatabases.set(projectId, projectDb);
+    }
+    return projectDb;
   }
 
   /**
@@ -317,51 +445,261 @@ export class SQLiteAdapter implements StorageAdapter {
   }
 
   /**
-   * Get or create a SiteDatabase instance for a site with database enabled
+   * Get or create a DeploymentDatabase instance for a deployment with database enabled
    * This only creates the database when explicitly requested for analytics
    */
-  private getOrCreateSiteDB(siteId: string): SiteDatabase {
-    let siteDb = this.siteDatabases.get(siteId);
-    if (!siteDb) {
-      siteDb = new SiteDatabase(siteId);
-      siteDb.init();
-      this.siteDatabases.set(siteId, siteDb);
+  private getOrCreateDeploymentDB(deploymentId: string): DeploymentDatabase {
+    let deploymentDb = this.deploymentDatabases.get(deploymentId);
+    if (!deploymentDb) {
+      deploymentDb = new DeploymentDatabase(deploymentId);
+      deploymentDb.init();
+      this.deploymentDatabases.set(deploymentId, deploymentDb);
     }
-    return siteDb;
+    return deploymentDb;
+  }
+
+  // ============================================
+  // Edge Functions (Project-scoped)
+  // ============================================
+
+  async createEdgeFunction(fn: EdgeFunction): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      INSERT INTO project_edge_functions (id, project_id, name, description, code, method, enabled, timeout_ms, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fn.id, fn.projectId, fn.name, fn.description || null, fn.code, fn.method, fn.enabled ? 1 : 0, fn.timeoutMs, toISOStringRequired(fn.createdAt), toISOStringRequired(fn.updatedAt));
+  }
+
+  async getEdgeFunction(id: string): Promise<EdgeFunction | null> {
+    const db = this.getDB();
+    const row = db.prepare('SELECT * FROM project_edge_functions WHERE id = ?').get(id) as any;
+    return row ? this.rowToEdgeFunction(row) : null;
+  }
+
+  async listEdgeFunctions(projectId: string): Promise<EdgeFunction[]> {
+    const db = this.getDB();
+    const rows = db.prepare('SELECT * FROM project_edge_functions WHERE project_id = ? ORDER BY name').all(projectId) as any[];
+    return rows.map((row) => this.rowToEdgeFunction(row));
+  }
+
+  async updateEdgeFunction(fn: EdgeFunction): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      UPDATE project_edge_functions SET name = ?, description = ?, code = ?, method = ?, enabled = ?, timeout_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(fn.name, fn.description || null, fn.code, fn.method, fn.enabled ? 1 : 0, fn.timeoutMs, toISOStringRequired(fn.updatedAt), fn.id);
+  }
+
+  async deleteEdgeFunction(id: string): Promise<void> {
+    const db = this.getDB();
+    db.prepare('DELETE FROM project_edge_functions WHERE id = ?').run(id);
+  }
+
+  private rowToEdgeFunction(row: any): EdgeFunction {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      name: row.name,
+      description: row.description || undefined,
+      code: row.code,
+      method: row.method as EdgeFunction['method'],
+      enabled: row.enabled === 1,
+      timeoutMs: row.timeout_ms,
+      createdAt: parseDate(row.created_at),
+      updatedAt: parseDate(row.updated_at),
+    };
+  }
+
+  // ============================================
+  // Server Functions (Project-scoped)
+  // ============================================
+
+  async createServerFunction(fn: ServerFunction): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      INSERT INTO project_server_functions (id, project_id, name, description, code, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fn.id, fn.projectId, fn.name, fn.description || null, fn.code, fn.enabled ? 1 : 0, toISOStringRequired(fn.createdAt), toISOStringRequired(fn.updatedAt));
+  }
+
+  async getServerFunction(id: string): Promise<ServerFunction | null> {
+    const db = this.getDB();
+    const row = db.prepare('SELECT * FROM project_server_functions WHERE id = ?').get(id) as any;
+    return row ? this.rowToServerFunction(row) : null;
+  }
+
+  async listServerFunctions(projectId: string): Promise<ServerFunction[]> {
+    const db = this.getDB();
+    const rows = db.prepare('SELECT * FROM project_server_functions WHERE project_id = ? ORDER BY name').all(projectId) as any[];
+    return rows.map((row) => this.rowToServerFunction(row));
+  }
+
+  async updateServerFunction(fn: ServerFunction): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      UPDATE project_server_functions SET name = ?, description = ?, code = ?, enabled = ?, updated_at = ?
+      WHERE id = ?
+    `).run(fn.name, fn.description || null, fn.code, fn.enabled ? 1 : 0, toISOStringRequired(fn.updatedAt), fn.id);
+  }
+
+  async deleteServerFunction(id: string): Promise<void> {
+    const db = this.getDB();
+    db.prepare('DELETE FROM project_server_functions WHERE id = ?').run(id);
+  }
+
+  private rowToServerFunction(row: any): ServerFunction {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      name: row.name,
+      description: row.description || undefined,
+      code: row.code,
+      enabled: row.enabled === 1,
+      createdAt: parseDate(row.created_at),
+      updatedAt: parseDate(row.updated_at),
+    };
+  }
+
+  // ============================================
+  // Secrets (Project-scoped)
+  // ============================================
+
+  async createSecret(secret: Secret): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      INSERT INTO project_secrets (id, project_id, name, description, has_value, value, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(secret.id, secret.projectId, secret.name, secret.description || null, secret.hasValue ? 1 : 0, secret.value || null, toISOStringRequired(secret.createdAt), toISOStringRequired(secret.updatedAt));
+  }
+
+  async getSecret(id: string): Promise<Secret | null> {
+    const db = this.getDB();
+    const row = db.prepare('SELECT * FROM project_secrets WHERE id = ?').get(id) as any;
+    return row ? this.rowToSecret(row) : null;
+  }
+
+  async listSecrets(projectId: string): Promise<Secret[]> {
+    const db = this.getDB();
+    const rows = db.prepare('SELECT * FROM project_secrets WHERE project_id = ? ORDER BY name').all(projectId) as any[];
+    return rows.map((row) => this.rowToSecret(row));
+  }
+
+  async updateSecret(secret: Secret): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      UPDATE project_secrets SET name = ?, description = ?, has_value = ?, value = ?, updated_at = ?
+      WHERE id = ?
+    `).run(secret.name, secret.description || null, secret.hasValue ? 1 : 0, secret.value || null, toISOStringRequired(secret.updatedAt), secret.id);
+  }
+
+  async deleteSecret(id: string): Promise<void> {
+    const db = this.getDB();
+    db.prepare('DELETE FROM project_secrets WHERE id = ?').run(id);
+  }
+
+  private rowToSecret(row: any): Secret {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      name: row.name,
+      description: row.description || undefined,
+      hasValue: row.has_value === 1,
+      value: row.value || undefined,
+      createdAt: parseDate(row.created_at),
+      updatedAt: parseDate(row.updated_at),
+    };
+  }
+
+  // ============================================
+  // Scheduled Functions (Project-scoped)
+  // ============================================
+
+  async createScheduledFunction(fn: ScheduledFunction): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      INSERT INTO project_scheduled_functions (id, project_id, name, description, function_id, cron_expression, timezone, config, enabled, last_run_at, next_run_at, last_status, last_error, last_duration_ms, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fn.id, fn.projectId, fn.name, fn.description || null, fn.functionId, fn.cronExpression, fn.timezone, JSON.stringify(fn.config), fn.enabled ? 1 : 0, toISOString(fn.lastRunAt ?? null), toISOString(fn.nextRunAt ?? null), fn.lastStatus || null, fn.lastError || null, fn.lastDurationMs ?? null, toISOStringRequired(fn.createdAt), toISOStringRequired(fn.updatedAt));
+  }
+
+  async getScheduledFunction(id: string): Promise<ScheduledFunction | null> {
+    const db = this.getDB();
+    const row = db.prepare('SELECT * FROM project_scheduled_functions WHERE id = ?').get(id) as any;
+    return row ? this.rowToScheduledFunction(row) : null;
+  }
+
+  async listScheduledFunctions(projectId: string): Promise<ScheduledFunction[]> {
+    const db = this.getDB();
+    const rows = db.prepare('SELECT * FROM project_scheduled_functions WHERE project_id = ? ORDER BY name').all(projectId) as any[];
+    return rows.map((row) => this.rowToScheduledFunction(row));
+  }
+
+  async updateScheduledFunction(fn: ScheduledFunction): Promise<void> {
+    const db = this.getDB();
+    db.prepare(`
+      UPDATE project_scheduled_functions SET name = ?, description = ?, function_id = ?, cron_expression = ?, timezone = ?, config = ?, enabled = ?, last_run_at = ?, next_run_at = ?, last_status = ?, last_error = ?, last_duration_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(fn.name, fn.description || null, fn.functionId, fn.cronExpression, fn.timezone, JSON.stringify(fn.config), fn.enabled ? 1 : 0, toISOString(fn.lastRunAt ?? null), toISOString(fn.nextRunAt ?? null), fn.lastStatus || null, fn.lastError || null, fn.lastDurationMs ?? null, toISOStringRequired(fn.updatedAt), fn.id);
+  }
+
+  async deleteScheduledFunction(id: string): Promise<void> {
+    const db = this.getDB();
+    db.prepare('DELETE FROM project_scheduled_functions WHERE id = ?').run(id);
+  }
+
+  private rowToScheduledFunction(row: any): ScheduledFunction {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      name: row.name,
+      description: row.description || undefined,
+      functionId: row.function_id,
+      cronExpression: row.cron_expression,
+      timezone: row.timezone,
+      config: parseJSON(row.config, {}),
+      enabled: row.enabled === 1,
+      lastRunAt: row.last_run_at ? parseDate(row.last_run_at) : undefined,
+      nextRunAt: row.next_run_at ? parseDate(row.next_run_at) : undefined,
+      lastStatus: row.last_status || undefined,
+      lastError: row.last_error || undefined,
+      lastDurationMs: row.last_duration_ms ?? undefined,
+      createdAt: parseDate(row.created_at),
+      updatedAt: parseDate(row.updated_at),
+    };
   }
 
   /**
-   * Enable database for a site (creates the site.sqlite file)
-   * Called when user enables "Database" feature in site settings
+   * Enable database for a deployment (creates the deployment.sqlite file)
+   * Called when user enables "Database" feature in deployment settings
    */
-  async enableSiteDatabase(siteId: string): Promise<void> {
+  async enableDeploymentDatabase(deploymentId: string): Promise<void> {
     const db = this.getDB();
 
-    // Update the site record
-    db.prepare('UPDATE sites SET database_enabled = 1 WHERE id = ?').run(siteId);
+    // Update the deployment record
+    db.prepare('UPDATE deployments SET database_enabled = 1 WHERE id = ?').run(deploymentId);
 
-    // Create the site database
-    this.getOrCreateSiteDB(siteId);
+    // Create the deployment database
+    this.getOrCreateDeploymentDB(deploymentId);
   }
 
   /**
-   * Disable database for a site (deletes the site.sqlite file)
+   * Disable database for a deployment (deletes the deployment.sqlite file)
    */
-  async disableSiteDatabase(siteId: string): Promise<void> {
+  async disableDeploymentDatabase(deploymentId: string): Promise<void> {
     const db = this.getDB();
 
-    // Update the site record
-    db.prepare('UPDATE sites SET database_enabled = 0 WHERE id = ?').run(siteId);
+    // Update the deployment record
+    db.prepare('UPDATE deployments SET database_enabled = 0 WHERE id = ?').run(deploymentId);
 
-    // Close and delete the site database
-    const siteDb = this.siteDatabases.get(siteId);
-    if (siteDb) {
-      siteDb.close();
-      this.siteDatabases.delete(siteId);
+    // Close and delete the deployment database
+    const deploymentDb = this.deploymentDatabases.get(deploymentId);
+    if (deploymentDb) {
+      deploymentDb.close();
+      this.deploymentDatabases.delete(deploymentId);
     }
 
-    if (siteExists(siteId)) {
-      deleteSiteDatabase(siteId);
+    if (deploymentExists(deploymentId)) {
+      deleteDeploymentDatabase(deploymentId);
     }
   }
 
@@ -473,11 +811,15 @@ export class SQLiteAdapter implements StorageAdapter {
     // Delete from core database
     db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 
-    // Delete site database if it exists
-    if (siteExists(id)) {
-      this.siteDatabases.delete(id);
-      deleteSiteDatabase(id);
+    // Delete deployment database if it exists
+    if (deploymentExists(id)) {
+      this.deploymentDatabases.delete(id);
+      deleteDeploymentDatabase(id);
     }
+
+    // Delete project database if it exists
+    this.projectDatabases.delete(id);
+    deleteProjectDatabase(id);
   }
 
   async listProjects(fields?: string[]): Promise<Project[]> {
@@ -912,13 +1254,13 @@ export class SQLiteAdapter implements StorageAdapter {
   }
 
   // ============================================
-  // Sites (stored in core database)
+  // Deployments (stored in core database)
   // ============================================
 
-  async createSite(site: Site): Promise<void> {
+  async createDeployment(deployment: Deployment): Promise<void> {
     const db = this.getDB();
     const stmt = db.prepare(`
-      INSERT INTO sites (
+      INSERT INTO deployments (
         id, project_id, name, slug, enabled, under_construction,
         custom_domain, head_scripts, body_scripts, cdn_links,
         analytics, seo, compliance, settings_version,
@@ -928,64 +1270,64 @@ export class SQLiteAdapter implements StorageAdapter {
     `);
 
     stmt.run(
-      site.id,
-      site.projectId,
-      site.name,
-      site.slug ?? null,
-      site.enabled ? 1 : 0,
-      site.underConstruction ? 1 : 0,
-      site.customDomain ?? null,
-      JSON.stringify(site.headScripts ?? []),
-      JSON.stringify(site.bodyScripts ?? []),
-      JSON.stringify(site.cdnLinks ?? []),
-      JSON.stringify(site.analytics ?? DEFAULT_ANALYTICS),
-      JSON.stringify(site.seo ?? DEFAULT_SEO),
-      JSON.stringify(site.compliance ?? DEFAULT_COMPLIANCE),
-      site.settingsVersion ?? 1,
-      site.lastPublishedVersion ?? null,
-      site.previewImage ?? null,
-      toISOString(site.previewUpdatedAt),
-      site.databaseEnabled ? 1 : 0,
-      toISOStringRequired(site.createdAt),
-      toISOStringRequired(site.updatedAt),
-      toISOString(site.publishedAt)
+      deployment.id,
+      deployment.projectId,
+      deployment.name,
+      deployment.slug ?? null,
+      deployment.enabled ? 1 : 0,
+      deployment.underConstruction ? 1 : 0,
+      deployment.customDomain ?? null,
+      JSON.stringify(deployment.headScripts ?? []),
+      JSON.stringify(deployment.bodyScripts ?? []),
+      JSON.stringify(deployment.cdnLinks ?? []),
+      JSON.stringify(deployment.analytics ?? DEFAULT_ANALYTICS),
+      JSON.stringify(deployment.seo ?? DEFAULT_SEO),
+      JSON.stringify(deployment.compliance ?? DEFAULT_COMPLIANCE),
+      deployment.settingsVersion ?? 1,
+      deployment.lastPublishedVersion ?? null,
+      deployment.previewImage ?? null,
+      toISOString(deployment.previewUpdatedAt),
+      deployment.databaseEnabled ? 1 : 0,
+      toISOStringRequired(deployment.createdAt),
+      toISOStringRequired(deployment.updatedAt),
+      toISOString(deployment.publishedAt)
     );
   }
 
-  async getSite(siteId: string): Promise<Site | null> {
+  async getDeployment(deploymentId: string): Promise<Deployment | null> {
     const db = this.getDB();
-    const row = db.prepare('SELECT * FROM sites WHERE id = ?').get(siteId) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM deployments WHERE id = ?').get(deploymentId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
-    return this.rowToSite(row);
+    return this.rowToDeployment(row);
   }
 
-  async getSiteBySlug(slug: string): Promise<Site | null> {
+  async getDeploymentBySlug(slug: string): Promise<Deployment | null> {
     const db = this.getDB();
-    const row = db.prepare('SELECT * FROM sites WHERE slug = ?').get(slug) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM deployments WHERE slug = ?').get(slug) as Record<string, unknown> | undefined;
 
     if (!row) return null;
-    return this.rowToSite(row);
+    return this.rowToDeployment(row);
   }
 
-  async listSites(): Promise<Site[]> {
+  async listDeployments(): Promise<Deployment[]> {
     const db = this.getDB();
-    const rows = db.prepare('SELECT * FROM sites ORDER BY updated_at DESC').all() as Record<string, unknown>[];
+    const rows = db.prepare('SELECT * FROM deployments ORDER BY updated_at DESC').all() as Record<string, unknown>[];
 
-    return rows.map(row => this.rowToSite(row));
+    return rows.map(row => this.rowToDeployment(row));
   }
 
-  async listSitesByProject(projectId: string): Promise<Site[]> {
+  async listDeploymentsByProject(projectId: string): Promise<Deployment[]> {
     const db = this.getDB();
-    const rows = db.prepare('SELECT * FROM sites WHERE project_id = ? ORDER BY created_at').all(projectId) as Record<string, unknown>[];
+    const rows = db.prepare('SELECT * FROM deployments WHERE project_id = ? ORDER BY created_at').all(projectId) as Record<string, unknown>[];
 
-    return rows.map(row => this.rowToSite(row));
+    return rows.map(row => this.rowToDeployment(row));
   }
 
-  async updateSite(site: Site): Promise<void> {
+  async updateDeployment(deployment: Deployment): Promise<void> {
     const db = this.getDB();
     const stmt = db.prepare(`
-      UPDATE sites SET
+      UPDATE deployments SET
         project_id = ?, name = ?, slug = ?, enabled = ?, under_construction = ?,
         custom_domain = ?, head_scripts = ?, body_scripts = ?, cdn_links = ?,
         analytics = ?, seo = ?, compliance = ?, settings_version = ?,
@@ -995,48 +1337,48 @@ export class SQLiteAdapter implements StorageAdapter {
     `);
 
     stmt.run(
-      site.projectId,
-      site.name,
-      site.slug ?? null,
-      site.enabled ? 1 : 0,
-      site.underConstruction ? 1 : 0,
-      site.customDomain ?? null,
-      JSON.stringify(site.headScripts ?? []),
-      JSON.stringify(site.bodyScripts ?? []),
-      JSON.stringify(site.cdnLinks ?? []),
-      JSON.stringify(site.analytics ?? DEFAULT_ANALYTICS),
-      JSON.stringify(site.seo ?? DEFAULT_SEO),
-      JSON.stringify(site.compliance ?? DEFAULT_COMPLIANCE),
-      site.settingsVersion ?? 1,
-      site.lastPublishedVersion ?? null,
-      site.previewImage ?? null,
-      toISOString(site.previewUpdatedAt),
-      site.databaseEnabled ? 1 : 0,
-      toISOStringRequired(site.updatedAt),
-      toISOString(site.publishedAt),
-      site.id
+      deployment.projectId,
+      deployment.name,
+      deployment.slug ?? null,
+      deployment.enabled ? 1 : 0,
+      deployment.underConstruction ? 1 : 0,
+      deployment.customDomain ?? null,
+      JSON.stringify(deployment.headScripts ?? []),
+      JSON.stringify(deployment.bodyScripts ?? []),
+      JSON.stringify(deployment.cdnLinks ?? []),
+      JSON.stringify(deployment.analytics ?? DEFAULT_ANALYTICS),
+      JSON.stringify(deployment.seo ?? DEFAULT_SEO),
+      JSON.stringify(deployment.compliance ?? DEFAULT_COMPLIANCE),
+      deployment.settingsVersion ?? 1,
+      deployment.lastPublishedVersion ?? null,
+      deployment.previewImage ?? null,
+      toISOString(deployment.previewUpdatedAt),
+      deployment.databaseEnabled ? 1 : 0,
+      toISOStringRequired(deployment.updatedAt),
+      toISOString(deployment.publishedAt),
+      deployment.id
     );
   }
 
-  async deleteSite(siteId: string): Promise<void> {
+  async deleteDeployment(deploymentId: string): Promise<void> {
     const db = this.getDB();
 
     // Delete from core database
-    db.prepare('DELETE FROM sites WHERE id = ?').run(siteId);
+    db.prepare('DELETE FROM deployments WHERE id = ?').run(deploymentId);
 
-    // If site had database enabled, also delete the site database file
-    const siteDb = this.siteDatabases.get(siteId);
-    if (siteDb) {
-      siteDb.close();
-      this.siteDatabases.delete(siteId);
+    // If deployment had database enabled, also delete the deployment database file
+    const deploymentDb = this.deploymentDatabases.get(deploymentId);
+    if (deploymentDb) {
+      deploymentDb.close();
+      this.deploymentDatabases.delete(deploymentId);
     }
 
-    if (siteExists(siteId)) {
-      deleteSiteDatabase(siteId);
+    if (deploymentExists(deploymentId)) {
+      deleteDeploymentDatabase(deploymentId);
     }
   }
 
-  private rowToSite(row: Record<string, unknown>): Site {
+  private rowToDeployment(row: Record<string, unknown>): Deployment {
     return {
       id: row.id as string,
       projectId: row.project_id as string,
@@ -1063,31 +1405,48 @@ export class SQLiteAdapter implements StorageAdapter {
   }
 
   // ============================================
-  // Analytics Access (via SiteDatabase)
+  // Analytics Access (via DeploymentDatabase)
   // ============================================
 
   /**
-   * Get the SiteDatabase for analytics operations
-   * Only returns a database if the site has database enabled
+   * Get the DeploymentDatabase for analytics operations
+   * Only returns a database if the deployment has database enabled
    * This allows API routes to access analytics methods
    */
-  getSiteDatabaseForAnalytics(siteId: string): SiteDatabase | null {
-    // First check if the site exists and has database enabled
-    const site = this.getSiteSync(siteId);
-    if (!site || !site.databaseEnabled) return null;
+  getDeploymentDatabaseForAnalytics(deploymentId: string): DeploymentDatabase | null {
+    // First check if the deployment exists and has database enabled
+    const deployment = this.getDeploymentSync(deploymentId);
+    if (!deployment || !deployment.databaseEnabled) return null;
 
-    // Get or create the site database (since database is enabled)
-    return this.getOrCreateSiteDB(siteId);
+    // Get or create the deployment database (since database is enabled)
+    return this.getOrCreateDeploymentDB(deploymentId);
   }
 
   /**
-   * Synchronous version of getSite for internal use
+   * Get the AnalyticsDatabase for analytics operations
+   * Only returns a database if the deployment exists and has database enabled
    */
-  private getSiteSync(siteId: string): Site | null {
+  getAnalyticsDatabaseInstance(deploymentId: string): AnalyticsDatabase | null {
+    const deployment = this.getDeploymentSync(deploymentId);
+    if (!deployment || !deployment.databaseEnabled) return null;
+
+    let analyticsDb = this.analyticsDatabases.get(deploymentId);
+    if (!analyticsDb) {
+      analyticsDb = new AnalyticsDatabase(deploymentId);
+      analyticsDb.init();
+      this.analyticsDatabases.set(deploymentId, analyticsDb);
+    }
+    return analyticsDb;
+  }
+
+  /**
+   * Synchronous version of getDeployment for internal use
+   */
+  private getDeploymentSync(deploymentId: string): Deployment | null {
     const db = this.getDB();
-    const row = db.prepare('SELECT * FROM sites WHERE id = ?').get(siteId) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM deployments WHERE id = ?').get(deploymentId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
-    return this.rowToSite(row);
+    return this.rowToDeployment(row);
   }
 }

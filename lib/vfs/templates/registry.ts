@@ -9,8 +9,7 @@ export interface BuiltInTemplateMetadata {
   description: string;
   isBuiltIn: true;
   updatedAt: Date;
-  templateType?: 'project' | 'site';
-  siteFeatures?: import('../types').SiteTemplateFeatures;
+  backendFeatures?: import('../types').BackendFeatures;
   metadata?: {
     author?: string;
     tags?: string[];
@@ -50,8 +49,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Professional landing page with a working contact form powered by Resend',
     isBuiltIn: true,
     updatedAt: new Date('2025-01-01T00:00:00Z'),
-    templateType: 'site',
-    siteFeatures: {
+    backendFeatures: {
       edgeFunctions: [
         {
           name: 'submit-contact',
@@ -88,8 +86,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Blog platform with posts, user auth, and moderated comments',
     isBuiltIn: true,
     updatedAt: new Date('2025-01-01T00:00:00Z'),
-    templateType: 'site',
-    siteFeatures: {
+    backendFeatures: {
       edgeFunctions: [
         {
           name: 'get-comments',

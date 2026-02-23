@@ -40,16 +40,16 @@ interface DashboardData {
     totalFiles: number;
   };
   hosting: {
-    publishedSites: number;
-    sitesWithDb: number;
+    publishedDeployments: number;
+    deploymentsWithDb: number;
     storageUsed: number;
   };
   traffic: {
     requestsLastHour: number;
     requestsLastDay: number;
     errorCount: number;
-    topSites: Array<{ siteId: string; siteName: string; count: number }>;
-    recentErrors: Array<{ siteId: string; path: string; statusCode: number; timestamp: string }>;
+    topDeployments: Array<{ deploymentId: string; deploymentName: string; count: number }>;
+    recentErrors: Array<{ deploymentId: string; path: string; statusCode: number; timestamp: string }>;
   };
   whatsNew: {
     version: string;
@@ -62,7 +62,7 @@ interface DashboardData {
     description: string | null;
     updatedAt: string;
   }>;
-  recentSites: Array<{
+  recentDeployments: Array<{
     id: string;
     name: string;
     slug: string;
@@ -260,9 +260,9 @@ function QuickActionsBar({
         </Button>
         {isServerMode && (
           <Button variant="outline" size="sm" asChild className="gap-1.5">
-            <Link href="/admin/sites">
+            <Link href="/admin/deployments">
               <Globe className="w-4 h-4" />
-              Sites
+              Deployments
             </Link>
           </Button>
         )}
@@ -359,7 +359,7 @@ function CompactOverview({
   const stats = [
     { label: 'Version', value: `v${data.system.version}` },
     { label: 'Projects', value: formatNumber(data.content.projects) },
-    { label: 'Sites', value: formatNumber(data.hosting.publishedSites) },
+    { label: 'Deployments', value: formatNumber(data.hosting.publishedDeployments) },
     { label: 'Traffic/h', value: formatNumber(data.traffic.requestsLastHour) },
     { label: 'Traffic/d', value: formatNumber(data.traffic.requestsLastDay) },
     { label: 'Errors', value: formatNumber(data.traffic.errorCount), highlight: data.traffic.errorCount > 0 },
@@ -536,46 +536,46 @@ function RecentProjectsCard({
   );
 }
 
-// Recent Sites Card
-function RecentSitesCard({ sites }: { sites: DashboardData['recentSites'] }) {
+// Recent Deployments Card
+function RecentDeploymentsCard({ deployments }: { deployments: DashboardData['recentDeployments'] }) {
   return (
     <div className="bg-zinc-900/30 rounded-xl border border-zinc-800 p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Globe className="w-4 h-4 text-orange-500" />
-          <h3 className="text-sm font-medium text-zinc-300">Recent Sites</h3>
+          <h3 className="text-sm font-medium text-zinc-300">Recent Deployments</h3>
         </div>
         <Link
-          href="/admin/sites"
+          href="/admin/deployments"
           className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-0.5"
         >
           View all
           <ChevronRight className="w-3 h-3" />
         </Link>
       </div>
-      {sites.length === 0 ? (
+      {deployments.length === 0 ? (
         <p className="text-xs text-zinc-500 text-center py-2 flex-1 flex items-center justify-center">
-          No sites yet
+          No deployments yet
         </p>
       ) : (
         <div className="space-y-1.5 flex-1">
-          {sites.slice(0, 3).map((site) => (
+          {deployments.slice(0, 3).map((deployment) => (
             <Link
-              key={site.id}
-              href={`/admin/sites?open=${site.id}`}
+              key={deployment.id}
+              href={`/admin/deployments?open=${deployment.id}`}
               className="flex items-center justify-between text-xs py-1.5 px-2 bg-zinc-900/50 rounded hover:bg-zinc-800/50 transition-colors"
             >
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <span
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    site.enabled ? 'bg-green-500' : 'bg-zinc-500'
+                    deployment.enabled ? 'bg-green-500' : 'bg-zinc-500'
                   }`}
                 />
-                <span className="text-zinc-300 truncate">{site.name}</span>
+                <span className="text-zinc-300 truncate">{deployment.name}</span>
               </div>
               <span className="text-zinc-500 shrink-0 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                {formatRelativeTime(site.updatedAt)}
+                {formatRelativeTime(deployment.updatedAt)}
               </span>
             </Link>
           ))}
@@ -585,32 +585,32 @@ function RecentSitesCard({ sites }: { sites: DashboardData['recentSites'] }) {
   );
 }
 
-// Compact Top Sites & Errors
+// Compact Top Deployments & Errors
 function TrafficLists({ data }: { data: DashboardData }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* Top Sites */}
+      {/* Top Deployments */}
       <div className="bg-zinc-900/30 rounded-xl border border-zinc-800 p-4 flex flex-col">
         <div className="flex items-center gap-2 mb-3">
           <Globe className="w-4 h-4 text-orange-500" />
-          <h3 className="text-sm font-medium text-zinc-300">Top Sites (24h)</h3>
+          <h3 className="text-sm font-medium text-zinc-300">Top Deployments (24h)</h3>
         </div>
-        {data.traffic.topSites.length === 0 ? (
+        {data.traffic.topDeployments.length === 0 ? (
           <p className="text-xs text-zinc-500 text-center py-2 flex-1 flex items-center justify-center">
             No traffic recorded yet
           </p>
         ) : (
           <div className="space-y-1.5 flex-1">
-            {data.traffic.topSites.slice(0, 5).map((site, i) => (
+            {data.traffic.topDeployments.slice(0, 5).map((deployment, i) => (
               <div
-                key={site.siteId}
+                key={deployment.deploymentId}
                 className="flex items-center justify-between text-xs py-1 px-2 bg-zinc-900/50 rounded"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-zinc-500 w-4">{i + 1}.</span>
-                  <span className="text-zinc-300 truncate">{site.siteName}</span>
+                  <span className="text-zinc-300 truncate">{deployment.deploymentName}</span>
                 </div>
-                <span className="text-zinc-500 shrink-0">{formatNumber(site.count)}</span>
+                <span className="text-zinc-500 shrink-0">{formatNumber(deployment.count)}</span>
               </div>
             ))}
           </div>
@@ -631,7 +631,7 @@ function TrafficLists({ data }: { data: DashboardData }) {
           <div className="space-y-1.5 flex-1">
             {data.traffic.recentErrors.slice(0, 5).map((error, i) => (
               <div
-                key={`${error.siteId}-${error.path}-${i}`}
+                key={`${error.deploymentId}-${error.path}-${i}`}
                 className="flex items-center justify-between text-xs py-1 px-2 bg-zinc-900/50 rounded"
               >
                 <div className="flex items-center gap-2 min-w-0">
@@ -779,13 +779,13 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
           {hasWhatsNew && <WhatsNewCard whatsNew={serverData.whatsNew} />}
         </div>
 
-        {/* Row 2: Recent Projects + Recent Sites */}
+        {/* Row 2: Recent Projects + Recent Deployments */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
           <RecentProjectsCard projects={serverData.recentProjects} />
-          <RecentSitesCard sites={serverData.recentSites} />
+          <RecentDeploymentsCard deployments={serverData.recentDeployments} />
         </div>
 
-        {/* Row 3: Top Sites + Recent Errors */}
+        {/* Row 3: Top Deployments + Recent Errors */}
         <div className="[&>*>*]:min-h-[140px]">
           <TrafficLists data={serverData} />
         </div>
@@ -825,7 +825,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
           )}
         </div>
 
-        {/* Row 2: Recent Projects (no Sites in browser mode) */}
+        {/* Row 2: Recent Projects (no Deployments in browser mode) */}
         <div className="mb-4">
           <RecentProjectsCard
             projects={browserData.recentProjects}
