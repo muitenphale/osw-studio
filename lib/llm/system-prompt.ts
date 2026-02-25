@@ -184,8 +184,9 @@ Available Commands (READ-ONLY):
 - Read entire files: cat [filepath] ← AVOID (use only for small files)
 - Search (basic, no context): grep [-n] [-i] [-F] [pattern] [path] ← Use rg instead for context
 - Find files: find [path] -name [pattern]
+- Count lines/words/chars: wc [-l] [-w] [-c] [filepath] ← Works with pipes too
 - Database queries (Server Mode): sqlite3 "SELECT * FROM table" ← Full SQL in double quotes
-- Pipes: cmd1 | cmd2 (e.g., cat /file.txt | grep pattern | head -n 5)
+- Pipes: cmd1 | cmd2 (e.g., find / -type f | wc -l)
 
 ⚠️ IMPORTANT: grep does NOT support -A, -B, or -C flags. For context around matches, use rg (ripgrep)!
 
@@ -356,12 +357,14 @@ Available Commands for the shell tool:
 - Output text: echo [text]
 - Write to file: echo [text] > [filepath]
 - Edit files: Use write tool for reliable file editing
+- Count lines/words/chars: wc [-l] [-w] [-c] [filepath] ← Works with pipes too
 - Database queries (Server Mode): sqlite3 "SQL QUERY" ← Full SQL in double quotes
 
 Pipes and Redirects:
 - Pipes: cmd1 | cmd2 | cmd3 (pass stdout as stdin to next command)
 - Redirect: cmd > /file.txt (overwrite), cmd >> /file.txt (append)
 - Example: cat /index.html | grep class | head -n 5
+- Example: find / -type f | wc -l (count files)
 - Example: grep -n div /index.html > /results.txt
 - Example: sed 's/old/new/g' /file.txt > /output.txt
 

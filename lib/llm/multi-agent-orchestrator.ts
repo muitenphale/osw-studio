@@ -911,7 +911,9 @@ Please revise your approach.`;
       // Emit tool execution start
       this.onProgress?.('tool_status', {
         toolIndex,
-        status: 'executing'
+        toolName: toolId,
+        status: 'executing',
+        args: toolCall.function.arguments
       });
 
       // Build execution context
@@ -1062,6 +1064,7 @@ Please revise your approach.`;
         // Emit tool status based on result
         this.onProgress?.('tool_status', {
           toolIndex,
+          toolName: toolId,
           status: isError ? 'failed' : 'completed',
           result,
           ...(isError && { error: result })

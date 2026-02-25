@@ -30,5 +30,5 @@ export function detectDeploymentType(): 'hf_space' | 'server' | 'browser' {
 }
 
 export function getAppVersion(): string {
-  return process.env.NEXT_PUBLIC_APP_VERSION || '1.35.0';
+  return process.env.NEXT_PUBLIC_APP_VERSION || '1.36.0';
 }

@@ -1130,6 +1130,61 @@ Examples:
         if (redirect) return applyRedirect(vfs, projectId, outputContent, redirect);
         return { stdout: truncate(outputContent), stderr: '', exitCode: 0 };
       }
+      case 'wc': {
+        // wc [-l] [-w] [-c] [file]  (or stdin via pipe)
+        // Default (no flags): show lines, words, chars
+        const flags = { l: false, w: false, c: false };
+        let filePath = '';
+        let anyFlag = false;
+
+        for (const a of args) {
+          if (a && a.startsWith('-')) {
+            for (const ch of a.slice(1)) {
+              if (ch === 'l') { flags.l = true; anyFlag = true; }
+              else if (ch === 'w') { flags.w = true; anyFlag = true; }
+              else if (ch === 'c') { flags.c = true; anyFlag = true; }
+            }
+          } else if (a) {
+            filePath = a;
+          }
+        }
+
+        // If no flags specified, show all three
+        if (!anyFlag) { flags.l = true; flags.w = true; flags.c = true; }
+
+        let inputContent: string;
+        const wcPath = normalizePath(filePath);
+
+        if (wcPath) {
+          try {
+            const file = await vfs.readFile(projectId, wcPath);
+            if (typeof file.content !== 'string') {
+              return { stdout: '', stderr: `wc: ${wcPath}: binary file`, exitCode: 1 };
+            }
+            inputContent = file.content;
+          } catch (e: any) {
+            return { stdout: '', stderr: `wc: ${wcPath}: ${e?.message || 'file not found'}`, exitCode: 1 };
+          }
+        } else if (stdin !== undefined) {
+          inputContent = stdin;
+        } else {
+          return { stdout: '', stderr: 'wc: no input file or stdin', exitCode: 2 };
+        }
+
+        const lineCount = inputContent === '' ? 0 : (inputContent.match(/\r?\n/g) || []).length;
+        const wordCount = inputContent.trim() === '' ? 0 : inputContent.trim().split(/\s+/).length;
+        const charCount = inputContent.length;
+
+        const parts: string[] = [];
+        if (flags.l) parts.push(String(lineCount));
+        if (flags.w) parts.push(String(wordCount));
+        if (flags.c) parts.push(String(charCount));
+        if (wcPath) parts.push(wcPath);
+
+        const wcOutput = parts.join(' ');
+        if (redirect) return applyRedirect(vfs, projectId, wcOutput, redirect);
+        return { stdout: truncate(wcOutput), stderr: '', exitCode: 0 };
+      }
       case 'sqlite3': {
         // This case is reached when sqlite3 is called without a deploymentId context
         // When deploymentId is available, tool-registry.ts routes the call to the server API
@@ -1159,7 +1214,7 @@ Right: {"cmd": ["ls", "-la"]}
           stdout: '',
           stderr: `${program}: command not found${bashHint}
 
-Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, sqlite3
+Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, sqlite3
 Operators: | (pipe), > (redirect), >> (append), && (chain)
 
 Correct shell tool usage:
@@ -1185,6 +1240,8 @@ Correct shell tool usage:
   {"cmd": ["sed", "-i", "s/old/new/g", "/file.txt"]} - In-place edit
   {"cmd": ["cat", "/f.txt", "|", "grep", "class", "|", "head", "-n", "5"]} - Pipe chain
   {"cmd": ["grep", "-n", "div", "/f.txt", ">", "/results.txt"]} - Redirect to file
+  {"cmd": ["find", "/", "-type", "f", "|", "wc", "-l"]} - Count files
+  {"cmd": ["wc", "-l", "/file.txt"]}             - Count lines in file
   {"cmd": ["sqlite3", "SELECT * FROM users"]} - Execute SQL (Server Mode)
   {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 

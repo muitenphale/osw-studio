@@ -648,7 +648,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
               onClick={() => router.push('/test-generation')}
             >
               <TestTube className="mr-2 h-4 w-4" />
-              Model Tester
+              Benchmark
             </Button>
             <Button
               variant="outline"
