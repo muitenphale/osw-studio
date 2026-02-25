@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.35.0 - Prompt Architecture & Shell Improvements (2026-02-25)
+
+The AI system prompt no longer hard-codes website instructions. Domain knowledge now lives in a per-project `.PROMPT.md` file that the AI reads at conversation start, making OSW Studio adaptable to non-website projects.
+
+- **Per-Project `.PROMPT.md`** - Each project can have a `/.PROMPT.md` file containing domain-specific instructions for the AI. All built-in templates ship with one pre-filled. Existing projects without it see a subtle banner offering to add the default
+- **Configurable Entry Point** - Right-click any file in the explorer and choose "Set as Entry Point" to change which file the preview loads first. The entry point shows a green Home icon
+- **Template Rename: "Blank" → "Website Starter"** - The Blank template is now called "Website Starter" to better describe its purpose
+- **Tool Rename: `json_patch` → `write`** - The file editing tool was renamed for better LLM compatibility. Same behavior, better tool selection
+- **Shell Pipes & Redirects** - Commands can now be chained with `|` and output redirected with `>` / `>>`
+- **`sed` Command** - New text substitution command with `s/pattern/replacement/[g]` syntax
+- **Repeat Helpers** - Added `{{#times N}}`, `{{#repeat N}}`, and `{{#for N}}` Handlebars block helpers
+
+---
+
 ## v1.34.0 - Project-Scoped Backend & Deployments (2026-02-22)
 
 Backend features are now managed at the **project level** instead of per-deployment, and "Sites" have been renamed to **"Deployments"** throughout the app.

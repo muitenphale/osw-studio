@@ -272,7 +272,7 @@ The operation executed successfully, but the content may be incomplete.
 
 📝 Next steps:
 1. Verify if the file content is complete
-2. If incomplete, continue with additional json_patch operations
+2. If incomplete, continue with additional write operations
 3. Use multiple smaller operations (aim for <2KB / ~500 tokens each)
 
 Example continuation for ${filePath}:
@@ -304,7 +304,7 @@ Why this failed:
 • 'replace_entity' operations need complete selectors - partial patterns = wrong entity match
 • Auto-repair would corrupt your file with incomplete/incorrect changes
 
-💡 Solution: Split into smaller json_patch operations
+💡 Solution: Split into smaller write operations
 1. Each operation should be <2KB (≈500 tokens)
 2. Use multiple sequential tool calls for large changes
 3. For rewrites, split content into logical sections

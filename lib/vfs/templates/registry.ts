@@ -23,13 +23,13 @@ export interface BuiltInTemplateMetadata {
 export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
   {
     id: 'blank',
-    name: 'Blank',
+    name: 'Website Starter',
     description: 'Minimal starting template with basic HTML/CSS/JS structure',
     isBuiltIn: true,
     updatedAt: new Date('2025-01-01T00:00:00Z'),
     metadata: {
       author: 'OSW Studio',
-      tags: ['starter', 'basic']
+      tags: ['starter', 'basic', 'website']
     }
   },
   {

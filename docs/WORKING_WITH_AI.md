@@ -268,7 +268,7 @@ When AI works in Code Mode, you'll see it use tools:
 
 **Editing files:**
 ```
-🔧 json_patch: Updated styles.css
+🔧 write: Updated styles.css
 ✅ Changed background color to blue
 ```
 

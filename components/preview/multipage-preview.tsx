@@ -41,6 +41,7 @@ interface MultipagePreviewProps {
   onClose?: () => void;
   deploymentId?: string | null;
   onCaptureScreenshot?: (screenshot: string) => void;
+  entryPoint?: string;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -59,7 +60,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   hasFocusTarget = false,
   onClose,
   deploymentId,
-  onCaptureScreenshot
+  onCaptureScreenshot,
+  entryPoint
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -224,7 +226,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         serverRef.current.cleanupBlobUrls();
       }
       
-      const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined);
+      const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined, entryPoint);
       serverRef.current = server;
       
       const compiled = await server.compileProject();
@@ -233,9 +235,14 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
       let pathToLoad = currentPath;
       if (!pathToLoad) {
-        pathToLoad = compiled.blobUrls.has('/index.html') ? '/' : 
-                     compiled.entryPoint || 
-                     (compiled.routes.length > 0 ? compiled.routes[0].path : '/');
+        const ep = compiled.entryPoint || '/index.html';
+        if (ep !== '/index.html' && compiled.blobUrls.has(ep)) {
+          // Non-default entry point — navigate directly to it
+          pathToLoad = ep;
+        } else {
+          pathToLoad = compiled.blobUrls.has(ep) ? '/' :
+                       (compiled.routes.length > 0 ? compiled.routes[0].path : '/');
+        }
       }
       
       loadPage(pathToLoad, compiled);
@@ -353,6 +360,9 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       filePath = route.file;
     } else if (normalizedPath === '/') {
       filePath = '/index.html';
+    } else if (normalizedPath.endsWith('.html')) {
+      // Already a full file path (e.g., entry point like /.renderer/index.html)
+      filePath = normalizedPath;
     } else if (normalizedPath.endsWith('/')) {
       // Directory path - look for index.html
       filePath = normalizedPath + 'index.html';

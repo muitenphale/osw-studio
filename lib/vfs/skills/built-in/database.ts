@@ -76,8 +76,8 @@ Tables can also be created using ` + "`db.run()`" + ` in edge functions with ` +
 Create an edge function to set up your schema:
 
 ` + "```" + `javascript
-// json_patch to create /.server/edge-functions/init-db.json
-json_patch({
+// write to create /.server/edge-functions/init-db.json
+write({
   "file_path": "/.server/edge-functions/init-db.json",
   "operations": [{
     "type": "rewrite",
@@ -267,7 +267,7 @@ Response.json({ deleted: true });
 
 ` + "```" + `javascript
 // Create a CRUD endpoint for products
-json_patch({
+write({
   "file_path": "/.server/edge-functions/products.json",
   "operations": [{
     "type": "rewrite",

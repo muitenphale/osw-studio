@@ -90,7 +90,7 @@ Let's build a simple personal website.
 2. Click **+ New Project**
 3. Name your project (e.g., "My Portfolio")
 4. Choose a template:
-   - **Blank** - Minimal starting point (recommended for most projects)
+   - **Website Starter** - Minimal starting point (recommended for most projects)
    - **Example Studios** - Pre-built example to learn from
 
 You'll see the workspace with 4 panels:

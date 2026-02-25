@@ -356,7 +356,7 @@ AI guidance documents injected into the system prompt. They teach the AI how to 
 
 Reusable project starting points with files, structure, and metadata.
 
-**Built-in Project Templates**: Blank (minimal), Example Studios (multi-page portfolio)
+**Built-in Project Templates**: Website Starter (minimal), Example Studios (multi-page portfolio)
 
 **Built-in Templates with Backend Features**: Landing Page with Contact Form (Resend email), Blog with Comments (auth + moderated comments)
 

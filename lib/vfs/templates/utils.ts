@@ -45,8 +45,10 @@ export async function createProjectFromTemplate(
             const arrayBuffer = await response.arrayBuffer();
             await vfs.createFile(projectId, asset.path, arrayBuffer);
           } else {
+            console.warn(`Asset fetch failed (${response.status}): ${asset.filename}`);
           }
         } catch (error) {
+          console.warn(`Asset fetch error: ${asset.filename}`, error);
         }
       }
     }

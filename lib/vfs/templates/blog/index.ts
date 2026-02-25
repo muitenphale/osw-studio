@@ -1,4 +1,5 @@
 import { ProjectTemplate } from '../../project-templates';
+import { WEBSITE_DOMAIN_PROMPT } from '@/lib/llm/prompts/website';
 
 export const BLOG_PROJECT_TEMPLATE: ProjectTemplate = {
   name: 'Blog with Comments',
@@ -981,6 +982,10 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 `
+    },
+    {
+      path: '/.PROMPT.md',
+      content: WEBSITE_DOMAIN_PROMPT
     },
   ],
 };

@@ -109,6 +109,26 @@ Deep dive into Handlebars features available in OSW Studio for building maintain
 {{/each}}
 \`\`\`
 
+### Repeat Content N Times
+\`\`\`handlebars
+{{! times, repeat, and for are all equivalent }}
+{{#times 3}}
+  <div class="item">Item {{add index 1}}</div>
+{{/times}}
+
+{{! Use with a data variable }}
+{{#repeat count}}
+  <span>●</span>
+{{/repeat}}
+
+{{! Access index, first, last (same as #each) }}
+{{#for 4}}
+  <div class="col {{#if first}}first{{/if}} {{#if last}}last{{/if}}">
+    Column {{add index 1}}
+  </div>
+{{/for}}
+\`\`\`
+
 ### Accessing Array Indices
 \`\`\`handlebars
 {{#each items}}

@@ -16,7 +16,7 @@ import {
   generateUnsafeOperationError
 } from './json-repair';
 
-export type ToolId = 'shell' | 'json_patch' | 'evaluation';
+export type ToolId = 'shell' | 'write' | 'evaluation';
 
 export interface ToolExecutor {
   /**
@@ -71,8 +71,20 @@ Available commands:
 - Directory listing: ls, tree
 - Search: grep, rg (ripgrep), find
 - File operations: mkdir, mv, cp, rm, rmdir, touch
+- Text processing: sed (substitution), echo
 - Database: sqlite3 (Server Mode only, requires deployment context)
-- Other: echo
+
+Pipes and Redirects:
+- Pipes: cmd1 | cmd2 | cmd3  (pass stdout to next command's stdin)
+- Redirect: cmd > /file.txt  (write stdout to file, overwrite)
+- Append: cmd >> /file.txt   (append stdout to file)
+- cat, head, tail, grep, rg, sed all accept stdin from pipes
+
+sed (text substitution):
+- {"cmd": "sed 's/old/new/g' /file.txt"}         → stdout
+- {"cmd": "sed -i 's/old/new/g' /file.txt"}      → in-place edit
+- {"cmd": "sed -e 's/a/b/' -e 's/c/d/' /f.txt"}  → multiple expressions
+- {"cmd": "cat /file.txt | sed 's/old/new/'"}     → pipe + sed
 
 IMPORTANT: Execute ONE command at a time. Pass the complete command as a single string.
 
@@ -90,8 +102,9 @@ Examples:
 - {"cmd": "ls -la /"}
 - {"cmd": "cat /index.html /app.js /style.css"}  ← Multiple files
 - {"cmd": "mkdir -p templates/components/{post,comment,user}"}  ← Brace expansion
-- {"cmd": "touch file1.txt file2.txt"}  ← Multiple files
-- {"cmd": "grep -r pattern /"}`,
+- {"cmd": "grep -r pattern /"}
+- {"cmd": "cat /index.html | grep class | head -n 5"}  ← Pipe chain
+- {"cmd": "grep -n div /index.html > /results.txt"}  ← Redirect`,
         parameters: {
           type: 'object',
           properties: {
@@ -174,12 +187,12 @@ Examples:
       }
     });
 
-    // JSON Patch tool - Edit files using structured operations
+    // Write tool - Write and edit files using structured operations
     this.register({
-      id: 'json_patch',
+      id: 'write',
       definition: {
-        name: 'json_patch',
-        description: `Edit files using structured patch operations. Supports three operation types:
+        name: 'write',
+        description: `Write and edit files using structured operations. Supports three operation types:
 
 IMPORTANT: The 'operations' parameter must be a direct array, NOT a JSON string.
 ❌ Wrong: "operations": "[{...}]"
@@ -313,7 +326,7 @@ For large file rewrites, ensure:
 
           const result = await execStringPatch(vfs, projectId, args.file_path, args.operations);
 
-          // Refresh server context if json_patch modified .server/ files
+          // Refresh server context if write tool modified .server/ files
           if (result.applied && args.file_path?.startsWith('/.server/')) {
             if (vfs.hasServerContext()) {
               await vfs.refreshServerContext();
@@ -498,7 +511,7 @@ For large file rewrites, ensure:
 
         if (repairResult.success) {
           // Successfully repaired JSON - check if it's safe to execute
-          if (toolId === 'json_patch') {
+          if (toolId === 'write') {
             const operations = repairResult.repaired?.operations;
 
             if (Array.isArray(operations) && operations.length > 0) {
@@ -657,6 +670,11 @@ function isWriteOperation(cmd: string[]): boolean {
 
   // Check if the command is a known write operation
   if (writeCommands.includes(cmd[0])) {
+    return true;
+  }
+
+  // sed -i is a write operation (in-place edit), sed without -i is read-only (stdout)
+  if (cmd[0] === 'sed' && cmd.includes('-i')) {
     return true;
   }
 

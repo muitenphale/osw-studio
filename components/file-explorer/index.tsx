@@ -18,7 +18,9 @@ import {
   Eye,
   EyeOff,
   Server,
-  BookOpen
+  BookOpen,
+  Home,
+  ScrollText
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,6 +37,9 @@ interface FileExplorerProps {
   onFileSelect?: (file: VirtualFile) => void;
   selectedPath?: string;
   onClose?: () => void;
+  entryPoint?: string;
+  onSetEntryPoint?: (path: string) => void;
+  onAddPromptFile?: () => void;
 }
 
 interface FileTreeItem {
@@ -44,7 +49,7 @@ interface FileTreeItem {
   children?: FileTreeItem[];
 }
 
-export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }: FileExplorerProps) {
+export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, entryPoint, onSetEntryPoint, onAddPromptFile }: FileExplorerProps) {
   const [files, setFiles] = useState<VirtualFile[]>([]);
   const [fileTree, setFileTree] = useState<FileTreeItem[]>([]);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['/']));
@@ -54,6 +59,10 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
   const [draggedItem, setDraggedItem] = useState<FileTreeItem | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [promptDismissed, setPromptDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(`osw-prompt-dismissed-${projectId}`) === 'true';
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const loadFilesVersionRef = useRef(0);
 
@@ -80,10 +89,14 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
       // Get regular files and directories
       const allItems = await vfs.getAllFilesAndDirectories(projectId);
 
-      // Add all transient files if showHidden is true
+      // Add truly transient files (/.server/, /.skills/) if showHidden is true
+      // Adapter-stored dot files (/.PROMPT.md, /.renderer/) are already in allItems
       if (showHidden) {
         const transientFiles = await vfs.listDirectory(projectId, '/', { includeTransient: true });
-        const transientOnly = transientFiles.filter(f => f.path.startsWith('/.'));
+        const existingPaths = new Set(allItems.map(item => item.path));
+        const transientOnly = transientFiles.filter(f =>
+          f.path.startsWith('/.') && !existingPaths.has(f.path)
+        );
 
         // Get enabled skills to filter /.skills/ folder
         const { skillsService } = await import('@/lib/vfs/skills');
@@ -182,7 +195,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
       }
     });
 
-    items.forEach(item => {
+    filteredItems.forEach(item => {
       if (item.type !== 'directory') {
         const file = item as VirtualFile;
         const parts = file.path.split('/').filter(Boolean);
@@ -465,6 +478,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
     const isTransient = isTransientPath(item.path);
     const isServerContext = isServerContextPath(item.path);
     const isSkills = isSkillsPath(item.path);
+    const isHiddenDotFile = !isTransient && (item.name.startsWith('.') || item.path.startsWith('/.'));
 
     // Get the appropriate folder icon for special directories
     const getFolderIcon = (expanded: boolean) => {
@@ -498,7 +512,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
               isSelected && 'bg-accent text-accent-foreground',
               isDropTarget && item.type === 'directory' && 'bg-blue-500/20 border border-blue-500',
               draggedItem?.path === item.path && 'opacity-50',
-              isTransient && 'opacity-75',
+              (isTransient || isHiddenDotFile) && 'opacity-75',
               'group'
             )}
             style={{ paddingLeft: `${level * 16 + 8}px` }}
@@ -517,6 +531,13 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
               <>
                 <span className="w-4" />
                 {(() => {
+                  const effectiveEntryPoint = entryPoint || '/index.html';
+                  if (item.path === effectiveEntryPoint) {
+                    return <Home className="w-4 h-4 text-emerald-500" />;
+                  }
+                  if (item.name === '.PROMPT.md') {
+                    return <ScrollText className="w-4 h-4 text-amber-500" />;
+                  }
                   const fileType = getFileTypeFromPath(item.path);
                   if (fileType === 'image') {
                     return <Image className="w-4 h-4 text-green-500" />;
@@ -546,9 +567,11 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className={cn("text-sm flex-1", isTransient && "italic")}>
+              <span className={cn("text-sm flex-1", (isTransient || isHiddenDotFile) && "italic text-muted-foreground")}>
                 {item.name}
                 {isTransient && <span className="text-xs text-muted-foreground ml-1">(read-only)</span>}
+                {item.path === (entryPoint || '/index.html') && <span className="text-xs text-emerald-500 ml-1">(entry)</span>}
+                {item.name === '.PROMPT.md' && <span className="text-xs text-amber-500 ml-1">(AI prompt)</span>}
               </span>
             )}
             </div>
@@ -572,6 +595,12 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
                     Upload Files
                   </ContextMenuItem>
                 </>
+              )}
+              {item.type === 'file' && onSetEntryPoint && item.path !== (entryPoint || '/index.html') && (
+                <ContextMenuItem onClick={() => onSetEntryPoint(item.path)}>
+                  <Home className="mr-2 h-4 w-4" />
+                  Set as Entry Point
+                </ContextMenuItem>
               )}
               <ContextMenuItem onClick={() => {
                 setRenamingPath(item.path);
@@ -748,6 +777,34 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose }:
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {/* Missing .PROMPT.md notification */}
+      {onAddPromptFile && !promptDismissed && files.length > 0 && !files.some(f => f.path === '/.PROMPT.md') && (
+        <div className="mx-2 mb-2 p-2 rounded-md border border-amber-500/30 bg-amber-500/5 text-xs">
+          <p className="text-amber-600 dark:text-amber-400 mb-1.5">No .PROMPT.md found</p>
+          <p className="text-muted-foreground mb-2">Add the default website prompt?</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs px-2"
+              onClick={onAddPromptFile}
+            >
+              Add
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs px-2"
+              onClick={() => {
+                setPromptDismissed(true);
+                localStorage.setItem(`osw-prompt-dismissed-${projectId}`, 'true');
+              }}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

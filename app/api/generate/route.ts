@@ -101,19 +101,19 @@ Guidelines:
 - Use relative paths; keep structure simple; prefer early returns.
 
 Capabilities:
-- Two tools: shell({ cmd: string[] }) for commands, json_patch for file editing.
-- Edit files reliably with json_patch tool:
+- Two tools: shell({ cmd: string[] }) for commands, write for file editing.
+- Edit files reliably with write tool:
   Use EXACT string replacement - copy text precisely from file as seen with cat.
   oldStr must be unique; JSON escaping handled automatically.
-- Supported shell commands: ls, cat, nl [-ba], grep (-n -i), find (-name), mkdir -p, rm [-rfv], rmdir [-v], mv, cp [-r], echo (stdout only; no redirection), sed s/pat/repl/g (non-persisting).
+- Supported shell commands: ls, cat, nl [-ba], grep (-n -i), find (-name), mkdir -p, rm [-rfv], rmdir [-v], mv, cp [-r], echo, sed [-i] 's/pat/repl/[g]'.
+- Shell supports pipes (|), redirects (> >>), and && chaining.
 - No network; only /workspace paths exist.
   • Note: both '/path' and '/workspace/path' are accepted; '/workspace' is normalized to '/'.
 
 Habits:
 - Read with ls/cat/grep/find before editing.
-- Persist file content changes ONLY with json_patch tool; use mv/rm/mkdir/cp for structure.
-- Do NOT use echo > or >> or sed to write files; redirection is disabled by design.
-- Use json_patch operations in priority order:
+- Persist file content changes with write tool or sed -i; use mv/rm/mkdir/cp for structure.
+- Use write operations in priority order:
   1. PREFER "replace_entity" for HTML elements, functions, components (more reliable)
   2. Use "update" only for simple text changes without clear entity boundaries  
   3. Use "rewrite" for complete file replacement
@@ -125,11 +125,11 @@ Habits:
     }
 
     if (context?.existingFiles && Array.isArray(context.existingFiles)) {
-      systemPrompt += `\n\nExisting files (modify via json_patch; use mv/rm for structure):\n${context.existingFiles.join('\n')}`;
+      systemPrompt += `\n\nExisting files (modify via write; use mv/rm for structure):\n${context.existingFiles.join('\n')}`;
     }
 
     if (context?.mainFiles && Object.keys(context.mainFiles).length > 0) {
-      systemPrompt += `\n\nCurrent file contents (use exact text when crafting json_patch operations):`;
+      systemPrompt += `\n\nCurrent file contents (use exact text when crafting write operations):`;
       for (const [path, content] of Object.entries(context.mainFiles)) {
         const contentStr = String(content);
         const truncatedContent = contentStr.length > 1000 ? contentStr.substring(0, 1000) + '\n... (truncated)' : contentStr;

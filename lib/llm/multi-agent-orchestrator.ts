@@ -23,6 +23,7 @@ import { buildShellSystemPrompt } from './system-prompt';
 import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
 import { track } from '@/lib/telemetry';
+import { extractToolAnalytics } from '@/lib/telemetry/tool-analytics';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -48,9 +49,9 @@ function detectMalformedToolCalls(content: string): boolean {
     /^shell\s*\[\s*["']/m,
     // JSON code block with cmd
     /```json\s*\n\s*\{\s*["']?cmd["']?\s*:/,
-    // json_patch tool written as text (common with DeepSeek)
-    /^json_patch\s*\{/m,
-    /json_patch\s*\{\s*["']?file_path["']?\s*:/,
+    // write tool written as text (common with DeepSeek)
+    /^write\s*\{/m,
+    /write\s*\{\s*["']?file_path["']?\s*:/,
     // evaluation tool written as text
     /^evaluation\s*\{/m,
   ];
@@ -73,7 +74,7 @@ function detectMalformedToolCalls(content: string): boolean {
   // (model explaining then "calling" the tool as text)
   const endsWithToolPattern = /shell\s*\{\s*["']?cmd["']?\s*:.*\}\s*$/.test(trimmed) ||
                                /```(?:shell|bash|sh)\s*\n[\s\S]*?\n```\s*$/.test(trimmed) ||
-                               /json_patch\s*\{[\s\S]*\}\s*$/.test(trimmed);
+                               /write\s*\{[\s\S]*\}\s*$/.test(trimmed);
 
   return endsWithToolPattern;
 }
@@ -82,14 +83,14 @@ const MALFORMED_TOOL_CALL_ERROR = `⛔ CRITICAL ERROR: You wrote a tool call as 
 
 This is WRONG - you wrote text like:
   shell{"cmd": "..."}
-  json_patch{"file_path": "..."}
+  write{"file_path": "..."}
   \`\`\`shell
   command
   \`\`\`
 
 This is RIGHT - invoke tools directly via function calling:
   Call shell tool with parameter cmd="your command"
-  Call json_patch tool with parameters file_path, operations
+  Call write tool with parameters file_path, operations
 
 You MUST use function calling. DO NOT write tool syntax as text.
 STOP writing text. START invoking tools. Try again NOW.`;
@@ -98,7 +99,7 @@ const MALFORMED_TOOL_CALL_PERSISTENT_REMINDER = `
 
 ⚠️ REMINDER: You have been writing tool calls as text instead of invoking them.
 EVERY time you want to use a tool, you MUST invoke it via function calling.
-DO NOT write shell{"cmd":...} or json_patch{...} as text - INVOKE the tools directly.`;
+DO NOT write shell{"cmd":...} or write{...} as text - INVOKE the tools directly.`;
 
 /**
  * Context for continuing a truncated file operation
@@ -139,8 +140,8 @@ class ContinuationHandler {
       return { needsContinuation: false };
     }
 
-    // Only json_patch operations can be continued
-    if (toolCall.function.name !== 'json_patch') {
+    // Only write operations can be continued
+    if (toolCall.function.name !== 'write') {
       return { needsContinuation: false };
     }
 
@@ -178,7 +179,7 @@ class ContinuationHandler {
       // Start new continuation
       context = {
         toolCallId,
-        toolName: 'json_patch',
+        toolName: 'write',
         filePath,
         operationType: 'rewrite',
         partialContent: content,
@@ -232,7 +233,7 @@ class ContinuationHandler {
 - Do NOT add any extra spacing or newlines at the start
 - Start your content directly after: "${marker.slice(-50)}"
 
-Use this json_patch to continue:
+Use the write tool to continue:
 {
   "file_path": "${filePath}",
   "operations": [{"type": "rewrite", "content": "...remaining content starting from where you left off..."}]
@@ -489,7 +490,7 @@ export class MultiAgentOrchestrator {
       const serverContext = vfs.getServerContextMetadata();
 
       // Build system prompt (includes skills and server context dynamically)
-      const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode, serverContext);
+      const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode, serverContext, this.projectId);
 
       // Get current conversation
       const conversation = this.conversations.get(this.currentConversationId);
@@ -825,7 +826,7 @@ export class MultiAgentOrchestrator {
       // When we're continuing a large file, the tool calls may look similar but are intentional
       // When tool calls are truncated, they look identical but aren't real loops
       let skipLoopDetection = false;
-      if (toolId === 'json_patch') {
+      if (toolId === 'write') {
         try {
           const args = JSON.parse(toolCall.function.arguments);
           const filePath = args.file_path;
@@ -921,9 +922,9 @@ Please revise your approach.`;
       };
 
       try {
-        // Check if this is a continuation response for json_patch
+        // Check if this is a continuation response for write tool
         let filePath: string | undefined;
-        if (toolId === 'json_patch') {
+        if (toolId === 'write') {
           try {
             const args = JSON.parse(toolCall.function.arguments);
             filePath = args.file_path;
@@ -1066,7 +1067,7 @@ Please revise your approach.`;
           ...(isError && { error: result })
         });
 
-        track('tool_call', { tool: toolCall.function.name, success: !isError });
+        track('tool_call', extractToolAnalytics(toolCall.function.name, toolCall.function.arguments, !isError));
 
         // Also emit tool_result for backward compatibility
         this.onProgress?.('tool_result', {
@@ -1080,7 +1081,7 @@ Please revise your approach.`;
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         // Check if this is a truncation error that we can continue from
-        if (wasTruncated && toolCall.function.name === 'json_patch') {
+        if (wasTruncated && toolCall.function.name === 'write') {
           const { needsContinuation, extraction } = this.continuationHandler.detectNeedsContinuation(
             toolCall,
             true,
@@ -1134,7 +1135,7 @@ Please revise your approach.`;
               tool_call_id: toolCall.id,
               content: `Error: Tool call for "${filePath}" was truncated before content could be captured (max_tokens limit hit).
 
-⚠️ IMPORTANT: Your response was cut off at the token limit. The json_patch tool call was incomplete.
+⚠️ IMPORTANT: Your response was cut off at the token limit. The write tool call was incomplete.
 
 To fix this, please:
 1. Use ONLY ONE tool call per response (don't batch multiple file operations)
@@ -1146,7 +1147,7 @@ To fix this, please:
 Example approach for ${filePath}:
 \`\`\`
 // Step 1: Create skeleton
-json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content": "/* Base styles */\\n\\n/* Layout */\\n\\n/* Components */\\n\\n/* Utilities */"}]}
+write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content": "/* Base styles */\\n\\n/* Layout */\\n\\n/* Components */\\n\\n/* Utilities */"}]}
 
 // Step 2: Fill in sections with UPDATE operations
 \`\`\``
@@ -1173,7 +1174,7 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
           error: errorMessage
         });
 
-        track('tool_call', { tool: toolCall.function.name, success: false });
+        track('tool_call', extractToolAnalytics(toolCall.function.name, toolCall.function.arguments, false));
       }
     }
 
@@ -1516,12 +1517,12 @@ json_patch: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "co
         return `shell:${cmd}`;
       }
 
-      // For json_patch, create signature from file_path + hashed operations
-      if (toolName === 'json_patch') {
+      // For write, create signature from file_path + hashed operations
+      if (toolName === 'write') {
         const filePath = args.file_path || '';
         // Hash entire operations parameter (string, array, or missing)
         const opsHash = this.hashString(JSON.stringify(args.operations || null));
-        return `json_patch:${filePath}:${opsHash}`;
+        return `write:${filePath}:${opsHash}`;
       }
 
       // For other tools, use stable JSON stringify with recursive key sorting

@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.35.0 - 2026-02-25
+
+Decoupled the AI system prompt from website-only output, added per-project `.PROMPT.md` for domain instructions, made the preview entry point configurable, and improved the AI shell tooling.
+
+- **System Prompt Separation**: The monolithic system prompt is now split into a base prompt (tool mechanics, stays in code) and a domain prompt (website knowledge, lives in `.PROMPT.md` per-project). The base prompt no longer contains any website-specific instructions — platform constraints, Handlebars docs, and routing rules all moved out
+- **`.PROMPT.md` Loading**: Both Code and Chat mode prompts now read `/.PROMPT.md` from the project's VFS at conversation start. If the file exists, its content is appended as domain instructions; if not, the AI operates with the base prompt only
+- **Templates Include `.PROMPT.md`**: All 4 built-in templates (Barebones, Example Studios, Landing Page, Blog) now ship with `/.PROMPT.md` containing the website domain prompt — new projects get full website instructions out of the box
+- **Missing `.PROMPT.md` Notification**: Existing projects without a `.PROMPT.md` file show a subtle amber banner at the bottom of the file explorer — click "Add" to create the default website prompt, or "Dismiss" to hide (persisted per-project in localStorage)
+- **Configurable Entry Point**: New `previewEntryPoint` project setting — right-click any file in the explorer and choose "Set as Entry Point" to change which file the preview loads first. Defaults to `/index.html` when unset
+- **File Explorer Indicators**: Entry point file shows a green Home icon with "(entry)" badge; `.PROMPT.md` shows an amber ScrollText icon with "(AI prompt)" badge
+- **Template Rename: "Blank" → "Website Starter"**: The Blank template has been renamed to "Website Starter" to better describe its purpose. Internal ID (`blank`) is unchanged.
+- **Tool Rename: `json_patch` → `write`**: The file editing tool presented to LLMs is now named `write` instead of `json_patch`. This is a pure identifier rename — all parameters, operation types (update, rewrite, replace_entity), and internal behavior are unchanged. The rename improves tool selection behavior by using a universally understood name that LLMs naturally gravitate toward, reducing wasted generation cost from incorrect tool choices.
+- **Shell Pipes**: Commands can now be chained with `|` — stdout from the left command becomes stdin for the right. Supports multi-stage pipes: `cat /file.txt | grep pattern | head -n 5`. Commands that accept stdin: cat, head, tail, grep, rg, sed.
+- **Generic Redirects**: All commands now support `>` (overwrite) and `>>` (append) to write stdout to a file. Previously only `echo` supported `>`. Now `grep -n div /index.html > /results.txt` and `sed 's/old/new/' /f.txt > /out.txt` work as expected.
+- **sed Command**: New `sed` command for text substitution. Supports `s/pattern/replacement/[g]` syntax, `-i` for in-place editing, `-e` for multiple expressions, and stdin via pipes. Delimiters: `/`, `|`, `#`, `@`.
+- **Repeat Helpers**: Added `{{#times N}}`, `{{#repeat N}}`, and `{{#for N}}` block helpers — all equivalent, repeat content N times with `index`, `first`, `last` context variables. Fixes persistent LLM-generated `{{#for}}` errors (e.g., star ratings). Documented in website prompt and handlebars-advanced skill.
+- **Tool Call Analytics**: Expanded `tool_call` telemetry events with safe, whitelisted operation details — shell events now include the command name, pipe/redirect flags; write events include file extension and operation types; evaluation events include goal/continue status. All values are whitelisted to prevent accidental capture of file contents or user code.
+
 ## v1.34.0 - 2026-02-22
 
 Major architectural restructure: backend features are now **project-scoped** and "Sites" have been renamed to **"Deployments"** throughout.

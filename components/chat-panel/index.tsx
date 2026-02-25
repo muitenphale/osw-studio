@@ -112,7 +112,7 @@ interface Turn {
 
 const toolIcons: Record<string, React.ReactNode> = {
   shell: <ChevronRight className="h-3 w-3 text-blue-500" />,
-  json_patch: <FileCode className="h-3 w-3 text-orange-500" />,
+  write: <FileCode className="h-3 w-3 text-orange-500" />,
 };
 
 const statusIcons: Record<string, React.ReactNode> = {

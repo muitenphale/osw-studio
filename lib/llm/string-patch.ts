@@ -69,7 +69,7 @@ NOT this (wrong):
     return {
       applied: false,
       summary: 'Missing operations parameter',
-      warnings: [`json_patch requires an operations array with at least one operation.
+      warnings: [`write tool requires an operations array with at least one operation.
 
 Required format:
 {
