@@ -7,6 +7,7 @@ export interface Project {
   settings: {
     defaultTemplate?: string;
     globalStyles?: string;
+    previewEntryPoint?: string;  // defaults to '/index.html' when absent
   };
   lastSavedCheckpointId?: string | null;
   lastSavedAt?: Date | null;

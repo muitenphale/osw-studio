@@ -10,7 +10,7 @@
 2. Click **+ New Project**
 3. Enter a project name
 4. Choose a template:
-   - **Blank** - Minimal starting point with basic structure
+   - **Website Starter** - Minimal starting point with basic structure
    - **Example Studios** - Pre-built example with multiple pages
    - Or select any custom template you've created
 5. Optionally add a description

@@ -169,7 +169,7 @@ export async function runGuidedDemoEdit({
   await emitEvent({
     id: toTranscriptId(),
     role: 'tool',
-    name: 'json_patch',
+    name: 'write',
     command: 'update /styles/main.css (--primary → #22c55e)',
     output: 'Applied 2/2 operations to /styles/main.css. Updated primary palette to emerald green.',
   });

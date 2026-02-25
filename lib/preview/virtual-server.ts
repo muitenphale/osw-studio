@@ -14,11 +14,13 @@ export class VirtualServer {
   private handlebars: typeof Handlebars;
   private templateCache: Map<string, HandlebarsTemplateDelegate> = new Map();
   private partialsRegistered: boolean = false;
+  private entryPoint: string;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, deploymentId?: string) {
+  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, deploymentId?: string, entryPoint?: string) {
     this.vfs = vfs;
     this.projectId = projectId;
     this.deploymentId = deploymentId;
+    this.entryPoint = entryPoint || '/index.html';
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     if (existingBlobUrls) {
       this.blobUrls = new Map(existingBlobUrls);
@@ -74,6 +76,18 @@ export class VirtualServer {
     this.handlebars.registerHelper('limit', (array: any[], max: number) =>
       array?.slice(0, max)
     );
+
+    // Repeat helpers - repeat content N times (times, repeat, for are all equivalent)
+    const repeatHelper = function(this: any, n: number, options: Handlebars.HelperOptions) {
+      let result = '';
+      for (let i = 0; i < n; i++) {
+        result += options.fn({ index: i, first: i === 0, last: i === n - 1 });
+      }
+      return result;
+    };
+    this.handlebars.registerHelper('times', repeatHelper);
+    this.handlebars.registerHelper('repeat', repeatHelper);
+    this.handlebars.registerHelper('for', repeatHelper);
   }
 
   private async registerPartials(): Promise<void> {
@@ -264,7 +278,7 @@ export class VirtualServer {
     this.blobUrls = newBlobUrls;
 
     return {
-      entryPoint: '/index.html',
+      entryPoint: this.entryPoint,
       files: processedFiles,
       routes,
       blobUrls: this.blobUrls
@@ -341,7 +355,7 @@ export class VirtualServer {
   // Helper function to resolve VFS paths to blob URLs
   function resolveVfsUrl(url) {
     if (!url || typeof url !== 'string') return url;
-    if (url.startsWith('/assets/') && vfsBlobUrls[url]) {
+    if (vfsBlobUrls[url]) {
       return vfsBlobUrls[url];
     }
     return url;

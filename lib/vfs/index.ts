@@ -102,10 +102,11 @@ export class VirtualFileSystem {
   }
 
   /**
-   * Check if a path is transient (starts with /.)
+   * Check if a path is transient (managed in-memory, not persisted to adapter).
+   * Only known transient namespaces: /.server/ (backend context) and /.skills/ (skills)
    */
   private isTransientPath(path: string): boolean {
-    return path.startsWith('/.');
+    return path.startsWith('/.server/') || path.startsWith('/.skills/');
   }
 
   /**
@@ -449,7 +450,7 @@ export class VirtualFileSystem {
 
   /**
    * Mount a single transient file
-   * @param isReadOnly - If false, the file can be edited via json_patch (edge functions, server functions)
+   * @param isReadOnly - If false, the file can be edited via write tool (edge functions, server functions)
    */
   private mountTransientFile(path: string, content: string, isReadOnly = true): void {
     const file: VirtualFile = {

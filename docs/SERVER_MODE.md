@@ -122,8 +122,8 @@ When you select a deployment from the **Deployment Selector** dropdown (in the w
 
 This hidden folder contains:
 - **db/schema.sql** - Database schema (read-only, use `sqlite3` for DDL)
-- **edge-functions/*.json** - Edge functions (editable via `json_patch`)
-- **server-functions/*.json** - Server functions (editable via `json_patch`)
+- **edge-functions/*.json** - Edge functions (editable via `write` tool)
+- **server-functions/*.json** - Server functions (editable via `write` tool)
 - **secrets/*.json** - Secret placeholders (editable - AI creates, user sets values in admin UI)
 
 These files are:

@@ -63,6 +63,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [isDirty, setIsDirty] = useState(false);
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
+  const [entryPoint, setEntryPoint] = useState<string | undefined>(project.settings?.previewEntryPoint);
   const [focusContext, setFocusContext] = useState<FocusTarget | null>(null);
   const [chatMode, setChatMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -300,6 +301,32 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const handleClosePreview = useCallback(() => {
     setShowPreview(false);
   }, []);
+
+  const handleSetEntryPoint = useCallback(async (path: string) => {
+    try {
+      const proj = await vfs.getProject(project.id);
+      proj.settings = { ...proj.settings, previewEntryPoint: path };
+      await vfs.updateProject(proj);
+      setEntryPoint(path);
+      setRefreshTrigger(prev => prev + 1);
+      toast.success(`Entry point set to ${path}`);
+    } catch (err) {
+      logger.error('Failed to set entry point:', err);
+      toast.error('Failed to set entry point');
+    }
+  }, [project.id]);
+
+  const handleAddPromptFile = useCallback(async () => {
+    try {
+      const { WEBSITE_DOMAIN_PROMPT } = await import('@/lib/llm/prompts/website');
+      await vfs.createFile(project.id, '/.PROMPT.md', WEBSITE_DOMAIN_PROMPT);
+      window.dispatchEvent(new CustomEvent('filesChanged', { detail: { projectId: project.id } }));
+      toast.success('.PROMPT.md added to project');
+    } catch (err) {
+      logger.error('Failed to add .PROMPT.md:', err);
+      toast.error('Failed to add .PROMPT.md');
+    }
+  }, [project.id]);
 
   const focusDescriptor = focusContext ? describeFocusTarget(focusContext) : '';
   const focusPreviewSnippet = focusContext ? truncateHtmlSnippet(focusContext.outerHTML, 240) : '';
@@ -1431,6 +1458,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                         projectId={project.id}
                         onFileSelect={handleFileSelect}
                         onClose={() => setShowFiles(false)}
+                        entryPoint={entryPoint}
+                        onSetEntryPoint={handleSetEntryPoint}
+                        onAddPromptFile={handleAddPromptFile}
                       />
                     </div>
                 </ResizablePanel>
@@ -1478,6 +1508,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                         onClose={handleClosePreview}
                         deploymentId={selectedDeploymentId}
                         onCaptureScreenshot={handleCaptureScreenshot}
+                        entryPoint={entryPoint}
                       />
                     </div>
                 </ResizablePanel>
@@ -1558,6 +1589,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   projectId={project.id}
                   onFileSelect={handleFileSelect}
                   onClose={() => setShowFiles(false)}
+                  entryPoint={entryPoint}
+                  onSetEntryPoint={handleSetEntryPoint}
+                  onAddPromptFile={handleAddPromptFile}
                 />
               </div>
             )}
@@ -1583,6 +1617,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onClose={handleClosePreview}
                   deploymentId={selectedDeploymentId}
                   onCaptureScreenshot={handleCaptureScreenshot}
+                  entryPoint={entryPoint}
                 />
               </div>
             )}

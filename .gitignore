@@ -24,6 +24,9 @@ npm-shrinkwrap.json
 /sites
 /public/sites
 /public/sites/*
+/deployments
+/public/deployments
+/public/deployments/*
 
 # next.js
 /.next/

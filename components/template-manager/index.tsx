@@ -179,7 +179,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     try {
       setCreating(true);
 
-      const projectName = template.name === 'Blank' || template.name === 'Example Studios'
+      const projectName = template.name === 'Website Starter' || template.name === 'Example Studios'
         ? `New ${template.name} Project`
         : template.name;
 

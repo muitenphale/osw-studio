@@ -43,7 +43,7 @@ In Browser Mode, backend templates create the frontend files normally (backend f
 
 ## Built-in Templates
 
-### Blank (Project)
+### Website Starter (Project)
 
 Minimal starting point with basic structure.
 

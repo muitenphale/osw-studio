@@ -45,6 +45,105 @@ async function ensureDirectory(vfs: VirtualFileSystem, projectId: string, path: 
   }
 }
 
+/**
+ * Extract redirect operator from args: > (overwrite) or >> (append)
+ * Returns cleaned args and redirect info
+ */
+function extractRedirect(args: string[]): { cleanArgs: string[]; redirect?: { file: string; append: boolean } } {
+  const appendIdx = args.indexOf('>>');
+  const overwriteIdx = args.indexOf('>');
+
+  // Prefer >> if it appears before >
+  const idx = appendIdx !== -1 ? appendIdx : overwriteIdx;
+  if (idx === -1) return { cleanArgs: args };
+
+  const append = args[idx] === '>>';
+  const file = args[idx + 1];
+  if (!file) return { cleanArgs: args }; // No file after redirect — leave as-is
+
+  const cleanArgs = [...args.slice(0, idx), ...args.slice(idx + 2)];
+  return { cleanArgs, redirect: { file, append } };
+}
+
+/**
+ * Apply redirect: write stdout to file (> = overwrite, >> = append)
+ */
+async function applyRedirect(
+  vfs: VirtualFileSystem,
+  projectId: string,
+  content: string,
+  redirect: { file: string; append: boolean }
+): Promise<ShellResult> {
+  const path = normalizePath(redirect.file);
+  if (!path) return { stdout: '', stderr: 'redirect: missing file path', exitCode: 2 };
+
+  try {
+    const dirPath = path.split('/').slice(0, -1).join('/') || '/';
+    if (dirPath !== '/') await ensureDirectory(vfs, projectId, dirPath);
+
+    if (redirect.append) {
+      // Append: read existing + append
+      let existing = '';
+      try {
+        const file = await vfs.readFile(projectId, path);
+        if (typeof file.content === 'string') existing = file.content;
+      } catch { /* file doesn't exist yet */ }
+      const newContent = existing ? existing + '\n' + content : content;
+      try { await vfs.createFile(projectId, path, newContent); }
+      catch { await vfs.updateFile(projectId, path, newContent); }
+    } else {
+      // Overwrite
+      try { await vfs.createFile(projectId, path, content); }
+      catch { await vfs.updateFile(projectId, path, content); }
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  } catch (e: any) {
+    return { stdout: '', stderr: `redirect: ${path}: ${e?.message || 'cannot write file'}`, exitCode: 1 };
+  }
+}
+
+/**
+ * Parse sed s/pattern/replacement/[flags] expression
+ * Supports delimiters: / | # @
+ */
+function parseSedExpression(expr: string): { pattern: RegExp; replacement: string } | { error: string } {
+  if (!expr.startsWith('s')) return { error: `sed: invalid expression: ${expr}` };
+
+  const delim = expr[1];
+  if (!delim || !/[\/|#@]/.test(delim)) {
+    return { error: `sed: invalid delimiter in expression: ${expr}` };
+  }
+
+  // Split on unescaped delimiter
+  const parts: string[] = [];
+  let current = '';
+  let escaped = false;
+  for (let i = 2; i < expr.length; i++) {
+    const ch = expr[i];
+    if (escaped) { current += ch; escaped = false; continue; }
+    if (ch === '\\') { escaped = true; current += ch; continue; }
+    if (ch === delim) { parts.push(current); current = ''; continue; }
+    current += ch;
+  }
+  parts.push(current); // flags part (may be empty)
+
+  if (parts.length < 2) {
+    return { error: `sed: incomplete expression: ${expr}\n\nUsage: sed 's/pattern/replacement/[flags]'\n  flags: g (global)` };
+  }
+
+  const [patStr, replStr, flagStr] = parts;
+  const globalFlag = (flagStr || '').includes('g');
+
+  try {
+    const pattern = new RegExp(patStr, globalFlag ? 'g' : '');
+    // Unescape the replacement string (remove backslash-delimiter escapes)
+    const replacement = replStr.replace(new RegExp('\\\\' + delim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), delim);
+    return { pattern, replacement };
+  } catch (e: any) {
+    return { error: `sed: invalid regex "${patStr}": ${e?.message || 'parse error'}` };
+  }
+}
+
 async function vfsShellExecute(
   vfs: VirtualFileSystem,
   projectId: string,
@@ -111,6 +210,38 @@ async function vfsShellExecute(
     };
   }
 
+  // Handle pipe chains: cmd1 | cmd2 | cmd3
+  if (cleanCmd.some(arg => arg === '|')) {
+    const segments: string[][] = [];
+    let currentSeg: string[] = [];
+
+    for (const arg of cleanCmd) {
+      if (arg === '|') {
+        if (currentSeg.length > 0) {
+          segments.push(currentSeg);
+          currentSeg = [];
+        }
+      } else {
+        currentSeg.push(arg);
+      }
+    }
+    if (currentSeg.length > 0) segments.push(currentSeg);
+
+    if (segments.length < 2) {
+      return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts);
+    }
+
+    // Execute pipe chain left-to-right, passing stdout as stdin
+    let stdin: string | undefined;
+    for (let i = 0; i < segments.length; i++) {
+      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], _opts, stdin);
+      if (result.exitCode !== 0) return result;
+      stdin = result.stdout;
+    }
+
+    return { stdout: stdin || '', stderr: '', exitCode: 0 };
+  }
+
   return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts);
 }
 
@@ -118,18 +249,13 @@ async function vfsShellExecuteSingle(
   vfs: VirtualFileSystem,
   projectId: string,
   cleanCmd: string[],
-  _opts: ShellOpts = {}
+  _opts: ShellOpts = {},
+  stdin?: string
 ): Promise<ShellResult> {
-  // Detect unsupported pipe operator
-  if (cleanCmd.some(arg => arg === '|' || arg.includes('|'))) {
-    return {
-      stdout: '',
-      stderr: 'Pipes (|) are not supported in the VFS shell. Commands run independently.\n\nInstead of piping commands, use the appropriate flags:\n  head -n 20 /file.txt      (first 20 lines)\n  tail -n 20 /file.txt      (last 20 lines)\n  rg -C 3 "pattern" /file   (search with context)',
-      exitCode: 2
-    };
-  }
-
-  const [program, ...args] = cleanCmd;
+  // Extract redirect operators (> or >>) before processing the command
+  const { cleanArgs: argsAfterRedirect, redirect } = extractRedirect(cleanCmd.slice(1));
+  const program = cleanCmd[0];
+  const args = argsAfterRedirect;
 
   try {
     switch (program) {
@@ -143,20 +269,22 @@ async function vfsShellExecuteSingle(
         }
         const recursive = flags.has('-R') || flags.has('-r');
         const path = normalizePath(paths[0]) || '/';
+        let lsOutput: string;
         if (!recursive) {
           const files = await vfs.listDirectory(projectId, path, { includeTransient: true });
-          const lines = files.map(f => f.path).sort().join('\n');
-          return { stdout: truncate(lines), stderr: '', exitCode: 0 };
+          lsOutput = files.map(f => f.path).sort().join('\n');
         } else {
           const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
           const prefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
-          const res = entries
+          lsOutput = entries
             .filter((e: any) => e.path === path || e.path.startsWith(prefix))
             .map((e: any) => e.path)
             .sort()
             .join('\n');
-          return { stdout: truncate(res), stderr: '', exitCode: 0 };
         }
+        const lsResult: ShellResult = { stdout: truncate(lsOutput), stderr: '', exitCode: 0 };
+        if (redirect) return applyRedirect(vfs, projectId, lsResult.stdout, redirect);
+        return lsResult;
       }
       case 'tree': {
         // tree [path] [-L depth]
@@ -273,12 +401,21 @@ async function vfsShellExecuteSingle(
 
         renderNode(root, '', true, true);
 
-        return { stdout: truncate(lines.join('\n')), stderr: '', exitCode: 0 };
+        const treeResult: ShellResult = { stdout: truncate(lines.join('\n')), stderr: '', exitCode: 0 };
+        if (redirect) return applyRedirect(vfs, projectId, treeResult.stdout, redirect);
+        return treeResult;
       }
       case 'cat': {
         // Support up to 5 files at once
         const MAX_FILES = 5;
         const filePaths = args.filter(a => a && !a.startsWith('-')).map(p => normalizePath(p));
+
+        // If no file args but stdin is available, pass through stdin
+        if (filePaths.length === 0 && stdin !== undefined) {
+          const result: ShellResult = { stdout: truncate(stdin), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
+          return result;
+        }
 
         if (filePaths.length === 0) {
           return { stdout: '', stderr: 'cat: missing file path', exitCode: 2 };
@@ -332,14 +469,12 @@ async function vfsShellExecuteSingle(
         const stdout = outputs.join('\n\n');
         const stderr = errorMessages.join('\n');
 
-        return {
-          stdout: truncate(stdout),
-          stderr,
-          exitCode: hadError ? 1 : 0
-        };
+        const catResult: ShellResult = { stdout: truncate(stdout), stderr, exitCode: hadError ? 1 : 0 };
+        if (redirect && !hadError) return applyRedirect(vfs, projectId, catResult.stdout, redirect);
+        return catResult;
       }
       case 'head': {
-        // head [-n lines] <file>
+        // head [-n lines] <file>  (or stdin via pipe)
         let numLines = 10;
         let filePath = '';
 
@@ -350,6 +485,15 @@ async function vfsShellExecuteSingle(
           } else if (!a.startsWith('-')) {
             filePath = a;
           }
+        }
+
+        // Use stdin if no file path and stdin is available
+        if (!filePath && stdin !== undefined) {
+          const lines = stdin.split(/\r?\n/);
+          const output = lines.slice(0, numLines).join('\n');
+          const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
+          return result;
         }
 
         const path = normalizePath(filePath);
@@ -363,13 +507,15 @@ async function vfsShellExecuteSingle(
 
           const lines = (file.content as string).split(/\r?\n/);
           const output = lines.slice(0, numLines).join('\n');
-          return { stdout: truncate(output), stderr: '', exitCode: 0 };
+          const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
+          return result;
         } catch (e: any) {
           return { stdout: '', stderr: `head: ${path}: ${e?.message || 'file not found'}`, exitCode: 1 };
         }
       }
       case 'tail': {
-        // tail [-n lines] <file>
+        // tail [-n lines] <file>  (or stdin via pipe)
         let numLines = 10;
         let filePath = '';
 
@@ -380,6 +526,15 @@ async function vfsShellExecuteSingle(
           } else if (!a.startsWith('-')) {
             filePath = a;
           }
+        }
+
+        // Use stdin if no file path and stdin is available
+        if (!filePath && stdin !== undefined) {
+          const lines = stdin.split(/\r?\n/);
+          const output = lines.slice(-numLines).join('\n');
+          const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
+          return result;
         }
 
         const path = normalizePath(filePath);
@@ -393,7 +548,9 @@ async function vfsShellExecuteSingle(
 
           const lines = (file.content as string).split(/\r?\n/);
           const output = lines.slice(-numLines).join('\n');
-          return { stdout: truncate(output), stderr: '', exitCode: 0 };
+          const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
+          return result;
         } catch (e: any) {
           return { stdout: '', stderr: `tail: ${path}: ${e?.message || 'file not found'}`, exitCode: 1 };
         }
@@ -445,30 +602,44 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
           regex = new RegExp(pattern, flags.i ? 'i' : '');
         }
 
-        const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
-        const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
         const outLines: string[] = [];
-        for (const e of entries) {
-          if ('type' in e && e.type === 'directory') continue;
-          const file = e as any;
-          if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
-          if (typeof file.content !== 'string') continue;
-          const lines = (file.content as string).split(/\r?\n/);
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (regex.test(line)) {
-              outLines.push(
-                `${file.path}${flags.n ? ':' + (i + 1) : ''}:${line}`
-              );
+
+        // If no file path provided and stdin is available, search stdin
+        if (!fargs[1] && stdin !== undefined) {
+          const stdinLines = stdin.split(/\r?\n/);
+          for (let i = 0; i < stdinLines.length; i++) {
+            if (regex.test(stdinLines[i])) {
+              outLines.push(flags.n ? `${i + 1}:${stdinLines[i]}` : stdinLines[i]);
+            }
+          }
+        } else {
+          const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
+          const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
+          for (const e of entries) {
+            if ('type' in e && e.type === 'directory') continue;
+            const file = e as any;
+            if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
+            if (typeof file.content !== 'string') continue;
+            const lines = (file.content as string).split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              if (regex.test(line)) {
+                outLines.push(
+                  `${file.path}${flags.n ? ':' + (i + 1) : ''}:${line}`
+                );
+              }
             }
           }
         }
+
         const output = outLines.join('\n');
         if (outLines.length === 0) {
-          const location = path === '/' ? 'workspace root' : path;
+          const location = stdin !== undefined ? 'stdin' : (path === '/' ? 'workspace root' : path);
           return { stdout: '', stderr: `grep: pattern "${pattern}" not found in ${location}`, exitCode: 1 };
         }
-        return { stdout: truncate(output), stderr: '', exitCode: 0 };
+        const grepResult: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
+        if (redirect) return applyRedirect(vfs, projectId, grepResult.stdout, redirect);
+        return grepResult;
       }
       case 'rg': {
         // ripgrep with context flags: rg [-n] [-i] [-C num] [-A num] [-B num] pattern [path]
@@ -520,55 +691,80 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
 
         const regex = new RegExp(pattern, flags.i ? 'i' : '');
-        const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
-        const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
         const outLines: string[] = [];
 
-        for (const e of entries) {
-          if ('type' in e && e.type === 'directory') continue;
-          const file = e as any;
-          if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
-          if (typeof file.content !== 'string') continue;
-
-          const lines = (file.content as string).split(/\r?\n/);
-          const matchedLines = new Set<number>();
-
-          // Find all matches
-          for (let i = 0; i < lines.length; i++) {
-            if (regex.test(lines[i])) {
-              matchedLines.add(i);
+        // If no file path provided and stdin is available, search stdin
+        if (!fargs[1] && stdin !== undefined) {
+          const stdinLines = stdin.split(/\r?\n/);
+          const matchedStdinLines = new Set<number>();
+          for (let i = 0; i < stdinLines.length; i++) {
+            if (regex.test(stdinLines[i])) matchedStdinLines.add(i);
+          }
+          if (matchedStdinLines.size > 0) {
+            const contextStdinLines = new Set<number>();
+            const beforeCtx = flags.C || flags.B;
+            const afterCtx = flags.C || flags.A;
+            for (const ln of matchedStdinLines) {
+              for (let j = Math.max(0, ln - beforeCtx); j <= Math.min(stdinLines.length - 1, ln + afterCtx); j++) {
+                contextStdinLines.add(j);
+              }
+            }
+            for (const ln of Array.from(contextStdinLines).sort((a, b) => a - b)) {
+              const lineNumStr = flags.n ? `${ln + 1}:` : '';
+              outLines.push(`${lineNumStr}${stdinLines[ln]}`);
             }
           }
+        } else {
+          const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
+          const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
 
-          if (matchedLines.size === 0) continue;
+          for (const e of entries) {
+            if ('type' in e && e.type === 'directory') continue;
+            const file = e as any;
+            if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
+            if (typeof file.content !== 'string') continue;
 
-          // Add context lines
-          const contextLines = new Set<number>();
-          const beforeContext = flags.C || flags.B;
-          const afterContext = flags.C || flags.A;
+            const lines = (file.content as string).split(/\r?\n/);
+            const matchedLines = new Set<number>();
 
-          for (const lineNum of matchedLines) {
-            for (let j = Math.max(0, lineNum - beforeContext); j <= Math.min(lines.length - 1, lineNum + afterContext); j++) {
-              contextLines.add(j);
+            // Find all matches
+            for (let i = 0; i < lines.length; i++) {
+              if (regex.test(lines[i])) {
+                matchedLines.add(i);
+              }
             }
-          }
 
-          // Output with line numbers
-          const sortedLines = Array.from(contextLines).sort((a, b) => a - b);
-          if (outLines.length > 0) outLines.push(''); // Separator between files
+            if (matchedLines.size === 0) continue;
 
-          for (const lineNum of sortedLines) {
-            const lineNumStr = flags.n ? `${lineNum + 1}:` : '';
-            const isMatch = matchedLines.has(lineNum);
-            outLines.push(`${file.path}:${lineNumStr}${lines[lineNum]}`);
+            // Add context lines
+            const contextLines = new Set<number>();
+            const beforeContext = flags.C || flags.B;
+            const afterContext = flags.C || flags.A;
+
+            for (const lineNum of matchedLines) {
+              for (let j = Math.max(0, lineNum - beforeContext); j <= Math.min(lines.length - 1, lineNum + afterContext); j++) {
+                contextLines.add(j);
+              }
+            }
+
+            // Output with line numbers
+            const sortedLines = Array.from(contextLines).sort((a, b) => a - b);
+            if (outLines.length > 0) outLines.push(''); // Separator between files
+
+            for (const lineNum of sortedLines) {
+              const lineNumStr = flags.n ? `${lineNum + 1}:` : '';
+              outLines.push(`${file.path}:${lineNumStr}${lines[lineNum]}`);
+            }
           }
         }
 
         if (outLines.length === 0) {
-          const location = path === '/' ? 'workspace root' : path;
+          const location = stdin !== undefined ? 'stdin' : (path === '/' ? 'workspace root' : path);
           return { stdout: '', stderr: `rg: pattern "${pattern}" not found in ${location}`, exitCode: 1 };
         }
-        return { stdout: truncate(outLines.join('\n')), stderr: '', exitCode: 0 };
+        const rgResult: ShellResult = { stdout: truncate(outLines.join('\n')), stderr: '', exitCode: 0 };
+        if (redirect) return applyRedirect(vfs, projectId, rgResult.stdout, redirect);
+        return rgResult;
       }
       case 'find': {
         // Supported: find <path> [-type f|d] [-name <pattern>] [-maxdepth <depth>]
@@ -614,7 +810,9 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
           .filter(p => (regex ? regex.test(p.split('/').pop() || p) : true))
           .sort();
 
-        return { stdout: truncate(res.join('\n')), stderr: '', exitCode: 0 };
+        const findResult: ShellResult = { stdout: truncate(res.join('\n')), stderr: '', exitCode: 0 };
+        if (redirect) return applyRedirect(vfs, projectId, findResult.stdout, redirect);
+        return findResult;
       }
       case 'mkdir': {
         // Support: mkdir [-p] <path1> <path2> ... (multiple paths like real bash)
@@ -831,40 +1029,106 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
       }
       case 'echo': {
-        // Support: echo text or echo "text" > /file.txt
-        const redirectIndex = args.indexOf('>');
+        // echo text (stdout) — redirect handled generically by extractRedirect/applyRedirect
+        const output = args.join(' ');
+        if (redirect) return applyRedirect(vfs, projectId, output, redirect);
+        return { stdout: truncate(output), stderr: '', exitCode: 0 };
+      }
+      case 'sed': {
+        // sed [-i] [-e expr]... 's/pattern/replacement/[flags]' [file]
+        // Supports: stdin via pipe, -i for in-place, multiple -e expressions
+        let inPlace = false;
+        const expressions: string[] = [];
+        let filePath = '';
 
-        if (redirectIndex === -1) {
-          // No redirection, just output to stdout
-          return { stdout: truncate(args.join(' ')), stderr: '', exitCode: 0 };
-        }
-
-        // Handle redirection: echo text > /file.txt
-        const content = args.slice(0, redirectIndex).join(' ');
-        const targetFile = args[redirectIndex + 1];
-        const path = normalizePath(targetFile);
-
-        if (!path) {
-          return { stdout: '', stderr: 'echo: missing file path after >', exitCode: 2 };
-        }
-
-        try {
-          // Ensure parent directory exists
-          const dirPath = path.split('/').slice(0, -1).join('/') || '/';
-          if (dirPath !== '/') {
-            await ensureDirectory(vfs, projectId, dirPath);
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (a === '-i') { inPlace = true; continue; }
+          if (a === '-e' && args[i + 1]) { expressions.push(args[++i]); continue; }
+          if (a.startsWith('s') && a.length > 2 && /[\/|#@]/.test(a[1])) {
+            expressions.push(a);
+            continue;
           }
+          if (!a.startsWith('-') && a) filePath = a;
+        }
 
-          // Create or overwrite the file
+        if (expressions.length === 0) {
+          return {
+            stdout: '',
+            stderr: `sed: missing expression
+
+Usage: sed [-i] [-e expr] 's/pattern/replacement/[flags]' [file]
+
+Flags:
+  -i      Edit file in-place
+  -e EXPR Apply expression (can specify multiple)
+  g       Global flag (replace all occurrences per line)
+
+Supported delimiters: / | # @
+
+Examples:
+  sed 's/old/new/g' /file.txt           (stdout)
+  sed -i 's/old/new/g' /file.txt        (in-place)
+  sed -e 's/a/b/' -e 's/c/d/' /file.txt (multiple)
+  cat /file.txt | sed 's/old/new/'       (stdin via pipe)`,
+            exitCode: 2
+          };
+        }
+
+        // Parse all expressions
+        const parsedExprs: { pattern: RegExp; replacement: string }[] = [];
+        for (const expr of expressions) {
+          const parsed = parseSedExpression(expr);
+          if ('error' in parsed) return { stdout: '', stderr: parsed.error, exitCode: 2 };
+          parsedExprs.push(parsed);
+        }
+
+        // Get input content
+        let inputContent: string;
+        const sedPath = normalizePath(filePath);
+
+        if (sedPath) {
           try {
-            await vfs.createFile(projectId, path, content);
-          } catch {
-            await vfs.updateFile(projectId, path, content);
+            const file = await vfs.readFile(projectId, sedPath);
+            if (typeof file.content !== 'string') {
+              return { stdout: '', stderr: `sed: ${sedPath}: binary file`, exitCode: 1 };
+            }
+            inputContent = file.content;
+          } catch (e: any) {
+            return { stdout: '', stderr: `sed: ${sedPath}: ${e?.message || 'file not found'}`, exitCode: 1 };
           }
-          return { stdout: '', stderr: '', exitCode: 0 };
-        } catch (e: any) {
-          return { stdout: '', stderr: `echo: ${path}: ${e?.message || 'cannot write file'}`, exitCode: 1 };
+        } else if (stdin !== undefined) {
+          inputContent = stdin;
+        } else {
+          return { stdout: '', stderr: 'sed: no input file or stdin', exitCode: 2 };
         }
+
+        // Apply all expressions
+        const lines = inputContent.split(/\r?\n/);
+        const outputLines = lines.map(line => {
+          let result = line;
+          for (const { pattern, replacement } of parsedExprs) {
+            result = result.replace(pattern, replacement);
+          }
+          return result;
+        });
+        const outputContent = outputLines.join('\n');
+
+        if (inPlace) {
+          if (!sedPath) {
+            return { stdout: '', stderr: 'sed: -i requires a file argument (cannot edit stdin in-place)', exitCode: 2 };
+          }
+          try {
+            await vfs.updateFile(projectId, sedPath, outputContent);
+            return { stdout: '', stderr: '', exitCode: 0 };
+          } catch (e: any) {
+            return { stdout: '', stderr: `sed: ${sedPath}: ${e?.message || 'cannot write file'}`, exitCode: 1 };
+          }
+        }
+
+        // Output to stdout (redirect handled generically)
+        if (redirect) return applyRedirect(vfs, projectId, outputContent, redirect);
+        return { stdout: truncate(outputContent), stderr: '', exitCode: 0 };
       }
       case 'sqlite3': {
         // This case is reached when sqlite3 is called without a deploymentId context
@@ -895,7 +1159,8 @@ Right: {"cmd": ["ls", "-la"]}
           stdout: '',
           stderr: `${program}: command not found${bashHint}
 
-Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sqlite3
+Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, sqlite3
+Operators: | (pipe), > (redirect), >> (append), && (chain)
 
 Correct shell tool usage:
   {"cmd": ["ls", "/"]}                        - List files
@@ -916,10 +1181,14 @@ Correct shell tool usage:
   {"cmd": ["cp", "-r", "/src", "/dest"]}      - Copy files/directories
   {"cmd": ["echo", "Hello World"]}            - Output text
   {"cmd": ["echo", "content", ">", "/file.txt"]} - Write text to file
+  {"cmd": ["sed", "s/old/new/g", "/file.txt"]}  - Text substitution (stdout)
+  {"cmd": ["sed", "-i", "s/old/new/g", "/file.txt"]} - In-place edit
+  {"cmd": ["cat", "/f.txt", "|", "grep", "class", "|", "head", "-n", "5"]} - Pipe chain
+  {"cmd": ["grep", "-n", "div", "/f.txt", ">", "/results.txt"]} - Redirect to file
   {"cmd": ["sqlite3", "SELECT * FROM users"]} - Execute SQL (Server Mode)
   {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 
-Note: Use json_patch tool for file editing. Use rg (ripgrep) instead of grep for better context management.
+Note: Use write tool for file editing. Use rg (ripgrep) instead of grep for better context management.
 Note: sqlite3 is only available in Server Mode and when a deployment context is selected.`,
           exitCode: 127
         };

@@ -215,14 +215,14 @@ if (!auth.valid) {
 
 ## Creating Functions
 
-**IMPORTANT: Use json_patch rewrite operation, NOT echo for creating functions.**
+**IMPORTANT: Use write rewrite operation, NOT echo for creating functions.**
 
-Echo with complex JSON strings causes escaping issues. The json_patch tool handles JSON encoding automatically.
+Echo with complex JSON strings causes escaping issues. The write tool handles JSON encoding automatically.
 
 ### Create Edge Function (Recommended)
 ` + "```" + `javascript
-// Use json_patch tool with type: "rewrite"
-json_patch({
+// Use write tool with type: "rewrite"
+write({
   "file_path": "/.server/edge-functions/list-products.json",
   "operations": [{
     "type": "rewrite",
@@ -238,8 +238,8 @@ json_patch({
 
 ### Create Server Function (Recommended)
 ` + "```" + `javascript
-// Use json_patch tool with type: "rewrite"
-json_patch({
+// Use write tool with type: "rewrite"
+write({
   "file_path": "/.server/server-functions/formatPrice.json",
   "operations": [{
     "type": "rewrite",
@@ -329,7 +329,7 @@ Minimum interval: 5 minutes.
 
 ### Creating a Scheduled Function
 ` + "```" + `javascript
-json_patch({
+write({
   "file_path": "/.server/scheduled-functions/daily-cleanup.json",
   "operations": [{
     "type": "rewrite",

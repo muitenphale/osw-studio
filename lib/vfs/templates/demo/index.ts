@@ -1,4 +1,5 @@
 import { ProjectTemplate } from '../../project-templates';
+import { WEBSITE_DOMAIN_PROMPT } from '@/lib/llm/prompts/website';
 
 export const DEMO_PROJECT_TEMPLATE: ProjectTemplate = {
   name: 'Example Studios',
@@ -2999,6 +3000,10 @@ The VFS system supports various file types:
 - Binary files up to 10MB
 
 This demonstrates the VFS capability to handle multiple file types and organize them in a structured directory system.`
+    },
+    {
+      path: '/.PROMPT.md',
+      content: WEBSITE_DOMAIN_PROMPT
     }
   ],
   assets: [

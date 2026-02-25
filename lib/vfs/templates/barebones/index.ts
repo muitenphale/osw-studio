@@ -1,4 +1,5 @@
 import { ProjectTemplate } from '../../project-templates';
+import { WEBSITE_DOMAIN_PROMPT } from '@/lib/llm/prompts/website';
 
 export const BAREBONES_PROJECT_TEMPLATE: ProjectTemplate = {
   name: 'Barebones Project',
@@ -75,6 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
   "title": "Welcome",
   "message": "Start building your website!"
 }`
+    },
+    {
+      path: '/.PROMPT.md',
+      content: WEBSITE_DOMAIN_PROMPT
     }
   ]
 };
