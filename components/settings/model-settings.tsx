@@ -28,9 +28,11 @@ import { track } from '@/lib/telemetry';
 interface ModelSettingsPanelProps {
   onClose?: () => void;
   onModelChange?: (modelId: string) => void;
+  showJudgeModel?: boolean;
+  onJudgeModelChange?: (modelId: string) => void;
 }
 
-export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPanelProps) {
+export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJudgeModelChange }: ModelSettingsPanelProps) {
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(() =>
     configManager.getSelectedProvider()
   );
@@ -392,23 +394,25 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
         </div>
       </div>
 
-      {/* Separate Chat Model Toggle */}
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-medium">Use different model for chat</div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Select a separate (usually cheaper) model for chat/planning
-          </p>
+      {/* Separate Chat Model Toggle — hidden in judge mode */}
+      {!showJudgeModel && (
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">Use different model for chat</div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Select a separate (usually cheaper) model for chat/planning
+            </p>
+          </div>
+          <Switch
+            id="separate-chat-model"
+            checked={useSeparateChatModel}
+            onCheckedChange={(checked) => setUseSeparateChatModel(checked)}
+          />
         </div>
-        <Switch
-          id="separate-chat-model"
-          checked={useSeparateChatModel}
-          onCheckedChange={(checked) => setUseSeparateChatModel(checked)}
-        />
-      </div>
+      )}
 
-      {/* Chat Model (conditional) */}
-      {useSeparateChatModel && (
+      {/* Chat Model (conditional) — hidden in judge mode */}
+      {!showJudgeModel && useSeparateChatModel && (
         <div>
           <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Chat Model</Label>
           <div className="mt-2">
@@ -425,6 +429,28 @@ export function ModelSettingsPanel({ onClose, onModelChange }: ModelSettingsPane
             />
           </div>
         </div>
+      )}
+
+      {/* Judge Model — shown only in benchmark mode */}
+      {showJudgeModel && (
+        <>
+          <hr className="border-border" />
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Judge Model <span className="normal-case font-normal">(optional)</span>
+            </Label>
+            <p className="text-xs text-muted-foreground mt-1 mb-2">
+              Separate model for evaluating subjective test criteria
+            </p>
+            <ModelSelector
+              provider={selectedProvider}
+              mode="inline"
+              skipGlobalSync
+              onChange={(modelId) => onJudgeModelChange?.(modelId)}
+              className="space-y-2"
+            />
+          </div>
+        </>
       )}
 
       </div>{/* end scrollable content */}

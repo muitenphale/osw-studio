@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.36.0 - Benchmark Overhaul & Shell `wc` (2026-02-26)
+
+The OSWS Benchmark (formerly "Model Tester") has been rebuilt with programmatic assertions, detailed tool analytics, and self-evaluation tracking — giving you much more insight into how models actually perform.
+
+- **Assertion-Based Validation** - Tests are now validated by 11 assertion types (`file_exists`, `file_contains`, `file_matches`, `tool_used`, `tool_output_matches`, `judge`, and more) instead of relying solely on the model's self-evaluation
+- **Tool Usage Analytics** - A new stats card shows total/successful/failed/invalid tool calls with a per-tool breakdown table. Invalid calls (model hallucinating tools like `read`) are tracked separately
+- **Cost & Token Tracking** - Running totals for cost, prompt tokens, completion tokens, and total tokens displayed in the stats cards
+- **Self-Evaluation Accuracy** - Compares the model's `goal_achieved` self-assessment against what the assertions actually determined. Surfaces cases where the model thinks it succeeded but didn't (or vice versa)
+- **Tool Call Details** - Each completed test shows an itemized list of every tool call with name, status, and argument preview. Failed tests show which specific assertions failed instead of a generic message
+- **Track Reports & Export** - Track reports and JSON/Markdown exports include tool breakdowns, assertion pass rates, and self-eval accuracy
+- **Shell: `wc` Command** - New `wc` command for counting lines (`-l`), words (`-w`), and characters (`-c`). Works with stdin via pipes — `find / -type f | wc -l`
+
+---
+
 ## v1.35.0 - Prompt Architecture & Shell Improvements (2026-02-25)
 
 The AI system prompt no longer hard-codes website instructions. Domain knowledge now lives in a per-project `.PROMPT.md` file that the AI reads at conversation start, making OSW Studio adaptable to non-website projects.

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { logger, cn } from '@/lib/utils';
@@ -44,11 +44,14 @@ interface ModelSelectorProps {
   className?: string;
   hideModelDetails?: boolean;
   mode?: 'popover' | 'inline';
+  skipGlobalSync?: boolean;
 }
 
-export function ModelSelector({ provider, value: _value, onChange, className, hideModelDetails, mode = 'popover' }: ModelSelectorProps) {
+export function ModelSelector({ provider, value: _value, onChange, className, hideModelDetails, mode = 'popover', skipGlobalSync }: ModelSelectorProps) {
   const currentProvider = provider || configManager.getSelectedProvider();
   const providerConfig = getProvider(currentProvider);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
   const [models, setModels] = useState<ProviderModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedModel, setSelectedModel] = useState('');
@@ -270,23 +273,26 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
   // Single effect to initialize selectedModel when models are loaded
   useEffect(() => {
     if (models.length === 0 || loading) return;
-    
+
     // Get the saved model for this provider
     const savedModel = configManager.getProviderModel(currentProvider);
     // Check if saved model exists in loaded models
     if (savedModel && models.some(m => m.id === savedModel)) {
       setSelectedModel(savedModel);
-      onChange?.(savedModel);
+      onChangeRef.current?.(savedModel);
     } else {
       // No saved model or saved model doesn't exist, use first model
       const firstModel = models[0]?.id;
       if (firstModel) {
         setSelectedModel(firstModel);
-        configManager.setProviderModel(currentProvider, firstModel);
-        onChange?.(firstModel);
+        if (!skipGlobalSync) {
+          configManager.setProviderModel(currentProvider, firstModel);
+        }
+        onChangeRef.current?.(firstModel);
       }
     }
-  }, [models, loading, currentProvider, onChange]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models, loading, currentProvider]);
 
   // Method to refresh models (can be called externally)
   const _refreshModels = (forceRefresh = false) => {
@@ -315,7 +321,9 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
 
   const handleModelSelect = (modelId: string) => {
     setSelectedModel(modelId);
-    configManager.setProviderModel(currentProvider, modelId);
+    if (!skipGlobalSync) {
+      configManager.setProviderModel(currentProvider, modelId);
+    }
     onChange?.(modelId);
     track('model_selected', { provider: currentProvider, model: modelId });
     if (mode === 'popover') {

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.36.0 - 2026-02-26
+
+Comprehensive benchmark overhaul with assertion-based validation, tool usage analytics, and self-evaluation tracking. Plus `wc` command for the shell.
+
+- **Benchmark Rename**: "Model Tester" renamed to "OSWS Benchmark" across all UI — header, sidebar, project manager button, and info banners reworded to benchmark framing
+- **Benchmark: Assertion System**: New programmatic assertion framework replaces the old validation approach. 11 assertion types: `file_exists`, `file_not_exists`, `file_contains`, `file_not_contains`, `file_matches`, `valid_json`, `tool_used`, `tool_args_match`, `output_matches`, `tool_output_matches`, and `judge` (LLM-evaluated). Test pass/fail is now determined by assertions, not just the model's self-evaluation
+- **Benchmark: Tool Usage Analytics**: Top-level stats card shows total/successful/failed/invalid tool calls with a per-tool breakdown table (shell, write, evaluation). Invalid tool calls (model hallucinating tools like `read` or `cat` as standalone tools) counted separately
+- **Benchmark: Cost & Token Tracking**: Stats cards show running totals for cost (USD), prompt tokens, completion tokens, and total tokens alongside pass rate, timing, and tool stats
+- **Benchmark: Self-Evaluation Accuracy**: Tracks whether the model's `goal_achieved` self-assessment matches the assertion-determined result. Displayed as "Self-eval accuracy: X/Y" in track reports and exports — surfaces calibration issues where the model thinks it succeeded but assertions say otherwise
+- **Benchmark: Tool Call Details**: Completed tests show an itemized list of every tool call — tool name, success/failure status, and argument preview. Failed tests show specific assertion failure details (e.g. "New title present — still contains Test App") instead of a generic message
+- **Benchmark: Live Tool Output**: Generation output stream shows specific tool arguments in real-time (e.g. `[tool] shell — cat /index.html`) instead of the generic `[tool] shell ...`
+- **Benchmark: Track Reports & Export**: Track reports include total cost, total tokens, per-tool breakdown, assertion pass rates, and self-eval accuracy. JSON and Markdown exports include the same
+- **Shell: `wc` Command**: New `wc` command for counting lines, words, and characters. Supports `-l`, `-w`, `-c` flags and works with stdin via pipes — `find / -type f | wc -l` now works. Documented in system prompt for both Chat and Code modes
+
 ## v1.35.0 - 2026-02-25
 
 Decoupled the AI system prompt from website-only output, added per-project `.PROMPT.md` for domain instructions, made the preview entry point configurable, and improved the AI shell tooling.
