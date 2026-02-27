@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.37.0 - Smarter Prompt Architecture (2026-02-27)
+
+The AI system prompt has been significantly compressed and reorganized so the model pays better attention to what matters.
+
+- **Leaner System Prompt** - The base prompt is ~48% smaller. Duplicate sections between Chat and Code modes eliminated, verbose examples trimmed, and decorative markers removed. The model gets the same instructions in fewer tokens, leaving more room for your project
+- **Project Context in Your Message** - The project file tree and skills list now appear in your first message to the AI instead of buried in the system prompt. Models pay more attention to user messages, so the AI is more aware of your project structure and available skills from the start
+- **Collapsible Context** - The injected project context shows as a small collapsed "Project context" indicator in the chat — click to expand if you want to see it, otherwise it stays out of the way
+- **File Creation Guidelines Moved** - Domain-specific advice about which files to create (and which to skip) now lives in the `.PROMPT.md` domain prompt instead of the base system prompt, where it belongs
+- **Handlebars Error Feedback** - When the preview detects a Handlebars template error (syntax issues, misused helpers, missing partials), the AI now sees the error automatically and can fix it — no more silent red error boxes that only you can see
+- **Shell: Heredoc Support** - The shell tool now supports `cat > /file << 'EOF'` heredoc syntax for writing large files. This gives the AI a reliable fallback when writing big JSON or HTML files that are tricky to encode
+- **Smarter Write Tool Recovery** - When the AI accidentally double-encodes a file write, the tool now attempts to heal the content instead of immediately failing. Fewer wasted retries on large file operations
+
+---
+
 ## v1.36.0 - Benchmark Overhaul & Shell `wc` (2026-02-26)
 
 The OSWS Benchmark (formerly "Model Tester") has been rebuilt with programmatic assertions, detailed tool analytics, and self-evaluation tracking — giving you much more insight into how models actually perform.

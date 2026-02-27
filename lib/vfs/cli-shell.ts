@@ -148,7 +148,8 @@ async function vfsShellExecute(
   vfs: VirtualFileSystem,
   projectId: string,
   cmd: string[],
-  _opts: ShellOpts = {}
+  _opts: ShellOpts = {},
+  stdin?: string
 ): Promise<ShellResult> {
   // Validate inputs
   if (!projectId || typeof projectId !== 'string') {
@@ -232,17 +233,17 @@ async function vfsShellExecute(
     }
 
     // Execute pipe chain left-to-right, passing stdout as stdin
-    let stdin: string | undefined;
+    let pipeStdin: string | undefined = stdin;
     for (let i = 0; i < segments.length; i++) {
-      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], _opts, stdin);
+      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], _opts, pipeStdin);
       if (result.exitCode !== 0) return result;
-      stdin = result.stdout;
+      pipeStdin = result.stdout;
     }
 
-    return { stdout: stdin || '', stderr: '', exitCode: 0 };
+    return { stdout: pipeStdin || '', stderr: '', exitCode: 0 };
   }
 
-  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts);
+  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts, stdin);
 }
 
 async function vfsShellExecuteSingle(
@@ -1258,11 +1259,11 @@ Note: sqlite3 is only available in Server Mode and when a deployment context is 
 
 // Create a global instance that can be imported
 export const vfsShell = {
-  execute: async (projectId: string, cmd: string[]): Promise<{ success: boolean; stdout?: string; stderr?: string }> => {
+  execute: async (projectId: string, cmd: string[], stdin?: string): Promise<{ success: boolean; stdout?: string; stderr?: string }> => {
     // Import singleton vfs to ensure transient files (skills) are available
     const { vfs } = await import('./index');
     await vfs.init();
-    const result = await vfsShellExecute(vfs, projectId, cmd);
+    const result = await vfsShellExecute(vfs, projectId, cmd, {}, stdin);
     return {
       success: result.exitCode === 0,
       stdout: result.stdout,

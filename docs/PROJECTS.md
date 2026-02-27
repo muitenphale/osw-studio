@@ -12,6 +12,8 @@
 4. Choose a template:
    - **Website Starter** - Minimal starting point with basic structure
    - **Example Studios** - Pre-built example with multiple pages
+   - **Landing Page with Contact Form** - Contact form with Resend email (Backend)
+   - **Blog with Comments** - Static blog with auth and moderated comments (Backend)
    - Or select any custom template you've created
 5. Optionally add a description
 6. Click **Create Project**
@@ -125,13 +127,15 @@ Press `Ctrl+S` (Windows/Linux) or `Cmd+S` (Mac) to save your project.
 
 OSW Studio creates checkpoints automatically after AI makes changes:
 
-- **Checkpoints** are temporary snapshots created during AI operations
-- **Saved state** is created when you press Cmd/Ctrl+S
-- "Discard Changes" reverts to your last saved state
+- **Starting point** is created when you open a project (if no prior save exists)
+- **Auto-checkpoints** are created during AI operations (last 10 kept per project)
+- **Manual saves** (Cmd/Ctrl+S) persist across refreshes and are never evicted
+- **"Discard Changes"** reverts to the state when you opened the project — your last manual save if one exists, or the Starting Point otherwise
 
 **How to restore:**
-1. Look for checkpoint indicators in the chat
-2. Click a checkpoint to restore your project to that state
+1. Open the **Checkpoints Panel** in the workspace
+2. Browse starting point, auto-checkpoints, and manual saves
+3. Click any checkpoint to restore your project to that state
 
 ---
 

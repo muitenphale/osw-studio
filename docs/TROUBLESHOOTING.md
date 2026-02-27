@@ -436,7 +436,9 @@ or
 Error: Parse error on line 5
 ```
 
-**Solutions**:
+**Auto-fix**: In Code Mode, the AI automatically detects Handlebars compilation errors from the preview and attempts to fix them on the next iteration — you don't need to copy-paste error messages manually.
+
+**Manual solutions** (if the AI doesn't catch it, or in Chat Mode):
 1. **Check partial exists**:
    - `/templates/header.hbs` must exist
    - Correct path in `{{> header}}`

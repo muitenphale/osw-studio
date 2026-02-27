@@ -139,9 +139,8 @@ export class CostCalculator {
       }
     }
 
-    // Only log OpenRouter warning when using truly estimated tokens (not real API usage data)
     if (usageInfo.isEstimated && (provider === 'openrouter' || provider.toString().includes('openrouter'))) {
-      logger.warn('[CostCalculator] Using estimated cost based on normalized tokens for OpenRouter. This may be inaccurate. Consider using Generation API for native token counts.');
+      logger.debug('[CostCalculator] Using token-based cost estimate for OpenRouter (no cost in response headers).');
     }
 
     return finalCost;
