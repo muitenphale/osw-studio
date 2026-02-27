@@ -335,4 +335,18 @@ Nested Data Access:
 {{/with}}
 
 {{! Debug data structures }}
-<pre>{{json data}}</pre>`;
+<pre>{{json data}}</pre>
+
+FILE CREATION GUIDELINES:
+
+Prefer editing existing files over creating new ones. Check if a file exists before creating.
+
+Create when appropriate:
+- README.md for complex projects (3+ features/pages) — skip for simple single-file changes
+- Config files (package.json, tsconfig.json) only when functionality requires them
+- Component files matching request scope
+
+Do not create unless explicitly requested:
+- .gitignore, .prettierrc, .eslintrc (user preference)
+- .env files (sensitive, user creates manually)
+- LICENSE, temporary/scratch files`;

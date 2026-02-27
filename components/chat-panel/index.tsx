@@ -96,7 +96,7 @@ interface ToolCall {
 
 interface TurnItem {
   id: string;
-  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error';
+  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error' | 'project_context';
   timestamp: number;
   data: any;
   eventId?: string;  // Links item to its source debug event (for coalesced updates)
@@ -538,11 +538,25 @@ export function ChatPanel({
             // Check if this is a synthetic error message (auto-injected by orchestrator)
             const isSyntheticError = message.ui_metadata?.isSyntheticError === true;
 
+            // Add project context as a separate collapsible item (collapsed by default)
+            const projectContext = message.ui_metadata?.projectContext;
+            if (projectContext && !isSyntheticError) {
+              state.currentTurn.items.push({
+                id: `item-${state.itemIdCounter++}`,
+                type: 'project_context',
+                timestamp: event.timestamp,
+                data: projectContext
+              });
+            }
+
+            // Use clean display content (without injected context/hints) if available
+            const displayContent = message.ui_metadata?.displayContent || message.content || '';
+
             state.currentTurn.items.push({
               id: `item-${state.itemIdCounter++}`,
               type: isSyntheticError ? 'synthetic_error' : 'user',
               timestamp: event.timestamp,
-              data: message.content || ''
+              data: displayContent
             });
           }
           // Skip system messages (don't display in chat UI)
@@ -992,6 +1006,27 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
             return (
               <div key={item.id} className="text-sm text-foreground/90 bg-muted/20 px-3 py-2 rounded">
                 <MarkdownRenderer content={item.data} />
+              </div>
+            );
+
+          case 'project_context':
+            return (
+              <div key={item.id} className={`rounded-md transition-all ${expandedItems.has(item.id) ? 'bg-muted/30 p-2' : 'p-1.5'}`}>
+                <button
+                  onClick={() => onToggleExpanded(item.id)}
+                  className="flex items-center gap-2 w-full text-left hover:bg-muted/30 rounded px-1"
+                >
+                  <ChevronRight className={`h-3 w-3 text-muted-foreground transition-transform ${expandedItems.has(item.id) ? 'rotate-90' : ''}`} />
+                  <FileCode className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">Project context</span>
+                </button>
+                {expandedItems.has(item.id) && (
+                  <div className="mt-2 px-2">
+                    <pre className="text-xs bg-muted/50 p-2 rounded overflow-x-auto whitespace-pre-wrap text-muted-foreground">
+                      {item.data}
+                    </pre>
+                  </div>
+                )}
               </div>
             );
 

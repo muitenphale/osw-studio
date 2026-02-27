@@ -11,6 +11,7 @@ import { logger } from '../utils';
 import {
   isJSONTruncationError,
   attemptJSONRepair,
+  extractPartialContent,
   analyzeOperationType,
   generateContinuationMessage,
   generateUnsafeOperationError
@@ -64,47 +65,14 @@ export class ToolRegistry {
       id: 'shell',
       definition: {
         name: 'shell',
-        description: `Execute shell commands to interact with the file system.
+        description: `Execute shell commands in the virtual file system.
 
-Available commands:
-- File reading: cat, head, tail, nl
-- Directory listing: ls, tree
-- Search: grep, rg (ripgrep), find
-- File operations: mkdir, mv, cp, rm, rmdir, touch
-- Text processing: sed (substitution), echo
-- Database: sqlite3 (Server Mode only, requires deployment context)
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, sqlite3.
+Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), and brace expansion ({a,b,c}) are supported.
 
-Pipes and Redirects:
-- Pipes: cmd1 | cmd2 | cmd3  (pass stdout to next command's stdin)
-- Redirect: cmd > /file.txt  (write stdout to file, overwrite)
-- Append: cmd >> /file.txt   (append stdout to file)
-- cat, head, tail, grep, rg, sed all accept stdin from pipes
+For large file writes, use heredoc: cat > /file << 'EOF'\\ncontent\\nEOF
 
-sed (text substitution):
-- {"cmd": "sed 's/old/new/g' /file.txt"}         → stdout
-- {"cmd": "sed -i 's/old/new/g' /file.txt"}      → in-place edit
-- {"cmd": "sed -e 's/a/b/' -e 's/c/d/' /f.txt"}  → multiple expressions
-- {"cmd": "cat /file.txt | sed 's/old/new/'"}     → pipe + sed
-
-IMPORTANT: Execute ONE command at a time. Pass the complete command as a single string.
-
-Brace Expansion Support:
-The shell supports bash-style brace expansion - use {a,b,c} syntax to create multiple arguments.
-- {"cmd": "mkdir templates/{layout,components,pages}"}  → Creates 3 directories
-- {"cmd": "touch src/{index,app,utils}.js"}  → Creates 3 files
-
-Multiple Arguments:
-- mkdir, touch, rm, cat support multiple paths
-- {"cmd": "mkdir dir1 dir2 dir3"}  → Creates 3 directories
-- {"cmd": "touch file1.txt file2.txt file3.txt"}  → Creates 3 files
-
-Examples:
-- {"cmd": "ls -la /"}
-- {"cmd": "cat /index.html /app.js /style.css"}  ← Multiple files
-- {"cmd": "mkdir -p templates/components/{post,comment,user}"}  ← Brace expansion
-- {"cmd": "grep -r pattern /"}
-- {"cmd": "cat /index.html | grep class | head -n 5"}  ← Pipe chain
-- {"cmd": "grep -n div /index.html > /results.txt"}  ← Redirect`,
+Execute ONE command at a time as a single string.`,
         parameters: {
           type: 'object',
           properties: {
@@ -123,8 +91,17 @@ Examples:
             return 'Error: cmd must be a string. Pass the complete command as a single string (e.g., "ls -la /")';
           }
 
+          // Extract heredoc content if present (e.g., cat > file << 'EOF'\ncontent\nEOF)
+          let heredocStdin: string | undefined;
+          let cmdString = args.cmd;
+          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\1\s*$/);
+          if (heredocMatch) {
+            heredocStdin = heredocMatch[2];
+            cmdString = cmdString.slice(0, heredocMatch.index!).trim();
+          }
+
           // Parse command string into array
-          const cmdArray = parseShellCommand(args.cmd);
+          const cmdArray = parseShellCommand(cmdString);
           const command = cmdArray[0];
 
           // Block write operations in read-only mode
@@ -166,7 +143,7 @@ Examples:
           }
 
           // Execute command via browser-side VFS shell
-          const result = await vfsShell.execute(projectId, cmdArray);
+          const result = await vfsShell.execute(projectId, cmdArray, heredocStdin);
 
           // Refresh server context if shell command modified .server/ files
           if (isWriteOperation(cmdArray) && cmdArray.some(a => a.includes('/.server/'))) {
@@ -192,42 +169,14 @@ Examples:
       id: 'write',
       definition: {
         name: 'write',
-        description: `Write and edit files using structured operations. Supports three operation types:
+        description: `Write and edit files using structured operations.
 
-IMPORTANT: The 'operations' parameter must be a direct array, NOT a JSON string.
-❌ Wrong: "operations": "[{...}]"
-✅ Correct: "operations": [{...}]
+operations must be a direct array, not a JSON string.
 
-1. UPDATE - Replace exact string (must be unique in file):
-   {"type": "update", "oldStr": "exact text to find", "newStr": "replacement text"}
-
-2. REWRITE - Replace entire file content:
-   {"type": "rewrite", "content": "complete new file content"}
-
-3. REPLACE_ENTITY - Replace code entity (function, CSS rule, HTML element) by opening pattern:
-   {"type": "replace_entity", "selector": "opening pattern", "replacement": "new entity content"}
-
-Examples:
-{
-  "file_path": "/index.html",
-  "operations": [
-    {"type": "update", "oldStr": "<title>Old Title</title>", "newStr": "<title>New Title</title>"}
-  ]
-}
-
-{
-  "file_path": "/style.css",
-  "operations": [
-    {"type": "rewrite", "content": "body { margin: 0; padding: 0; }"}
-  ]
-}
-
-{
-  "file_path": "/app.js",
-  "operations": [
-    {"type": "replace_entity", "selector": "function myFunc()", "replacement": "function myFunc() { return true; }"}
-  ]
-}`,
+Operation types:
+- UPDATE: {"type": "update", "oldStr": "exact text", "newStr": "replacement"} — oldStr must be unique
+- REWRITE: {"type": "rewrite", "content": "complete file content"}
+- REPLACE_ENTITY: {"type": "replace_entity", "selector": "opening pattern", "replacement": "new content"}`,
         parameters: {
           type: 'object',
           properties: {
@@ -283,26 +232,51 @@ Examples:
 
           // Check if operations itself is a string (the whole array was stringified)
           if (typeof args.operations === 'string') {
+            let parsed = false;
+
+            // Try 1: Direct parse
             try {
               args.operations = JSON.parse(args.operations);
-            } catch (error) {
-              const parseError = error instanceof Error ? error.message : String(error);
-              return `Error: operations parameter appears to be a stringified JSON array, but parsing failed.
+              parsed = true;
+            } catch {
+              // Try 2: Fix literal newlines/tabs inside the JSON string
+              try {
+                const healed = args.operations
+                  .replace(/\r\n/g, '\\n')
+                  .replace(/\r/g, '\\n')
+                  .replace(/\n/g, '\\n')
+                  .replace(/\t/g, '\\t');
+                args.operations = JSON.parse(healed);
+                parsed = true;
+              } catch {
+                // Try 3: JSON structure repair (close truncated brackets)
+                const repairResult = attemptJSONRepair(args.operations);
+                if (repairResult.success) {
+                  args.operations = repairResult.repaired;
+                  parsed = true;
+                } else {
+                  // Try 4: Extract content for rewrite operations via regex
+                  const extraction = extractPartialContent(args.operations);
+                  if (extraction.success && extraction.content) {
+                    args.file_path = extraction.filePath || args.file_path;
+                    args.operations = [{ type: 'rewrite', content: extraction.content }];
+                    parsed = true;
+                  }
+                }
+              }
+            }
 
-This usually means the JSON is malformed or truncated. Common causes:
-1. Content string not properly escaped or too long
-2. JSON syntax error in the operations array
-3. Unclosed quotes or brackets
+            if (!parsed) {
+              return `Error: operations parameter is a stringified JSON array that could not be parsed or healed.
 
-Parse error: ${parseError}
-
-For large file rewrites, ensure:
-- Content is properly escaped (use raw strings or escape quotes)
-- JSON is complete and valid
-- Consider breaking very large content into smaller operations
-
+Tip: Pass operations as a direct array, not a JSON string.
 ❌ Wrong: "operations": "[{...}]" (stringified)
-✅ Correct: "operations": [{...}] (direct array)`;
+✅ Correct: "operations": [{...}] (direct array)
+
+For large file rewrites, use the shell tool with heredoc:
+cat > /path/to/file << 'EOF'
+file content here
+EOF`;
             }
           }
 
@@ -353,7 +327,7 @@ For large file rewrites, ensure:
       id: 'evaluation',
       definition: {
         name: 'evaluation',
-        description: 'Assess whether the task has been completed successfully. Required before finishing work.',
+        description: 'Track progress on complex tasks. Not needed for simple tasks.',
         parameters: {
           type: 'object',
           properties: {

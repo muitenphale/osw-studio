@@ -19,7 +19,8 @@ import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } f
 import { fetchAvailableModels } from './models-api';
 import { parseStreamingResponse, buildFileTree, StreamResponse, ReasoningDetail } from './streaming-parser';
 import { extractPartialContent, getContinuationMarker, PartialContentExtraction } from './json-repair';
-import { buildShellSystemPrompt } from './system-prompt';
+import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
+import { buildShellSystemPrompt, buildProjectContext } from './system-prompt';
 import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
 import { track } from '@/lib/telemetry';
@@ -322,12 +323,14 @@ export interface AgentMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
-  // UI metadata for session recovery
+  // UI metadata for session recovery and display hints
   ui_metadata?: {
     checkpointId?: string;
     cost?: number;
     usage?: UsageInfo;
     isSyntheticError?: boolean;  // True if this is an auto-injected error message (e.g., malformed tool call correction)
+    projectContext?: string;  // Project context injected into first user message (for collapsible UI display)
+    displayContent?: string | ContentBlock[];  // Clean user prompt for UI (without injected context/hints)
   };
 }
 
@@ -489,7 +492,7 @@ export class MultiAgentOrchestrator {
       // Get server context metadata from VFS (already computed when context was mounted)
       const serverContext = vfs.getServerContextMetadata();
 
-      // Build system prompt (includes skills and server context dynamically)
+      // Build system prompt (behavioral instructions only — skills/tree go in user message)
       const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode, serverContext, this.projectId);
 
       // Get current conversation
@@ -503,6 +506,13 @@ export class MultiAgentOrchestrator {
           role: 'system',
           content: systemPrompt
         });
+      }
+
+      // Build project context (skills list + file tree) for the first user message.
+      // Placed in user message so the model treats it as project state, not instructions.
+      let projectContext = '';
+      if (!hasExistingSystemMessage) {
+        projectContext = await buildProjectContext(fileTreeStr, serverContext);
       }
 
       // Skill evaluation pass - check if any enabled skills are relevant
@@ -539,7 +549,7 @@ export class MultiAgentOrchestrator {
 
             if (evalResult.skillIds.length > 0) {
               const paths = evalResult.skillIds.map(s => `/.skills/${s}.md`).join(', ');
-              skillHint = `⚡ Skill evaluation: read ${paths} before proceeding.\n\n`;
+              skillHint = `Skill evaluation: read ${paths} before proceeding.\n\n`;
             }
           }
         }
@@ -548,29 +558,37 @@ export class MultiAgentOrchestrator {
       }
 
       // Build user message content - string or ContentBlock[] with images
+      // First message gets project context prepended; follow-ups get skill hint only
+      const messagePrefix = (projectContext ? projectContext + '\n\n' : '') + skillHint;
       let userContent: string | ContentBlock[];
+      let displayContent: string | ContentBlock[];
+
       if (options?.images && options.images.length > 0) {
         // Build multimodal content with text and images
-        const contentBlocks: ContentBlock[] = [
-          { type: 'text', text: skillHint + userPrompt }
-        ];
+        const imageBlocks: ContentBlock[] = [];
         for (const img of options.images) {
-          contentBlocks.push({
+          imageBlocks.push({
             type: 'image_url',
             image_url: {
               url: `data:${img.mediaType};base64,${img.data}`
             }
           });
         }
-        userContent = contentBlocks;
+        userContent = [{ type: 'text' as const, text: messagePrefix + userPrompt }, ...imageBlocks];
+        displayContent = [{ type: 'text' as const, text: userPrompt }, ...imageBlocks];
       } else {
-        userContent = skillHint + userPrompt;
+        userContent = messagePrefix + userPrompt;
+        displayContent = userPrompt;
       }
 
-      // Add user prompt
+      // Add user prompt — full content for LLM, display content + context metadata for UI
       this.addMessage(this.currentConversationId, {
         role: 'user',
-        content: userContent
+        content: userContent,
+        ui_metadata: {
+          displayContent,
+          ...(projectContext ? { projectContext } : {})
+        }
       });
 
       // Run agent loop
@@ -636,6 +654,20 @@ export class MultiAgentOrchestrator {
         max: maxIterations,
         agent: agent.type
       });
+
+      // Before calling LLM, drain compile errors from previous iteration's file changes.
+      // Preview compilation is debounced (150ms) so we must wait before draining.
+      if (iteration > 0) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const compileErrors = drainCompileErrors();
+        if (compileErrors.length > 0) {
+          this.addMessage(conversationId, {
+            role: 'user',
+            content: formatCompileErrors(compileErrors),
+            ui_metadata: { isSyntheticError: true }
+          });
+        }
+      }
 
       // Get LLM response - emit 'waiting' to show we're waiting for first token
       // Note: actual reasoning tokens are handled via 'reasoning_delta' events from streaming-parser

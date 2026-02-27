@@ -3,6 +3,7 @@ import { VirtualFile } from '../vfs/types';
 import { ProcessedFile, Route, CompiledProject } from './types';
 import Handlebars from 'handlebars';
 import { logger } from '@/lib/utils';
+import { beginCompilation, pushCompileError, commitCompilation } from './compile-errors';
 
 export class VirtualServer {
   private vfs: VirtualFileSystem;
@@ -160,9 +161,11 @@ export class VirtualServer {
   }
 
   async compileProject(incrementalUpdate = false): Promise<CompiledProject> {
+    beginCompilation();
+
     // Register partials before processing
     await this.registerPartials();
-    
+
     const files = await this.vfs.listDirectory(this.projectId, '/');
     
     const oldBlobUrls = new Map(this.blobUrls);
@@ -277,6 +280,8 @@ export class VirtualServer {
     
     this.blobUrls = newBlobUrls;
 
+    commitCompilation();
+
     return {
       entryPoint: this.entryPoint,
       files: processedFiles,
@@ -337,7 +342,7 @@ export class VirtualServer {
     let content = file.content as string;
 
     // Process Handlebars templates first
-    content = await this.processHandlebarsTemplates(content);
+    content = await this.processHandlebarsTemplates(content, file.path);
     
     // Then process internal references with available blob URLs
     content = await this.processInternalReferences(content, blobUrls);
@@ -692,7 +697,7 @@ export class VirtualServer {
     }
   }
 
-  private async processHandlebarsTemplates(content: string): Promise<string> {
+  private async processHandlebarsTemplates(content: string, filePath?: string): Promise<string> {
     // Ensure partials are registered
     await this.registerPartials();
 
@@ -700,6 +705,9 @@ export class VirtualServer {
       // Check for common invalid LLM-generated patterns before compilation
       const invalidPatterns = this.detectInvalidHandlebarsPatterns(content);
       if (invalidPatterns.length > 0) {
+        for (const p of invalidPatterns) {
+          pushCompileError(filePath || 'unknown', `${p.error} — ${p.suggestion}`);
+        }
         const errorMessages = invalidPatterns.map(pattern => `❌ ${pattern.error}\n💡 ${pattern.suggestion}`).join('\n\n');
         return `<!-- Handlebars Syntax Error -->\n<div style="background: #fee; border: 1px solid #f99; padding: 1rem; margin: 1rem; border-radius: 4px; font-family: monospace;">\n<h3 style="color: #c33; margin: 0 0 1rem 0;">⚠️ Handlebars Template Error</h3>\n<pre style="margin: 0; white-space: pre-wrap;">${errorMessages}</pre>\n</div>\n<!-- Original content:\n${content}\n-->`;
       }
@@ -726,8 +734,10 @@ export class VirtualServer {
     } catch (error) {
       logger.error('VirtualServer: Error processing Handlebars templates:', error);
 
-      // Return a helpful error message instead of original content
       const errorMessage = error instanceof Error ? error.message : String(error);
+      pushCompileError(filePath || 'unknown', errorMessage);
+
+      // Return a helpful error message instead of original content
       return `<!-- Handlebars Compilation Error -->\n<div style="background: #fee; border: 1px solid #f99; padding: 1rem; margin: 1rem; border-radius: 4px; font-family: monospace;">\n<h3 style="color: #c33; margin: 0 0 1rem 0;">⚠️ Handlebars Template Error</h3>\n<p><strong>Error:</strong> ${errorMessage}</p>\n<p><strong>Common fixes:</strong></p>\n<ul>\n<li>Check for typos in helper names and partial references</li>\n<li>Ensure all opening tags have matching closing tags</li>\n<li>Verify partial names exist in /templates/ directory</li>\n<li>Use <code>{{> partialName}}</code> syntax, not <code>(> partialName)</code></li>\n</ul>\n</div>\n<!-- Original content:\n${content}\n-->`;
     }
   }

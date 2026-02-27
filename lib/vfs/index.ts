@@ -996,7 +996,7 @@ export class VirtualFileSystem {
 
     const file = await this.adapter.getFile(projectId, cleanPath);
     if (!file) {
-      logger.error('VFS: File not found for read', { projectId, path: cleanPath, originalPath: path });
+      logger.debug('VFS: File not found for read', { projectId, path: cleanPath, originalPath: path });
       throw new Error(`File not found: ${cleanPath}`);
     }
 
