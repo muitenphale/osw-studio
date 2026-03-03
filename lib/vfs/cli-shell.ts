@@ -46,6 +46,26 @@ async function ensureDirectory(vfs: VirtualFileSystem, projectId: string, path: 
 }
 
 /**
+ * Strip bash stderr/stdout redirect operators that are no-ops in the virtual shell.
+ * LLMs reflexively append patterns like `2>/dev/null`, `&>/dev/null`, `2>&1`, etc.
+ * Handles both fused (`2>/dev/null`) and split (`2>` `/dev/null`) token forms.
+ */
+function stripBashRedirects(args: string[]): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    // Exact fd-duplication: 2>&1
+    if (token === '2>&1') continue;
+    // Bare redirect operator (2>, 2>>, 1>, 1>>, &>, &>>) — skip it AND the next token (the target path)
+    if (/^(?:2|1|&)>>?$/.test(token)) { i++; continue; }
+    // Fused redirect+path (2>/dev/null, 1>/tmp/err, &>/dev/null, 2>>/dev/null, etc.)
+    if (/^(?:2|1|&)>>?./.test(token)) continue;
+    result.push(token);
+  }
+  return result;
+}
+
+/**
  * Extract redirect operator from args: > (overwrite) or >> (append)
  * Returns cleaned args and redirect info
  */
@@ -160,8 +180,9 @@ async function vfsShellExecute(
     return { stdout: '', stderr: 'No command provided', exitCode: 2 };
   }
 
-  // Filter out empty/undefined arguments
-  const cleanCmd = cmd.filter(arg => arg !== undefined && arg !== null && arg !== '');
+  const cleanCmd = stripBashRedirects(
+    cmd.filter(arg => arg !== undefined && arg !== null && arg !== '')
+  );
   if (cleanCmd.length === 0) {
     return { stdout: '', stderr: 'No valid command arguments provided', exitCode: 2 };
   }
@@ -209,6 +230,37 @@ async function vfsShellExecute(
       stderr: allStderr.join('\n'),
       exitCode: 0
     };
+  }
+
+  // Handle || fallback - execute sequentially, skip remaining on first success
+  if (cleanCmd.some(arg => arg === '||')) {
+    const commands: string[][] = [];
+    let currentCmd: string[] = [];
+
+    for (const arg of cleanCmd) {
+      if (arg === '||') {
+        if (currentCmd.length > 0) {
+          commands.push(currentCmd);
+          currentCmd = [];
+        }
+      } else {
+        currentCmd.push(arg);
+      }
+    }
+    if (currentCmd.length > 0) {
+      commands.push(currentCmd);
+    }
+
+    // Execute commands sequentially, stop on first success
+    let lastResult: ShellResult = { stdout: '', stderr: '', exitCode: 1 };
+    for (const singleCmd of commands) {
+      lastResult = await vfsShellExecuteSingle(vfs, projectId, singleCmd, _opts);
+      if (lastResult.exitCode === 0) {
+        return lastResult;
+      }
+    }
+
+    return lastResult;
   }
 
   // Handle pipe chains: cmd1 | cmd2 | cmd3
@@ -475,7 +527,7 @@ async function vfsShellExecuteSingle(
         return catResult;
       }
       case 'head': {
-        // head [-n lines] <file>  (or stdin via pipe)
+        // head [-n lines | -lines] <file>  (or stdin via pipe)
         let numLines = 10;
         let filePath = '';
 
@@ -483,6 +535,9 @@ async function vfsShellExecuteSingle(
           const a = args[i];
           if (a === '-n' && args[i + 1]) {
             numLines = parseInt(args[++i]) || 10;
+          } else if (/^-\d+$/.test(a)) {
+            // Shorthand: head -20 (same as head -n 20)
+            numLines = parseInt(a.slice(1)) || 10;
           } else if (!a.startsWith('-')) {
             filePath = a;
           }
@@ -506,7 +561,7 @@ async function vfsShellExecuteSingle(
             return { stdout: '', stderr: `head: ${path}: binary file`, exitCode: 1 };
           }
 
-          const lines = (file.content as string).split(/\r?\n/);
+          const lines = file.content.split(/\r?\n/);
           const output = lines.slice(0, numLines).join('\n');
           const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
           if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
@@ -516,7 +571,7 @@ async function vfsShellExecuteSingle(
         }
       }
       case 'tail': {
-        // tail [-n lines] <file>  (or stdin via pipe)
+        // tail [-n lines | -lines] <file>  (or stdin via pipe)
         let numLines = 10;
         let filePath = '';
 
@@ -524,6 +579,9 @@ async function vfsShellExecuteSingle(
           const a = args[i];
           if (a === '-n' && args[i + 1]) {
             numLines = parseInt(args[++i]) || 10;
+          } else if (/^-\d+$/.test(a)) {
+            // Shorthand: tail -20 (same as tail -n 20)
+            numLines = parseInt(a.slice(1)) || 10;
           } else if (!a.startsWith('-')) {
             filePath = a;
           }
@@ -547,7 +605,7 @@ async function vfsShellExecuteSingle(
             return { stdout: '', stderr: `tail: ${path}: binary file`, exitCode: 1 };
           }
 
-          const lines = (file.content as string).split(/\r?\n/);
+          const lines = file.content.split(/\r?\n/);
           const output = lines.slice(-numLines).join('\n');
           const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
           if (redirect) return applyRedirect(vfs, projectId, result.stdout, redirect);
@@ -557,9 +615,8 @@ async function vfsShellExecuteSingle(
         }
       }
       case 'grep': {
-        // Supported: grep [-n] [-i] [-r] [-F] pattern path
-        // -F: treat pattern as fixed string (literal) instead of regex
-        const flags: Record<string, boolean> = { n: false, i: false, r: false, F: false };
+        // Supported: grep [-n] [-i] [-F] pattern path  (always recursive)
+        const flags: Record<string, boolean> = { n: false, i: false, F: false };
         const fargs: string[] = [];
         for (const a of args) {
           if (a.startsWith('-')) {
@@ -621,7 +678,7 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
             const file = e as any;
             if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
             if (typeof file.content !== 'string') continue;
-            const lines = (file.content as string).split(/\r?\n/);
+            const lines = file.content.split(/\r?\n/);
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
               if (regex.test(line)) {
@@ -725,7 +782,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
             if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
             if (typeof file.content !== 'string') continue;
 
-            const lines = (file.content as string).split(/\r?\n/);
+            const lines = file.content.split(/\r?\n/);
             const matchedLines = new Set<number>();
 
             // Find all matches
@@ -997,11 +1054,10 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         // Attempt file copy
         try {
           const file = await vfs.readFile(projectId, src);
-          const content = typeof file.content === 'string' ? file.content : file.content;
           try {
-            await vfs.createFile(projectId, dst, content as any);
+            await vfs.createFile(projectId, dst, file.content as any);
           } catch {
-            await vfs.updateFile(projectId, dst, content as any);
+            await vfs.updateFile(projectId, dst, file.content as any);
           }
           return { stdout: '', stderr: '', exitCode: 0 };
         } catch {
@@ -1018,11 +1074,10 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
               const rel = file.path.slice(src.length);
               const target = (dst.endsWith('/') ? dst.slice(0, -1) : dst) + rel;
               await ensureDirectory(vfs, projectId, target.split('/').slice(0, -1).join('/'));
-              const content = typeof file.content === 'string' ? file.content : file.content;
               try {
-                await vfs.createFile(projectId, target, content as any);
+                await vfs.createFile(projectId, target, file.content as any);
               } catch {
-                await vfs.updateFile(projectId, target, content as any);
+                await vfs.updateFile(projectId, target, file.content as any);
               }
             }
           }
@@ -1041,6 +1096,22 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         let inPlace = false;
         const expressions: string[] = [];
         let filePath = '';
+
+        // Check for unsupported flags/addressing before parsing
+        if (args.includes('-n')) {
+          return {
+            stdout: '',
+            stderr: `sed: -n flag (line addressing) is not supported
+
+This shell only supports substitution: sed 's/pattern/replacement/[flags]' [file]
+
+For line ranges, use head/tail instead:
+  head -n 45 /file | tail -n 9    — lines 37-45
+  head -n 20 /file                — first 20 lines
+  tail -n 10 /file                — last 10 lines`,
+            exitCode: 2
+          };
+        }
 
         for (let i = 0; i < args.length; i++) {
           const a = args[i];
@@ -1186,6 +1257,146 @@ Examples:
         if (redirect) return applyRedirect(vfs, projectId, wcOutput, redirect);
         return { stdout: truncate(wcOutput), stderr: '', exitCode: 0 };
       }
+      case 'curl': {
+        // curl localhost/path — fetch compiled HTML from preview engine
+        // Flags: -s/--silent, -I/--head, -o FILE/--output FILE
+        const curlFlags = { silent: false, head: false, outputFile: '' };
+        let curlUrl = '';
+
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (a === '-s' || a === '--silent') { curlFlags.silent = true; continue; }
+          if (a === '-I' || a === '--head') { curlFlags.head = true; continue; }
+          if ((a === '-o' || a === '--output') && args[i + 1]) { curlFlags.outputFile = args[++i]; continue; }
+          if (!a.startsWith('-') && a) curlUrl = a;
+        }
+
+        if (!curlUrl) {
+          return {
+            stdout: '',
+            stderr: `curl: no URL specified
+
+Usage: curl [OPTIONS] URL
+
+Options:
+  -s, --silent     Suppress progress output
+  -I, --head       Show response headers only
+  -o, --output FILE  Write output to FILE
+
+Examples:
+  curl localhost/                    — compiled index.html
+  curl localhost/about               — compiled about page
+  curl -I localhost/                 — response headers only
+  curl -s localhost/ | grep '<title>'  — pipe to grep
+  curl localhost/ > /output.html     — redirect to file
+
+Only localhost URLs are supported (fetches compiled HTML from preview engine).`,
+            exitCode: 2
+          };
+        }
+
+        // Validate localhost-only
+        const urlLower = curlUrl.toLowerCase();
+        const isLocalhost =
+          urlLower.startsWith('localhost') ||
+          urlLower.startsWith('http://localhost') ||
+          urlLower.startsWith('https://localhost') ||
+          urlLower.startsWith('127.0.0.1') ||
+          urlLower.startsWith('http://127.0.0.1') ||
+          urlLower.startsWith('https://127.0.0.1');
+
+        if (!isLocalhost) {
+          return {
+            stdout: '',
+            stderr: `curl: external URLs are not supported: ${curlUrl}\n\nOnly localhost URLs are supported. curl fetches compiled HTML from the preview engine.\n\nExamples:\n  curl localhost/\n  curl localhost/about`,
+            exitCode: 1
+          };
+        }
+
+        // Extract path from URL
+        let urlPath = '/';
+        try {
+          // Normalize to a parseable URL
+          let normalizedUrl = curlUrl;
+          if (!normalizedUrl.includes('://')) {
+            normalizedUrl = 'http://' + normalizedUrl;
+          }
+          const parsed = new URL(normalizedUrl);
+          urlPath = parsed.pathname || '/';
+        } catch {
+          // Fallback: extract path manually
+          const pathMatch = curlUrl.match(/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/.*)?$/i);
+          urlPath = pathMatch?.[1] || '/';
+        }
+
+        // Resolve path to VFS file path
+        // / → /index.html
+        // /about → /about.html
+        // /about.html → /about.html
+        // /products/ → /products/index.html
+        let resolvedPath = urlPath;
+        if (resolvedPath === '/') {
+          resolvedPath = '/index.html';
+        } else if (resolvedPath.endsWith('/')) {
+          resolvedPath = resolvedPath + 'index.html';
+        } else if (!resolvedPath.includes('.')) {
+          resolvedPath = resolvedPath + '.html';
+        }
+
+        try {
+          // Dynamic import VirtualServer to avoid adding to cli-shell's initial bundle
+          const { VirtualServer } = await import('@/lib/preview/virtual-server');
+          const server = new VirtualServer(vfs, projectId);
+          const compiled = await server.getCompiledFile(resolvedPath);
+
+          if (!compiled) {
+            return {
+              stdout: '',
+              stderr: `curl: 404 Not Found — ${resolvedPath}\n\nThe file does not exist in the project. Check the path and try again.\n\nResolved: ${urlPath} → ${resolvedPath}`,
+              exitCode: 1
+            };
+          }
+
+          let content = typeof compiled.content === 'string' ? compiled.content : '';
+
+          // Strip VFS Asset Interceptor script (only relevant for browser preview, noise for LLM)
+          const interceptorRegex = /<script>\s*\/\/ VFS Asset Interceptor[\s\S]*?<\/script>\s*/;
+          content = content.replace(interceptorRegex, '');
+
+          if (curlFlags.head) {
+            // Headers only
+            const headers = [
+              'HTTP/1.1 200 OK',
+              `Content-Type: ${compiled.mimeType || 'text/html'}`,
+              `Content-Length: ${new TextEncoder().encode(content).length}`,
+              ''
+            ].join('\n');
+            const headResult: ShellResult = { stdout: headers, stderr: '', exitCode: 0 };
+            if (redirect) return applyRedirect(vfs, projectId, headResult.stdout, redirect);
+            return headResult;
+          }
+
+          if (curlFlags.outputFile) {
+            // Write to file
+            const outPath = normalizePath(curlFlags.outputFile);
+            if (!outPath) return { stdout: '', stderr: 'curl: -o: missing file path', exitCode: 2 };
+            const dirPath = outPath.split('/').slice(0, -1).join('/') || '/';
+            if (dirPath !== '/') await ensureDirectory(vfs, projectId, dirPath);
+            try { await vfs.createFile(projectId, outPath, content); }
+            catch { await vfs.updateFile(projectId, outPath, content); }
+            const msg = curlFlags.silent ? '' : `  % Total    Received\n  100  ${content.length}    ${content.length}\n\nSaved to ${outPath}`;
+            return { stdout: msg, stderr: '', exitCode: 0 };
+          }
+
+          // Default: return compiled HTML
+          const curlResult: ShellResult = { stdout: truncate(content), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, curlResult.stdout, redirect);
+          return curlResult;
+        } catch (e: any) {
+          // Compilation errors from Handlebars are still useful for the LLM
+          return { stdout: '', stderr: `curl: error compiling ${resolvedPath}: ${e?.message || 'unknown error'}`, exitCode: 1 };
+        }
+      }
       case 'sqlite3': {
         // This case is reached when sqlite3 is called without a deploymentId context
         // When deploymentId is available, tool-registry.ts routes the call to the server API
@@ -1215,8 +1426,8 @@ Right: {"cmd": ["ls", "-la"]}
           stdout: '',
           stderr: `${program}: command not found${bashHint}
 
-Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, sqlite3
-Operators: | (pipe), > (redirect), >> (append), && (chain)
+Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, curl, sqlite3
+Operators: | (pipe), > (redirect), >> (append), && (chain), || (fallback)
 
 Correct shell tool usage:
   {"cmd": ["ls", "/"]}                        - List files
@@ -1243,6 +1454,9 @@ Correct shell tool usage:
   {"cmd": ["grep", "-n", "div", "/f.txt", ">", "/results.txt"]} - Redirect to file
   {"cmd": ["find", "/", "-type", "f", "|", "wc", "-l"]} - Count files
   {"cmd": ["wc", "-l", "/file.txt"]}             - Count lines in file
+  {"cmd": ["curl", "localhost/"]}                 - View compiled HTML output
+  {"cmd": ["curl", "localhost/about"]}            - View compiled page (path resolution)
+  {"cmd": ["curl", "-I", "localhost/"]}           - Response headers only
   {"cmd": ["sqlite3", "SELECT * FROM users"]} - Execute SQL (Server Mode)
   {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 

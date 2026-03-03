@@ -6,6 +6,18 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.38.0 - Preview Inspection & Shell Hardening (2026-03-04)
+
+The AI can now inspect its own compiled output, and the shell handles more real-world command patterns.
+
+- **Shell: `curl` for Preview Inspection** - The AI can now run `curl localhost/` to see the compiled HTML output of any page — Handlebars partials resolved, data.json injected, just like the live preview. This lets the AI debug template issues, verify partials are rendering, and check the final output without guessing. Supports `-I` for headers, `-o` to save to a file, and piping (`curl localhost/ | grep nav`)
+- **Shell: `||` Fallback Operator** - Commands can now use `||` to run a fallback if the first command fails, e.g. `cat /config.json || echo "not found"`
+- **Shell: Better Bash Compatibility** - Common bash redirect patterns like `2>/dev/null`, `2> /dev/null` (with space), `&>/dev/null`, `1>/dev/null`, and `2>&1` are all handled correctly. The shell quietly strips these since they don't apply in the virtual environment
+- **Smarter Tool Routing** - When the AI accidentally calls a shell command (like `cat` or `curl`) as its own tool instead of going through the shell, it now works anyway — the command is automatically routed to the shell instead of failing
+- **New Benchmark Scenarios** - Three new preview-focused test scenarios validate the AI's ability to discover and use `curl` to inspect compiled Handlebars output
+
+---
+
 ## v1.37.0 - Smarter Prompt Architecture (2026-02-27)
 
 The AI system prompt has been significantly compressed and reorganized so the model pays better attention to what matters.

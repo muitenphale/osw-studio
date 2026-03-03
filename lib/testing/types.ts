@@ -20,7 +20,7 @@ export interface AssertionResult {
 export interface TestScenario {
   id: string;
   name: string;
-  category: 'shell-read' | 'shell-write' | 'shell-search' | 'shell-text' | 'write-tool' | 'evaluation' | 'multi-tool';
+  category: 'shell-read' | 'shell-write' | 'shell-search' | 'shell-text' | 'shell-preview' | 'write-tool' | 'evaluation' | 'multi-tool';
   prompt: string;
   setupFiles?: Record<string, string>;
   assertions?: TestAssertion[];

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.38.0 - 2026-03-04
+
+Shell `curl` command for inspecting compiled preview output, shell robustness improvements, new benchmark scenarios, and dead code cleanup.
+
+- **Shell: `curl` Command**: New `curl localhost/[path]` command lets the AI (and users in the shell) fetch compiled HTML from the preview engine. Handlebars templates are compiled with partials and data.json resolved, so the output reflects what the browser preview shows. Supports `-s` (silent), `-I` (headers only), `-o FILE` (write to file). Path resolution follows preview conventions: `/` → `/index.html`, `/about` → `/about.html`, `/products/` → `/products/index.html`. The VFS Asset Interceptor script is stripped from output to keep it clean. Only localhost URLs are accepted. Plain `curl` is read-only (works in Chat mode); `curl -o` is a write operation (Code mode only). Listed in the system prompt under Shell commands for both modes
+- **Shell: `||` Operator**: The shell now supports the `||` (OR/fallback) operator — `cmd1 || cmd2` runs the second command only if the first fails. Complements the existing `&&` (AND/chain) operator
+- **Shell: Durable Redirect Stripping**: Replaced the inline regex filter (`/^2>/`) with a dedicated `stripBashRedirects()` function that walks the args array with an index. Handles both fused (`2>/dev/null`) and split (`2>` `/dev/null`) token forms — the split form previously left an orphaned `/dev/null` argument interpreted as a filename. Covers `2>`, `1>`, `&>`, their `>>` append variants, and `2>&1`. Won't false-positive on path arguments like `/2>file.txt`
+- **Shell: Auto-Routing for Misrouted Tool Calls**: When the AI calls a shell command (like `cat`, `curl`, `grep`) as a standalone tool instead of routing through the shell tool, the tool registry now auto-detects this and executes the command through the shell. Previously this was a wasted round-trip with an "Unknown tool" error followed by a retry
+- **Bug Fix: Token Estimate in Write Healing**: `estimateTokenCount(String(originalLength))` converted a char count like `5000` to the 4-character string `"5000"`, yielding `~1 token` regardless of content size. Replaced with direct `Math.ceil(originalLength / 4)`. The now-unused `estimateTokenCount` function was removed
+- **Code Cleanup**: Removed dead `onCostUpdate` callback (25-line closure passed to streaming parser but never invoked), unused imports (`GenerationAPIService`, `GenerationUsage`, `VirtualFile`, `StreamResponse`), write-only `lastCheckpointId` field, vestigial `fileTree` parameter on `buildShellSystemPrompt`, 4 trivial pass-through wrappers in `string-patch.ts`, `generateSummary()` stub, no-op ternaries in `cp`, redundant `as string` casts, and dead `grep -r` flag. Fixed `||` operator re-executing the last command unnecessarily and variable shadowing in `stableStringify`
+- **Benchmark: Preview Scenarios**: Three new test scenarios (`shell-curl`, `shell-curl-path`, `shell-curl-pipe`) under the `shell-preview` category validate that the AI can discover and use `curl` to inspect compiled Handlebars output. Setup includes templates with partials and data.json so assertions verify actual compilation, not raw source
+
 ## v1.37.0 - 2026-02-27
 
 System prompt compression and reorganization of how project context reaches the AI model.

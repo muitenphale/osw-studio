@@ -34,7 +34,6 @@ export interface StreamParserOptions {
   projectId: string;
   suppressAssistantDelta?: boolean;
   onProgress?: (event: string, data?: any) => void;
-  onCostUpdate?: (cost: number, usage: UsageInfo) => void;
 }
 
 /**

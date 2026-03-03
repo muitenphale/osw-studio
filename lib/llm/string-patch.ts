@@ -344,14 +344,11 @@ function detectEntityBoundary(
     case 'html_element':
       return detectHtmlElementBoundary(content, selectorIndex, selector);
     case 'react_component':
-      return detectReactComponentBoundary(content, selectorIndex);
     case 'function':
-      return detectFunctionBoundary(content, selectorIndex);
     case 'css_rule':
-      return detectCssRuleBoundary(content, selectorIndex);
     case 'interface':
     case 'type':
-      return detectTypeBoundary(content, selectorIndex);
+      return detectBracketBoundary(content, selectorIndex);
     default:
       // Default to bracket matching
       return detectBracketBoundary(content, selectorIndex);
@@ -439,34 +436,6 @@ function detectHtmlElementBoundary(content: string, selectorIndex: number, selec
   }
 
   return null;
-}
-
-/**
- * Detect function/component boundaries using bracket matching
- */
-function detectReactComponentBoundary(content: string, selectorIndex: number): { start: number; end: number } | null {
-  return detectBracketBoundary(content, selectorIndex);
-}
-
-/**
- * Detect function boundaries using bracket matching
- */
-function detectFunctionBoundary(content: string, selectorIndex: number): { start: number; end: number } | null {
-  return detectBracketBoundary(content, selectorIndex);
-}
-
-/**
- * Detect CSS rule boundaries using bracket matching
- */
-function detectCssRuleBoundary(content: string, selectorIndex: number): { start: number; end: number } | null {
-  return detectBracketBoundary(content, selectorIndex);
-}
-
-/**
- * Detect TypeScript type/interface boundaries
- */
-function detectTypeBoundary(content: string, selectorIndex: number): { start: number; end: number } | null {
-  return detectBracketBoundary(content, selectorIndex);
 }
 
 /**
