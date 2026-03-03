@@ -88,6 +88,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
 const defaultPromptMd = `You are building a website. Use HTML, CSS, and JavaScript.`;
 
+// Setup with Handlebars templates for curl/preview testing
+const handlebarsSetup: Record<string, string> = {
+  '/.PROMPT.md': defaultPromptMd,
+  '/index.html': `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>{{site_title}}</title></head>
+<body>
+{{> header}}
+<main><h1>{{page_heading}}</h1><p>Welcome to our site.</p></main>
+</body>
+</html>`,
+  '/about.html': `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>About - {{site_title}}</title></head>
+<body>
+{{> header}}
+<main><h1>About Us</h1><p>We build great things.</p></main>
+</body>
+</html>`,
+  '/templates/header.hbs': `<header><nav class="main-nav">Site Navigation</nav></header>`,
+  '/data.json': `{"site_title": "Curl Test Site", "page_heading": "Welcome Home"}`,
+  '/styles.css': `body { font-family: sans-serif; }`,
+};
+
 // Standard setup: HTML + CSS + JS + .PROMPT.md
 const standardSetup: Record<string, string> = {
   '/.PROMPT.md': defaultPromptMd,
@@ -248,6 +272,41 @@ export const testScenarios: TestScenario[] = [
     assertions: [
       { type: 'file_exists', path: '/pages/about.html', description: 'about.html created in pages/' },
       { type: 'file_exists', path: '/pages/contact.html', description: 'contact.html created in pages/' },
+    ],
+  },
+
+  // ─── Shell — Preview with curl (3 tests) ──────────────────────────
+  {
+    id: 'shell-curl',
+    name: 'Inspect compiled homepage',
+    category: 'shell-preview',
+    prompt: 'Check what the compiled homepage looks like in the browser and tell me what the page title is.',
+    setupFiles: handlebarsSetup,
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'curl.*localhost', description: 'Used curl to inspect compiled output' },
+      { type: 'output_matches', pattern: 'Curl Test Site', description: 'Output contains compiled page title from data.json' },
+    ],
+  },
+  {
+    id: 'shell-curl-path',
+    name: 'Inspect compiled subpage',
+    category: 'shell-preview',
+    prompt: 'Inspect the compiled about page and verify the header partial is being rendered correctly.',
+    setupFiles: handlebarsSetup,
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'curl.*localhost', description: 'Used curl to inspect compiled page' },
+      { type: 'output_matches', pattern: 'Site Navigation|header|nav', description: 'Output shows compiled partial content' },
+    ],
+  },
+  {
+    id: 'shell-curl-pipe',
+    name: 'Inspect compiled output and search',
+    category: 'shell-preview',
+    prompt: "Look at the compiled homepage output and find which lines contain navigation elements.",
+    setupFiles: handlebarsSetup,
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'curl.*localhost', description: 'Used curl to fetch compiled output' },
+      { type: 'tool_output_matches', toolName: 'shell', pattern: 'nav', description: 'Output contains nav matches' },
     ],
   },
 
@@ -423,7 +482,7 @@ export const testTracks: TestTrack[] = [
   {
     id: 'shell',
     name: 'Shell',
-    description: 'Shell commands: read, write, search, text processing',
+    description: 'Shell commands: read, write, search, text processing, preview',
     scenarioIds: testScenarios.filter(s => s.category.startsWith('shell-')).map(s => s.id),
   },
   {

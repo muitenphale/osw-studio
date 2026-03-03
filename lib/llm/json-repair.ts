@@ -201,14 +201,6 @@ export function attemptJSONRepair(truncatedJSON: string): JSONRepairResult {
 }
 
 /**
- * Estimate token count (rough approximation)
- * Generally: 1 token ≈ 4 characters for English text
- */
-export function estimateTokenCount(str: string): number {
-  return Math.ceil(str.length / 4);
-}
-
-/**
  * Format byte size in human-readable format
  */
 export function formatBytes(bytes: number): string {
@@ -257,7 +249,7 @@ export function generateContinuationMessage(
   operations: any[],
   originalLength: number
 ): string {
-  const tokenEstimate = estimateTokenCount(String(originalLength));
+  const tokenEstimate = Math.ceil(originalLength / 4);
   const sizeEstimate = formatBytes(originalLength);
   const firstOpType = operations[0]?.type || 'unknown';
 
@@ -288,7 +280,7 @@ export function generateUnsafeOperationError(
   operations: any[],
   originalLength: number
 ): string {
-  const tokenEstimate = estimateTokenCount(String(originalLength));
+  const tokenEstimate = Math.ceil(originalLength / 4);
   const sizeEstimate = formatBytes(originalLength);
   const unsafeOps = operations
     .filter(op => op?.type === 'update' || op?.type === 'replace_entity')

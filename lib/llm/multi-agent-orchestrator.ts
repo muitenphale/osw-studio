@@ -5,19 +5,18 @@
 
 import { Agent, AgentType, agentRegistry } from './agent';
 import { toolRegistry, ToolExecutionContext } from './tool-registry';
-import { vfs, VirtualFile } from '@/lib/vfs';
+import { vfs } from '@/lib/vfs';
 import { checkpointManager, Checkpoint } from '@/lib/vfs/checkpoint';
 import { saveManager } from '@/lib/vfs/save-manager';
 import { configManager } from '@/lib/config/storage';
 import { getProvider } from '@/lib/llm/providers/registry';
 import { CostCalculator } from './cost-calculator';
 import { ToolCall, UsageInfo, ContentBlock } from './types';
-import { GenerationAPIService, GenerationUsage } from './generation-api';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
 import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from './pricing-cache';
 import { fetchAvailableModels } from './models-api';
-import { parseStreamingResponse, buildFileTree, StreamResponse, ReasoningDetail } from './streaming-parser';
+import { parseStreamingResponse, buildFileTree, ReasoningDetail } from './streaming-parser';
 import { extractPartialContent, getContinuationMarker, PartialContentExtraction } from './json-repair';
 import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
 import { buildShellSystemPrompt, buildProjectContext } from './system-prompt';
@@ -382,7 +381,6 @@ export class MultiAgentOrchestrator {
   };
   private stopped = false;
   private pricingEnsured = new Set<string>();
-  private lastCheckpointId: string | null = null;
   private chatMode: boolean;
   private model?: string;
   private lastToolCallSignature: string | null = null; // Loop detection
@@ -493,7 +491,7 @@ export class MultiAgentOrchestrator {
       const serverContext = vfs.getServerContextMetadata();
 
       // Build system prompt (behavioral instructions only — skills/tree go in user message)
-      const systemPrompt = await buildShellSystemPrompt(fileTreeStr, this.chatMode, serverContext, this.projectId);
+      const systemPrompt = await buildShellSystemPrompt(this.chatMode, serverContext, this.projectId);
 
       // Get current conversation
       const conversation = this.conversations.get(this.currentConversationId);
@@ -599,7 +597,7 @@ export class MultiAgentOrchestrator {
 
       return {
         success: true,
-        summary: this.generateSummary(),
+        summary: 'Task completed',
         conversation: Array.from(this.conversations.values()),
         totalCost: this.totalCost,
         totalUsage: this.totalUsage
@@ -1309,7 +1307,7 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
   /**
    * Create a new conversation node
    */
-  private createConversation(agentType: AgentType, parentId?: string): string {
+  private createConversation(agentType: AgentType): string {
     const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const conversation: ConversationNode = {
       id,
@@ -1334,8 +1332,6 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
       kind: 'auto',
       baseRevisionId: saveManager.getSavedCheckpointId(this.projectId)
     });
-    this.lastCheckpointId = checkpoint.id;
-
     // Emit checkpoint created event
     this.onProgress?.('checkpoint_created', {
       checkpointId: checkpoint.id,
@@ -1469,32 +1465,7 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
       provider,
       model,
       projectId: this.projectId,
-      onProgress: this.onProgress,
-      onCostUpdate: (cost, usage) => {
-        this.totalCost += cost;
-        this.totalUsage.promptTokens += usage.promptTokens;
-        this.totalUsage.completionTokens += usage.completionTokens;
-        this.totalUsage.totalTokens += usage.totalTokens;
-
-        // Update session and project costs
-        configManager.updateSessionCost(usage, cost);
-
-        const sessionId = configManager.getCurrentSession()?.sessionId;
-        if (!this.projectId.startsWith('test-')) {
-          vfs.updateProjectCost(this.projectId, {
-            cost,
-            provider: usage.provider || provider || 'unknown',
-            tokenUsage: {
-              input: usage.promptTokens,
-              output: usage.completionTokens
-            },
-            sessionId,
-            mode: 'absolute'
-          }).catch(err => logger.error('Failed to update project cost:', err));
-        }
-
-        this.onProgress?.('usage', { usage, totalCost: this.totalCost });
-      }
+      onProgress: this.onProgress
     });
 
     // Update cost tracking
@@ -1588,8 +1559,8 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
   private stableStringify(obj: any): string {
     return JSON.stringify(obj, (key, value) => {
       if (value && typeof value === 'object' && !Array.isArray(value)) {
-        return Object.keys(value).sort().reduce((sorted: any, key) => {
-          sorted[key] = value[key];
+        return Object.keys(value).sort().reduce((sorted: any, k) => {
+          sorted[k] = value[k];
           return sorted;
         }, {});
       }
@@ -1597,10 +1568,4 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
     });
   }
 
-  /**
-   * Generate a summary of the task completion
-   */
-  private generateSummary(): string {
-    return 'Task completed';
-  }
 }

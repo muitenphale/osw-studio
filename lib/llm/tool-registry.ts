@@ -67,7 +67,7 @@ export class ToolRegistry {
         name: 'shell',
         description: `Execute shell commands in the virtual file system.
 
-Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, sqlite3.
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, curl, sqlite3.
 Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), and brace expansion ({a,b,c}) are supported.
 
 For large file writes, use heredoc: cat > /file << 'EOF'\\ncontent\\nEOF
@@ -468,6 +468,23 @@ EOF`;
     const tool = this.get(toolId);
 
     if (!tool) {
+      // Auto-route known shell commands called as standalone tools
+      // LLMs sometimes call "cat", "curl", "grep" etc. as tool names instead of using shell
+      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3'];
+      if (shellCommands.includes(toolId)) {
+        const shellTool = this.get('shell');
+        if (shellTool) {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            // Reconstruct a shell command string from whatever args the LLM provided
+            const cmd = reconstructShellCommand(toolId, args);
+            return await shellTool.executor.execute(projectId, { cmd }, context);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return `Error: ${msg}`;
+          }
+        }
+      }
       return `Error: Unknown tool "${toolId}"`;
     }
 
@@ -652,6 +669,11 @@ function isWriteOperation(cmd: string[]): boolean {
     return true;
   }
 
+  // curl -o/--output writes to a file; plain curl is read-only
+  if (cmd[0] === 'curl' && (cmd.includes('-o') || cmd.includes('--output'))) {
+    return true;
+  }
+
   // Check for echo with redirection (echo > file or echo >> file)
   if (cmd[0] === 'echo') {
     // Look for > or >> in any argument
@@ -661,6 +683,50 @@ function isWriteOperation(cmd: string[]): boolean {
   // Check for redirection operators in any command
   // This catches cases like: cat file > output.txt
   return cmd.some(arg => arg === '>' || arg === '>>');
+}
+
+/**
+ * Reconstruct a shell command string when the LLM calls a shell command as a standalone tool.
+ * Handles various arg shapes: { cmd: "..." }, { url: "..." }, { file: "..." }, { path: "..." }, etc.
+ */
+function reconstructShellCommand(command: string, args: any): string {
+  // If args already has a cmd string, prepend the command name if not already there
+  if (typeof args.cmd === 'string') {
+    const cmd = args.cmd.trim();
+    return cmd.startsWith(command) ? cmd : `${command} ${cmd}`;
+  }
+
+  // Collect meaningful string values from args
+  const parts: string[] = [command];
+
+  // Common arg names LLMs use, in priority order
+  const knownKeys = ['url', 'file', 'path', 'file_path', 'pattern', 'query', 'expression', 'text', 'content', 'args'];
+  const flags = args.flags || args.options;
+
+  // Add flags first if present
+  if (typeof flags === 'string') {
+    parts.push(flags);
+  } else if (Array.isArray(flags)) {
+    parts.push(...flags.filter((f: any) => typeof f === 'string'));
+  }
+
+  // Add known keys
+  for (const key of knownKeys) {
+    if (typeof args[key] === 'string' && args[key].trim()) {
+      parts.push(args[key].trim());
+    }
+  }
+
+  // If we only have the command name (no recognized args), try all string values
+  if (parts.length === 1) {
+    for (const [key, val] of Object.entries(args)) {
+      if (typeof val === 'string' && val.trim() && key !== 'description') {
+        parts.push(val.trim());
+      }
+    }
+  }
+
+  return parts.join(' ');
 }
 
 // Singleton instance

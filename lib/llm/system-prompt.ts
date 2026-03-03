@@ -11,7 +11,7 @@ export interface ServerContextMetadata {
   scheduledFunctionCount: number;
 }
 
-export async function buildShellSystemPrompt(fileTree?: string, chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
+export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
   if (chatMode) {
     return buildChatModePrompt(serverContext, projectId);
   }
@@ -41,6 +41,7 @@ Shell commands:
 - List: ls [-R] path, tree [-L depth] path
 - Find: find path -name pattern
 - Count: wc [-l] [-w] [-c] file
+- Preview: curl localhost/[path] (view compiled HTML output)
 - Database (Server Mode): sqlite3 "SQL QUERY"`;
 
   if (!isReadOnly) {
