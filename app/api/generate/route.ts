@@ -43,6 +43,87 @@ function toAnthropicContent(content: string | ContentBlock[]): any {
   });
 }
 
+// Transform messages to Gemini format
+function toGeminiContents(messages: LLMMessage[]): { contents: any[]; systemInstruction?: any } {
+  let systemInstruction: any = undefined;
+  const contents: any[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      systemInstruction = { parts: [{ text: getTextContent(msg.content) }] };
+      continue;
+    }
+
+    const role = msg.role === 'assistant' ? 'model' : 'user';
+    const parts: any[] = [];
+
+    if (typeof msg.content === 'string') {
+      parts.push({ text: msg.content });
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === 'text') {
+          parts.push({ text: block.text });
+        } else if (block.type === 'image_url') {
+          try {
+            const { mediaType, data } = parseDataUrl(block.image_url.url);
+            parts.push({ inline_data: { mime_type: mediaType, data } });
+          } catch {
+            logger.warn('[API] Failed to parse image data URL for Gemini');
+          }
+        }
+      }
+    }
+
+    if (parts.length > 0) {
+      contents.push({ role, parts });
+    }
+  }
+
+  return { contents, systemInstruction };
+}
+
+// Build Gemini-format request body from the standard OpenAI-format parameters
+function buildGeminiRequestBody(
+  messages: LLMMessage[],
+  options: {
+    maxTokens?: number;
+    temperature?: number;
+    tools?: any[];
+    toolChoice?: any;
+    reasoning?: any;
+  }
+): Record<string, unknown> {
+  const { contents, systemInstruction } = toGeminiContents(messages);
+  const body: Record<string, unknown> = { contents };
+
+  if (systemInstruction) {
+    body.system_instruction = systemInstruction;
+  }
+
+  const generationConfig: Record<string, unknown> = {
+    maxOutputTokens: options.maxTokens || 4096,
+    temperature: options.temperature ?? 0.7,
+  };
+
+  if (options.reasoning) {
+    generationConfig.thinkingConfig = { thinkingBudget: options.reasoning.max_tokens || 4096 };
+  }
+
+  body.generationConfig = generationConfig;
+
+  if (options.tools && options.tools.length > 0) {
+    body.tools = [{
+      function_declarations: options.tools.map((t: any) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      })),
+    }];
+  }
+
+  return body;
+}
+
 // Extract images from messages for Ollama (images field at request level)
 function extractOllamaImages(messages: LLMMessage[]): { processedMessages: LLMMessage[]; images: string[] } {
   const images: string[] = [];
@@ -166,7 +247,6 @@ Habits:
       });
     }
 
-    const apiEndpoint = getApiEndpoint(selectedProvider, providerConfig, model);
     const headers = buildHeaders(selectedProvider, apiKey, request, providerConfig);
     
     let processedMessages = chatMessages;
@@ -198,9 +278,6 @@ Habits:
               content: msg.content
             });
           } else {
-            if (currentUserMessage && currentUserMessage.role === 'user') {
-              processedMessages.push(currentUserMessage);
-            }
             currentUserMessage = {
               role: 'user',
               content: [{
@@ -271,6 +348,69 @@ Habits:
     }
 
     const streamEnabled = requestStream !== false;
+    const apiEndpoint = getApiEndpoint(selectedProvider, providerConfig, model, { apiKey, stream: streamEnabled });
+
+    // --- Gemini: build entirely different request body ---
+    if (selectedProvider === 'gemini') {
+      // Validate tools if present
+      let validTools: any[] = [];
+      if (tools && tools.length > 0) {
+        validTools = tools.filter((tool: { name?: string }) => tool.name && tool.name.trim() !== '');
+        if (validTools.length === 0) {
+          return NextResponse.json(
+            { error: 'All tools are invalid. Tools must have a name field.' },
+            { status: 400 }
+          );
+        }
+      }
+
+      const modelName = model || '';
+      const needsReasoning = modelName.includes('thinking') || modelName.includes('2.5') || modelName.includes('3-pro');
+      const geminiBody = buildGeminiRequestBody(processedMessages, {
+        maxTokens: max_tokens,
+        temperature: 0.7,
+        tools: validTools.length > 0 ? validTools : undefined,
+        reasoning: needsReasoning ? { max_tokens: 4096 } : undefined,
+      });
+
+      const response = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(geminiBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let cleanError = errorText;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.error?.message) cleanError = parsed.error.message;
+        } catch {
+          if (errorText.trimStart().startsWith('<!') || errorText.trimStart().startsWith('<html')) {
+            cleanError = `HTTP ${response.status} — ${response.statusText || 'check your API key and try again'}`;
+          }
+        }
+        return NextResponse.json(
+          { error: `Google Gemini API error: ${cleanError}` },
+          { status: response.status }
+        );
+      }
+
+      if (!streamEnabled) {
+        const data = await response.json();
+        return NextResponse.json(data);
+      }
+
+      return new Response(response.body, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // --- All other providers: OpenAI-compatible request body ---
     const requestBody: Record<string, unknown> = {
       model: model || getDefaultModel(selectedProvider),
       messages: processedMessages,
@@ -326,12 +466,6 @@ Habits:
         } else {
           requestBody.tool_choice = { type: 'auto' };
         }
-      } else if (selectedProvider === 'ollama') {
-        requestBody.tools = validTools.map((tool: { name: string; description: string; parameters: unknown }) => ({
-          type: 'function',
-          function: tool
-        }));
-        requestBody.tool_choice = tool_choice || 'auto';
       } else {
         requestBody.tools = validTools.map((tool: { name: string; description: string; parameters: unknown }) => ({
           type: 'function',
@@ -346,6 +480,7 @@ Habits:
 
       const modelName = model || getDefaultModel(selectedProvider);
       if (modelName.includes('gpt-5-nano')) {
+        // gpt-5-nano requires temperature=1; other values cause API errors
         requestBody.temperature = 1;
       } else {
         requestBody.temperature = 0.7;
@@ -359,19 +494,14 @@ Habits:
     }
 
     // Enable reasoning for models that support it
-    // This provides reasoning_details with signatures that must be preserved
     const modelName = model || '';
-
-    // Gemini thinking models need reasoning with max_tokens
-    if (modelName.includes('gemini') && (modelName.includes('thinking') || modelName.includes('2.5') || modelName.includes('3-pro'))) {
-      requestBody.reasoning = {
-        max_tokens: 4096
-      };
-    }
 
     // Handle client-requested reasoning (for models that support toggleable reasoning)
     if (reasoning && selectedProvider === 'openrouter') {
       requestBody.reasoning = reasoning;
+    }
+    if (reasoning && selectedProvider === 'zhipu') {
+      requestBody.thinking = { type: 'enabled' };
     }
 
     // DeepSeek V3.2+ models - some providers (e.g., AtlasCloud) may have issues with tool calling
@@ -432,15 +562,15 @@ Habits:
         logger.error('[API] Provider error (raw):', errorText.slice(0, 500));
       }
 
-      const headers: Record<string, string> = {};
+      const rateLimitHeaders: Record<string, string> = {};
       if (response.status === 429) {
         const retryAfter = response.headers.get('Retry-After');
         const rateLimitReset = response.headers.get('X-RateLimit-Reset');
         const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
 
-        if (retryAfter) headers['Retry-After'] = retryAfter;
-        if (rateLimitReset) headers['X-RateLimit-Reset'] = rateLimitReset;
-        if (rateLimitRemaining) headers['X-RateLimit-Remaining'] = rateLimitRemaining;
+        if (retryAfter) rateLimitHeaders['Retry-After'] = retryAfter;
+        if (rateLimitReset) rateLimitHeaders['X-RateLimit-Reset'] = rateLimitReset;
+        if (rateLimitRemaining) rateLimitHeaders['X-RateLimit-Remaining'] = rateLimitRemaining;
       }
       // HuggingFace credit exhaustion
       if (selectedProvider === 'huggingface' && (
@@ -528,7 +658,7 @@ You can make multiple tool calls in a single response. Always include the tool_c
 
       return NextResponse.json(
         { error: `${providerConfig.name} API error: ${cleanError}` },
-        { status: response.status, headers }
+        { status: response.status, headers: rateLimitHeaders }
       );
     }
 
@@ -576,14 +706,16 @@ You can make multiple tool calls in a single response. Always include the tool_c
   }
 }
 
-function getApiEndpoint(provider: ProviderId, config: ReturnType<typeof getProvider>, model?: string): string {
+function getApiEndpoint(provider: ProviderId, config: ReturnType<typeof getProvider>, model?: string, options?: { apiKey?: string; stream?: boolean }): string {
   const baseUrl = config.baseUrl || 'https://openrouter.ai/api/v1';
-  
+
   if (provider === 'anthropic') {
     return 'https://api.anthropic.com/v1/messages';
   } else if (provider === 'gemini') {
-    const geminiModel = model || 'gemini-1.5-flash';
-    return `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
+    const geminiModel = model || 'gemini-2.5-flash';
+    const action = options?.stream ? 'streamGenerateContent?alt=sse' : 'generateContent';
+    const key = options?.apiKey ? `${options.stream ? '&' : '?'}key=${options.apiKey}` : '';
+    return `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:${action}${key}`;
   } else {
     return `${baseUrl}/chat/completions`;
   }
@@ -606,6 +738,7 @@ function buildHeaders(
       headers['anthropic-beta'] = 'tools-2024-04-04';
     }
   } else if (provider === 'gemini') {
+    // Gemini uses query-param key auth; no auth headers needed
   } else {
     if (apiKey) {
       headers['Authorization'] = `Bearer ${apiKey}`;
@@ -629,11 +762,11 @@ function getDefaultModel(provider: ProviderId): string {
     case 'openai-codex':
       return 'gpt-5.3-codex';
     case 'anthropic':
-      return 'claude-3-5-haiku-20241022';
+      return 'claude-haiku-4-5-20251001';
     case 'groq':
       return 'llama-3.3-70b-versatile';
     case 'gemini':
-      return 'gemini-1.5-flash';
+      return 'gemini-2.5-flash';
     case 'huggingface':
       return 'Qwen/Qwen2.5-Coder-32B-Instruct';
     case 'ollama':
@@ -642,6 +775,10 @@ function getDefaultModel(provider: ProviderId): string {
       return 'qwen/qwen3-4b-thinking-2507';
     case 'sambanova':
       return 'Meta-Llama-3.3-70B-Instruct';
+    case 'zhipu':
+      return 'glm-5';
+    case 'minimax':
+      return 'MiniMax-M2.5';
     default:
       return 'deepseek/deepseek-chat';
   }

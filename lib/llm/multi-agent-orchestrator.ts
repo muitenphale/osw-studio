@@ -1464,7 +1464,6 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
     const result = await parseStreamingResponse(response, {
       provider,
       model,
-      projectId: this.projectId,
       onProgress: this.onProgress
     });
 

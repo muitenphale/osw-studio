@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.39.0 - 2026-03-05
+
+Two new providers (MiniMax, Zhipu AI), Gemini rebuilt from scratch, and streaming parser improvements for thinking/reasoning display.
+
+- **New Provider: MiniMax**: 5 models — M2.5, M2.5 Highspeed (~100 tps), M2.1, M2.1 Highspeed, and M2. All have 200K context, 128K max output, streaming, and tool calling. Built-in reasoning (always-on, no toggle). Pay-as-you-go from $0.30/$1.20 per 1M tokens, or coding plans from $10/mo
+- **New Provider: Zhipu AI (GLM)**: 6 models — GLM-5, GLM-4.7, GLM-4.7 Flash (free), GLM-4.6, GLM-4.6V (vision), and GLM-4.6V Flash (vision, free). Up to 200K context. Supports streaming, tool calling, vision, and thinking mode. Pay-as-you-go from $0.60/$2.20 per 1M tokens, or coding plans from $3/mo
+- **Streaming: Thinking/Reasoning Display**: The streaming parser now handles three provider-specific reasoning formats — `reasoning_content` field (Zhipu), inline `<think>` tags in content (MiniMax, Ollama thinking models), and `reasoning` field (DeepSeek via OpenRouter). All are routed to the collapsible thinking section instead of appearing as regular assistant text. A state machine handles `<think>` tags split across chunks, and auto-closes unclosed blocks when tool calls arrive
+- **Gemini: Full Rebuild**: The Gemini provider was non-functional — the server was sending OpenAI-format requests to Gemini's native API. Rebuilt with a dedicated transformation layer: messages converted to Gemini's `contents`/`parts` structure, system messages extracted to `system_instruction`, vision content mapped to `inline_data`, and streaming routed to the correct `streamGenerateContent?alt=sse` endpoint. Generation, streaming, vision, tool use, and thinking all work correctly now
+- **Gemini: Dynamic Model Discovery**: The model selector now queries Gemini's live API instead of returning a hardcoded list. Fallback models updated from retired 1.5-era to current: Gemini 2.5 Flash (1M context, 65K output), 2.5 Pro, and 2.0 Flash
+- **Default Model Updates**: Retired model defaults replaced — Gemini 1.5 Flash → 2.5 Flash, Claude 3.5 Haiku → Claude Haiku 4.5
+- **Bug Fix: Zhipu/MiniMax Default Model**: `getProviderDefaultModel()` in ConfigManager was missing cases for the new providers, falling through to the default which returned a DeepSeek model ID
+- **Bug Fix: Stream End ThinkTag Flush**: If a stream ended while the `<think>` tag parser had buffered a partial tag prefix (e.g. `<th`), that text was silently lost. Now flushed as content or reasoning on stream end
+- **Bug Fix: Error Recovery Tool Call**: The stream parser's error recovery guard required at least one finalized tool call before attempting to salvage an in-progress tool call. Removed the guard so the first tool call is also recovered
+- **Bug Fix: Ollama Fallback Headers**: Variable shadowing caused the Ollama tool-calling fallback to send an empty headers object instead of the properly built auth headers
+- **Dead Code Removal**: Deleted the `LLMClient` class (~590 lines) — the entire class was unused except for two static methods (`validateApiKey`, `getAvailableModels`), which are now standalone exports. Also removed unused `ProviderSettings` type, unused `icon` field on `ProviderConfig`, unused `DEBUG_TOOL_STREAM` variable, and unused `projectId` from stream parser options
+
 ## v1.38.0 - 2026-03-04
 
 Shell `curl` command for inspecting compiled preview output, shell robustness improvements, new benchmark scenarios, and dead code cleanup.

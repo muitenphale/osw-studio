@@ -3,20 +3,12 @@
  * Extracted from original orchestrator for reuse
  */
 
-import { ToolCall, UsageInfo } from './types';
+import { ToolCall, UsageInfo, ReasoningDetail } from './types';
 import { logger } from '../utils';
 import { VirtualFile } from '@/lib/vfs';
 
-// Reasoning detail block from OpenRouter (for Gemini thinking models)
-export interface ReasoningDetail {
-  type: string;
-  text?: string;
-  summary?: string;
-  signature?: string;
-  id?: string;
-  format?: string;
-  index?: number;
-}
+// Re-export for consumers that import from streaming-parser
+export type { ReasoningDetail };
 
 export interface StreamResponse {
   content?: string;
@@ -31,7 +23,6 @@ export interface StreamResponse {
 export interface StreamParserOptions {
   provider: string;
   model: string;
-  projectId: string;
   suppressAssistantDelta?: boolean;
   onProgress?: (event: string, data?: any) => void;
 }
@@ -39,6 +30,9 @@ export interface StreamParserOptions {
 /**
  * Parse streaming response from LLM
  * Handles Anthropic, OpenAI, and OpenRouter formats
+ *
+ * Progress events emit only deltas (new text), never cumulative snapshots,
+ * to avoid O(N²) memory/render cost on the consumer side.
  */
 export async function parseStreamingResponse(
   response: Response,
@@ -60,7 +54,63 @@ export async function parseStreamingResponse(
   let lastFinishReason: string | undefined;
   let reasoningDetails: ReasoningDetail[] = [];  // For Gemini thinking models
 
-  const DEBUG_TOOL_STREAM = process.env.NEXT_PUBLIC_DEBUG_TOOL_STREAM === '1';
+  // State for extracting inline <think>...</think> blocks (MiniMax, Ollama thinking models, etc.)
+  let inThinkBlock = false;
+  let thinkTagBuffer = '';
+
+  /**
+   * Split a content piece into regular content and reasoning, handling
+   * <think>...</think> tags that may span across streaming chunks.
+   */
+  function splitThinkTags(piece: string): { content: string; reasoning: string } {
+    const text = thinkTagBuffer + piece;
+    thinkTagBuffer = '';
+    let contentOut = '';
+    let reasoningOut = '';
+    let pos = 0;
+
+    while (pos < text.length) {
+      if (!inThinkBlock) {
+        const idx = text.indexOf('<think>', pos);
+        if (idx === -1) {
+          // Check if text ends with a partial "<think>" prefix
+          for (let k = Math.min(6, text.length - pos); k >= 1; k--) {
+            if ('<think>'.startsWith(text.slice(text.length - k))) {
+              contentOut += text.slice(pos, text.length - k);
+              thinkTagBuffer = text.slice(text.length - k);
+              return { content: contentOut, reasoning: reasoningOut };
+            }
+          }
+          contentOut += text.slice(pos);
+          return { content: contentOut, reasoning: reasoningOut };
+        }
+        contentOut += text.slice(pos, idx);
+        inThinkBlock = true;
+        pos = idx + 7; // '<think>'.length
+        if (pos < text.length && text[pos] === '\n') pos++;
+      } else {
+        const idx = text.indexOf('</think>', pos);
+        if (idx === -1) {
+          // Check if text ends with a partial "</think>" prefix
+          for (let k = Math.min(8, text.length - pos); k >= 1; k--) {
+            if ('</think>'.startsWith(text.slice(text.length - k))) {
+              reasoningOut += text.slice(pos, text.length - k);
+              thinkTagBuffer = text.slice(text.length - k);
+              return { content: contentOut, reasoning: reasoningOut };
+            }
+          }
+          reasoningOut += text.slice(pos);
+          return { content: contentOut, reasoning: reasoningOut };
+        }
+        reasoningOut += text.slice(pos, idx);
+        inThinkBlock = false;
+        pos = idx + 8; // '</think>'.length
+        while (pos < text.length && text[pos] === '\n') pos++;
+      }
+    }
+
+    return { content: contentOut, reasoning: reasoningOut };
+  }
 
   // For Anthropic: track partial JSON building and thinking blocks
   const anthropicToolBuffers: Record<string, string> = {};
@@ -117,7 +167,7 @@ export async function parseStreamingResponse(
                 const piece = json.delta.thinking as string;
                 reasoning += piece;
                 if (!suppressAssistantDelta) {
-                  // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+
                   onProgress?.('reasoning_delta', { text: piece });
                 }
               } else if (json.type === 'content_block_stop' && json.index === anthropicThinkingBlockIndex) {
@@ -128,7 +178,7 @@ export async function parseStreamingResponse(
               } else if (json.type === 'content_block_delta' && json.delta?.text_delta?.text) {
                 const piece = json.delta.text_delta.text as string;
                 content += piece;
-                // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+
                 if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece });
               } else if (json.type === 'content_block_start' && json.content_block?.type === 'tool_use') {
                 const toolCall = {
@@ -208,7 +258,17 @@ export async function parseStreamingResponse(
                 const reasoningPiece = String(delta.reasoning);
                 reasoning += reasoningPiece;
                 if (!suppressAssistantDelta) {
-                  // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+
+                  onProgress?.('reasoning_delta', { text: reasoningPiece });
+                }
+                handledReasoningDelta = true;
+              }
+
+              // Handle Zhipu delta.reasoning_content (same pattern, different field name)
+              if (delta?.reasoning_content && !delta?.content && !delta?.tool_calls) {
+                const reasoningPiece = String(delta.reasoning_content);
+                reasoning += reasoningPiece;
+                if (!suppressAssistantDelta) {
                   onProgress?.('reasoning_delta', { text: reasoningPiece });
                 }
                 handledReasoningDelta = true;
@@ -216,9 +276,17 @@ export async function parseStreamingResponse(
 
               if (delta?.content) {
                 const piece = String(delta.content);
-                content += piece;
-                // Only emit text, not snapshot - snapshots cause O(N²) memory usage
-                if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: piece });
+                // Extract inline <think>...</think> blocks into reasoning
+                const { content: contentPiece, reasoning: reasoningPiece } = splitThinkTags(piece);
+                if (contentPiece) {
+                  content += contentPiece;
+                  if (!suppressAssistantDelta) onProgress?.('assistant_delta', { text: contentPiece });
+                }
+                if (reasoningPiece) {
+                  reasoning += reasoningPiece;
+                  if (!suppressAssistantDelta) onProgress?.('reasoning_delta', { text: reasoningPiece });
+                  handledReasoningDelta = true;
+                }
               }
 
               // Capture reasoning_details for Gemini thinking models (OpenRouter format)
@@ -247,7 +315,7 @@ export async function parseStreamingResponse(
                         reasoningDetails[existingIdx].text = rd.text;
 
                         // Emit delta event with just the new portion
-                        // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+      
                         if (deltaText && !suppressAssistantDelta) {
                           onProgress?.('reasoning_delta', { text: deltaText });
                         }
@@ -259,7 +327,7 @@ export async function parseStreamingResponse(
                   } else {
                     reasoningDetails.push(rd as ReasoningDetail);
                     // Emit delta for new reasoning detail
-                    // Only emit text, not snapshot - snapshots cause O(N²) memory usage
+  
                     if (rd.text && !suppressAssistantDelta) {
                       onProgress?.('reasoning_delta', { text: rd.text });
                     }
@@ -277,6 +345,18 @@ export async function parseStreamingResponse(
               }
 
               if (delta?.tool_calls) {
+                // Auto-close any open <think> block when tool calls arrive
+                // (MiniMax sometimes omits </think> before making tool calls)
+                if (inThinkBlock) {
+                  if (thinkTagBuffer) {
+                    reasoning += thinkTagBuffer;
+                    if (!suppressAssistantDelta) onProgress?.('reasoning_delta', { text: thinkTagBuffer });
+                    thinkTagBuffer = '';
+                  }
+                  inThinkBlock = false;
+                  if (!suppressAssistantDelta) onProgress?.('reasoning_complete', { reasoning });
+                }
+
                 for (const tc of delta.tool_calls) {
                   if (tc.index !== undefined) {
                     const key = `idx_${tc.index}`;
@@ -379,12 +459,20 @@ export async function parseStreamingResponse(
     }
   } catch (error) {
     logger.error('Error reading stream:', error);
-    if (Object.keys(toolCallsById).length > 0) {
-      if (currentToolCall && toolCallBuffer && currentToolCall.function && currentToolCall.id) {
-        currentToolCall.function.arguments = toolCallBuffer;
-        toolCallsById[currentToolCall.id] = currentToolCall as ToolCall;
-      }
+    if (currentToolCall && toolCallBuffer && currentToolCall.function && currentToolCall.id) {
+      currentToolCall.function.arguments = toolCallBuffer;
+      toolCallsById[currentToolCall.id] = currentToolCall as ToolCall;
     }
+  }
+
+  // Flush any remaining thinkTagBuffer (partial tag that never completed)
+  if (thinkTagBuffer) {
+    if (inThinkBlock) {
+      reasoning += thinkTagBuffer;
+    } else {
+      content += thinkTagBuffer;
+    }
+    thinkTagBuffer = '';
   }
 
   // Pass tool calls as-is - let tool-registry handle JSON repair with smart strategies

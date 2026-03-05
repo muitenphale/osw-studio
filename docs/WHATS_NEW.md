@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.39.0 - New Providers + Gemini Rebuild (2026-03-05)
+
+Two new AI providers, a Gemini rebuild, and better thinking/reasoning display across providers.
+
+- **New: MiniMax** - 5 models with 200K context, built-in reasoning, and tool calling. Highspeed variants at ~100 tokens/sec. Pay-as-you-go from $0.30/M input tokens, or coding plans from $10/mo. Get an API key at [platform.minimax.io](https://platform.minimax.io/user-center/basic-information/interface-key)
+- **New: Zhipu AI (GLM)** - 6 models including GLM-5 (most capable), vision models (GLM-4.6V), and free flash variants. Supports streaming, tool calling, vision, and thinking mode. Get an API key at [z.ai/model-api](https://z.ai/model-api)
+- **Better Thinking/Reasoning Display** - Providers that use thinking tokens (MiniMax, Zhipu AI, DeepSeek) now display reasoning in the collapsible thinking section instead of mixing it into the response
+- **Gemini Rebuilt** - The Gemini provider was silently broken — rebuilt from scratch with proper API format. Generation, streaming, vision, tool use, and thinking all work now
+- **Gemini Model Discovery** - The model selector now queries Gemini's live API instead of showing a hardcoded list
+- **Updated Model Defaults** - Retired models replaced: Gemini 1.5 Flash → 2.5 Flash, Claude 3.5 Haiku → Haiku 4.5
+
+---
+
 ## v1.38.0 - Preview Inspection & Shell Hardening (2026-03-04)
 
 The AI can now inspect its own compiled output, and the shell handles more real-world command patterns.
