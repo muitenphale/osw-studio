@@ -8,7 +8,7 @@ import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { ConnectionBadge } from '@/components/settings/connection-badge';
 import { toast } from 'sonner';
 import { configManager } from '@/lib/config/storage';
-import { LLMClient } from '@/lib/llm/llm-client';
+import { validateApiKey } from '@/lib/llm/llm-client';
 import { checkHFCapabilities, loginHF } from '@/lib/auth/hf-auth';
 import type { HFCapabilities } from '@/lib/auth/hf-auth';
 
@@ -104,7 +104,7 @@ export function HFAuthPanel({ onAuthChange }: HFAuthPanelProps) {
     }
     setIsConnecting(true);
     try {
-      const isValid = await LLMClient.validateApiKey(key, 'huggingface');
+      const isValid = await validateApiKey(key, 'huggingface');
       if (isValid) {
         configManager.setHFAuth({ access_token: key });
         setIsConnected(true);

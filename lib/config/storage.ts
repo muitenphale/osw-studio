@@ -277,6 +277,10 @@ class ConfigManager {
         return 'local-model';
       case 'sambanova':
         return 'Meta-Llama-3.3-70B-Instruct';
+      case 'zhipu':
+        return 'glm-5';
+      case 'minimax':
+        return 'MiniMax-M2.5';
       default:
         return 'deepseek/deepseek-chat';
     }

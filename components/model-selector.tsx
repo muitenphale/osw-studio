@@ -28,7 +28,7 @@ import {
 import { configManager } from '@/lib/config/storage';
 import { ProviderId, ProviderModel } from '@/lib/llm/providers/types';
 import { getProvider } from '@/lib/llm/providers/registry';
-import { LLMClient } from '@/lib/llm/llm-client';
+import { getAvailableModels } from '@/lib/llm/llm-client';
 import {
   fetchAvailableModels,
   formatModelPrice
@@ -205,7 +205,7 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
         }
       } else if (providerConfig.supportsModelDiscovery) {
         // Try to discover models (we know API key exists at this point)
-        const modelIds = await LLMClient.getAvailableModels(apiKey || undefined, currentProvider);
+        const modelIds = await getAvailableModels(apiKey || undefined, currentProvider);
         loadedModels = modelIds.map(id => ({
           id,
           name: id.split('/').pop() || id,

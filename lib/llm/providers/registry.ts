@@ -77,26 +77,26 @@ const codexModels: ProviderModel[] = [
 
 const geminiModels: ProviderModel[] = [
   {
-    id: 'gemini-2.0-flash-exp',
-    name: 'Gemini 2.0 Flash',
-    description: 'Latest experimental Gemini model',
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    description: 'Latest fast Gemini model with thinking',
     contextLength: 1048576,
-    maxTokens: 8192,
+    maxTokens: 65536,
     supportsFunctions: true,
     supportsVision: true
   },
   {
-    id: 'gemini-1.5-pro',
-    name: 'Gemini 1.5 Pro',
+    id: 'gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
     description: 'Advanced reasoning and analysis',
-    contextLength: 2097152,
-    maxTokens: 8192,
+    contextLength: 1048576,
+    maxTokens: 65536,
     supportsFunctions: true,
     supportsVision: true
   },
   {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash',
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
     description: 'Fast and versatile',
     contextLength: 1048576,
     maxTokens: 8192,
@@ -105,10 +105,114 @@ const geminiModels: ProviderModel[] = [
   }
 ];
 
+const zhipuModels: ProviderModel[] = [
+  {
+    id: 'glm-5',
+    name: 'GLM-5',
+    description: 'Most capable GLM model for reasoning and coding',
+    contextLength: 200000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsReasoning: true,
+    pricing: { input: 1.00, output: 3.20 },
+  },
+  {
+    id: 'glm-4.7',
+    name: 'GLM-4.7',
+    description: 'High-performance reasoning model',
+    contextLength: 200000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    supportsReasoning: true,
+    pricing: { input: 0.60, output: 2.20 },
+  },
+  {
+    id: 'glm-4.7-flash',
+    name: 'GLM-4.7 Flash',
+    description: 'Fast and free GLM model',
+    contextLength: 200000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0, output: 0 },
+  },
+  {
+    id: 'glm-4.6',
+    name: 'GLM-4.6',
+    description: 'Balanced performance model',
+    contextLength: 200000,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0.60, output: 2.20 },
+  },
+  {
+    id: 'glm-4.6v',
+    name: 'GLM-4.6V',
+    description: 'Vision model with tool calling support',
+    contextLength: 128000,
+    maxTokens: 32000,
+    supportsFunctions: true,
+    supportsVision: true,
+    pricing: { input: 0.30, output: 0.90 },
+  },
+  {
+    id: 'glm-4.6v-flash',
+    name: 'GLM-4.6V Flash',
+    description: 'Fast and free vision model',
+    contextLength: 128000,
+    maxTokens: 32000,
+    supportsFunctions: true,
+    supportsVision: true,
+    pricing: { input: 0, output: 0 },
+  },
+];
 
-
-
-
+const minimaxModels: ProviderModel[] = [
+  {
+    id: 'MiniMax-M2.5',
+    name: 'MiniMax M2.5',
+    description: 'Most capable model — coding, reasoning, and tool use',
+    contextLength: 204800,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0.30, output: 1.20 },
+  },
+  {
+    id: 'MiniMax-M2.5-highspeed',
+    name: 'MiniMax M2.5 Highspeed',
+    description: 'Faster variant at ~100 tokens/sec',
+    contextLength: 204800,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0.60, output: 2.40 },
+  },
+  {
+    id: 'MiniMax-M2.1',
+    name: 'MiniMax M2.1',
+    description: 'Multi-language programming with 230B params (10B active)',
+    contextLength: 204800,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0.30, output: 1.20 },
+  },
+  {
+    id: 'MiniMax-M2.1-highspeed',
+    name: 'MiniMax M2.1 Highspeed',
+    description: 'Faster M2.1 variant at ~100 tokens/sec',
+    contextLength: 204800,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0.60, output: 2.40 },
+  },
+  {
+    id: 'MiniMax-M2',
+    name: 'MiniMax M2',
+    description: 'Agentic model with function calling and reasoning',
+    contextLength: 204800,
+    maxTokens: 128000,
+    supportsFunctions: true,
+    pricing: { input: 0.30, output: 1.20 },
+  },
+];
 
 export const providers: Record<ProviderId, ProviderConfig> = {
   openrouter: {
@@ -126,7 +230,7 @@ export const providers: Record<ProviderId, ProviderConfig> = {
   openai: {
     id: 'openai',
     name: 'OpenAI',
-    description: 'GPT-4, GPT-3.5 and other OpenAI models',
+    description: 'GPT-4o, GPT-5 and other OpenAI models',
     apiKeyRequired: true,
     apiKeyPlaceholder: 'sk-...',
     apiKeyHelpUrl: 'https://platform.openai.com/api-keys',
@@ -149,7 +253,7 @@ export const providers: Record<ProviderId, ProviderConfig> = {
   anthropic: {
     id: 'anthropic',
     name: 'Anthropic',
-    description: 'Claude 3.5 Sonnet, Haiku and Opus models',
+    description: 'Claude Sonnet, Haiku, and Opus models',
     apiKeyRequired: true,
     apiKeyPlaceholder: 'sk-ant-...',
     apiKeyHelpUrl: 'https://console.anthropic.com/settings/keys',
@@ -226,6 +330,32 @@ export const providers: Record<ProviderId, ProviderConfig> = {
     apiKeyHelpUrl: 'https://cloud.sambanova.ai/apis',
     baseUrl: 'https://api.sambanova.ai/v1',
     supportsModelDiscovery: true,
+    supportsFunctions: true,
+    supportsStreaming: true
+  },
+  minimax: {
+    id: 'minimax',
+    name: 'MiniMax',
+    description: 'MiniMax M2 models for coding and reasoning',
+    apiKeyRequired: true,
+    apiKeyPlaceholder: 'Your MiniMax API Key',
+    apiKeyHelpUrl: 'https://platform.minimax.io/user-center/basic-information/interface-key',
+    baseUrl: 'https://api.minimax.io/v1',
+    models: minimaxModels,
+    supportsModelDiscovery: false,
+    supportsFunctions: true,
+    supportsStreaming: true
+  },
+  zhipu: {
+    id: 'zhipu',
+    name: 'Zhipu AI',
+    description: 'GLM models for reasoning, coding, and vision',
+    apiKeyRequired: true,
+    apiKeyPlaceholder: 'Your Zhipu AI API Key',
+    apiKeyHelpUrl: 'https://z.ai/subscribe',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    models: zhipuModels,
+    supportsModelDiscovery: false,
     supportsFunctions: true,
     supportsStreaming: true
   },

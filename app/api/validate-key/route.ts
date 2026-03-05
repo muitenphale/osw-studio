@@ -60,6 +60,11 @@ export async function POST(request: NextRequest) {
         isValid = !!apiKey && apiKey.length > 10;
         break;
 
+      case 'zhipu':
+      case 'minimax':
+        isValid = !!apiKey && apiKey.length > 10;
+        break;
+
       case 'huggingface':
         const hfResp = await fetch('https://huggingface.co/api/whoami-v2', {
           headers: { 'Authorization': `Bearer ${apiKey}` }

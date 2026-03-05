@@ -12,7 +12,9 @@ export type ProviderId =
   | 'huggingface'
   | 'ollama'
   | 'lmstudio'
-  | 'sambanova';
+  | 'sambanova'
+  | 'zhipu'
+  | 'minimax';
 
 export interface ProviderModel {
   id: string;
@@ -34,7 +36,6 @@ export interface ProviderConfig {
   id: ProviderId;
   name: string;
   description: string;
-  icon?: string;
   apiKeyRequired: boolean;
   apiKeyPlaceholder?: string;
   apiKeyHelpUrl?: string;
@@ -61,8 +62,3 @@ export interface HFAuthData {
   expires_at?: number;  // OAuth tokens expire, API keys don't
 }
 
-export interface ProviderSettings {
-  selectedProvider: ProviderId;
-  providerKeys: Partial<Record<ProviderId, string>>;
-  providerModels: Partial<Record<ProviderId, string>>;
-}

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { configManager } from '@/lib/config/storage';
-import { LLMClient } from '@/lib/llm/llm-client';
+import { validateApiKey as checkApiKey } from '@/lib/llm/llm-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -106,7 +106,7 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
 
     setValidatingKey(true);
     try {
-      const isValid = await LLMClient.validateApiKey(currentApiKey, selectedProvider);
+      const isValid = await checkApiKey(currentApiKey, selectedProvider);
       setKeyValid(isValid);
       
       if (isValid) {
@@ -130,7 +130,7 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
     }
     setValidatingKey(true);
     try {
-      const isValid = await LLMClient.validateApiKey(key, selectedProvider);
+      const isValid = await checkApiKey(key, selectedProvider);
       if (isValid) {
         configManager.setProviderApiKey(selectedProvider, key);
         configManager.clearModelCache(selectedProvider);

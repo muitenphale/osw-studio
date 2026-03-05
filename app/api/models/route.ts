@@ -113,8 +113,18 @@ export async function POST(request: NextRequest) {
           break;
 
         case 'gemini':
-          // Gemini uses hardcoded models from config
-          models = providerConfig.models?.map(m => m.id) || [];
+          const geminiResponse = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=${apiKey}`
+          );
+          if (geminiResponse.ok) {
+            const geminiData = await geminiResponse.json();
+            models = (geminiData.models || [])
+              .filter((m: any) =>
+                m.supportedGenerationMethods?.includes('generateContent') &&
+                /gemini/i.test(m.name)
+              )
+              .map((m: any) => m.name.replace('models/', ''));
+          }
           break;
 
         case 'huggingface':
