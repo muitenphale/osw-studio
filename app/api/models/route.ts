@@ -100,15 +100,16 @@ export async function POST(request: NextRequest) {
           break;
 
         case 'lmstudio':
+        case 'llamacpp':
           try {
             const lmResponse = await fetch(`${providerConfig.baseUrl}/models`);
             if (lmResponse.ok) {
               const lmData = await lmResponse.json();
-              // LM Studio uses OpenAI-compatible format with data array
+              // OpenAI-compatible format with data array
               models = lmData.data?.map((m: any) => m.id) || [];
             }
           } catch (error) {
-            logger.error('LM Studio models fetch error:', error);
+            logger.error(`${provider} models fetch error:`, error);
           }
           break;
 
