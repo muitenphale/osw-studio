@@ -20,6 +20,7 @@ npm-shrinkwrap.json
 # testing
 /coverage
 /data/*.sqlite*
+/data/projects/
 /data/test
 /sites
 /public/sites

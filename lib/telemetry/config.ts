@@ -29,6 +29,8 @@ export function detectDeploymentType(): 'hf_space' | 'server' | 'browser' {
   return 'browser';
 }
 
+import pkg from '@/package.json';
+
 export function getAppVersion(): string {
-  return process.env.NEXT_PUBLIC_APP_VERSION || '1.38.0';
+  return pkg.version;
 }

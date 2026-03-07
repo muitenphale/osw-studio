@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.40.0 - 2026-03-07
+
+Local inference improvements and code cleanup.
+
+- **New Provider: llama.cpp**: Run GGUF models locally with `llama-server`. OpenAI-compatible at `localhost:8080`, supports streaming, tool use, and vision (via multimodal projector). No API key required — model discovery via `/v1/models`
+- **Local Tool Fallback**: When a local model doesn't support native function calling, the tool-use fallback (JSON-based prompting) now applies to all local providers (Ollama, LM Studio, llama.cpp) — previously only triggered for Ollama
+- **Default Model Consolidation**: The per-provider default model mapping was duplicated between the API route and config manager with stale values drifting apart (`claude-3-5-haiku` vs `claude-haiku-4-5`, `gemini-1.5-flash` vs `gemini-2.5-flash`). Extracted to a single `getDefaultModel()` in the provider registry
+- **Telemetry Version Fix**: `getAppVersion()` was returning a hardcoded fallback string that went stale each release. Now reads directly from `package.json` — single source of truth, no manual bump needed
+
 ## v1.39.0 - 2026-03-05
 
 Two new providers (MiniMax, Zhipu AI), Gemini rebuilt from scratch, and streaming parser improvements for thinking/reasoning display.

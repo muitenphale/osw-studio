@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
 
       case 'ollama':
       case 'lmstudio':
+      case 'llamacpp':
         const localResp = await fetch(`${providerConfig.baseUrl}/models`);
         isValid = localResp.ok;
         break;

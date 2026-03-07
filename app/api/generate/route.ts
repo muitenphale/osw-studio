@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ProviderId } from '@/lib/llm/providers/types';
-import { getProvider } from '@/lib/llm/providers/registry';
+import { getProvider, getDefaultModel } from '@/lib/llm/providers/registry';
 import { LLMMessage, ToolDefinition, ContentBlock, TextContentBlock, ImageContentBlock } from '@/lib/llm/types';
 import { logger } from '@/lib/utils';
 import { handleCodexGeneration } from '@/lib/llm/codex-adapter';
@@ -586,7 +586,7 @@ Habits:
         );
       }
 
-      if (selectedProvider === 'ollama' && cleanError.includes('does not support tools') && tools && tools.length > 0) {
+      if (providerConfig.isLocal && cleanError.includes('does not support tools') && tools && tools.length > 0) {
         const fallbackSystemPrompt = systemPrompt + `
 
 IMPORTANT: This model doesn't support native function calling, so you must use JSON format for tool calls.
@@ -751,35 +751,4 @@ function buildHeaders(
   }
   
   return headers;
-}
-
-function getDefaultModel(provider: ProviderId): string {
-  switch (provider) {
-    case 'openrouter':
-      return 'deepseek/deepseek-chat';
-    case 'openai':
-      return 'gpt-4o-mini';
-    case 'openai-codex':
-      return 'gpt-5.3-codex';
-    case 'anthropic':
-      return 'claude-haiku-4-5-20251001';
-    case 'groq':
-      return 'llama-3.3-70b-versatile';
-    case 'gemini':
-      return 'gemini-2.5-flash';
-    case 'huggingface':
-      return 'Qwen/Qwen2.5-Coder-32B-Instruct';
-    case 'ollama':
-      return 'llama3.2:latest';
-    case 'lmstudio':
-      return 'qwen/qwen3-4b-thinking-2507';
-    case 'sambanova':
-      return 'Meta-Llama-3.3-70B-Instruct';
-    case 'zhipu':
-      return 'glm-5';
-    case 'minimax':
-      return 'MiniMax-M2.5';
-    default:
-      return 'deepseek/deepseek-chat';
-  }
 }

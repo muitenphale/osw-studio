@@ -6,6 +6,16 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.40.0 - Local Inference Improvements (2026-03-07)
+
+Local model support expanded and infrastructure fixes.
+
+- **New: llama.cpp** - Run GGUF models locally with `llama-server` (default port 8080). Supports streaming, tool use, and vision via multimodal projector. No API key needed — just start the server and select the provider
+- **Better Local Model Tool Use** - When a locally-loaded model doesn't support native function calling, OSW Studio now falls back to JSON-based tool prompting for all local providers — previously this only worked with Ollama
+- **Version Tracking Fix** - The analytics version indicator was stuck on an old version. Now reads directly from package.json
+
+---
+
 ## v1.39.0 - New Providers + Gemini Rebuild (2026-03-05)
 
 Two new AI providers, a Gemini rebuild, and better thinking/reasoning display across providers.

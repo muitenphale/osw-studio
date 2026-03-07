@@ -321,6 +321,17 @@ export const providers: Record<ProviderId, ProviderConfig> = {
     supportsStreaming: true,
     isLocal: true
   },
+  llamacpp: {
+    id: 'llamacpp',
+    name: 'llama.cpp',
+    description: 'Run GGUF models locally with llama-server',
+    apiKeyRequired: false,
+    baseUrl: 'http://localhost:8080/v1',
+    supportsModelDiscovery: true,
+    supportsFunctions: true,
+    supportsStreaming: true,
+    isLocal: true
+  },
   sambanova: {
     id: 'sambanova',
     name: 'SambaNova',
@@ -367,6 +378,39 @@ export function getProvider(id: ProviderId): ProviderConfig {
 
 export function getAllProviders(): ProviderConfig[] {
   return Object.values(providers);
+}
+
+export function getDefaultModel(provider: ProviderId): string {
+  switch (provider) {
+    case 'openrouter':
+      return 'deepseek/deepseek-chat';
+    case 'openai':
+      return 'gpt-4o-mini';
+    case 'openai-codex':
+      return 'gpt-5.3-codex';
+    case 'anthropic':
+      return 'claude-haiku-4-5-20251001';
+    case 'groq':
+      return 'llama-3.3-70b-versatile';
+    case 'gemini':
+      return 'gemini-2.5-flash';
+    case 'huggingface':
+      return 'Qwen/Qwen2.5-Coder-32B-Instruct';
+    case 'ollama':
+      return 'llama3.2:latest';
+    case 'lmstudio':
+      return 'qwen/qwen3-4b-thinking-2507';
+    case 'llamacpp':
+      return 'local-model';
+    case 'sambanova':
+      return 'Meta-Llama-3.3-70B-Instruct';
+    case 'zhipu':
+      return 'glm-5';
+    case 'minimax':
+      return 'MiniMax-M2.5';
+    default:
+      return 'deepseek/deepseek-chat';
+  }
 }
 
 /**

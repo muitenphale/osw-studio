@@ -1,5 +1,6 @@
 
 import { ProviderId, ProviderModel, CodexAuthData, HFAuthData } from '@/lib/llm/providers/types';
+import { getDefaultModel } from '@/lib/llm/providers/registry';
 import { UsageInfo } from '@/lib/llm/types';
 
 export interface SessionCost {
@@ -256,34 +257,7 @@ class ConfigManager {
   }
 
   private getProviderDefaultModel(provider: ProviderId): string {
-    switch (provider) {
-      case 'openrouter':
-        return 'deepseek/deepseek-chat';
-      case 'openai':
-        return 'gpt-4o-mini';
-      case 'openai-codex':
-        return 'gpt-5.3-codex';
-      case 'anthropic':
-        return 'claude-3-5-haiku-20241022';
-      case 'groq':
-        return 'llama-3.3-70b-versatile';
-      case 'gemini':
-        return 'gemini-1.5-flash';
-      case 'huggingface':
-        return 'Qwen/Qwen2.5-Coder-32B-Instruct';
-      case 'ollama':
-        return 'llama3.2:latest';
-      case 'lmstudio':
-        return 'local-model';
-      case 'sambanova':
-        return 'Meta-Llama-3.3-70B-Instruct';
-      case 'zhipu':
-        return 'glm-5';
-      case 'minimax':
-        return 'MiniMax-M2.5';
-      default:
-        return 'deepseek/deepseek-chat';
-    }
+    return getDefaultModel(provider);
   }
 
   getTheme(): 'light' | 'dark' | 'system' {
