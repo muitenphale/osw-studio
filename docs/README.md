@@ -2,7 +2,7 @@
 
 **Your guide to building websites with AI.**
 
-Welcome to OSW Studio - a browser-based development environment where you chat with AI to build complete websites.
+Welcome to OSW Studio - a browser-based development environment where you chat with AI to build websites and web apps.
 
 ---
 
@@ -60,12 +60,18 @@ For support and self-hosters:
 
 ## What Can I Build?
 
-OSW Studio is perfect for creating static websites:
+OSW Studio supports multiple project runtimes — pick the one that fits your needs:
 
+**Static (HTML/CSS/JS):**
 ✅ **Personal websites** - Portfolios, blogs, resumes
 ✅ **Landing pages** - Marketing sites, product pages
 ✅ **Documentation sites** - Project docs, help centers
 ✅ **Interactive apps** - Calculators, tools, games (client-side)
+
+**React + TypeScript:**
+✅ **Component-based apps** - Dashboards, admin panels, SPAs
+✅ **Interactive UIs** - Forms, data visualization, real-time interfaces
+✅ **npm ecosystem** - Import packages by name, fetched from CDN at runtime
 
 **Server Mode adds:**
 ✅ **API endpoints** - REST APIs with database access via edge functions
@@ -110,12 +116,13 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 ### Features
 
 **Major Features:**
-- Multi-provider AI support (10 providers, including ChatGPT subscription and HuggingFace free tier)
+- Multiple project runtimes (Static, React + TypeScript, more planned)
+- Multi-provider AI support (10+ providers, including ChatGPT subscription and HuggingFace free tier)
 - Dual modes (Chat/Code)
 - Templates & Skills systems
 - Browser mode (IndexedDB)
 - Optional Server mode
-- Static site publishing
+- Site publishing with SEO & analytics
 - Edge functions & database management
 - Cost tracking
 

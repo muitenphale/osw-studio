@@ -6,6 +6,25 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.41.0 - React & TypeScript Support (2026-03-07)
+
+Build React apps with TypeScript — right in the browser. No npm, no build tools, no setup.
+
+- **React + TypeScript Projects** - Create component-based React apps with `.tsx` files. Source files are automatically bundled in the browser — no build tools or setup needed. npm packages like `framer-motion`, `zustand`, or `date-fns` just work — import by name and they're fetched from a CDN at runtime
+- **Two React Templates** - A minimal blank starter (Hello World — clean slate for AI) and a demo task tracker (components, state, props, typed interfaces). Pick the starter when you want the AI to build from scratch, or the demo to explore what React in OSW Studio looks like
+- **Seamless Preview** - The live preview rebuilds automatically when you edit any file. React projects get the same instant feedback as HTML/CSS/JS projects
+- **Smart Export** - ZIP exports include both a ready-to-deploy build and your source files with a `package.json` + `vite.config.ts` for local development
+- **Server Mode Publishing** - React projects can now be published in Server Mode, just like static projects
+- **Editor IntelliSense** - Full TypeScript IntelliSense in the code editor for React projects — autocomplete for React hooks (`useState`, `useEffect`), JSX support without false errors, and cross-file import resolution. Type definitions load from CDN and are cached for the session
+- **Build Error Feedback** - TypeScript and JSX errors are fed back to the AI so it can self-correct
+- **Runtime Badges** - Project and template cards now show whether they use "Static" or "React" — visible on thumbnails in grid view and next to titles in list view
+- **Smoother Server Sync** - The sync dialog no longer flashes after each push/pull — the list stays visible with a subtle loading overlay
+- **Zero Impact on Existing Projects** - The React bundler only loads when a project has `.tsx`/`.ts` entry points. HTML/CSS/JS projects work exactly as before
+
+- **Project Settings** - The workspace header now has a "Project" button that opens a settings modal. Change your project's runtime (Static or React) or preview entry point at any time — no need to recreate the project. Backend features (Server Mode) are organized into their own tabs within the same modal
+
+---
+
 ## v1.40.0 - Local Inference Improvements (2026-03-07)
 
 Local model support expanded and infrastructure fixes.

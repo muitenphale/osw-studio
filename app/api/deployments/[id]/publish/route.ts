@@ -49,6 +49,7 @@ export async function POST(
       projectId: result.projectId,
       filesWritten: result.filesWritten,
       outputPath: result.outputPath,
+      lastPublishedVersion: deployment?.settingsVersion ?? null,
     });
   } catch (error) {
     console.error('[Deployments API] Error publishing deployment:', error);

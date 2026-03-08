@@ -33,10 +33,16 @@ const INITIAL_STATUS: DetailedSyncStatus = {
 
 export function useSyncStatus() {
   const [status, setStatus] = useState<DetailedSyncStatus>(INITIAL_STATUS);
+  const [refreshing, setRefreshing] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const syncManager = getSyncManager();
 
   const fetchStatus = useCallback(async () => {
-    setStatus((prev) => ({ ...prev, loading: true, error: null }));
+    if (hasLoaded) {
+      setRefreshing(true);
+    } else {
+      setStatus((prev) => ({ ...prev, loading: true, error: null }));
+    }
 
     try {
       // Fetch server status
@@ -48,6 +54,7 @@ export function useSyncStatus() {
           loading: false,
           error: serverResult.error || 'Failed to fetch server status',
         }));
+        setRefreshing(false);
         return;
       }
 
@@ -210,6 +217,7 @@ export function useSyncStatus() {
         loading: false,
         error: null,
       });
+      setHasLoaded(true);
     } catch (error) {
       logger.error('[useSyncStatus] Error fetching sync status:', error);
       setStatus((prev) => ({
@@ -217,8 +225,10 @@ export function useSyncStatus() {
         loading: false,
         error: error instanceof Error ? error.message : 'Failed to fetch sync status',
       }));
+    } finally {
+      setRefreshing(false);
     }
-  }, [syncManager]);
+  }, [syncManager, hasLoaded]);
 
   useEffect(() => {
     fetchStatus();
@@ -228,6 +238,7 @@ export function useSyncStatus() {
     status,
     refresh: fetchStatus,
     loading: status.loading,
+    refreshing,
     error: status.error,
   };
 }

@@ -10,10 +10,12 @@
 2. Click **+ New Project**
 3. Enter a project name
 4. Choose a template:
-   - **Website Starter** - Minimal starting point with basic structure
-   - **Example Studios** - Pre-built example with multiple pages
+   - **Website Starter** - Minimal starting point with basic HTML/CSS/JS structure
+   - **Example Studios** - Pre-built multi-page portfolio example
+   - **React + TypeScript** - Blank React app with auto-bundling
+   - **React Demo: Task Tracker** - Interactive task tracker showcasing React components and state
    - **Landing Page with Contact Form** - Contact form with Resend email (Backend)
-   - **Blog with Comments** - Static blog with auth and moderated comments (Backend)
+   - **Blog with Comments** - Blog with auth and moderated comments (Backend)
    - Or select any custom template you've created
 5. Optionally add a description
 6. Click **Create Project**
@@ -100,7 +102,7 @@ View and edit code:
 - Multiple tabs for different files
 - Syntax highlighting
 - Save with `Cmd/Ctrl+S`
-- Supports HTML, CSS, JavaScript, JSON, Markdown
+- Supports HTML, CSS, JavaScript, TypeScript, TSX, JSON, Markdown
 
 ### Live Preview (Last)
 

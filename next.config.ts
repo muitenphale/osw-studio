@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     'quickjs-emscripten',
     'quickjs-emscripten-core',
     '@jitl/quickjs-wasmfile-release-sync',
+    'esbuild-wasm',
   ],
   eslint: {
     ignoreDuringBuilds: true,

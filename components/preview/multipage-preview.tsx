@@ -27,6 +27,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn, logger } from '@/lib/utils';
 import { captureIframeScreenshot } from '@/lib/utils/screenshot';
+import type { ProjectRuntime } from '@/lib/vfs/types';
 
 export interface MultipagePreviewHandle {
   captureScreenshot: (waitForContent?: boolean) => Promise<string | null>;
@@ -42,6 +43,7 @@ interface MultipagePreviewProps {
   deploymentId?: string | null;
   onCaptureScreenshot?: (screenshot: string) => void;
   entryPoint?: string;
+  runtime?: ProjectRuntime;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -61,7 +63,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   onClose,
   deploymentId,
   onCaptureScreenshot,
-  entryPoint
+  entryPoint,
+  runtime
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -226,7 +229,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         serverRef.current.cleanupBlobUrls();
       }
       
-      const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined, entryPoint);
+      const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined, entryPoint, runtime);
       serverRef.current = server;
       
       const compiled = await server.compileProject();

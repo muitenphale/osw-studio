@@ -1770,7 +1770,8 @@ export class VirtualFileSystem {
     
     try {
       // Create VirtualServer instance and compile the project through Handlebars
-      const server = new VirtualServer(this, projectId);
+      const project = await this.getProject(projectId);
+      const server = new VirtualServer(this, projectId, undefined, undefined, undefined, project?.settings?.runtime);
       const compiledProject = await server.compileProject();
       
       // Add compiled files to ZIP, filtering out template-related files
@@ -1781,17 +1782,50 @@ export class VirtualFileSystem {
         if (this.shouldExcludeFromExport(file.path)) {
           continue;
         }
-        
-        if (typeof file.content === 'string') {
-          zip.file(zipPath, file.content);
-        } else {
-          zip.file(zipPath, file.content);
-        }
+
+        zip.file(zipPath, file.content);
       }
-      
+
+      // For bundled projects: also include raw source files (.tsx/.ts/.jsx)
+      // and inject package.json + vite.config.ts for local development
+      const allFiles = await this.adapter.listFiles(projectId);
+      const hasBundleableFiles = allFiles.some(f =>
+        f.path.endsWith('.tsx') || f.path.endsWith('.ts') || f.path.endsWith('.jsx')
+      );
+
+      if (hasBundleableFiles) {
+        // Add source files that were compiled into the bundle
+        for (const file of allFiles) {
+          if (file.path.endsWith('.tsx') || file.path.endsWith('.ts') || file.path.endsWith('.jsx')) {
+            const zipPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
+            if (typeof file.content === 'string') {
+              zip.file(zipPath, file.content);
+            }
+          }
+        }
+
+        // Inject package.json for local dev with Vite
+        const projectSlug = (project?.name || 'my-app').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        zip.file('package.json', JSON.stringify({
+          name: projectSlug,
+          private: true,
+          type: 'module',
+          scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+          dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' },
+          devDependencies: {
+            '@types/react': '^19.0.0', '@types/react-dom': '^19.0.0',
+            typescript: '^5.6.0', vite: '^6.0.0', '@vitejs/plugin-react': '^4.0.0'
+          }
+        }, null, 2));
+
+        zip.file('vite.config.ts',
+          `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({ plugins: [react()] });\n`
+        );
+      }
+
       // Clean up VirtualServer resources
       server.cleanupBlobUrls();
-      
+
     } catch (error) {
       logger.warn('Failed to compile Handlebars templates during export, falling back to raw files:', error);
       
@@ -1805,15 +1839,11 @@ export class VirtualFileSystem {
         if (this.shouldExcludeFromExport(file.path)) {
           continue;
         }
-        
-        if (typeof file.content === 'string') {
-          zip.file(zipPath, file.content);
-        } else {
-          zip.file(zipPath, file.content);
-        }
+
+        zip.file(zipPath, file.content);
       }
     }
-    
+
     const blob = await zip.generateAsync({ 
       type: 'blob',
       compression: 'DEFLATE',

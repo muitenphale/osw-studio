@@ -6,7 +6,7 @@
 
 ### What is OSW Studio?
 
-OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It's designed for building static websites (HTML/CSS/JS) using natural language prompts.
+OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — static websites (HTML/CSS/JS) and React + TypeScript apps — with more planned.
 
 ### Is OSW Studio free?
 
@@ -154,15 +154,14 @@ The application itself is **free and open source** (MIT license). However:
 
 ### Does it support TypeScript?
 
-Not directly. OSW Studio builds static sites (no build tooling). You can:
-- Write JavaScript directly
-- Use TypeScript playground to transpile manually
-- Deploy with external build process
+Yes — create a project with the **React + TypeScript** runtime. `.tsx`, `.ts`, and `.jsx` files are bundled automatically in the browser via esbuild. For static projects, you can write plain JavaScript or include TypeScript via external tooling.
 
 ### Can I install npm packages?
 
-No, OSW Studio doesn't run Node.js build tools. Instead:
-- Use CDN links (e.g., unpkg.com, cdnjs.com)
+In **React projects**, you can `import` npm packages by name (e.g., `import { motion } from "framer-motion"`) and they're fetched from a CDN at runtime — no `npm install` needed.
+
+In **static projects**, use CDN links or `<script>` tags:
+- CDN links (e.g., unpkg.com, cdnjs.com)
 - Include libraries via `<script>` tags
 - Vanilla JavaScript works great
 
@@ -359,9 +358,7 @@ AI guidance documents injected into the system prompt. They teach the AI how to 
 
 Reusable project starting points with files, structure, and metadata.
 
-**Built-in Project Templates**: Website Starter (minimal), Example Studios (multi-page portfolio)
-
-**Built-in Templates with Backend Features**: Landing Page with Contact Form (Resend email), Blog with Comments (auth + moderated comments)
+**Built-in Templates**: Website Starter (minimal), Example Studios (multi-page portfolio), React + TypeScript (blank), React Demo: Task Tracker, Landing Page with Contact Form (backend), Blog with Comments (backend)
 
 **See**: [Templates Guide](?doc=templates)
 

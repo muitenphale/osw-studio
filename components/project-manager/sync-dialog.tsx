@@ -23,7 +23,7 @@ interface SyncDialogProps {
 export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogProps) {
   const [authenticated, setAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
-  const { status, refresh, loading, error } = useSyncStatus();
+  const { status, refresh, loading, refreshing, error } = useSyncStatus();
   const [bulkState, setBulkState] = useState<BulkActionState | null>(null);
 
   useEffect(() => {
@@ -123,7 +123,7 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
             </div>
           )}
 
-          {/* Loading Overlay */}
+          {/* Initial Loading */}
           {loading && (
             <div className="flex items-center justify-center py-8">
               <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -131,14 +131,21 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
             </div>
           )}
 
-          {/* Tabbed Content */}
+          {/* Tabbed Content (kept visible during refresh) */}
           {!loading && !error && (
-            <SyncTabs
-              syncStatus={status}
-              onRefresh={refresh}
-              onSyncComplete={handleSyncComplete}
-              onBulkActionStateChange={setBulkState}
-            />
+            <div className="relative">
+              {refreshing && (
+                <div className="absolute inset-0 bg-background/60 z-10 flex items-center justify-center rounded-lg">
+                  <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              )}
+              <SyncTabs
+                syncStatus={status}
+                onRefresh={refresh}
+                onSyncComplete={handleSyncComplete}
+                onBulkActionStateChange={setBulkState}
+              />
+            </div>
           )}
         </div>
 
@@ -188,9 +195,9 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
               variant="outline"
               size="sm"
               onClick={refresh}
-              disabled={loading}
+              disabled={loading || refreshing}
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading || refreshing ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <Button variant="outline" onClick={() => onOpenChange(false)}>

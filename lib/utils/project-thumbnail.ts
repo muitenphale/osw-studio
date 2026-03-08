@@ -11,7 +11,8 @@ import { captureIframeScreenshot } from './screenshot';
 export async function captureProjectScreenshot(projectId: string): Promise<string | null> {
   await vfs.init();
 
-  const server = new VirtualServer(vfs, projectId);
+  const project = await vfs.getProject(projectId);
+  const server = new VirtualServer(vfs, projectId, undefined, undefined, undefined, project?.settings?.runtime);
   let compiled;
   try {
     compiled = await server.compileProject();

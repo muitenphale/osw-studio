@@ -186,10 +186,16 @@ export class TelemetryTracker {
       if (TELEMETRY_TOKEN) {
         body.token = TELEMETRY_TOKEN;
       }
-      const payload = new Blob([JSON.stringify(body)], { type: 'application/json' });
-      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-        navigator.sendBeacon(TELEMETRY_ENDPOINT, payload);
-      }
+      const json = JSON.stringify(body);
+      // Use fetch with keepalive instead of sendBeacon to avoid CORS
+      // issues (sendBeacon sends with credentials: 'include' by default,
+      // which is incompatible with Access-Control-Allow-Origin: *)
+      fetch(TELEMETRY_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: json,
+        keepalive: true,
+      }).catch(() => {});
     } catch {
       // silently ignore
     }

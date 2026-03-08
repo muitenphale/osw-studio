@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Server } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2 } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
@@ -44,7 +44,7 @@ import { DebugPanel, DebugEvent } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
 import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
-import { ProjectBackendModal } from '@/components/project-backend';
+import { ProjectSettingsModal } from '@/components/project-backend';
 
 interface WorkspaceProps {
   project: Project;
@@ -111,7 +111,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [showPreview, setShowPreview] = useState(true);  // Column 4: Live preview
   const [showCheckpoints, setShowCheckpoints] = useState(false); // Column 5: Checkpoint history
   const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 6: Debug events
-  const [showBackendModal, setShowBackendModal] = useState(false); // Backend modal
+  const [showProjectSettingsModal, setShowProjectSettingsModal] = useState(false); // Project settings modal
 
   // Backend enabled state (persisted per-project in localStorage)
   const [backendEnabled, setBackendEnabled] = useState<boolean>(() => {
@@ -318,15 +318,16 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   const handleAddPromptFile = useCallback(async () => {
     try {
-      const { WEBSITE_DOMAIN_PROMPT } = await import('@/lib/llm/prompts/website');
-      await vfs.createFile(project.id, '/.PROMPT.md', WEBSITE_DOMAIN_PROMPT);
+      const { getDomainPrompt } = await import('@/lib/llm/prompts');
+      const runtime = project.settings?.runtime || 'static';
+      await vfs.createFile(project.id, '/.PROMPT.md', getDomainPrompt(runtime));
       window.dispatchEvent(new CustomEvent('filesChanged', { detail: { projectId: project.id } }));
       toast.success('.PROMPT.md added to project');
     } catch (err) {
       logger.error('Failed to add .PROMPT.md:', err);
       toast.error('Failed to add .PROMPT.md');
     }
-  }, [project.id]);
+  }, [project.id, project.settings?.runtime]);
 
   const focusDescriptor = focusContext ? describeFocusTarget(focusContext) : '';
   const focusPreviewSnippet = focusContext ? truncateHtmlSnippet(focusContext.outerHTML, 240) : '';
@@ -660,6 +661,20 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setBackendEnabled(enabled);
     localStorage.setItem(`osw-backend-${project.id}`, String(enabled));
   }, [project.id]);
+
+  // Handle project settings updates (runtime, entry point)
+  const handleProjectSettingsUpdate = useCallback((updated: Project) => {
+    // If entry point changed, update local state and refresh preview
+    const newEntryPoint = updated.settings?.previewEntryPoint;
+    if (newEntryPoint !== entryPoint) {
+      setEntryPoint(newEntryPoint);
+      setRefreshTrigger(prev => prev + 1);
+    }
+    // If runtime changed, refresh preview
+    if (updated.settings?.runtime !== project.settings?.runtime) {
+      setRefreshTrigger(prev => prev + 1);
+    }
+  }, [entryPoint, project.settings?.runtime]);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)
@@ -1121,16 +1136,16 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         onDeploymentChange={handleDeploymentChange}
       />
 
-      {/* Backend button */}
+      {/* Project settings button */}
       <Button
         variant="outline"
         size="sm"
-        className={`h-8 px-3 flex items-center gap-2 ${backendEnabled ? 'border-primary/50 bg-primary/10' : ''}`}
-        onClick={() => setShowBackendModal(true)}
-        title="Backend"
+        className="h-8 px-3 flex items-center gap-2"
+        onClick={() => setShowProjectSettingsModal(true)}
+        title="Project Settings"
       >
-        <Server className="h-4 w-4" />
-        <span className="text-sm hidden lg:inline">Backend</span>
+        <Settings2 className="h-4 w-4" />
+        <span className="text-sm hidden lg:inline">Project</span>
       </Button>
 
       {/* Settings popover */}
@@ -1170,10 +1185,10 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         variant="outline"
         size="sm"
         className="w-full justify-start"
-        onClick={() => setShowBackendModal(true)}
+        onClick={() => setShowProjectSettingsModal(true)}
       >
-        <Server className="h-4 w-4 mr-2" />
-        Backend
+        <Settings2 className="h-4 w-4 mr-2" />
+        Project Settings
       </Button>
       <Popover>
         <PopoverTrigger asChild>
@@ -1480,6 +1495,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)`, minWidth: '240px' }}>
                       <MultiTabEditor
                         projectId={project.id}
+                        runtime={project.settings?.runtime}
                         onFilesChange={handleFilesChange}
                         onClose={() => setShowEditor(false)}
                       />
@@ -1509,6 +1525,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                         deploymentId={selectedDeploymentId}
                         onCaptureScreenshot={handleCaptureScreenshot}
                         entryPoint={entryPoint}
+                        runtime={project.settings?.runtime}
                       />
                     </div>
                 </ResizablePanel>
@@ -1600,6 +1617,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
               <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)` }}>
                 <MultiTabEditor
                   projectId={project.id}
+                  runtime={project.settings?.runtime}
                   onFilesChange={handleFilesChange}
                   onClose={() => setShowEditor(false)}
                 />
@@ -1618,6 +1636,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   deploymentId={selectedDeploymentId}
                   onCaptureScreenshot={handleCaptureScreenshot}
                   entryPoint={entryPoint}
+                  runtime={project.settings?.runtime}
                 />
               </div>
             )}
@@ -1689,11 +1708,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       <GuidedTourOverlay location="workspace" />
       <GuidedTourOverlay location="settings" />
 
-      <ProjectBackendModal
-        projectId={project.id}
-        projectName={project.name}
-        isOpen={showBackendModal}
-        onClose={() => setShowBackendModal(false)}
+      <ProjectSettingsModal
+        project={project}
+        isOpen={showProjectSettingsModal}
+        onClose={() => setShowProjectSettingsModal(false)}
+        onProjectUpdate={handleProjectSettingsUpdate}
         enabled={backendEnabled}
         onToggleEnabled={handleBackendToggle}
       />

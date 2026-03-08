@@ -1,7 +1,7 @@
 /**
  * Compile Error Accumulator
  *
- * Module-level store for Handlebars compilation errors detected by VirtualServer.
+ * Module-level store for compilation errors (Handlebars and esbuild) detected by VirtualServer.
  * VirtualServer pushes errors during compileProject(); the orchestrator drains them
  * before the next LLM turn to give the model feedback.
  *
@@ -25,7 +25,7 @@ export function beginCompilation(): void {
 }
 
 /**
- * Called by processHandlebarsTemplates when an error is caught.
+ * Called during compilation when an error is caught.
  * Errors accumulate in staging during a single compilation.
  */
 export function pushCompileError(file: string, error: string): void {
@@ -67,5 +67,10 @@ export function formatCompileErrors(errors: CompileError[]): string {
     parts.push(`${file}:\n${errs.map(e => `  - ${e}`).join('\n')}`);
   }
 
-  return `The preview detected possible Handlebars template issues after compilation. Verify whether these are still present — they may already be resolved by recent edits:\n\n${parts.join('\n\n')}`;
+  const hasEsbuildErrors = errors.some(e => e.error.startsWith('[esbuild]'));
+  const prefix = hasEsbuildErrors
+    ? 'Build errors detected during compilation. Fix these issues:\n\n'
+    : 'The preview detected possible Handlebars template issues after compilation. Verify whether these are still present — they may already be resolved by recent edits:\n\n';
+
+  return `${prefix}${parts.join('\n\n')}`;
 }

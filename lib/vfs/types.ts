@@ -1,3 +1,10 @@
+export type ProjectRuntime = 'static' | 'react';
+
+export const PROJECT_RUNTIMES: { value: ProjectRuntime; label: string; description: string }[] = [
+  { value: 'static', label: 'Static Website', description: 'HTML, CSS, JavaScript with Handlebars templating' },
+  { value: 'react', label: 'React + TypeScript', description: 'Component-based app with auto-bundling' },
+];
+
 export interface Project {
   id: string;
   name: string;
@@ -5,6 +12,7 @@ export interface Project {
   createdAt: Date;
   updatedAt: Date;
   settings: {
+    runtime?: ProjectRuntime;  // defaults to 'static' when absent
     defaultTemplate?: string;
     globalStyles?: string;
     previewEntryPoint?: string;  // defaults to '/index.html' when absent
@@ -243,7 +251,7 @@ export const MIME_TYPES: Record<FileType, string> = {
 export const SUPPORTED_EXTENSIONS = {
   html: ['html', 'htm'],
   css: ['css'],
-  js: ['js', 'mjs', 'jsx'],
+  js: ['js', 'mjs', 'jsx', 'ts', 'tsx'],
   json: ['json'],
   text: ['txt', 'md', 'xml', 'svg'],
   template: ['hbs', 'handlebars'],
@@ -287,7 +295,9 @@ export function getSpecificMimeType(path: string): string {
     'js': 'application/javascript',
     'mjs': 'application/javascript',
     'jsx': 'application/javascript',
-    
+    'ts': 'application/typescript',
+    'tsx': 'application/typescript',
+
     'json': 'application/json',
     
     'txt': 'text/plain',
@@ -352,6 +362,7 @@ export interface CustomTemplate {
     previewImages?: string[];     // Array of base64 images
     downloadUrl?: string;
   };
+  runtime?: ProjectRuntime;
   importedAt: Date;
   updatedAt?: Date;
   backendFeatures?: BackendFeatures;
