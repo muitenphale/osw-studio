@@ -1346,7 +1346,8 @@ Only localhost URLs are supported (fetches compiled HTML from preview engine).`,
         try {
           // Dynamic import VirtualServer to avoid adding to cli-shell's initial bundle
           const { VirtualServer } = await import('@/lib/preview/virtual-server');
-          const server = new VirtualServer(vfs, projectId);
+          const project = await vfs.getProject(projectId);
+          const server = new VirtualServer(vfs, projectId, undefined, undefined, undefined, project?.settings?.runtime);
           const compiled = await server.getCompiledFile(resolvedPath);
 
           if (!compiled) {

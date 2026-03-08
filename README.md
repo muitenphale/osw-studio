@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.32.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.41.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -22,7 +22,7 @@
 
 ## Overview
 
-**OSW Studio** is an AI-powered development platform where you build and maintain websites through natural language conversations.
+**OSW Studio** is an AI-powered development platform where you build and maintain websites and web apps through natural language conversations.
 
 Static sites have always been fast, cheap to host, and secure. The tradeoff was that maintaining them required technical skill. OSW Studio removes that tradeoff - describe what you want, and AI handles the implementation.
 
@@ -31,17 +31,18 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 **For everyone else:** Finally maintain the site that was built for you. Add blog posts, update business hours, swap team photos - without filing a support ticket or hiring an agency.
 
 **What you get:**
+- **Multiple runtimes** - Static (HTML/CSS/JS) or React + TypeScript with auto-bundling, more planned
 - **Sandboxed agent** - AI operates in a virtual file system with automatic checkpoints - explore freely, rollback anytime
 - **Dual AI modes** - Chat (exploration, planning) + Code (full implementation)
-- **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, SambaNova, Ollama, LM Studio
+- **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp
 - **Full IDE** - Monaco editor, live preview, file explorer, multi-tab support
-- **Templates & Skills** - Reusable project and site templates (with bundled backend infrastructure) and AI workflow guides
+- **Templates & Skills** - Reusable project templates (with bundled backend infrastructure) and AI workflow guides
 - **Export anywhere** - Download as ZIP, deploy to Vercel/Netlify/GitHub Pages
 - **Optional Server Mode** - Self-host a multi-site publishing platform with built-in SEO, analytics, and admin dashboard
 
-**Perfect for:** Business websites, landing pages, portfolios, documentation sites, blogs, marketing pages
+**Perfect for:** Business websites, landing pages, portfolios, documentation sites, blogs, React apps, interactive tools
 
-**Two modes:** Browser Mode (static sites, export as ZIP) or [Server Mode](#server-mode-optional) (self-hosted platform with databases, APIs, and publishing)
+**Two modes:** Browser Mode (build and export as ZIP) or [Server Mode](#server-mode-optional) (self-hosted platform with databases, APIs, and publishing)
 
 ## 🚀 Quick Start
 
@@ -80,7 +81,7 @@ npm run dev
 - **Dual Modes**:
   - 💬 **Chat Mode** - Exploration, planning, Q&A
   - 🔧 **Code Mode** - Full implementation with file operations
-- **9 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, HuggingFace, SambaNova, Ollama, LM Studio
+- **12 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp
 - **200+ Models** - From tiny 4B tool models to SOTA frontier models
 - **Smart Agent** - Uses shell commands, JSON patch edits, self-evaluation
 - **Skills System** - Teach AI your workflow preferences with Anthropic-style skills
@@ -99,15 +100,16 @@ npm run dev
 | **Portfolios** | Personal websites, photography, design portfolios |
 | **Documentation** | Project docs, help centers, knowledge bases |
 | **Blogs** | Static blogs with templates and navigation |
+| **React Apps** | React + TypeScript with auto-bundling via esbuild |
 | **Client-side Apps** | Calculators, tools, games, interactive demos |
 
 | ✅ Server Mode | Details |
 |----------------|---------|
 | **Dynamic Websites** | Contact forms, comment systems, user submissions via Edge Functions |
-| **Database-backed Apps** | CRUD apps, dashboards, admin panels with per-site SQLite |
+| **Database-backed Apps** | CRUD apps, dashboards, admin panels with per-deployment SQLite |
 | **Blogs & CMS** | Static posts with Handlebars partials, comments via Edge Functions |
 | **API Backends** | REST APIs with database access, secrets management, auth flows |
-| **Multi-site Platform** | Host multiple sites on one instance with custom domains |
+| **Multi-site Platform** | Host multiple deployments on one instance |
 
 See [Server Mode](#server-mode-optional) for full details.
 
@@ -150,18 +152,20 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 
 **Cloud:**
 - [OpenRouter](https://openrouter.ai) - 200+ models, pay-per-use
-- [OpenAI](https://platform.openai.com) - GPT-4, GPT-5 series
+- [OpenAI](https://platform.openai.com) - GPT-4, GPT-5 series (+ ChatGPT subscription)
 - [Anthropic](https://console.anthropic.com) - Claude 3/4 series
 - [Google](https://aistudio.google.com) - Gemini models
 - [Groq](https://console.groq.com) - Fast inference
 - [HuggingFace](https://huggingface.co) - Free tier ($0.10/month), 120+ models
+- [MiniMax](https://platform.minimaxi.com) - MiniMax models
+- [Zhipu AI](https://open.bigmodel.cn) - GLM series
 - [SambaNova](https://sambanova.ai) - High-performance models
 
 ## File Support
 
 | Type | Formats | Limits |
 |------|---------|--------|
-| **Code** | HTML, CSS, JS/JSX, JSON, HBS/Handlebars | 5MB per file |
+| **Code** | HTML, CSS, JS/JSX, TS/TSX, JSON, HBS/Handlebars | 5MB per file |
 | **Docs** | TXT, MD, XML, SVG | 5MB per file |
 | **Media** | PNG, JPG, GIF, WebP, MP4, WebM | 10MB images, 50MB video |
 
@@ -179,10 +183,10 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 ### Server Mode (Optional)
 - ✅ SQLite persistence (no external database setup)
 - ✅ Admin authentication (JWT sessions)
-- ✅ Static site publishing to `/sites/{siteId}/`
+- ✅ Static site publishing to `/deployments/{deploymentId}/`
 - ✅ Edge Functions - JavaScript API endpoints with database access
 - ✅ Scheduled Functions - Run edge functions on cron schedules
-- ✅ Per-site SQLite databases (WAL mode) with SQL editor
+- ✅ Per-deployment SQLite databases (WAL mode) with SQL editor
 - ✅ Secrets management (AES-256-GCM encrypted)
 - ✅ SEO controls - Meta tags, Open Graph, Twitter Cards, auto-sitemap
 - ✅ Built-in analytics (privacy-focused) or external (GA4, Plausible)
@@ -219,7 +223,7 @@ npm install && npm run dev
 - **UI**: TailwindCSS v4, Radix UI primitives
 - **Editor**: Monaco Editor (VS Code engine)
 - **Storage**: IndexedDB (browser), SQLite (server mode)
-- **AI**: 8 LLM provider integrations
+- **AI**: 12 LLM provider integrations
 - **Templating**: Handlebars.js for components
 - **Export**: JSZip for deployment packages
 
@@ -267,8 +271,8 @@ NEXT_PUBLIC_DEBUG_TOOL_STREAM=0
 
 ## Limitations
 
-- **No package managers** - Use CDN links for libraries (unpkg, jsdelivr, cdnjs)
-- **Browser Mode** - Static sites only, no backend (use Server Mode for APIs/databases)
+- **No package managers** - Static projects use CDN links for libraries; React projects auto-resolve npm imports via esm.sh
+- **Browser Mode** - Static/React sites only, no backend (use Server Mode for APIs/databases)
 
 ## Contributing
 

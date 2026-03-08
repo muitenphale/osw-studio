@@ -1295,7 +1295,9 @@ write: { "file_path": "${filePath}", "operations": [{"type": "rewrite", "content
       try {
         const errorData = await response.json();
         if (errorData.error) {
-          errorMessage = errorData.error;
+          errorMessage = typeof errorData.error === 'string'
+            ? errorData.error
+            : (errorData.error.message || JSON.stringify(errorData.error));
         }
       } catch {}
       throw new Error(errorMessage);

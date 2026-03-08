@@ -63,6 +63,10 @@ export class TemplateService {
       // Validate metadata
       this.validateMetadata(metadata);
 
+      // Get project runtime setting
+      const project = await vfs.getProject(projectId);
+      const runtime = project?.settings?.runtime;
+
       // Get all files and directories from the project
       const items = await vfs.getAllFilesAndDirectories(projectId);
 
@@ -121,6 +125,7 @@ export class TemplateService {
         thumbnail: metadata.thumbnail,
         previewImages: metadata.previewImages || [],
         downloadUrl: metadata.downloadUrl,
+        runtime,
         directories,
         files: files.map((file: any) => ({
           path: file.path,
@@ -204,6 +209,7 @@ export class TemplateService {
           previewImages: templateData.previewImages || [],
           downloadUrl: templateData.downloadUrl
         },
+        runtime: templateData.runtime,
         importedAt: new Date(),
         backendFeatures: templateData.backendFeatures || templateData.serverFeatures,
       };

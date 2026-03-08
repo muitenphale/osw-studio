@@ -5,6 +5,7 @@ import { Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -173,6 +174,12 @@ export function ProjectCard({
     return <FileText className="h-3 w-3" />;
   };
 
+  // Runtime badge display
+  const runtime = project.settings?.runtime || 'static';
+  const runtimeBadge = runtime === 'react'
+    ? { label: 'React', className: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800' }
+    : { label: 'Static', className: 'bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800' };
+
   // Format cost display
   const formatCost = (cost?: number) => {
     if (!cost || cost === 0) return null;
@@ -248,6 +255,7 @@ export function ProjectCard({
                   {/* Title row */}
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold truncate">{project.name}</h3>
+                    <Badge className={`text-xs px-1.5 py-0 h-auto shrink-0 ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -402,12 +410,17 @@ export function ProjectCard({
       data-tour-id="project-card"
     >
       {/* Preview Thumbnail */}
-      <ThumbnailArea
-        image={project.previewImage}
-        onCapture={() => captureProjectScreenshot(project.id)}
-        onImageChange={(img) => onUpdate({ ...project, previewImage: img, previewUpdatedAt: img ? new Date() : undefined })}
-        size="md"
-      />
+      <div className="relative">
+        <ThumbnailArea
+          image={project.previewImage}
+          onCapture={() => captureProjectScreenshot(project.id)}
+          onImageChange={(img) => onUpdate({ ...project, previewImage: img, previewUpdatedAt: img ? new Date() : undefined })}
+          size="md"
+        />
+        <div className="absolute bottom-2 left-2">
+          <Badge className={`text-xs px-1.5 py-0.5 shadow-sm ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
+        </div>
+      </div>
 
       <div className="p-4 space-y-3">
         {/* Header with name and actions */}

@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { CustomTemplate, LICENSE_OPTIONS, BackendFeatures } from '@/lib/vfs/types';
+import { CustomTemplate, LICENSE_OPTIONS } from '@/lib/vfs/types';
+import type { BuiltInTemplateMetadata } from '@/lib/vfs/templates/registry';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical, Server } from 'lucide-react';
@@ -20,24 +21,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 
-interface BuiltInTemplate {
-  id: string;
-  name: string;
-  description: string;
-  isBuiltIn: true;
-  updatedAt: Date;
-  backendFeatures?: BackendFeatures;
-  metadata?: {
-    author?: string;
-    tags?: string[];
-  };
-}
-
 interface TemplateCardProps {
-  template: CustomTemplate | BuiltInTemplate;
-  onSelect: (template: CustomTemplate | BuiltInTemplate) => void;
+  template: CustomTemplate | BuiltInTemplateMetadata;
+  onSelect: (template: CustomTemplate | BuiltInTemplateMetadata) => void;
   onDelete?: (id: string) => void;
-  onExport?: (template: CustomTemplate | BuiltInTemplate) => void;
+  onExport?: (template: CustomTemplate | BuiltInTemplateMetadata) => void;
   viewMode?: 'grid' | 'list';
 }
 
@@ -119,12 +107,6 @@ export function TemplateCard({
               <h3 className="font-semibold text-base truncate" title={template.name}>
                 {template.name}
               </h3>
-              {hasBackendFeatures && (
-                <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800 shrink-0">
-                  <Server className="h-3 w-3 mr-0.5" />
-                  Backend
-                </Badge>
-              )}
               {customTemplate && (
                 <span className="text-xs text-muted-foreground shrink-0">
                   v{customTemplate.version}
@@ -138,6 +120,19 @@ export function TemplateCard({
 
             {/* Metadata */}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              {isBuiltIn && 'runtime' in template && (
+                template.runtime === 'react' ? (
+                  <Badge className="text-xs px-1.5 py-0 h-auto bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800">React</Badge>
+                ) : (
+                  <Badge className="text-xs px-1.5 py-0 h-auto bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800">Static</Badge>
+                )
+              )}
+              {hasBackendFeatures && (
+                <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800">
+                  <Server className="h-3 w-3 mr-0.5" />
+                  Backend
+                </Badge>
+              )}
               {(customTemplate?.metadata.author || template.metadata?.author) && (
                 <span className="truncate max-w-[150px]" title={customTemplate?.metadata.author || template.metadata?.author}>
                   by {customTemplate?.metadata.author || template.metadata?.author}
@@ -332,12 +327,6 @@ export function TemplateCard({
             <h3 className="font-semibold text-base line-clamp-1 flex-1" title={template.name}>
               {template.name}
             </h3>
-            {hasBackendFeatures && (
-              <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800 shrink-0">
-                <Server className="h-3 w-3 mr-0.5" />
-                Backend
-              </Badge>
-            )}
             {customTemplate && (
               <span className="text-xs text-muted-foreground shrink-0">
                 v{customTemplate.version}
@@ -371,8 +360,21 @@ export function TemplateCard({
           )}
 
           {/* Tags */}
-          {(customTemplate?.metadata.tags || template.metadata?.tags) && (customTemplate?.metadata.tags || template.metadata?.tags || []).length > 0 && (
+          {((customTemplate?.metadata.tags || template.metadata?.tags || []).length > 0 || (isBuiltIn && 'runtime' in template) || hasBackendFeatures) && (
             <div className="flex flex-wrap gap-1">
+              {isBuiltIn && 'runtime' in template && (
+                template.runtime === 'react' ? (
+                  <Badge className="text-xs px-1.5 py-0.5 bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800">React</Badge>
+                ) : (
+                  <Badge className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800">Static</Badge>
+                )
+              )}
+              {hasBackendFeatures && (
+                <Badge className="text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800">
+                  <Server className="h-3 w-3 mr-0.5" />
+                  Backend
+                </Badge>
+              )}
               {(customTemplate?.metadata.tags || template.metadata?.tags || []).slice(0, 3).map((tag) => (
                 <Badge key={tag} variant="secondary" className="text-xs px-1.5 py-0.5">
                   {tag}

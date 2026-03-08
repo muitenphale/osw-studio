@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, CustomTemplate } from '@/lib/vfs/types';
+import { Project, CustomTemplate, ProjectRuntime, PROJECT_RUNTIMES } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { logger } from '@/lib/utils';
@@ -40,9 +40,11 @@ import {
   DEMO_PROJECT_TEMPLATE,
   CONTACT_LANDING_PROJECT_TEMPLATE,
   BLOG_PROJECT_TEMPLATE,
+  REACT_STARTER_PROJECT_TEMPLATE,
+  REACT_DEMO_PROJECT_TEMPLATE,
   createProjectFromTemplate,
-  type AssetConfig,
   BUILT_IN_TEMPLATES,
+  getBuiltInTemplatesForRuntime,
   type BuiltInTemplateMetadata
 } from '@/lib/vfs/project-templates';
 import {
@@ -63,7 +65,7 @@ import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
 import { TemplateExportDialog } from '@/components/templates/template-export-dialog';
-import { ProjectBackendModal } from '@/components/project-backend';
+import { ProjectSettingsModal } from '@/components/project-backend';
 
 interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
@@ -83,6 +85,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [newProjectTemplate, setNewProjectTemplate] = useState<string>('blank');
+  const [newProjectRuntime, setNewProjectRuntime] = useState<ProjectRuntime>('static');
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
 
   // Helper to get template name from ID for display
@@ -95,6 +98,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     const builtIn = BUILT_IN_TEMPLATES.find(t => t.id === templateId);
     return builtIn?.name || 'Select a template';
   };
+
+  // Built-in templates filtered by the selected runtime
+  const filteredBuiltInTemplates = getBuiltInTemplatesForRuntime(newProjectRuntime);
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
@@ -274,6 +280,13 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         newProjectDescription.trim().slice(0, 200) || undefined
       );
 
+      // Persist runtime in project settings and keep updated object for onProjectSelect
+      const finalProject: Project = {
+        ...project,
+        settings: { ...project.settings, runtime: newProjectRuntime },
+      };
+      await vfs.updateProject(finalProject);
+
       // Apply selected template
       if (newProjectTemplate.startsWith('custom:')) {
         // Custom template from IndexedDB
@@ -281,7 +294,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         const customTemplate = customTemplates.find(t => t.id === customTemplateId);
 
         if (customTemplate) {
-          await createProjectFromTemplate(vfs, project.id, {
+          await createProjectFromTemplate(vfs, finalProject.id, {
             name: customTemplate.name,
             description: customTemplate.description,
             files: customTemplate.files.map(f => ({
@@ -296,30 +309,38 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         // Built-in template
         switch (newProjectTemplate) {
           case 'demo':
-            await createProjectFromTemplate(vfs, project.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+            await createProjectFromTemplate(vfs, finalProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
             break;
           case 'contact-landing':
-            await createProjectFromTemplate(vfs, project.id, CONTACT_LANDING_PROJECT_TEMPLATE);
+            await createProjectFromTemplate(vfs, finalProject.id, CONTACT_LANDING_PROJECT_TEMPLATE);
             break;
           case 'blog':
-            await createProjectFromTemplate(vfs, project.id, BLOG_PROJECT_TEMPLATE);
+            await createProjectFromTemplate(vfs, finalProject.id, BLOG_PROJECT_TEMPLATE);
+            break;
+          case 'react-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, REACT_STARTER_PROJECT_TEMPLATE);
+            break;
+          case 'react-demo':
+            await createProjectFromTemplate(vfs, finalProject.id, REACT_DEMO_PROJECT_TEMPLATE);
             break;
           case 'blank':
           default:
-            await createProjectFromTemplate(vfs, project.id, BAREBONES_PROJECT_TEMPLATE);
+            await createProjectFromTemplate(vfs, finalProject.id, BAREBONES_PROJECT_TEMPLATE);
             break;
         }
       }
 
       // Provision backend features if the selected template has them
-      const builtInTemplate = BUILT_IN_TEMPLATES.find(t => t.id === newProjectTemplate) as BuiltInTemplateMetadata | undefined;
-      const backendFeatures = builtInTemplate?.backendFeatures;
-      if (backendFeatures) {
-        try {
-          await provisionBackendFeatures(project.id, backendFeatures);
-        } catch (provisionError) {
-          logger.error('Failed to provision backend features:', provisionError);
-          toast.warning('Project created but backend features provisioning failed.');
+      {
+        const builtInTemplate = BUILT_IN_TEMPLATES.find(t => t.id === newProjectTemplate) as BuiltInTemplateMetadata | undefined;
+        const backendFeatures = builtInTemplate?.backendFeatures;
+        if (backendFeatures) {
+          try {
+            await provisionBackendFeatures(finalProject.id, backendFeatures);
+          } catch (provisionError) {
+            logger.error('Failed to provision backend features:', provisionError);
+            toast.warning('Project created but backend features provisioning failed.');
+          }
         }
       }
 
@@ -328,8 +349,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       setNewProjectName('');
       setNewProjectDescription('');
       setNewProjectTemplate('blank');
+      setNewProjectRuntime('static');
       await reloadProjects();
-      onProjectSelect(project);
+      onProjectSelect(finalProject);
     } catch (error) {
       logger.error('Failed to create project:', error);
       toast.error('Failed to create project');
@@ -681,7 +703,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
           <DialogHeader>
             <DialogTitle>Create New Project</DialogTitle>
             <DialogDescription>
-              Start a new multipage website project
+              Start a new project
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -702,6 +724,36 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
               />
             </div>
             <div>
+              <Label htmlFor="runtime">Runtime</Label>
+              <Select
+                value={newProjectRuntime}
+                onValueChange={(value) => {
+                  const runtime = value as ProjectRuntime;
+                  setNewProjectRuntime(runtime);
+                  // Reset template to first available for this runtime
+                  const templates = getBuiltInTemplatesForRuntime(runtime);
+                  setNewProjectTemplate(templates[0]?.id || 'blank');
+                }}
+              >
+                <SelectTrigger id="runtime" className="mt-2 w-full">
+                  <div className="truncate flex-1 text-left">
+                    {PROJECT_RUNTIMES.find(r => r.value === newProjectRuntime)?.label}
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {PROJECT_RUNTIMES.map(rt => (
+                    <SelectItem key={rt.value} value={rt.value}>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="font-medium">{rt.label}</div>
+                        <div className="text-xs text-muted-foreground">{rt.description}</div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1.5">You can change this later in project settings.</p>
+            </div>
+            <div>
               <Label htmlFor="template">Template</Label>
               <Select
                 value={newProjectTemplate}
@@ -713,22 +765,10 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                   </div>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Built-in Templates</SelectLabel>
-                    {BUILT_IN_TEMPLATES.map(template => (
-                      <SelectItem key={template.id} value={template.id}>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="font-medium">{template.name}</div>
-                          <div className="text-xs text-muted-foreground">{template.description}</div>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                  {customTemplates.length > 0 && (
+                  {filteredBuiltInTemplates.length > 0 && (
                     <SelectGroup>
-                      <SelectLabel>Custom Templates</SelectLabel>
-                      {customTemplates.map(template => (
-                        <SelectItem key={template.id} value={`custom:${template.id}`}>
+                      {filteredBuiltInTemplates.map(template => (
+                        <SelectItem key={template.id} value={template.id}>
                           <div className="flex flex-col gap-0.5">
                             <div className="font-medium">{template.name}</div>
                             <div className="text-xs text-muted-foreground">{template.description}</div>
@@ -737,6 +777,22 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                       ))}
                     </SelectGroup>
                   )}
+                  {(() => {
+                    const filtered = customTemplates.filter(t => (t.runtime || 'static') === newProjectRuntime);
+                    return filtered.length > 0 ? (
+                      <SelectGroup>
+                        <SelectLabel>Custom Templates</SelectLabel>
+                        {filtered.map(template => (
+                          <SelectItem key={template.id} value={`custom:${template.id}`}>
+                            <div className="flex flex-col gap-0.5">
+                              <div className="font-medium">{template.name}</div>
+                              <div className="text-xs text-muted-foreground">{template.description}</div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ) : null;
+                  })()}
                 </SelectContent>
               </Select>
             </div>
@@ -794,15 +850,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         }}
       />
 
-      {/* Backend Modal */}
+      {/* Project Settings Modal */}
       {backendProject && (
-        <ProjectBackendModal
-          projectId={backendProject.id}
-          projectName={backendProject.name}
+        <ProjectSettingsModal
+          project={backendProject}
           isOpen={true}
           onClose={() => setBackendProject(null)}
+          onProjectUpdate={(updated: Project) => setBackendProject(updated)}
           enabled={backendProjectEnabled}
-          onToggleEnabled={(enabled) => {
+          onToggleEnabled={(enabled: boolean) => {
             localStorage.setItem(`osw-backend-${backendProject.id}`, String(enabled));
             setBackendProject({ ...backendProject }); // Force re-derive enabled state
           }}

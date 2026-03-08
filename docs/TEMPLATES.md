@@ -25,19 +25,14 @@ Templates are complete website projects that you can use as starting points:
 
 ## Template Types
 
-OSW Studio has two types of templates:
+Each template has a **runtime** that determines how the project is built and previewed. The runtime badge is shown on each template card.
 
-### Project Templates
+| Runtime | Description |
+|---------|-------------|
+| **Static** | HTML, CSS, and JavaScript with optional Handlebars templating |
+| **React** | Component-based React + TypeScript with automatic bundling |
 
-Standard website starting points with HTML, CSS, and JavaScript files. Work in both Browser Mode and Server Mode.
-
-### Backend Templates
-
-Bundles frontend files **plus backend infrastructure** — edge functions, database schema, server functions, and secrets. In Server Mode, creating a project from a backend template automatically provisions the full backend in one step.
-
-In Browser Mode, backend templates create the frontend files normally (backend features require Server Mode).
-
-**How to tell them apart:** Backend templates show a "Backend" badge in the template browser.
+Some templates also include **backend features** — edge functions, database schema, server functions, and secrets. These show a "Backend" badge and require Server Mode for full functionality. In Browser Mode, backend templates create the frontend files normally.
 
 ---
 
@@ -66,6 +61,32 @@ A multi-page agency portfolio showing OSW Studio's capabilities.
 - Interactive elements (portfolio gallery, contact form)
 
 **Best for**: Learning how OSW Studio works, understanding Handlebars partials
+
+### React + TypeScript (Project)
+
+Component-based React app with TypeScript and automatic bundling.
+
+**Includes:**
+- `index.html` shell with bundle references
+- `src/main.tsx` entry point
+- `src/App.tsx` Hello World component
+- `.PROMPT.md` with React-specific AI instructions
+
+**Best for**: Starting a React app from scratch with AI, component-driven UIs
+
+### React Demo: Task Tracker (Project)
+
+Interactive task tracker showcasing React components, state management, and typed props.
+
+**Includes:**
+- `index.html` shell with bundle references
+- `src/main.tsx` entry point
+- `src/App.tsx` with `useState` for task management
+- `src/TaskForm.tsx` controlled input with form submit
+- `src/TaskItem.tsx` checkbox toggle and delete
+- `src/App.css` styles
+
+**Best for**: Learning React in OSW Studio, exploring component composition and state
 
 ### Landing Page with Contact Form (Backend)
 
@@ -285,15 +306,10 @@ Improve them over time as you learn better patterns
 
 ## Templates vs Skills
 
-**Project Templates** = Starting point for a project
-- Complete website structure
-- HTML, CSS, JavaScript files
-- Ready to customize and deploy
-
-**Backend Templates** = Starting point with backend
-- Everything in project templates, plus
-- Edge functions, database schema, server functions, secrets
-- Automatic backend provisioning in Server Mode
+**Templates** = Starting point for a project
+- Complete file structure (HTML/CSS/JS or React/TypeScript)
+- Some templates include backend features (edge functions, database schema, secrets)
+- Backend features are provisioned automatically in Server Mode
 
 **Skills** = Instructions for AI
 - Markdown documents

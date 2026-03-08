@@ -1,5 +1,5 @@
 import { VirtualFileSystem } from '../vfs';
-import { VirtualFile } from '../vfs/types';
+import { VirtualFile, ProjectRuntime } from '../vfs/types';
 import { ProcessedFile, Route, CompiledProject } from './types';
 import Handlebars from 'handlebars';
 import { logger } from '@/lib/utils';
@@ -16,12 +16,14 @@ export class VirtualServer {
   private templateCache: Map<string, HandlebarsTemplateDelegate> = new Map();
   private partialsRegistered: boolean = false;
   private entryPoint: string;
+  private runtime: ProjectRuntime;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, deploymentId?: string, entryPoint?: string) {
+  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, deploymentId?: string, entryPoint?: string, runtime?: ProjectRuntime) {
     this.vfs = vfs;
     this.projectId = projectId;
     this.deploymentId = deploymentId;
     this.entryPoint = entryPoint || '/index.html';
+    this.runtime = runtime || 'static';
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     if (existingBlobUrls) {
       this.blobUrls = new Map(existingBlobUrls);
@@ -166,8 +168,9 @@ export class VirtualServer {
     // Register partials before processing
     await this.registerPartials();
 
-    const files = await this.vfs.listDirectory(this.projectId, '/');
-    
+    let files = await this.vfs.listDirectory(this.projectId, '/');
+    files = await this.runBundleStep(files);
+
     const oldBlobUrls = new Map(this.blobUrls);
     const newBlobUrls = new Map<string, string>();
     const rawProcessedFiles: ProcessedFile[] = [];
@@ -290,6 +293,67 @@ export class VirtualServer {
     };
   }
   
+  private async runBundleStep(files: VirtualFile[]): Promise<VirtualFile[]> {
+    if (this.runtime !== 'react') return files;
+
+    // Lazy-import to avoid loading esbuild for non-bundleable projects
+    const { detectBundleEntryPoint, bundleProject, isBundleableSource } =
+      await import('./esbuild-bundler');
+
+    const entryPoint = detectBundleEntryPoint(files);
+    if (!entryPoint) return files;
+
+    const result = await bundleProject({ files, entryPoint });
+
+    // Push errors through the compile-errors system
+    for (const err of result.errors) {
+      pushCompileError(entryPoint, err);
+    }
+
+    if (result.errors.length > 0) {
+      // Bundle failed — return files unmodified so the preview shows what it can
+      return files;
+    }
+
+    // Filter out source files that were compiled into the bundle
+    const filtered = files.filter(f => !isBundleableSource(f.path));
+
+    // Inject synthetic bundle.js
+    const now = new Date();
+    filtered.push({
+      id: '__bundle_js__',
+      projectId: this.projectId,
+      path: '/bundle.js',
+      name: 'bundle.js',
+      type: 'js',
+      content: result.js,
+      mimeType: 'application/javascript',
+      size: result.js.length,
+      createdAt: now,
+      updatedAt: now,
+      metadata: { isTransient: true },
+    });
+
+    // Inject synthetic bundle.css (empty if esbuild produced no CSS, to avoid 404s
+    // from templates that reference /bundle.css unconditionally)
+    const cssContent = result.css || '';
+    filtered.push({
+      id: '__bundle_css__',
+      projectId: this.projectId,
+      path: '/bundle.css',
+      name: 'bundle.css',
+      type: 'css',
+      content: cssContent,
+      mimeType: 'text/css',
+      size: cssContent.length,
+      createdAt: now,
+      updatedAt: now,
+      metadata: { isTransient: true },
+    });
+
+    return filtered;
+  }
+
   private hashContent(content: string | ArrayBuffer): string {
     let hash = 0;
     
@@ -308,34 +372,6 @@ export class VirtualServer {
     }
     
     return hash.toString(36);
-  }
-
-  private async processFiles(files: VirtualFile[]): Promise<ProcessedFile[]> {
-    const processed: ProcessedFile[] = [];
-
-    for (const file of files) {
-      if (file.type === 'html') {
-        processed.push(await this.processHTML(file));
-      } else if (file.type === 'css') {
-        processed.push(await this.processCSS(file, new Map()));
-      } else if (file.type === 'js') {
-        processed.push(await this.processJS(file));
-      } else if (file.type === 'image' || file.type === 'video') {
-        processed.push({
-          path: file.path,
-          content: file.content, // Can be ArrayBuffer or string
-          mimeType: file.mimeType
-        });
-      } else {
-        processed.push({
-          path: file.path,
-          content: file.content as string,
-          mimeType: file.mimeType
-        });
-      }
-    }
-
-    return processed;
   }
 
   private async processHTML(file: VirtualFile, blobUrls?: Map<string, string>): Promise<ProcessedFile> {
@@ -915,11 +951,6 @@ export class VirtualServer {
         title
       };
     });
-  }
-
-  private extractTitle(content: string): string {
-    const match = content.match(/<title>([^<]+)<\/title>/i);
-    return match ? match[1] : 'Untitled Page';
   }
 
   cleanupBlobUrls(): void {

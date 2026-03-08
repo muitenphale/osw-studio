@@ -19,10 +19,13 @@ export {
   BAREBONES_PROJECT_TEMPLATE,
   CONTACT_LANDING_PROJECT_TEMPLATE,
   BLOG_PROJECT_TEMPLATE,
+  REACT_STARTER_PROJECT_TEMPLATE,
+  REACT_DEMO_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   type AssetConfig,
   BUILT_IN_TEMPLATES,
   getBuiltInTemplate,
   getBuiltInTemplateIds,
+  getBuiltInTemplatesForRuntime,
   type BuiltInTemplateMetadata
 } from './templates';

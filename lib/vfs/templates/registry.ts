@@ -3,11 +3,14 @@
  * This is the single source of truth for all built-in templates in the system
  */
 
+import type { ProjectRuntime } from '../types';
+
 export interface BuiltInTemplateMetadata {
   id: string;
   name: string;
   description: string;
   isBuiltIn: true;
+  runtime: ProjectRuntime;
   updatedAt: Date;
   backendFeatures?: import('../types').BackendFeatures;
   metadata?: {
@@ -26,6 +29,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     name: 'Website Starter',
     description: 'Minimal starting template with basic HTML/CSS/JS structure',
     isBuiltIn: true,
+    runtime: 'static',
     updatedAt: new Date('2025-01-01T00:00:00Z'),
     metadata: {
       author: 'OSW Studio',
@@ -37,6 +41,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     name: 'Example Studios',
     description: 'Multi-page agency portfolio showcasing modern web development',
     isBuiltIn: true,
+    runtime: 'static',
     updatedAt: new Date('2025-01-01T00:00:00Z'),
     metadata: {
       author: 'OSW Studio',
@@ -48,6 +53,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     name: 'Landing Page with Contact Form',
     description: 'Professional landing page with a working contact form powered by Resend',
     isBuiltIn: true,
+    runtime: 'static',
     updatedAt: new Date('2025-01-01T00:00:00Z'),
     backendFeatures: {
       edgeFunctions: [
@@ -81,10 +87,35 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     },
   },
   {
+    id: 'react-starter',
+    name: 'React + TypeScript',
+    description: 'Minimal React app — blank canvas for AI-driven development',
+    isBuiltIn: true,
+    runtime: 'react',
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['react', 'typescript', 'starter']
+    }
+  },
+  {
+    id: 'react-demo',
+    name: 'React Demo: Task Tracker',
+    description: 'Interactive task tracker showcasing React components, state, and props',
+    isBuiltIn: true,
+    runtime: 'react',
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['react', 'typescript', 'demo']
+    }
+  },
+  {
     id: 'blog',
     name: 'Blog with Comments',
     description: 'Blog platform with posts, user auth, and moderated comments',
     isBuiltIn: true,
+    runtime: 'static',
     updatedAt: new Date('2025-01-01T00:00:00Z'),
     backendFeatures: {
       edgeFunctions: [
@@ -160,4 +191,11 @@ export function getBuiltInTemplate(id: string): BuiltInTemplateMetadata | undefi
  */
 export function getBuiltInTemplateIds(): string[] {
   return BUILT_IN_TEMPLATES.map(t => t.id);
+}
+
+/**
+ * Get built-in templates filtered by runtime
+ */
+export function getBuiltInTemplatesForRuntime(runtime: ProjectRuntime): BuiltInTemplateMetadata[] {
+  return BUILT_IN_TEMPLATES.filter(t => t.runtime === runtime);
 }

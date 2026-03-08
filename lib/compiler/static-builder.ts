@@ -154,7 +154,7 @@ export async function buildStaticDeployment(deploymentId: string): Promise<Build
     const serverVfs = createServerVfs(deployment.projectId, allFiles);
 
     // Compile project using VirtualServer (renders Handlebars templates)
-    const server = new VirtualServer(serverVfs as any, deployment.projectId);
+    const server = new VirtualServer(serverVfs as any, deployment.projectId, undefined, undefined, undefined, project.settings?.runtime);
     const compiledProject = await server.compileProject();
 
     await adapter.close?.();
@@ -358,7 +358,7 @@ export async function cleanStaticDeployment(deploymentId: string): Promise<boole
 }
 
 /**
- * Check if a file should be excluded from export (same logic as VFS export)
+ * Check if a file should be excluded from published deployment output
  */
 function shouldExcludeFromExport(filePath: string): boolean {
   // Exclude template files
@@ -373,6 +373,11 @@ function shouldExcludeFromExport(filePath: string): boolean {
 
   // Exclude data.json file (since it's compiled into HTML)
   if (filePath === '/data.json') {
+    return true;
+  }
+
+  // Exclude TypeScript/JSX source files (compiled into bundle.js)
+  if (filePath.endsWith('.ts') || filePath.endsWith('.tsx') || filePath.endsWith('.jsx')) {
     return true;
   }
 
@@ -421,6 +426,15 @@ function replaceAssetPathsWithDeploymentPrefix(
   // Rewrite asset directory paths (styles, scripts, assets, images, fonts, js, css)
   const assetDirPattern = /(?:href|src)=(["'])(\/(?:styles|scripts|assets|images|fonts|js|css)\/[^"']+)\1/g;
   result = result.replace(assetDirPattern, (match, quote, filePath) => {
+    if (isAlreadyPrefixed(filePath)) {
+      return match;
+    }
+    return match.replace(filePath, `${pathPrefix}${filePath}`);
+  });
+
+  // Rewrite root-level asset references (e.g., /bundle.js, /bundle.css, /favicon.ico)
+  const rootAssetPattern = /(?:href|src)=(["'])(\/[^"'\/]+\.(?:js|css|json|xml|ico|png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|eot))\1/g;
+  result = result.replace(rootAssetPattern, (match, quote, filePath) => {
     if (isAlreadyPrefixed(filePath)) {
       return match;
     }
