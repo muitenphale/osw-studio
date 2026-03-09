@@ -6,10 +6,11 @@ import type { IDisposable } from 'monaco-editor';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import type { ProjectRuntime } from '@/lib/vfs/types';
+import { getRuntimeConfig } from '@/lib/runtimes/registry';
 
 // Module-level cache: CDN types fetched once per session
-let cachedReactTypes: Map<string, string> | null = null;
-let fetchingReactTypes: Promise<Map<string, string>> | null = null;
+let cachedJsxTypes: Map<string, string> | null = null;
+let fetchingJsxTypes: Promise<Map<string, string>> | null = null;
 
 const CDN_TYPE_FILES = [
   { url: 'https://cdn.jsdelivr.net/npm/@types/react@19/index.d.ts', path: 'file:///node_modules/@types/react/index.d.ts' },
@@ -19,11 +20,11 @@ const CDN_TYPE_FILES = [
   { url: 'https://cdn.jsdelivr.net/npm/@types/react-dom@19/client.d.ts', path: 'file:///node_modules/@types/react-dom/client.d.ts' },
 ];
 
-async function fetchReactTypes(): Promise<Map<string, string>> {
-  if (cachedReactTypes) return cachedReactTypes;
-  if (fetchingReactTypes) return fetchingReactTypes;
+async function fetchJsxTypes(): Promise<Map<string, string>> {
+  if (cachedJsxTypes) return cachedJsxTypes;
+  if (fetchingJsxTypes) return fetchingJsxTypes;
 
-  fetchingReactTypes = (async () => {
+  fetchingJsxTypes = (async () => {
     const types = new Map<string, string>();
     const results = await Promise.allSettled(
       CDN_TYPE_FILES.map(async ({ url, path }) => {
@@ -42,12 +43,12 @@ async function fetchReactTypes(): Promise<Map<string, string>> {
       }
     }
 
-    cachedReactTypes = types;
-    fetchingReactTypes = null;
+    cachedJsxTypes = types;
+    fetchingJsxTypes = null;
     return types;
   })();
 
-  return fetchingReactTypes;
+  return fetchingJsxTypes;
 }
 
 const TS_EXTENSIONS = /\.(ts|tsx|js|jsx)$/;
@@ -57,7 +58,7 @@ export function useTypescriptIntelliSense(
   runtime: ProjectRuntime | undefined,
   monacoRef: MutableRefObject<Monaco | null>
 ) {
-  const isReact = runtime === 'react';
+  const isJsx = runtime ? getRuntimeConfig(runtime).jsxImportSource != null : false;
 
   // Track disposables for cleanup
   const typeDisposablesRef = useRef<IDisposable[]>([]);
@@ -66,7 +67,7 @@ export function useTypescriptIntelliSense(
   // --- (a) Compiler options ---
   useEffect(() => {
     const monaco = monacoRef.current;
-    if (!monaco || !isReact) return;
+    if (!monaco || !isJsx) return;
 
     const ts = monaco.languages.typescript;
 
@@ -96,17 +97,17 @@ export function useTypescriptIntelliSense(
       ts.typescriptDefaults.setCompilerOptions({});
       ts.typescriptDefaults.setDiagnosticsOptions({});
     };
-  }, [isReact, monacoRef]);
+  }, [isJsx, monacoRef]);
 
   // --- (b) React type definitions from CDN ---
   useEffect(() => {
     const monaco = monacoRef.current;
-    if (!monaco || !isReact) return;
+    if (!monaco || !isJsx) return;
 
     let cancelled = false;
     const ts = monaco.languages.typescript;
 
-    fetchReactTypes().then((types) => {
+    fetchJsxTypes().then((types) => {
       if (cancelled) return;
 
       const disposables: IDisposable[] = [];
@@ -124,12 +125,12 @@ export function useTypescriptIntelliSense(
       }
       typeDisposablesRef.current = [];
     };
-  }, [isReact, monacoRef]);
+  }, [isJsx, monacoRef]);
 
   // --- (c) Project file sync ---
   useEffect(() => {
     const monaco = monacoRef.current;
-    if (!monaco || !isReact) return;
+    if (!monaco || !isJsx) return;
 
     const ts = monaco.languages.typescript;
     const fileMap = fileDisposablesRef.current;
@@ -202,5 +203,5 @@ export function useTypescriptIntelliSense(
       }
       fileMap.clear();
     };
-  }, [isReact, projectId, monacoRef]);
+  }, [isJsx, projectId, monacoRef]);
 }

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Project } from '@/lib/vfs/types';
+import { getRuntimeBadge } from '@/lib/runtimes/registry';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -176,9 +177,7 @@ export function ProjectCard({
 
   // Runtime badge display
   const runtime = project.settings?.runtime || 'static';
-  const runtimeBadge = runtime === 'react'
-    ? { label: 'React', className: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800' }
-    : { label: 'Static', className: 'bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800' };
+  const runtimeBadge = getRuntimeBadge(runtime);
 
   // Format cost display
   const formatCost = (cost?: number) => {

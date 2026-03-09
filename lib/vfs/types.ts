@@ -1,9 +1,4 @@
-export type ProjectRuntime = 'static' | 'react';
-
-export const PROJECT_RUNTIMES: { value: ProjectRuntime; label: string; description: string }[] = [
-  { value: 'static', label: 'Static Website', description: 'HTML, CSS, JavaScript with Handlebars templating' },
-  { value: 'react', label: 'React + TypeScript', description: 'Component-based app with auto-bundling' },
-];
+export type ProjectRuntime = 'static' | 'react' | 'preact' | 'svelte' | 'vue';
 
 export interface Project {
   id: string;
@@ -251,7 +246,7 @@ export const MIME_TYPES: Record<FileType, string> = {
 export const SUPPORTED_EXTENSIONS = {
   html: ['html', 'htm'],
   css: ['css'],
-  js: ['js', 'mjs', 'jsx', 'ts', 'tsx'],
+  js: ['js', 'mjs', 'jsx', 'ts', 'tsx', 'svelte', 'vue'],
   json: ['json'],
   text: ['txt', 'md', 'xml', 'svg'],
   template: ['hbs', 'handlebars'],
@@ -297,6 +292,8 @@ export function getSpecificMimeType(path: string): string {
     'jsx': 'application/javascript',
     'ts': 'application/typescript',
     'tsx': 'application/typescript',
+    'svelte': 'text/x-svelte',
+    'vue': 'text/x-vue',
 
     'json': 'application/json',
     

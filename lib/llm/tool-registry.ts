@@ -471,13 +471,21 @@ EOF`;
       // Auto-route known shell commands called as standalone tools
       // LLMs sometimes call "cat", "curl", "grep" etc. as tool names instead of using shell
       const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3'];
-      if (shellCommands.includes(toolId)) {
+
+      // Map common "read file" tool names to cat
+      const readAliases: Record<string, string> = {
+        'read': 'cat', 'read_file': 'cat', 'file_read': 'cat',
+        'view': 'cat', 'view_file': 'cat',
+      };
+
+      const resolvedCommand = readAliases[toolId] || toolId;
+
+      if (shellCommands.includes(resolvedCommand)) {
         const shellTool = this.get('shell');
         if (shellTool) {
           try {
             const args = JSON.parse(toolCall.function.arguments);
-            // Reconstruct a shell command string from whatever args the LLM provided
-            const cmd = reconstructShellCommand(toolId, args);
+            const cmd = reconstructShellCommand(resolvedCommand, args);
             return await shellTool.executor.execute(projectId, { cmd }, context);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);

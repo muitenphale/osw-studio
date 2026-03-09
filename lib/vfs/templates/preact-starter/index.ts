@@ -1,9 +1,9 @@
 import { ProjectTemplate } from '../../project-templates';
-import { REACT_DOMAIN_PROMPT } from '@/lib/llm/prompts/react';
+import { PREACT_DOMAIN_PROMPT } from '@/lib/llm/prompts/preact';
 
-export const REACT_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Starter (React + TypeScript)',
-  description: 'Minimal React app with TypeScript and auto-bundling',
+export const PREACT_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
+  name: 'Starter (Preact + TypeScript)',
+  description: 'Lightweight Preact app with TypeScript and auto-bundling',
   directories: ['/src', '/src/components'],
   files: [
     {
@@ -13,7 +13,7 @@ export const REACT_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>React App</title>
+    <title>Preact App</title>
     <link rel="stylesheet" href="/bundle.css">
 </head>
 <body>
@@ -24,11 +24,10 @@ export const REACT_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
     },
     {
       path: '/src/main.tsx',
-      content: `import { createRoot } from "react-dom/client";
+      content: `import { render } from "preact";
 import App from "./App";
 
-const root = createRoot(document.getElementById("root")!);
-root.render(<App />);
+render(<App />, document.getElementById("root")!);
 `
     },
     {
@@ -44,7 +43,7 @@ root.render(<App />);
     },
     {
       path: '/.PROMPT.md',
-      content: REACT_DOMAIN_PROMPT
+      content: PREACT_DOMAIN_PROMPT
     }
   ]
 };

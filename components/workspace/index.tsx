@@ -93,6 +93,18 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const supportsVision = useMemo(() => {
     const currentProvider = configManager.getSelectedProvider();
     const modelId = currentModel || configManager.getDefaultModel();
+
+    // Check cached discovered models first (has accurate modality data from API)
+    const cached = configManager.getCachedModels(currentProvider);
+    if (cached) {
+      const model = (cached.models as import('@/lib/llm/providers/types').ProviderModel[])
+        .find(m => m.id === modelId);
+      if (model?.supportsVision !== undefined) {
+        return model.supportsVision;
+      }
+    }
+
+    // Fall back to name-based heuristics for hardcoded providers
     return modelSupportsVision(currentProvider, modelId);
   }, [currentModel]);
 

@@ -10,7 +10,7 @@ OSW Studio is a browser-based development environment where you describe what yo
 - Landing pages and marketing sites
 - Blogs and documentation sites
 - Interactive web applications
-- Anything that runs in a browser (HTML/CSS/JS)
+- Anything that runs in a browser (HTML/CSS/JS, React, Svelte, Vue, Preact)
 
 ## How It Works
 

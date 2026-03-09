@@ -3,6 +3,7 @@
 import React from 'react';
 import { CustomTemplate, LICENSE_OPTIONS } from '@/lib/vfs/types';
 import type { BuiltInTemplateMetadata } from '@/lib/vfs/templates/registry';
+import { getRuntimeBadge } from '@/lib/runtimes/registry';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical, Server } from 'lucide-react';
@@ -44,6 +45,10 @@ export function TemplateCard({
     const license = LICENSE_OPTIONS.find(opt => opt.value === licenseValue);
     return license?.label || licenseValue;
   };
+
+  const runtimeBadge = isBuiltIn && 'runtime' in template
+    ? getRuntimeBadge((template as BuiltInTemplateMetadata).runtime)
+    : null;
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -120,12 +125,8 @@ export function TemplateCard({
 
             {/* Metadata */}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              {isBuiltIn && 'runtime' in template && (
-                template.runtime === 'react' ? (
-                  <Badge className="text-xs px-1.5 py-0 h-auto bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800">React</Badge>
-                ) : (
-                  <Badge className="text-xs px-1.5 py-0 h-auto bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800">Static</Badge>
-                )
+              {runtimeBadge && (
+                <Badge className={`text-xs px-1.5 py-0 h-auto ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
               )}
               {hasBackendFeatures && (
                 <Badge className="text-xs px-1.5 py-0 h-auto bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800">
@@ -362,12 +363,8 @@ export function TemplateCard({
           {/* Tags */}
           {((customTemplate?.metadata.tags || template.metadata?.tags || []).length > 0 || (isBuiltIn && 'runtime' in template) || hasBackendFeatures) && (
             <div className="flex flex-wrap gap-1">
-              {isBuiltIn && 'runtime' in template && (
-                template.runtime === 'react' ? (
-                  <Badge className="text-xs px-1.5 py-0.5 bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800">React</Badge>
-                ) : (
-                  <Badge className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800">Static</Badge>
-                )
+              {runtimeBadge && (
+                <Badge className={`text-xs px-1.5 py-0.5 ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
               )}
               {hasBackendFeatures && (
                 <Badge className="text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800">

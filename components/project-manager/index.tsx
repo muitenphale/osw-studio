@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, CustomTemplate, ProjectRuntime, PROJECT_RUNTIMES } from '@/lib/vfs/types';
+import { Project, CustomTemplate, ProjectRuntime } from '@/lib/vfs/types';
+import { getProjectRuntimes } from '@/lib/runtimes/registry';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { logger } from '@/lib/utils';
@@ -42,6 +43,9 @@ import {
   BLOG_PROJECT_TEMPLATE,
   REACT_STARTER_PROJECT_TEMPLATE,
   REACT_DEMO_PROJECT_TEMPLATE,
+  PREACT_STARTER_PROJECT_TEMPLATE,
+  SVELTE_STARTER_PROJECT_TEMPLATE,
+  VUE_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   BUILT_IN_TEMPLATES,
   getBuiltInTemplatesForRuntime,
@@ -322,6 +326,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
             break;
           case 'react-demo':
             await createProjectFromTemplate(vfs, finalProject.id, REACT_DEMO_PROJECT_TEMPLATE);
+            break;
+          case 'preact-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, PREACT_STARTER_PROJECT_TEMPLATE);
+            break;
+          case 'svelte-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, SVELTE_STARTER_PROJECT_TEMPLATE);
+            break;
+          case 'vue-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, VUE_STARTER_PROJECT_TEMPLATE);
             break;
           case 'blank':
           default:
@@ -737,11 +750,11 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
               >
                 <SelectTrigger id="runtime" className="mt-2 w-full">
                   <div className="truncate flex-1 text-left">
-                    {PROJECT_RUNTIMES.find(r => r.value === newProjectRuntime)?.label}
+                    {getProjectRuntimes().find(r => r.value === newProjectRuntime)?.label}
                   </div>
                 </SelectTrigger>
                 <SelectContent>
-                  {PROJECT_RUNTIMES.map(rt => (
+                  {getProjectRuntimes().map(rt => (
                     <SelectItem key={rt.value} value={rt.value}>
                       <div className="flex flex-col gap-0.5">
                         <div className="font-medium">{rt.label}</div>

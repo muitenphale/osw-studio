@@ -31,6 +31,9 @@ Each template has a **runtime** that determines how the project is built and pre
 |---------|-------------|
 | **Static** | HTML, CSS, and JavaScript with optional Handlebars templating |
 | **React** | Component-based React + TypeScript with automatic bundling |
+| **Preact** | Lightweight React alternative (~3KB) with signals support |
+| **Svelte** | Svelte 5 with compile-time reactivity and runes |
+| **Vue** | Vue 3 with Composition API and SFC support |
 
 Some templates also include **backend features** — edge functions, database schema, server functions, and secrets. These show a "Backend" badge and require Server Mode for full functionality. In Browser Mode, backend templates create the frontend files normally.
 
@@ -62,7 +65,7 @@ A multi-page agency portfolio showing OSW Studio's capabilities.
 
 **Best for**: Learning how OSW Studio works, understanding Handlebars partials
 
-### React + TypeScript (Project)
+### Starter (React + TypeScript)
 
 Component-based React app with TypeScript and automatic bundling.
 
@@ -87,6 +90,42 @@ Interactive task tracker showcasing React components, state management, and type
 - `src/App.css` styles
 
 **Best for**: Learning React in OSW Studio, exploring component composition and state
+
+### Starter (Preact + TypeScript)
+
+Lightweight React alternative with signals for reactive state.
+
+**Includes:**
+- `index.html` shell with bundle references
+- `src/main.tsx` entry point
+- `src/App.tsx` Hello World component
+- `.PROMPT.md` with Preact-specific AI instructions
+
+**Best for**: Small, fast apps where bundle size matters. Same API as React but ~3KB
+
+### Starter (Svelte)
+
+Svelte 5 app with compile-time reactivity and runes.
+
+**Includes:**
+- `index.html` shell with bundle references
+- `src/main.ts` entry point
+- `src/App.svelte` counter component using `$state()` rune
+- `.PROMPT.md` with Svelte-specific AI instructions
+
+**Best for**: Apps that benefit from compile-time optimization, scoped styles, and minimal boilerplate
+
+### Starter (Vue)
+
+Vue 3 app with Composition API and single-file components.
+
+**Includes:**
+- `index.html` shell with bundle references
+- `src/main.ts` entry point
+- `src/App.vue` counter component using `ref()` and `@click`
+- `.PROMPT.md` with Vue-specific AI instructions
+
+**Best for**: Progressive apps, gentle learning curve, familiar HTML-like template syntax
 
 ### Landing Page with Contact Form (Backend)
 
@@ -307,7 +346,7 @@ Improve them over time as you learn better patterns
 ## Templates vs Skills
 
 **Templates** = Starting point for a project
-- Complete file structure (HTML/CSS/JS or React/TypeScript)
+- Complete file structure (HTML/CSS/JS, React, Svelte, Vue, or Preact)
 - Some templates include backend features (edge functions, database schema, secrets)
 - Backend features are provisioned automatically in Server Mode
 

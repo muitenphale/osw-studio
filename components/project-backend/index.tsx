@@ -32,7 +32,7 @@ import {
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
 import type { Project, ProjectRuntime } from '@/lib/vfs/types';
-import { PROJECT_RUNTIMES } from '@/lib/vfs/types';
+import { getProjectRuntimes } from '@/lib/runtimes/registry';
 import type {
   FunctionsDataProvider,
   ServerFunctionsDataProvider,
@@ -217,7 +217,7 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
       proj.settings = { ...proj.settings, runtime: value };
       await vfs.updateProject(proj);
       onProjectUpdate(proj);
-      const label = PROJECT_RUNTIMES.find(r => r.value === value)?.label || value;
+      const label = getProjectRuntimes().find(r => r.value === value)?.label || value;
       toast.success(`Runtime changed to ${label}`);
     } catch (err) {
       logger.error('Failed to update runtime:', err);
@@ -248,11 +248,11 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
         <Select value={project.settings?.runtime || 'static'} onValueChange={handleRuntimeChange}>
           <SelectTrigger id="runtime" className="w-full">
             <div className="truncate flex-1 text-left">
-              {PROJECT_RUNTIMES.find(r => r.value === (project.settings?.runtime || 'static'))?.label}
+              {getProjectRuntimes().find(r => r.value === (project.settings?.runtime || 'static'))?.label}
             </div>
           </SelectTrigger>
           <SelectContent>
-            {PROJECT_RUNTIMES.map(rt => (
+            {getProjectRuntimes().map(rt => (
               <SelectItem key={rt.value} value={rt.value}>
                 <div className="flex flex-col gap-0.5">
                   <div className="font-medium">{rt.label}</div>
