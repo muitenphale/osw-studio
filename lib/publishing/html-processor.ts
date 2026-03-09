@@ -7,6 +7,7 @@ export interface HtmlProcessingOptions {
   projectId: string;
   baseUrl: string;
   deploymentId: string;
+  hasEdgeFunctions?: boolean;
 }
 
 /**
@@ -16,7 +17,7 @@ export interface HtmlProcessingOptions {
  * not by overlaying content
  */
 export function processHtml(html: string, options: HtmlProcessingOptions): string {
-  const { publishSettings, projectId, baseUrl, deploymentId } = options;
+  const { publishSettings, projectId, baseUrl, deploymentId, hasEdgeFunctions } = options;
 
   let processed = html;
 
@@ -29,8 +30,10 @@ export function processHtml(html: string, options: HtmlProcessingOptions): strin
   // 3. Inject head scripts into <head>
   processed = injectHeadScripts(processed, publishSettings);
 
-  // 4. Inject edge function interceptor into <head> (early execution)
-  processed = injectEdgeFunctionInterceptor(processed, deploymentId);
+  // 4. Inject edge function interceptor into <head> (only if project has edge functions)
+  if (hasEdgeFunctions) {
+    processed = injectEdgeFunctionInterceptor(processed, deploymentId);
+  }
 
   // 5. Inject body scripts before </body>
   processed = injectBodyScripts(processed, publishSettings);

@@ -1,8 +1,3 @@
-/**
- * Centralized registry for built-in templates
- * This is the single source of truth for all built-in templates in the system
- */
-
 import type { ProjectRuntime } from '../types';
 
 export interface BuiltInTemplateMetadata {
@@ -19,10 +14,6 @@ export interface BuiltInTemplateMetadata {
   };
 }
 
-/**
- * Registry of all built-in templates
- * Add new templates here to make them available throughout the application
- */
 export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
   {
     id: 'blank',
@@ -88,8 +79,8 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
   },
   {
     id: 'react-starter',
-    name: 'React + TypeScript',
-    description: 'Minimal React app — blank canvas for AI-driven development',
+    name: 'Starter (React + TypeScript)',
+    description: 'Minimal React app with TypeScript and auto-bundling',
     isBuiltIn: true,
     runtime: 'react',
     updatedAt: new Date('2025-01-01T00:00:00Z'),
@@ -108,6 +99,42 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     metadata: {
       author: 'OSW Studio',
       tags: ['react', 'typescript', 'demo']
+    }
+  },
+  {
+    id: 'preact-starter',
+    name: 'Starter (Preact + TypeScript)',
+    description: 'Lightweight Preact app with TypeScript and auto-bundling',
+    isBuiltIn: true,
+    runtime: 'preact',
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['preact', 'typescript', 'starter']
+    }
+  },
+  {
+    id: 'svelte-starter',
+    name: 'Starter (Svelte)',
+    description: 'Svelte 5 app with runes and auto-bundling',
+    isBuiltIn: true,
+    runtime: 'svelte',
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['svelte', 'starter']
+    }
+  },
+  {
+    id: 'vue-starter',
+    name: 'Starter (Vue)',
+    description: 'Vue 3 app with Composition API and auto-bundling',
+    isBuiltIn: true,
+    runtime: 'vue',
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['vue', 'starter']
     }
   },
   {
@@ -179,23 +206,6 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
   },
 ];
 
-/**
- * Get a built-in template by ID
- */
-export function getBuiltInTemplate(id: string): BuiltInTemplateMetadata | undefined {
-  return BUILT_IN_TEMPLATES.find(t => t.id === id);
-}
-
-/**
- * Get all built-in template IDs
- */
-export function getBuiltInTemplateIds(): string[] {
-  return BUILT_IN_TEMPLATES.map(t => t.id);
-}
-
-/**
- * Get built-in templates filtered by runtime
- */
 export function getBuiltInTemplatesForRuntime(runtime: ProjectRuntime): BuiltInTemplateMetadata[] {
   return BUILT_IN_TEMPLATES.filter(t => t.runtime === runtime);
 }

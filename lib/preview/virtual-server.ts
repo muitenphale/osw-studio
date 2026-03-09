@@ -4,6 +4,7 @@ import { ProcessedFile, Route, CompiledProject } from './types';
 import Handlebars from 'handlebars';
 import { logger } from '@/lib/utils';
 import { beginCompilation, pushCompileError, commitCompilation } from './compile-errors';
+import { isRuntimeBundled } from '@/lib/runtimes/registry';
 
 export class VirtualServer {
   private vfs: VirtualFileSystem;
@@ -164,7 +165,7 @@ export class VirtualServer {
 
   async compileProject(incrementalUpdate = false): Promise<CompiledProject> {
     beginCompilation();
-
+    try {
     // Register partials before processing
     await this.registerPartials();
 
@@ -283,18 +284,20 @@ export class VirtualServer {
     
     this.blobUrls = newBlobUrls;
 
-    commitCompilation();
-
     return {
       entryPoint: this.entryPoint,
       files: processedFiles,
       routes,
       blobUrls: this.blobUrls
     };
+
+    } finally {
+      commitCompilation();
+    }
   }
   
   private async runBundleStep(files: VirtualFile[]): Promise<VirtualFile[]> {
-    if (this.runtime !== 'react') return files;
+    if (!isRuntimeBundled(this.runtime)) return files;
 
     // Lazy-import to avoid loading esbuild for non-bundleable projects
     const { detectBundleEntryPoint, bundleProject, isBundleableSource } =
@@ -303,7 +306,7 @@ export class VirtualServer {
     const entryPoint = detectBundleEntryPoint(files);
     if (!entryPoint) return files;
 
-    const result = await bundleProject({ files, entryPoint });
+    const result = await bundleProject({ files, entryPoint, runtime: this.runtime });
 
     // Push errors through the compile-errors system
     for (const err of result.errors) {

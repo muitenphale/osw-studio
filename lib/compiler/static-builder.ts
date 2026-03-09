@@ -153,6 +153,12 @@ export async function buildStaticDeployment(deploymentId: string): Promise<Build
     // Create a minimal VFS-like wrapper for server-side compilation
     const serverVfs = createServerVfs(deployment.projectId, allFiles);
 
+    // Check if project has edge functions (for conditional interceptor injection)
+    const edgeFunctions = adapter.listEdgeFunctions
+      ? await adapter.listEdgeFunctions(deployment.projectId)
+      : [];
+    const hasEdgeFunctions = edgeFunctions.some(f => f.enabled);
+
     // Compile project using VirtualServer (renders Handlebars templates)
     const server = new VirtualServer(serverVfs as any, deployment.projectId, undefined, undefined, undefined, project.settings?.runtime);
     const compiledProject = await server.compileProject();
@@ -207,6 +213,7 @@ export async function buildStaticDeployment(deploymentId: string): Promise<Build
             projectId: deployment.projectId,
             baseUrl,
             deploymentId,
+            hasEdgeFunctions,
           });
         }
       }
@@ -376,8 +383,14 @@ function shouldExcludeFromExport(filePath: string): boolean {
     return true;
   }
 
-  // Exclude TypeScript/JSX source files (compiled into bundle.js)
-  if (filePath.endsWith('.ts') || filePath.endsWith('.tsx') || filePath.endsWith('.jsx')) {
+  // Exclude TypeScript/JSX/SFC source files (compiled into bundle.js)
+  if (filePath.endsWith('.ts') || filePath.endsWith('.tsx') || filePath.endsWith('.jsx') ||
+      filePath.endsWith('.svelte') || filePath.endsWith('.vue')) {
+    return true;
+  }
+
+  // Exclude CSS source files under src/ (compiled into bundle.css by esbuild)
+  if (filePath.startsWith('/src/') && filePath.endsWith('.css')) {
     return true;
   }
 

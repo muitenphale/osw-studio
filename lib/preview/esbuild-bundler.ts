@@ -1,15 +1,19 @@
 /**
- * esbuild-wasm Bundler for React/TypeScript Projects
+ * esbuild-wasm Bundler for Component-Framework Projects
  *
- * Lazy-loads esbuild-wasm and bundles TSX/TS/JSX source files into a single
- * bundle.js (+ optional bundle.css). Bare npm imports are rewritten to esm.sh
- * CDN URLs and marked external so the browser fetches them at runtime.
+ * Lazy-loads esbuild-wasm and bundles TSX/TS/JSX/Svelte/Vue source files into
+ * a single bundle.js (+ optional bundle.css). Bare npm imports are rewritten
+ * to esm.sh CDN URLs and marked external so the browser fetches them at runtime.
+ *
+ * Svelte and Vue single-file components are pre-compiled via CDN-loaded
+ * compilers before being fed to esbuild.
  *
  * Only loaded when a project contains recognized entry points — existing
  * HTML/CSS/JS projects never trigger this module.
  */
 
-import type { VirtualFile } from '../vfs/types';
+import type { VirtualFile, ProjectRuntime } from '../vfs/types';
+import { getRuntimeConfig } from '@/lib/runtimes/registry';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +23,7 @@ export interface BundleInput {
   files: VirtualFile[];
   entryPoint: string;
   cdnBase?: string;
+  runtime?: ProjectRuntime;
 }
 
 export interface BundleOutput {
@@ -44,7 +49,13 @@ async function ensureEsbuild(): Promise<typeof import('esbuild-wasm')> {
       const esbuild = await import('esbuild-wasm');
 
       if (typeof window !== 'undefined') {
-        await esbuild.initialize({ wasmURL: '/esbuild.wasm' });
+        try {
+          await esbuild.initialize({ wasmURL: '/esbuild.wasm' });
+        } catch (err: any) {
+          // esbuild WASM persists across HMR / module re-evaluations —
+          // if it's already initialized, that's fine, just keep going.
+          if (!err?.message?.includes('more than once')) throw err;
+        }
       }
 
       esbuildInstance = esbuild;
@@ -94,21 +105,29 @@ export function detectBundleEntryPoint(files: VirtualFile[]): string | null {
  * and should be excluded from direct serving.
  */
 export function isBundleableSource(path: string): boolean {
-  return /\.(tsx|ts|jsx)$/.test(path);
+  return /\.(tsx|ts|jsx|svelte|vue)$/.test(path);
 }
 
 // ---------------------------------------------------------------------------
 // VFS resolver plugin
 // ---------------------------------------------------------------------------
 
-const RESOLVE_EXTENSIONS = [
+const BASE_RESOLVE_EXTENSIONS = [
   '.ts', '.tsx', '.js', '.jsx', '.json', '.css',
   '/index.ts', '/index.tsx', '/index.js', '/index.jsx',
 ];
 
+function getResolveExtensions(sfcExtension?: string): string[] {
+  if (!sfcExtension) return BASE_RESOLVE_EXTENSIONS;
+  // SFC extension first so `import Foo from './Foo'` finds Foo.svelte/Foo.vue
+  // before Foo.ts in framework projects
+  return [sfcExtension, ...BASE_RESOLVE_EXTENSIONS, `/index${sfcExtension}`];
+}
+
 function createVfsPlugin(
   fileMap: Map<string, string>,
   cdnBase: string,
+  sfcExtension?: string,
 ) {
   return {
     name: 'vfs-resolver',
@@ -136,7 +155,8 @@ function createVfsPlugin(
         }
 
         // Extension probing
-        for (const ext of RESOLVE_EXTENSIONS) {
+        const extensions = getResolveExtensions(sfcExtension);
+        for (const ext of extensions) {
           const candidate = resolved + ext;
           if (fileMap.has(candidate)) {
             const loader = loaderForPath(candidate);
@@ -189,8 +209,174 @@ function loaderForPath(p: string): string {
     case 'js': case 'mjs': return 'js';
     case 'json': return 'json';
     case 'css': return 'css';
+    case 'svelte': return 'js';
+    case 'vue': return 'js';
     default: return 'js';
   }
+}
+
+// ---------------------------------------------------------------------------
+// CDN compiler loading (Svelte, Vue)
+// ---------------------------------------------------------------------------
+
+// Dynamic import wrapper that bypasses Next.js bundler
+// eslint-disable-next-line @typescript-eslint/no-implied-eval
+const dynamicImport = new Function('url', 'return import(url)') as (url: string) => Promise<any>;
+
+const compilerCache = new Map<string, any>();
+
+async function loadCdnCompiler(url: string): Promise<any> {
+  const cached = compilerCache.get(url);
+  if (cached) return cached;
+  const mod = await dynamicImport(url);
+  compilerCache.set(url, mod);
+  return mod;
+}
+
+// ---------------------------------------------------------------------------
+// SFC compiler plugins
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip TypeScript from <script> blocks in a .svelte file.
+ *
+ * The Svelte CDN compiler does not handle TypeScript natively — we use
+ * esbuild's `transform()` (already loaded) to strip type annotations
+ * from every <script> block before passing the file to the Svelte compiler.
+ */
+async function preprocessSvelteTS(source: string): Promise<string> {
+  const esbuild = await ensureEsbuild();
+
+  // Match <script ...> ... </script> blocks (non-greedy)
+  const scriptRegex = /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/g;
+  const replacements: Array<{ original: string; replacement: string }> = [];
+
+  let match;
+  while ((match = scriptRegex.exec(source)) !== null) {
+    const openTag = match[1];
+    const body = match[2];
+    const closeTag = match[3];
+
+    try {
+      const transformed = await esbuild.transform(body, {
+        loader: 'ts',
+        target: 'es2020',
+      });
+
+      // Remove lang="ts" / lang='ts' from the opening tag
+      const cleanOpenTag = openTag.replace(/\s+lang\s*=\s*["']ts["']/g, '');
+      replacements.push({
+        original: match[0],
+        replacement: cleanOpenTag + transformed.code + closeTag,
+      });
+    } catch {
+      // If esbuild can't transform it, leave as-is — the Svelte compiler
+      // will surface the error with better context.
+    }
+  }
+
+  let result = source;
+  for (const { original, replacement } of replacements) {
+    result = result.replace(original, replacement);
+  }
+  return result;
+}
+
+function createSveltePlugin(
+  fileMap: Map<string, string>,
+  compilerUrl: string,
+) {
+  return {
+    name: 'svelte-compiler',
+    setup(build: import('esbuild-wasm').PluginBuild) {
+      build.onLoad({ filter: /\.svelte$/, namespace: 'vfs' }, async (args) => {
+        const contents = fileMap.get(args.path);
+        if (contents === undefined) {
+          return { errors: [{ text: `File not found in VFS: ${args.path}` }] };
+        }
+
+        try {
+          // Strip TypeScript from <script> blocks before Svelte compilation
+          const preprocessed = await preprocessSvelteTS(contents);
+
+          const compiler = await loadCdnCompiler(compilerUrl);
+          const result = compiler.compile(preprocessed, {
+            filename: args.path,
+            generate: 'client',
+            css: 'injected',
+          });
+          return {
+            contents: result.js.code,
+            loader: 'js' as import('esbuild-wasm').Loader,
+            resolveDir: parentDir(args.path),
+          };
+        } catch (err: any) {
+          return { errors: [{ text: `Svelte compile error in ${args.path}: ${err.message}` }] };
+        }
+      });
+    },
+  };
+}
+
+function createVuePlugin(
+  fileMap: Map<string, string>,
+  compilerUrl: string,
+  cdnBase: string,
+) {
+  return {
+    name: 'vue-compiler',
+    setup(build: import('esbuild-wasm').PluginBuild) {
+      build.onLoad({ filter: /\.vue$/, namespace: 'vfs' }, async (args) => {
+        const contents = fileMap.get(args.path);
+        if (contents === undefined) {
+          return { errors: [{ text: `File not found in VFS: ${args.path}` }] };
+        }
+
+        try {
+          const compiler = await loadCdnCompiler(compilerUrl);
+          const id = args.path.replace(/[^a-zA-Z0-9]/g, '_');
+          const descriptor = compiler.parse(contents, { filename: args.path });
+
+          // Compile <script setup> or <script>
+          let scriptCode = '';
+          if (descriptor.descriptor.scriptSetup || descriptor.descriptor.script) {
+            const compiled = compiler.compileScript(descriptor.descriptor, {
+              id,
+              inlineTemplate: true,
+            });
+            scriptCode = compiled.content;
+          }
+
+          // Handle <style> blocks — inject as a <style> tag at runtime
+          let styleInjection = '';
+          if (descriptor.descriptor.styles?.length > 0) {
+            const allStyles = descriptor.descriptor.styles
+              .map((s: any) => s.content)
+              .join('\n');
+            const escaped = JSON.stringify(allStyles);
+            styleInjection = `
+;(function(){
+  const s = document.createElement('style');
+  s.textContent = ${escaped};
+  document.head.appendChild(s);
+})();`;
+          }
+
+          // Rewrite bare `import { ... } from 'vue'` so it resolves to CDN
+          const code = scriptCode
+            .replace(/from\s+['"]vue['"]/g, `from '${cdnBase}/vue'`);
+
+          return {
+            contents: styleInjection + '\n' + code,
+            loader: 'js' as import('esbuild-wasm').Loader,
+            resolveDir: parentDir(args.path),
+          };
+        } catch (err: any) {
+          return { errors: [{ text: `Vue compile error in ${args.path}: ${err.message}` }] };
+        }
+      });
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +385,8 @@ function loaderForPath(p: string): string {
 
 export async function bundleProject(input: BundleInput): Promise<BundleOutput> {
   const cdnBase = input.cdnBase || 'https://esm.sh';
+  const runtime = input.runtime || 'react';
+  const config = getRuntimeConfig(runtime);
 
   // Build file map (path → content string)
   const fileMap = new Map<string, string>();
@@ -210,23 +398,50 @@ export async function bundleProject(input: BundleInput): Promise<BundleOutput> {
 
   const esbuild = await ensureEsbuild();
 
-  const result = await esbuild.build({
-    stdin: {
-      contents: fileMap.get(input.entryPoint) || '',
-      loader: loaderForPath(input.entryPoint) as import('esbuild-wasm').Loader,
-      resolveDir: parentDir(input.entryPoint),
-      sourcefile: input.entryPoint,
-    },
-    bundle: true,
-    format: 'esm',
-    target: ['es2020'],
-    outdir: '/',
-    write: false,
-    jsx: 'automatic',
-    jsxImportSource: `${cdnBase}/react`,
-    plugins: [createVfsPlugin(fileMap, cdnBase)],
-    logLevel: 'silent',
-  });
+  const plugins: any[] = [createVfsPlugin(fileMap, cdnBase, config.sfcExtension)];
+
+  if (config.sfcExtension === '.svelte' && config.compilerCdnUrl) {
+    plugins.unshift(createSveltePlugin(fileMap, config.compilerCdnUrl));
+  }
+  if (config.sfcExtension === '.vue' && config.compilerCdnUrl) {
+    plugins.unshift(createVuePlugin(fileMap, config.compilerCdnUrl, cdnBase));
+  }
+
+  // JSX options — only for JSX-based runtimes
+  const jsxOptions: Record<string, any> = {};
+  if (config.jsxImportSource) {
+    jsxOptions.jsx = 'automatic';
+    jsxOptions.jsxImportSource = `${cdnBase}/${config.jsxImportSource}`;
+  }
+
+  let result;
+  try {
+    result = await esbuild.build({
+      stdin: {
+        contents: fileMap.get(input.entryPoint) || '',
+        loader: loaderForPath(input.entryPoint) as import('esbuild-wasm').Loader,
+        resolveDir: parentDir(input.entryPoint),
+        sourcefile: input.entryPoint,
+      },
+      bundle: true,
+      format: 'esm',
+      target: ['es2020'],
+      outdir: '/',
+      write: false,
+      ...jsxOptions,
+      plugins,
+      logLevel: 'silent',
+    });
+  } catch (buildError: any) {
+    // esbuild throws on build failures — extract structured errors
+    const errors = (buildError.errors || []).map(
+      (e: any) => `[esbuild] ${e.location ? `${e.location.file}:${e.location.line}:${e.location.column} ` : ''}${e.text}`
+    );
+    if (errors.length === 0) {
+      errors.push(`[esbuild] ${buildError.message}`);
+    }
+    return { js: '', css: null, errors, warnings: [] };
+  }
 
   const errors = result.errors.map(
     e => `[esbuild] ${e.location ? `${e.location.file}:${e.location.line}:${e.location.column} ` : ''}${e.text}`
@@ -245,6 +460,9 @@ export async function bundleProject(input: BundleInput): Promise<BundleOutput> {
       js = file.text;
     }
   }
+
+  // Strip esbuild module boundary comments
+  js = js.replace(/^\/\/ [^\n]*\.(svelte|vue|[tj]sx?)\n/gm, '');
 
   return { js, css, errors, warnings };
 }

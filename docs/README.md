@@ -68,10 +68,11 @@ OSW Studio supports multiple project runtimes — pick the one that fits your ne
 ✅ **Documentation sites** - Project docs, help centers
 ✅ **Interactive apps** - Calculators, tools, games (client-side)
 
-**React + TypeScript:**
+**React, Preact, Svelte, Vue:**
 ✅ **Component-based apps** - Dashboards, admin panels, SPAs
 ✅ **Interactive UIs** - Forms, data visualization, real-time interfaces
 ✅ **npm ecosystem** - Import packages by name, fetched from CDN at runtime
+✅ **Single-file components** - Svelte `.svelte` and Vue `.vue` files compiled in-browser
 
 **Server Mode adds:**
 ✅ **API endpoints** - REST APIs with database access via edge functions
@@ -116,7 +117,7 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 ### Features
 
 **Major Features:**
-- Multiple project runtimes (Static, React + TypeScript, more planned)
+- Multiple project runtimes (Static, React, Preact, Svelte, Vue, more planned)
 - Multi-provider AI support (10+ providers, including ChatGPT subscription and HuggingFace free tier)
 - Dual modes (Chat/Code)
 - Templates & Skills systems

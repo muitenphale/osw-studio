@@ -6,7 +6,7 @@
 
 ### What is OSW Studio?
 
-OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — static websites (HTML/CSS/JS) and React + TypeScript apps — with more planned.
+OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — Static websites (HTML/CSS/JS), React, Preact, Svelte, and Vue — all compiled in the browser with no build tools needed.
 
 ### Is OSW Studio free?
 
@@ -138,6 +138,8 @@ The application itself is **free and open source** (MIT license). However:
 
 **Text** (5MB limit):
 - HTML, CSS, JavaScript, JSON
+- TypeScript, TSX, JSX
+- Svelte (.svelte), Vue (.vue)
 - Markdown, TXT, XML, SVG
 - Handlebars (.hbs)
 
@@ -154,11 +156,11 @@ The application itself is **free and open source** (MIT license). However:
 
 ### Does it support TypeScript?
 
-Yes — create a project with the **React + TypeScript** runtime. `.tsx`, `.ts`, and `.jsx` files are bundled automatically in the browser via esbuild. For static projects, you can write plain JavaScript or include TypeScript via external tooling.
+Yes — create a project with any bundled runtime (React, Preact, Svelte, or Vue). `.tsx`, `.ts`, `.jsx`, `.svelte`, and `.vue` files are bundled automatically in the browser via esbuild. For static projects, you can write plain JavaScript or include TypeScript via external tooling.
 
 ### Can I install npm packages?
 
-In **React projects**, you can `import` npm packages by name (e.g., `import { motion } from "framer-motion"`) and they're fetched from a CDN at runtime — no `npm install` needed.
+In **React, Preact, Svelte, and Vue projects**, you can `import` npm packages by name (e.g., `import { motion } from "framer-motion"`) and they're fetched from a CDN at runtime — no `npm install` needed.
 
 In **static projects**, use CDN links or `<script>` tags:
 - CDN links (e.g., unpkg.com, cdnjs.com)
@@ -358,7 +360,7 @@ AI guidance documents injected into the system prompt. They teach the AI how to 
 
 Reusable project starting points with files, structure, and metadata.
 
-**Built-in Templates**: Website Starter (minimal), Example Studios (multi-page portfolio), React + TypeScript (blank), React Demo: Task Tracker, Landing Page with Contact Form (backend), Blog with Comments (backend)
+**Built-in Templates**: Website Starter (minimal), Example Studios (multi-page portfolio), Starter (React + TypeScript), React Demo: Task Tracker, Starter (Preact + TypeScript), Starter (Svelte), Starter (Vue), Landing Page with Contact Form (backend), Blog with Comments (backend)
 
 **See**: [Templates Guide](?doc=templates)
 

@@ -1271,6 +1271,11 @@ Examples:
           if (!a.startsWith('-') && a) curlUrl = a;
         }
 
+        // Assume http:// when no protocol is specified
+        if (curlUrl && !curlUrl.includes('://')) {
+          curlUrl = 'http://' + curlUrl;
+        }
+
         if (!curlUrl) {
           return {
             stdout: '',
@@ -1298,10 +1303,8 @@ Only localhost URLs are supported (fetches compiled HTML from preview engine).`,
         // Validate localhost-only
         const urlLower = curlUrl.toLowerCase();
         const isLocalhost =
-          urlLower.startsWith('localhost') ||
           urlLower.startsWith('http://localhost') ||
           urlLower.startsWith('https://localhost') ||
-          urlLower.startsWith('127.0.0.1') ||
           urlLower.startsWith('http://127.0.0.1') ||
           urlLower.startsWith('https://127.0.0.1');
 
@@ -1316,12 +1319,7 @@ Only localhost URLs are supported (fetches compiled HTML from preview engine).`,
         // Extract path from URL
         let urlPath = '/';
         try {
-          // Normalize to a parseable URL
-          let normalizedUrl = curlUrl;
-          if (!normalizedUrl.includes('://')) {
-            normalizedUrl = 'http://' + normalizedUrl;
-          }
-          const parsed = new URL(normalizedUrl);
+          const parsed = new URL(curlUrl);
           urlPath = parsed.pathname || '/';
         } catch {
           // Fallback: extract path manually

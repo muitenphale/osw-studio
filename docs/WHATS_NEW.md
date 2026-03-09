@@ -6,6 +6,22 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.42.0 - Multi-Framework Support (2026-03-08)
+
+Svelte, Vue, and Preact join React as first-class project runtimes. Build with whichever framework you prefer — all compiled in the browser, no setup needed.
+
+- **Svelte 5** - Write `.svelte` single-file components with Svelte 5 runes (`$state()`, `$derived()`, `$effect()`). The Svelte compiler loads from CDN on first use and compiles components in the browser. TypeScript in `<script lang="ts">` blocks is fully supported. Styles in `<style>` blocks are scoped automatically
+- **Vue 3** - Write `.vue` single-file components with `<script setup>` and the Composition API (`ref()`, `reactive()`, `computed()`). The Vue compiler loads from CDN and compiles SFCs in the browser. `<style scoped>` works out of the box
+- **Preact** - A 3KB React alternative with the same API. Uses `.tsx`/`.jsx` files just like React, plus Preact signals (`@preact/signals`) for lightweight reactive state. If you know React, you know Preact
+- **Starter Templates** - Each new framework comes with a starter template that includes an entry point, root component with counter example, and a `.PROMPT.md` with framework-specific AI instructions
+- **Framework Selection** - Choose your runtime when creating a project. Each framework shows a colored badge on project and template cards (React blue, Preact purple, Svelte orange, Vue green, Static gray)
+- **npm Packages Everywhere** - Import npm packages by name in any framework — `import confetti from "canvas-confetti"` works the same in React, Svelte, Vue, and Preact. All resolved from CDN at runtime
+- **Smarter Build Error Recovery** - When esbuild encounters build errors, they're now piped back to the AI as feedback so it can self-correct. Previously, build failures were shown in the preview but the AI never saw them
+- **Cleaner Exports** - Published bundles no longer include esbuild module boundary comments. Source files (`.svelte`, `.vue`, `.ts`, `.tsx`, `.jsx`, and `/src/*.css`) are excluded from exports since they're compiled into the bundle
+- **Conditional Edge Function Interceptor** - The fetch interceptor script is only injected into published HTML when the project actually uses edge functions, reducing output size for projects without backend features
+
+---
+
 ## v1.41.0 - React & TypeScript Support (2026-03-07)
 
 Build React apps with TypeScript — right in the browser. No npm, no build tools, no setup.

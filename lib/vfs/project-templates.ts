@@ -21,11 +21,12 @@ export {
   BLOG_PROJECT_TEMPLATE,
   REACT_STARTER_PROJECT_TEMPLATE,
   REACT_DEMO_PROJECT_TEMPLATE,
+  PREACT_STARTER_PROJECT_TEMPLATE,
+  SVELTE_STARTER_PROJECT_TEMPLATE,
+  VUE_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   type AssetConfig,
   BUILT_IN_TEMPLATES,
-  getBuiltInTemplate,
-  getBuiltInTemplateIds,
   getBuiltInTemplatesForRuntime,
   type BuiltInTemplateMetadata
 } from './templates';

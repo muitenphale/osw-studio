@@ -89,9 +89,13 @@ Let's build a simple personal website.
 1. Click **Projects** in the sidebar
 2. Click **+ New Project**
 3. Name your project (e.g., "My Portfolio")
-4. Choose a template:
-   - **Website Starter** - Minimal starting point (recommended for most projects)
-   - **Example Studios** - Pre-built example to learn from
+4. Choose a runtime and template:
+   - **Static: Website Starter** - Minimal HTML/CSS/JS starting point
+   - **Static: Example Studios** - Pre-built multi-page portfolio
+   - **Starter (React + TypeScript)** - Component-based React app
+   - **Starter (Preact + TypeScript)** - Lightweight React alternative (~3KB)
+   - **Starter (Svelte)** - Compile-time reactive framework
+   - **Starter (Vue)** - Progressive framework with SFC support
 
 You'll see the workspace with 4 panels:
 - **Chat** (left-most) - Talk to AI
