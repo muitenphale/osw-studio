@@ -14,6 +14,8 @@ export interface BuiltInTemplateMetadata {
   };
 }
 
+const BUILT_IN_EPOCH = new Date('2025-01-01T00:00:00Z');
+
 export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
   {
     id: 'blank',
@@ -21,10 +23,22 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Minimal starting template with basic HTML/CSS/JS structure',
     isBuiltIn: true,
     runtime: 'static',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['starter', 'basic', 'website']
+    }
+  },
+  {
+    id: 'handlebars-starter',
+    name: 'Starter (Handlebars)',
+    description: 'Minimal starting template with Handlebars partials and data',
+    isBuiltIn: true,
+    runtime: 'handlebars',
+    updatedAt: BUILT_IN_EPOCH,
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['handlebars', 'starter', 'website']
     }
   },
   {
@@ -32,8 +46,8 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     name: 'Example Studios',
     description: 'Multi-page agency portfolio showcasing modern web development',
     isBuiltIn: true,
-    runtime: 'static',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    runtime: 'handlebars',
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['portfolio', 'multi-page', 'example']
@@ -44,8 +58,8 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     name: 'Landing Page with Contact Form',
     description: 'Professional landing page with a working contact form powered by Resend',
     isBuiltIn: true,
-    runtime: 'static',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    runtime: 'handlebars',
+    updatedAt: BUILT_IN_EPOCH,
     backendFeatures: {
       edgeFunctions: [
         {
@@ -65,7 +79,6 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
           timeoutMs: 5000,
         },
       ],
-      serverFunctions: [],
       secrets: [
         { name: 'RESEND_API_KEY', description: 'Resend API key for sending email notifications (get one at resend.com)' },
         { name: 'NOTIFY_EMAIL', description: 'Email address to receive contact form notifications' },
@@ -83,7 +96,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Minimal React app with TypeScript and auto-bundling',
     isBuiltIn: true,
     runtime: 'react',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['react', 'typescript', 'starter']
@@ -95,7 +108,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Interactive task tracker showcasing React components, state, and props',
     isBuiltIn: true,
     runtime: 'react',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['react', 'typescript', 'demo']
@@ -107,7 +120,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Lightweight Preact app with TypeScript and auto-bundling',
     isBuiltIn: true,
     runtime: 'preact',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['preact', 'typescript', 'starter']
@@ -119,7 +132,7 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Svelte 5 app with runes and auto-bundling',
     isBuiltIn: true,
     runtime: 'svelte',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['svelte', 'starter']
@@ -131,10 +144,34 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     description: 'Vue 3 app with Composition API and auto-bundling',
     isBuiltIn: true,
     runtime: 'vue',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: BUILT_IN_EPOCH,
     metadata: {
       author: 'OSW Studio',
       tags: ['vue', 'starter']
+    }
+  },
+  {
+    id: 'python-starter',
+    name: 'Starter (Python)',
+    description: 'Minimal Python script with Pyodide (browser-based CPython)',
+    isBuiltIn: true,
+    runtime: 'python',
+    updatedAt: BUILT_IN_EPOCH,
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['python', 'starter', 'scripting']
+    }
+  },
+  {
+    id: 'lua-starter',
+    name: 'Starter (Lua)',
+    description: 'Minimal Lua script with wasmoon (browser-based Lua 5.4)',
+    isBuiltIn: true,
+    runtime: 'lua',
+    updatedAt: BUILT_IN_EPOCH,
+    metadata: {
+      author: 'OSW Studio',
+      tags: ['lua', 'starter', 'scripting']
     }
   },
   {
@@ -142,8 +179,8 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     name: 'Blog with Comments',
     description: 'Blog platform with posts, user auth, and moderated comments',
     isBuiltIn: true,
-    runtime: 'static',
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    runtime: 'handlebars',
+    updatedAt: BUILT_IN_EPOCH,
     backendFeatures: {
       edgeFunctions: [
         {
@@ -195,8 +232,6 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
           timeoutMs: 5000,
         },
       ],
-      serverFunctions: [],
-      secrets: [],
       databaseSchema: `CREATE TABLE IF NOT EXISTS comments (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  post_slug TEXT NOT NULL,\n  author TEXT NOT NULL,\n  content TEXT NOT NULL,\n  approved INTEGER DEFAULT 0,\n  created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE TABLE IF NOT EXISTS users (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  username TEXT NOT NULL UNIQUE,\n  password_hash TEXT NOT NULL,\n  salt TEXT NOT NULL,\n  display_name TEXT NOT NULL,\n  created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE TABLE IF NOT EXISTS sessions (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  user_id INTEGER NOT NULL REFERENCES users(id),\n  token TEXT NOT NULL UNIQUE,\n  expires_at DATETIME NOT NULL,\n  created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n);`,
     },
     metadata: {

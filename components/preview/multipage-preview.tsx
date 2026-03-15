@@ -28,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn, logger } from '@/lib/utils';
 import { captureIframeScreenshot } from '@/lib/utils/screenshot';
 import type { ProjectRuntime } from '@/lib/vfs/types';
+import { pushRuntimeError } from '@/lib/preview/runtime-errors';
 
 export interface MultipagePreviewHandle {
   captureScreenshot: (waitForContent?: boolean) => Promise<string | null>;
@@ -35,7 +36,6 @@ export interface MultipagePreviewHandle {
 
 interface MultipagePreviewProps {
   projectId: string;
-  currentPath?: string;
   refreshTrigger?: number;
   onFocusSelection?: (selection: FocusContextPayload | null) => void;
   hasFocusTarget?: boolean;
@@ -139,6 +139,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   const pendingCompileOptionsRef = useRef<{ preserve: boolean; showLoading: boolean } | null>(null);
   const compileTimeoutRef = useRef<number | null>(null);
   const scheduledCompileOptionsRef = useRef<{ preserve: boolean; showLoading: boolean } | null>(null);
+  const compileGeneration = useRef(0);
 
   const Header = () => (
     <div className="p-3 border-b bg-muted/70 flex items-center gap-2">
@@ -206,6 +207,22 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     }
   }, [iframeReady]);
 
+  // Listen for previewNavigate event (dispatched by AI preview command)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const path = (e as CustomEvent).detail?.path;
+      if (!path) return;
+
+      if (compiledProjectRef.current) {
+        loadPage(path, compiledProjectRef.current);
+      } else {
+        pendingLoadPath.current = path;
+      }
+    };
+    window.addEventListener('previewNavigate', handler);
+    return () => window.removeEventListener('previewNavigate', handler);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (compileTimeoutRef.current) {
@@ -215,6 +232,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   }, []);
 
   const compileAndLoadInternal = useCallback(async (preserveCurrentPath = false, showLoading = true) => {
+    const gen = ++compileGeneration.current;
+
     if (showLoading) {
       setLoading(true);
     }
@@ -222,17 +241,21 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
     try {
       await vfs.init();
-      
+
       const currentPath = preserveCurrentPath ? activePathRef.current : null;
-      
+
       if (serverRef.current) {
         serverRef.current.cleanupBlobUrls();
       }
-      
+
       const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined, entryPoint, runtime);
       serverRef.current = server;
-      
+
       const compiled = await server.compileProject();
+
+      // A newer compile started while we were awaiting — discard this result
+      if (gen !== compileGeneration.current) return;
+
       setCompiledProject(compiled);
       compiledProjectRef.current = compiled;
 
@@ -247,7 +270,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
                        (compiled.routes.length > 0 ? compiled.routes[0].path : '/');
         }
       }
-      
+
       loadPage(pathToLoad, compiled);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to compile project');
@@ -257,7 +280,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         setLoading(false);
       }
     }
-  }, [projectId, deploymentId]);
+  }, [projectId, deploymentId, entryPoint, runtime]);
 
   const compileAndLoad = useCallback((preserveCurrentPath: boolean = false, showLoading: boolean = true) => {
     if (compilingRef.current) {
@@ -403,8 +426,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         return match;
       }
       
-      const normalizedPath = href.startsWith('/') ? href : '/' + href;
-      const blobUrl = projectToUse.blobUrls.get(normalizedPath);
+      const normalizedHref = href.startsWith('/') ? href : '/' + href;
+      const blobUrl = projectToUse.blobUrls.get(normalizedHref);
       
       if (blobUrl) {
         return `href="${blobUrl}"`;
@@ -418,8 +441,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         return match;
       }
       
-      const normalizedPath = src.startsWith('/') ? src : '/' + src;
-      const blobUrl = projectToUse.blobUrls.get(normalizedPath);
+      const normalizedSrc = src.startsWith('/') ? src : '/' + src;
+      const blobUrl = projectToUse.blobUrls.get(normalizedSrc);
       
       if (blobUrl) {
         return `src="${blobUrl}"`;
@@ -765,6 +788,16 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         return;
       }
 
+      if (data.type === 'console') {
+        window.dispatchEvent(new CustomEvent('previewConsole', {
+          detail: { level: data.level, args: data.args },
+        }));
+        if (data.level === 'error') {
+          pushRuntimeError(data.args.join(' '));
+        }
+        return;
+      }
+
       if (data.type === 'navigate' && data.path) {
         handleNavigation(data.path);
         return;
@@ -952,11 +985,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
             className="h-5 w-5"
             onClick={() => setSelectorActive(prev => !prev)}
             disabled={!iframeReady}
-            style={{
-              backgroundColor: selectorActive ? 'var(--button-preview-active)' : undefined,
-              color: selectorActive ? 'white' : undefined
-            }}
-            title={selectorActive ? 'Cancel element focus' : 'Select element'}
+            style={crosshairButtonStyle}
+            title={selectorActive ? 'Cancel element selection' : hasFocusTarget ? 'Replace focused element' : 'Select element'}
             data-tour-id="focus-crosshair-button"
           >
             <Crosshair className="h-3 w-3" />

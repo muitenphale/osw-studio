@@ -176,7 +176,7 @@ export function ProjectCard({
   };
 
   // Runtime badge display
-  const runtime = project.settings?.runtime || 'static';
+  const runtime = project.settings?.runtime || 'handlebars';
   const runtimeBadge = getRuntimeBadge(runtime);
 
   // Format cost display

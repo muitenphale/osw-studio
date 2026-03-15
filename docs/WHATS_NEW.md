@@ -6,6 +6,28 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.43.0 - Python, Lua, Console & Runtime Split (2026-03-12)
+
+Write and run Python and Lua scripts directly in the browser. A new interactive Console works across all project types. Plus: the Static runtime is now pure HTML/CSS/JS, with Handlebars templating moved to its own dedicated runtime.
+
+- **Static vs Handlebars** - The "Static" runtime now means pure HTML, CSS, and JavaScript — no template engine, no partials, no `data.json`. Projects that use Handlebars templating (partials, `{{> partial}}`, data.json) are now the "Handlebars" runtime with an amber badge. Existing projects are automatically migrated. New projects default to Static (simplest starting point)
+- **Python Projects** - Create Python projects and run them in the browser. Full Python 3 via Pyodide (CPython compiled to WebAssembly) — standard library included, multi-file `import` support, and output file generation. The runtime loads from CDN on first run and is cached by the browser
+- **Lua Projects** - Create Lua 5.4 projects with `require()` for multi-file support. Runs via wasmoon (Lua VM compiled to WebAssembly). Standard library modules (string, table, math, io) available out of the box
+- **Interactive Console** - A unified terminal panel that combines a VFS shell and script execution in one place. Type `ls`, `cat`, `grep`, `tree`, and more — with pipes, redirects, and chaining. Run scripts with `exec main.py`. Command history with Up/Down arrows. Available for every project type via the sidebar toggle
+- **Auto-Run for Scripts** - Python and Lua projects auto-run the entry point when you save a file, just like the live preview updates for HTML/CSS/JS projects. Edit your code, see the output instantly
+- **Run from File Explorer** - Right-click any `.py` or `.lua` file and select "Run in Console" to execute it immediately
+- **Starter Templates** - Handlebars Starter (partials + data.json), Python Starter, and Lua Starter templates with entry points and AI-tuned `.PROMPT.md` files
+- **AI Error Feedback** - Script errors (syntax errors, runtime exceptions, timeouts) are fed back to the AI so it can self-correct — same as build errors for React/Svelte/Vue projects
+- **Console for All Projects** - The Console isn't just for Python and Lua — toggle it on for any project type to explore files, run shell commands, or test utility scripts. It defaults to visible for script projects and hidden for visual projects
+- **Runtime Error Card** - When the preview throws a JS error after the AI finishes (e.g. you click a button that breaks), a red card now appears above the chat input showing the errors. Hit "Send" to auto-send them to the AI for correction, or "Clear" to dismiss
+- **ZIP Export for Scripts** - Python and Lua projects export as raw source files with a README containing run instructions — no compilation step needed
+- **Server Publish: Bundled Runtimes** - Publishing React, Preact, Svelte, and Vue projects in Server Mode now works correctly. Bundles are compiled client-side before syncing to the server
+- **Server Publish: Terminal Runtimes Blocked** - Python and Lua projects cannot be published as static deployments. A clear error directs you to use ZIP export instead
+- **Cleaner Published Output** - Internal files (`.PROMPT.md`) and preview-only scripts (Console Capture, VFS Asset Interceptor) are now stripped from published deployments
+- **Console Doubling Fix** - Fixed duplicate console messages appearing in dev mode caused by React StrictMode double-mounting the preview
+
+---
+
 ## v1.42.0 - Multi-Framework Support (2026-03-08)
 
 Svelte, Vue, and Preact join React as first-class project runtimes. Build with whichever framework you prefer — all compiled in the browser, no setup needed.

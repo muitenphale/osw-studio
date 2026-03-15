@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.41.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.43.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -31,7 +31,7 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 **For everyone else:** Finally maintain the site that was built for you. Add blog posts, update business hours, swap team photos - without filing a support ticket or hiring an agency.
 
 **What you get:**
-- **Multiple runtimes** - Static (HTML/CSS/JS) or React + TypeScript with auto-bundling, more planned
+- **Multiple runtimes** - Static (HTML/CSS/JS), Handlebars (templated websites), React, Preact, Svelte, Vue, Python, Lua
 - **Sandboxed agent** - AI operates in a virtual file system with automatic checkpoints - explore freely, rollback anytime
 - **Dual AI modes** - Chat (exploration, planning) + Code (full implementation)
 - **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp
@@ -100,7 +100,8 @@ npm run dev
 | **Portfolios** | Personal websites, photography, design portfolios |
 | **Documentation** | Project docs, help centers, knowledge bases |
 | **Blogs** | Static blogs with templates and navigation |
-| **React Apps** | React + TypeScript with auto-bundling via esbuild |
+| **Framework Apps** | React, Preact, Svelte, Vue with in-browser bundling via esbuild |
+| **Scripts** | Python (Pyodide) and Lua (wasmoon) with interactive Console |
 | **Client-side Apps** | Calculators, tools, games, interactive demos |
 
 | ✅ Server Mode | Details |
@@ -165,7 +166,7 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 
 | Type | Formats | Limits |
 |------|---------|--------|
-| **Code** | HTML, CSS, JS/JSX, TS/TSX, JSON, HBS/Handlebars | 5MB per file |
+| **Code** | HTML, CSS, JS/JSX, TS/TSX, JSON, HBS, Svelte, Vue, Python, Lua | 5MB per file |
 | **Docs** | TXT, MD, XML, SVG | 5MB per file |
 | **Media** | PNG, JPG, GIF, WebP, MP4, WebM | 10MB images, 50MB video |
 
@@ -271,8 +272,8 @@ NEXT_PUBLIC_DEBUG_TOOL_STREAM=0
 
 ## Limitations
 
-- **No package managers** - Static projects use CDN links for libraries; React projects auto-resolve npm imports via esm.sh
-- **Browser Mode** - Static/React sites only, no backend (use Server Mode for APIs/databases)
+- **No package managers** - Static projects use CDN links for libraries; framework projects (React, Preact, Svelte, Vue) auto-resolve npm imports via esm.sh
+- **Browser Mode** - Client-side projects only, no backend (use Server Mode for APIs/databases)
 
 ## Contributing
 

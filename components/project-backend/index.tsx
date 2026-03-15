@@ -245,10 +245,10 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
     <div className="p-4 space-y-6">
       <div className="space-y-2">
         <Label htmlFor="runtime">Runtime</Label>
-        <Select value={project.settings?.runtime || 'static'} onValueChange={handleRuntimeChange}>
+        <Select value={project.settings?.runtime || 'handlebars'} onValueChange={handleRuntimeChange}>
           <SelectTrigger id="runtime" className="w-full">
             <div className="truncate flex-1 text-left">
-              {getProjectRuntimes().find(r => r.value === (project.settings?.runtime || 'static'))?.label}
+              {getProjectRuntimes().find(r => r.value === (project.settings?.runtime || 'handlebars'))?.label}
             </div>
           </SelectTrigger>
           <SelectContent>

@@ -24,7 +24,7 @@ export class VirtualServer {
     this.projectId = projectId;
     this.deploymentId = deploymentId;
     this.entryPoint = entryPoint || '/index.html';
-    this.runtime = runtime || 'static';
+    this.runtime = runtime || 'handlebars';
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     if (existingBlobUrls) {
       this.blobUrls = new Map(existingBlobUrls);
@@ -166,6 +166,9 @@ export class VirtualServer {
   async compileProject(incrementalUpdate = false): Promise<CompiledProject> {
     beginCompilation();
     try {
+    // Clear any stale generated files from previous compiles (e.g. switching from bundled to non-bundled runtime)
+    this.vfs.clearGeneratedFiles();
+
     // Register partials before processing
     await this.registerPartials();
 
@@ -191,8 +194,6 @@ export class VirtualServer {
           content: file.content,
           mimeType: file.mimeType
         };
-      } else if (file.type === 'js') {
-        processedFile = await this.processJS(file);
       } else {
         processedFile = {
           path: file.path,
@@ -299,6 +300,11 @@ export class VirtualServer {
   private async runBundleStep(files: VirtualFile[]): Promise<VirtualFile[]> {
     if (!isRuntimeBundled(this.runtime)) return files;
 
+    // Pre-compiled bundle from client (synced before publish) — skip server-side bundling
+    if (files.some(f => f.path === '/bundle.js')) {
+      return files.filter(f => !/\.(tsx|ts|jsx|svelte|vue)$/.test(f.path));
+    }
+
     // Lazy-import to avoid loading esbuild for non-bundleable projects
     const { detectBundleEntryPoint, bundleProject, isBundleableSource } =
       await import('./esbuild-bundler');
@@ -314,7 +320,8 @@ export class VirtualServer {
     }
 
     if (result.errors.length > 0) {
-      // Bundle failed — return files unmodified so the preview shows what it can
+      // Bundle failed — clear any previous generated files and return unmodified
+      this.vfs.clearGeneratedFiles();
       return files;
     }
 
@@ -354,6 +361,10 @@ export class VirtualServer {
       metadata: { isTransient: true },
     });
 
+    // Publish bundle files to VFS so they appear in file explorer and are readable
+    this.vfs.setGeneratedFile('/bundle.js', result.js, 'application/javascript');
+    this.vfs.setGeneratedFile('/bundle.css', cssContent, 'text/css');
+
     return filtered;
   }
 
@@ -380,8 +391,10 @@ export class VirtualServer {
   private async processHTML(file: VirtualFile, blobUrls?: Map<string, string>): Promise<ProcessedFile> {
     let content = file.content as string;
 
-    // Process Handlebars templates first
-    content = await this.processHandlebarsTemplates(content, file.path);
+    // Only run Handlebars for the handlebars runtime; skip /output/ files (script-generated)
+    if (this.runtime === 'handlebars' && !file.path.startsWith('/output/')) {
+      content = await this.processHandlebarsTemplates(content, file.path);
+    }
     
     // Then process internal references with available blob URLs
     content = await this.processInternalReferences(content, blobUrls);
@@ -618,8 +631,6 @@ export class VirtualServer {
           form.dispatchEvent(event);
           document.dispatchEvent(event);
 
-          // Result available for custom event handlers if needed
-          void result;
         })
         .catch(function(error) {
           console.error('[Edge Function] Error:', error);
@@ -692,14 +703,93 @@ export class VirtualServer {
   }
 })();
 </script>`;
-      
+
+    const consoleScript = `<script>
+// Console Capture - Auto-injected by OSW Studio
+(function() {
+  if (window === window.parent) return;
+  var levels = ['log', 'warn', 'error', 'info', 'debug'];
+  var originals = {};
+  var queue = [];
+  var timer = null;
+
+  function serialize(arg) {
+    if (typeof arg === 'string') return arg;
+    if (arg === null) return 'null';
+    if (arg === undefined) return 'undefined';
+    if (arg instanceof Error) return arg.stack || arg.message || String(arg);
+    if (typeof arg === 'function') return 'function ' + (arg.name || 'anonymous') + '()';
+    if (typeof HTMLElement !== 'undefined' && arg instanceof HTMLElement) return '<' + arg.tagName.toLowerCase() + '>';
+    try {
+      var seen = [];
+      return JSON.stringify(arg, function(key, val) {
+        if (typeof val === 'object' && val !== null) {
+          if (seen.indexOf(val) !== -1) return '[Circular]';
+          seen.push(val);
+        }
+        return val;
+      });
+    } catch (e) {
+      return String(arg);
+    }
+  }
+
+  function flush() {
+    timer = null;
+    if (queue.length === 0) return;
+    var batch = queue.splice(0, 50);
+    for (var i = 0; i < batch.length; i++) {
+      try {
+        window.parent.postMessage(batch[i], '*');
+      } catch (e) {}
+    }
+    if (queue.length > 0) {
+      timer = setTimeout(flush, 100);
+    }
+  }
+
+  for (var i = 0; i < levels.length; i++) {
+    (function(level) {
+      originals[level] = console[level];
+      console[level] = function() {
+        originals[level].apply(console, arguments);
+        var args = [];
+        for (var j = 0; j < arguments.length; j++) {
+          args.push(serialize(arguments[j]));
+        }
+        queue.push({ type: 'console', level: level, args: args });
+        if (!timer) {
+          timer = setTimeout(flush, 100);
+        }
+      };
+    })(levels[i]);
+  }
+
+  // Capture uncaught errors (SyntaxError, ReferenceError, etc.)
+  window.onerror = function(message, source, lineno, colno) {
+    var loc = source ? ' (' + source.replace(/^.*[\\/]/, '') + ':' + lineno + ':' + colno + ')' : '';
+    queue.push({ type: 'console', level: 'error', args: [String(message) + loc] });
+    if (!timer) timer = setTimeout(flush, 100);
+  };
+
+  // Capture unhandled promise rejections
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = e.reason;
+    var msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    queue.push({ type: 'console', level: 'error', args: ['Unhandled rejection: ' + msg] });
+    if (!timer) timer = setTimeout(flush, 100);
+  });
+})();
+</script>`;
+
     // Insert in head for early execution
+    const injectedScripts = vfsScript + '\n' + consoleScript;
     if (content.includes('</head>')) {
-      content = content.replace('</head>', vfsScript + '\n</head>');
+      content = content.replace('</head>', injectedScripts + '\n</head>');
     } else if (content.includes('<body>')) {
-      content = content.replace('<body>', vfsScript + '\n<body>');
+      content = content.replace('<body>', injectedScripts + '\n<body>');
     } else {
-      content = vfsScript + '\n' + content;
+      content = injectedScripts + '\n' + content;
     }
 
     return {
@@ -818,16 +908,6 @@ export class VirtualServer {
     let content = file.content as string;
 
     content = await this.processUrlReferences(content, blobUrls);
-
-    return {
-      path: file.path,
-      content,
-      mimeType: file.mimeType
-    };
-  }
-
-  private async processJS(file: VirtualFile): Promise<ProcessedFile> {
-    const content = file.content as string;
 
     return {
       path: file.path,
@@ -975,8 +1055,6 @@ export class VirtualServer {
         return await this.processHTML(file, this.blobUrls);
       } else if (file.type === 'css') {
         return await this.processCSS(file, new Map());
-      } else if (file.type === 'js') {
-        return await this.processJS(file);
       } else {
         return {
           path: file.path,

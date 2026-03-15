@@ -39,6 +39,17 @@ export function pushCompileError(file: string, error: string): void {
 export function commitCompilation(): void {
   pendingErrors = stagingErrors;
   stagingErrors = [];
+
+  // Notify listeners (console panel) about compilation result
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('compilationComplete', {
+      detail: {
+        errors: [...pendingErrors],
+        success: pendingErrors.length === 0,
+        timestamp: Date.now(),
+      },
+    }));
+  }
 }
 
 /**
@@ -68,9 +79,12 @@ export function formatCompileErrors(errors: CompileError[]): string {
   }
 
   const hasEsbuildErrors = errors.some(e => e.error.startsWith('[esbuild]'));
-  const prefix = hasEsbuildErrors
-    ? 'Build errors detected during compilation. Fix these issues:\n\n'
-    : 'The preview detected possible Handlebars template issues after compilation. Verify whether these are still present — they may already be resolved by recent edits:\n\n';
+  const hasScriptErrors = errors.some(e => e.file === 'script' || e.file.endsWith('.py') || e.file.endsWith('.lua'));
+  const prefix = hasScriptErrors
+    ? 'Runtime errors detected during script execution. Fix these issues:\n\n'
+    : hasEsbuildErrors
+      ? 'Build errors detected during compilation. Fix these issues:\n\n'
+      : 'The preview detected possible Handlebars template issues after compilation. Verify whether these are still present — they may already be resolved by recent edits:\n\n';
 
   return `${prefix}${parts.join('\n\n')}`;
 }

@@ -12,10 +12,13 @@ import {
   isJSONTruncationError,
   attemptJSONRepair,
   extractPartialContent,
+  getContinuationMarker,
   analyzeOperationType,
   generateContinuationMessage,
   generateUnsafeOperationError
 } from './json-repair';
+import { scriptRunner } from '@/lib/scripting/script-runner';
+import type { ScriptRuntime } from '@/lib/scripting/types';
 
 export type ToolId = 'shell' | 'write' | 'evaluation';
 
@@ -67,8 +70,9 @@ export class ToolRegistry {
         name: 'shell',
         description: `Execute shell commands in the virtual file system.
 
-Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, curl, sqlite3.
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, curl, sqlite3, python, python3, lua, preview.
 Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), and brace expansion ({a,b,c}) are supported.
+Run scripts: python <file>, lua <file>. Show output in preview: preview <path>.
 
 For large file writes, use heredoc: cat > /file << 'EOF'\\ncontent\\nEOF
 
@@ -92,74 +96,79 @@ Execute ONE command at a time as a single string.`,
           }
 
           // Extract heredoc content if present (e.g., cat > file << 'EOF'\ncontent\nEOF)
+          // Also handles chained commands after the heredoc (e.g., ... EOF\npython file.py)
           let heredocStdin: string | undefined;
           let cmdString = args.cmd;
-          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\1\s*$/);
+          let trailingCommands: string | undefined;
+          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\1(?:[ \t]*\n([\s\S]+))?\s*$/);
           if (heredocMatch) {
             heredocStdin = heredocMatch[2];
             cmdString = cmdString.slice(0, heredocMatch.index!).trim();
+            if (heredocMatch[3]) {
+              trailingCommands = heredocMatch[3].trim();
+            }
           }
 
           // Parse command string into array
           const cmdArray = parseShellCommand(cmdString);
-          const command = cmdArray[0];
 
-          // Block write operations in read-only mode
-          if (context.isReadOnly && isWriteOperation(cmdArray)) {
-            return `Error: Write operations are disabled in read-only mode. "${cmdArray[0]}" is not allowed.`;
-          }
+          // Check for && / || chain operators — handle at this level so
+          // python/lua/preview/cd work when chained (e.g., "python main.py && preview /output/chart.html")
+          if (cmdArray.some(t => t === '&&' || t === '||')) {
+            const segments = splitChainOperators(cmdArray);
+            const outputs: string[] = [];
 
-          // Check if this command requires server-side execution
-          const serverCommands = ['sqlite3'];
-          const deploymentId = vfs.getRuntimeDeploymentId();
-
-          if (serverCommands.includes(command) && deploymentId) {
-            // Proxy to server API for server-side execution
-            try {
-              const response = await fetch('/api/shell/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deploymentId, cmd: cmdArray })
-              });
-
-              if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                return `Error: ${errorData.stderr || 'Server request failed'}`;
+            for (let i = 0; i < segments.length; i++) {
+              if (i > 0) {
+                const prevOp = segments[i - 1].nextOp;
+                const prevResult = outputs[outputs.length - 1] || '';
+                const prevSuccess = !prevResult.startsWith('Error');
+                if (prevOp === '&&' && !prevSuccess) break;
+                if (prevOp === '||' && prevSuccess) continue;
               }
 
-              const result = await response.json();
+              const segResult = await executeShellSegment(
+                projectId, segments[i].args, context,
+                i === 0 ? heredocStdin : undefined
+              );
+              if (segResult) outputs.push(segResult);
+            }
 
-              if (result.exitCode === 0) {
-                return result.stdout && result.stdout.trim().length > 0
-                  ? result.stdout
-                  : 'Command succeeded with no output';
-              } else {
-                return `Error: ${result.stderr || 'Command failed'}`;
+            const combined = outputs.join('\n').trim();
+            return combined || 'Command succeeded with no output';
+          }
+
+          // Single command (no chaining)
+          const mainResult = await executeShellSegment(projectId, cmdArray, context, heredocStdin);
+
+          // If there are trailing commands after a heredoc (e.g., EOF\npython file.py),
+          // execute them sequentially as a chained && command.
+          if (trailingCommands) {
+            const outputs: string[] = [];
+            if (mainResult && !mainResult.startsWith('Error')) {
+              if (mainResult) outputs.push(mainResult);
+            } else {
+              return mainResult || 'Error: Command failed';
+            }
+
+            const lines = trailingCommands.split('\n').map(l => l.trim()).filter(Boolean);
+            for (const line of lines) {
+              const trailArray = parseShellCommand(line);
+              if (trailArray.length === 0) continue;
+
+              const trailResult = await executeShellSegment(projectId, trailArray, context);
+              if (trailResult.startsWith('Error')) {
+                return outputs.length > 0
+                  ? outputs.join('\n') + '\n' + trailResult
+                  : trailResult;
               }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : 'Server request failed';
-              return `Error: ${message}`;
+              if (trailResult) outputs.push(trailResult);
             }
+
+            return outputs.length > 0 ? outputs.join('\n') : 'Command succeeded with no output';
           }
 
-          // Execute command via browser-side VFS shell
-          const result = await vfsShell.execute(projectId, cmdArray, heredocStdin);
-
-          // Refresh server context if shell command modified .server/ files
-          if (isWriteOperation(cmdArray) && cmdArray.some(a => a.includes('/.server/'))) {
-            if (vfs.hasServerContext()) {
-              await vfs.refreshServerContext();
-            }
-          }
-
-          if (result.success) {
-            return result.stdout && result.stdout.trim().length > 0
-              ? result.stdout
-              : 'Command succeeded with no output';
-          } else {
-            const message = result.stderr && result.stderr.trim().length > 0 ? result.stderr : 'Command failed';
-            return `Error: ${message}`;
-          }
+          return mainResult || 'Command succeeded with no output';
         }
       }
     });
@@ -470,7 +479,7 @@ EOF`;
     if (!tool) {
       // Auto-route known shell commands called as standalone tools
       // LLMs sometimes call "cat", "curl", "grep" etc. as tool names instead of using shell
-      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3'];
+      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview'];
 
       // Map common "read file" tool names to cat
       const readAliases: Record<string, string> = {
@@ -547,7 +556,40 @@ EOF`;
           logger.warn(`[ToolRegistry] Repaired ${toolId} but safety unknown, not executing`);
           return `Error: ${errorMessage}\n\nNote: JSON repair succeeded but operation type is unclear. Please split into smaller operations.`;
         } else {
-          // Repair failed - provide helpful error message
+          // Repair failed — for write tools, try to salvage content via regex extraction
+          if (toolId === 'write') {
+            const extraction = extractPartialContent(toolCall.function.arguments);
+            if (extraction.success && extraction.content && extraction.filePath) {
+              logger.info(`[ToolRegistry] JSON repair failed but extracted ${extraction.content.length} chars for ${extraction.filePath}`);
+              try {
+                const partialResult = await tool.executor.execute(projectId, {
+                  file_path: extraction.filePath,
+                  operations: [{ type: 'rewrite', content: extraction.content }]
+                }, context);
+
+                const lineCount = extraction.content.split('\n').length;
+                const marker = getContinuationMarker(extraction.content, 200);
+
+                return `${partialResult}
+
+⚠️ Your tool call had a JSON encoding error (likely an unescaped quote in the content).
+The file was written with ${lineCount} lines of salvaged content.
+
+The file currently ends with:
+\`\`\`
+${marker}
+\`\`\`
+
+The file is INCOMPLETE. Continue writing the rest from where it ends.
+Use the write tool with type "update": set oldStr to the last few lines above, and newStr to those lines + the remaining content.`;
+              } catch (salvageError) {
+                logger.error(`[ToolRegistry] Salvage write failed for ${extraction.filePath}:`, salvageError);
+                // Fall through to generic error
+              }
+            }
+          }
+
+          // Repair and extraction both failed
           logger.error(`[ToolRegistry] JSON repair failed for ${toolId}:`, repairResult.error);
           return `Error: ${errorMessage}
 
@@ -579,6 +621,153 @@ JSON repair attempt failed. The tool call was likely truncated due to max_tokens
   getAll(): RegisteredTool[] {
     return Array.from(this.tools.values());
   }
+}
+
+/**
+ * Execute a single shell command segment (no && / || chaining).
+ * Handles cd, python/lua, preview, server commands, and VFS shell fallthrough.
+ * Returns empty string for success-no-output, 'Error: ...' for failures.
+ */
+async function executeShellSegment(
+  projectId: string,
+  cmdArray: string[],
+  context: ToolExecutionContext,
+  heredocStdin?: string
+): Promise<string> {
+  const command = cmdArray[0];
+  if (!command) return 'Error: empty command';
+
+  // Block write operations in read-only mode
+  if (context.isReadOnly && isWriteOperation(cmdArray)) {
+    return `Error: Write operations are disabled in read-only mode. "${command}" is not allowed.`;
+  }
+
+  // cd — no-op (VFS has no working directory concept)
+  if (command === 'cd') {
+    return '';
+  }
+
+  // Script execution commands (python, python3, lua)
+  if (command === 'python' || command === 'python3' || command === 'lua') {
+    const sr: ScriptRuntime = command === 'lua' ? 'lua' : 'python';
+    const filePath = cmdArray[1];
+    if (!filePath) return `Error: Usage: ${command} <file>`;
+
+    const normalizedPath = filePath.startsWith('/') ? filePath : '/' + filePath;
+
+    return new Promise<string>((resolve) => {
+      const output: string[] = [];
+      let resolved = false;
+
+      const unsubscribe = scriptRunner.onOutput((msg) => {
+        switch (msg.type) {
+          case 'stdout': output.push(msg.data); break;
+          case 'stderr': output.push(`[stderr] ${msg.data}`); break;
+          case 'error': output.push(`[error] ${msg.data}`); break;
+          case 'complete':
+            unsubscribe();
+            resolved = true;
+            const text = output.join('\n').trim();
+            resolve(msg.exitCode === 0
+              ? (text || 'Script completed with no output')
+              : `Error (exit ${msg.exitCode}):\n${text}`);
+            break;
+        }
+      });
+
+      scriptRunner.execute(projectId, sr, normalizedPath).catch((err) => {
+        if (!resolved) {
+          unsubscribe();
+          resolve(`Error: ${err}`);
+        }
+      });
+    });
+  }
+
+  // Preview navigation command
+  if (command === 'preview') {
+    const targetPath = cmdArray[1] || '/';
+    const normalizedPath = targetPath.startsWith('/') ? targetPath : '/' + targetPath;
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('showPreview'));
+      window.dispatchEvent(new CustomEvent('previewNavigate', { detail: { path: normalizedPath } }));
+    }
+
+    return `Preview navigated to ${normalizedPath}`;
+  }
+
+  // Server-side execution (sqlite3)
+  const serverCommands = ['sqlite3'];
+  const deploymentId = vfs.getRuntimeDeploymentId();
+
+  if (serverCommands.includes(command) && deploymentId) {
+    try {
+      const response = await fetch('/api/shell/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deploymentId, cmd: cmdArray })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return `Error: ${errorData.stderr || 'Server request failed'}`;
+      }
+
+      const result = await response.json();
+
+      if (result.exitCode === 0) {
+        return result.stdout && result.stdout.trim().length > 0 ? result.stdout : '';
+      } else {
+        return `Error: ${result.stderr || 'Command failed'}`;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Server request failed';
+      return `Error: ${message}`;
+    }
+  }
+
+  // VFS shell fallthrough (handles pipes, redirects, etc.)
+  const result = await vfsShell.execute(projectId, cmdArray, heredocStdin);
+
+  // Refresh server context if shell command modified .server/ files
+  if (isWriteOperation(cmdArray) && cmdArray.some(a => a.includes('/.server/'))) {
+    if (vfs.hasServerContext()) {
+      await vfs.refreshServerContext();
+    }
+  }
+
+  if (!result.success) {
+    const message = result.stderr && result.stderr.trim().length > 0 ? result.stderr : 'Command failed';
+    return `Error: ${message}`;
+  }
+
+  return result.stdout && result.stdout.trim().length > 0 ? result.stdout : '';
+}
+
+/**
+ * Split a parsed command array by && and || chain operators into segments.
+ */
+function splitChainOperators(cmdArray: string[]): { args: string[]; nextOp: '&&' | '||' | null }[] {
+  const segments: { args: string[]; nextOp: '&&' | '||' | null }[] = [];
+  let current: string[] = [];
+
+  for (const token of cmdArray) {
+    if (token === '&&' || token === '||') {
+      if (current.length > 0) {
+        segments.push({ args: current, nextOp: token as '&&' | '||' });
+        current = [];
+      }
+    } else {
+      current.push(token);
+    }
+  }
+
+  if (current.length > 0) {
+    segments.push({ args: current, nextOp: null });
+  }
+
+  return segments;
 }
 
 /**

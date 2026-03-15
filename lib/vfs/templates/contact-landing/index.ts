@@ -1,5 +1,5 @@
 import { ProjectTemplate } from '../../project-templates';
-import { WEBSITE_DOMAIN_PROMPT } from '@/lib/llm/prompts/website';
+import { HANDLEBARS_DOMAIN_PROMPT } from '@/lib/llm/prompts/handlebars';
 
 export const CONTACT_LANDING_PROJECT_TEMPLATE: ProjectTemplate = {
   name: 'Landing Page with Contact Form',
@@ -561,7 +561,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     {
       path: '/.PROMPT.md',
-      content: WEBSITE_DOMAIN_PROMPT
+      content: HANDLEBARS_DOMAIN_PROMPT
     },
   ],
 };

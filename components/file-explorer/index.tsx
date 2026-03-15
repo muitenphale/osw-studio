@@ -20,7 +20,8 @@ import {
   Server,
   BookOpen,
   Home,
-  ScrollText
+  ScrollText,
+  Play,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -82,6 +83,11 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
     return path.startsWith('/.skills/') || path === '/.skills';
   };
 
+  // Check if a path is a generated file (bundle.js, bundle.css)
+  const isGeneratedPath = (path: string): boolean => {
+    return vfs.isGeneratedPath(path);
+  };
+
   const loadFiles = useCallback(async () => {
     const version = ++loadFilesVersionRef.current;
     try {
@@ -114,6 +120,15 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
         });
 
         allItems.push(...filteredTransient);
+      }
+
+      // Include generated files (bundle.js, bundle.css) — always visible
+      const generatedFiles = vfs.getGeneratedFiles();
+      const existingPaths = new Set(allItems.map(item => item.path));
+      for (const gf of generatedFiles) {
+        if (!existingPaths.has(gf.path)) {
+          allItems.push(gf);
+        }
       }
 
       // Only update state if this is still the latest call
@@ -476,9 +491,11 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
     const isRenaming = renamingPath === item.path;
     const isDropTarget = dropTarget === item.path;
     const isTransient = isTransientPath(item.path);
+    const isGenerated = isGeneratedPath(item.path);
     const isServerContext = isServerContextPath(item.path);
     const isSkills = isSkillsPath(item.path);
-    const isHiddenDotFile = !isTransient && (item.name.startsWith('.') || item.path.startsWith('/.'));
+    const isHiddenDotFile = !isTransient && !isGenerated && (item.name.startsWith('.') || item.path.startsWith('/.'));
+    const isReadOnly = isTransient || isGenerated;
 
     // Get the appropriate folder icon for special directories
     const getFolderIcon = (expanded: boolean) => {
@@ -498,11 +515,11 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
     return (
       <div
         key={item.path}
-        draggable={!isRenaming && !isTransient}
-        onDragStart={(e) => !isTransient && handleItemDragStart(e, item)}
+        draggable={!isRenaming && !isReadOnly}
+        onDragStart={(e) => !isReadOnly && handleItemDragStart(e, item)}
         onDragEnd={handleItemDragEnd}
-        onDragOver={(e) => item.type === 'directory' && !isTransient && handleItemDragOver(e, item.path)}
-        onDrop={(e) => item.type === 'directory' && !isTransient && handleItemDrop(e, item)}
+        onDragOver={(e) => item.type === 'directory' && !isReadOnly && handleItemDragOver(e, item.path)}
+        onDrop={(e) => item.type === 'directory' && !isReadOnly && handleItemDrop(e, item)}
       >
         <ContextMenu>
           <ContextMenuTrigger>
@@ -512,7 +529,7 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
               isSelected && 'bg-accent text-accent-foreground',
               isDropTarget && item.type === 'directory' && 'bg-blue-500/20 border border-blue-500',
               draggedItem?.path === item.path && 'opacity-50',
-              (isTransient || isHiddenDotFile) && 'opacity-75',
+              (isTransient || isGenerated || isHiddenDotFile) && 'opacity-75',
               'group'
             )}
             style={{ paddingLeft: `${level * 16 + 8}px` }}
@@ -567,9 +584,10 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className={cn("text-sm flex-1", (isTransient || isHiddenDotFile) && "italic text-muted-foreground")}>
+              <span className={cn("text-sm flex-1", (isTransient || isGenerated || isHiddenDotFile) && "italic text-muted-foreground")}>
                 {item.name}
                 {isTransient && <span className="text-xs text-muted-foreground ml-1">(read-only)</span>}
+                {isGenerated && <span className="text-xs text-muted-foreground ml-1">(generated)</span>}
                 {item.path === (entryPoint || '/index.html') && <span className="text-xs text-emerald-500 ml-1">(entry)</span>}
                 {item.name === '.PROMPT.md' && <span className="text-xs text-amber-500 ml-1">(AI prompt)</span>}
               </span>
@@ -577,8 +595,8 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-          {/* Only show edit options for non-transient paths */}
-          {!isTransient && (
+          {/* Only show edit options for non-read-only paths */}
+          {!isReadOnly && (
             <>
               {item.type === 'directory' && (
                 <>
@@ -602,6 +620,14 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
                   Set as Entry Point
                 </ContextMenuItem>
               )}
+              {item.type === 'file' && (item.path.endsWith('.py') || item.path.endsWith('.lua')) && (
+                <ContextMenuItem onClick={() => {
+                  window.dispatchEvent(new CustomEvent('runInConsole', { detail: { path: item.path } }));
+                }}>
+                  <Play className="mr-2 h-4 w-4" />
+                  Run in Console
+                </ContextMenuItem>
+              )}
               <ContextMenuItem onClick={() => {
                 setRenamingPath(item.path);
                 setNewName(item.name);
@@ -616,11 +642,18 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
               </ContextMenuItem>
             </>
           )}
-          {/* For transient files, just show a read-only indicator */}
+          {/* For transient files, show a read-only indicator */}
           {isTransient && (
             <ContextMenuItem disabled>
               <Eye className="mr-2 h-4 w-4" />
               Read-only {isServerContext ? 'server context' : 'skill'}
+            </ContextMenuItem>
+          )}
+          {/* For generated files, show a generated indicator */}
+          {isGenerated && (
+            <ContextMenuItem disabled>
+              <Eye className="mr-2 h-4 w-4" />
+              Generated build output
             </ContextMenuItem>
           )}
           </ContextMenuContent>

@@ -25,11 +25,14 @@ export interface FocusContextPayload {
   outerHTML: string;
 }
 
+export type ConsoleLevel = 'log' | 'warn' | 'error' | 'info' | 'debug';
+
 export type PreviewMessage =
   | { type: 'navigate'; path: string }
   | { type: 'reload' }
   | { type: 'error'; error: string }
   | { type: 'selector-selection'; payload: FocusContextPayload }
-  | { type: 'selector-cancelled' };
+  | { type: 'selector-cancelled' }
+  | { type: 'console'; level: ConsoleLevel; args: string[] };
 
 export type PreviewHostMessage = { type: 'selector-toggle'; active: boolean };

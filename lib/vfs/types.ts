@@ -1,4 +1,4 @@
-export type ProjectRuntime = 'static' | 'react' | 'preact' | 'svelte' | 'vue';
+export type ProjectRuntime = 'static' | 'handlebars' | 'react' | 'preact' | 'svelte' | 'vue' | 'python' | 'lua';
 
 export interface Project {
   id: string;
@@ -7,7 +7,7 @@ export interface Project {
   createdAt: Date;
   updatedAt: Date;
   settings: {
-    runtime?: ProjectRuntime;  // defaults to 'static' when absent
+    runtime?: ProjectRuntime;  // defaults to 'handlebars' when absent (legacy compat)
     defaultTemplate?: string;
     globalStyles?: string;
     previewEntryPoint?: string;  // defaults to '/index.html' when absent
@@ -199,6 +199,7 @@ export interface VirtualFile {
     isEntry?: boolean;
     dependencies?: string[];
     isTransient?: boolean;
+    isGenerated?: boolean;
     isBuiltIn?: boolean;
     isServerContext?: boolean;
     isReadOnly?: boolean;
@@ -246,7 +247,7 @@ export const MIME_TYPES: Record<FileType, string> = {
 export const SUPPORTED_EXTENSIONS = {
   html: ['html', 'htm'],
   css: ['css'],
-  js: ['js', 'mjs', 'jsx', 'ts', 'tsx', 'svelte', 'vue'],
+  js: ['js', 'mjs', 'jsx', 'ts', 'tsx', 'svelte', 'vue', 'py', 'lua'],
   json: ['json'],
   text: ['txt', 'md', 'xml', 'svg'],
   template: ['hbs', 'handlebars'],
@@ -294,6 +295,8 @@ export function getSpecificMimeType(path: string): string {
     'tsx': 'application/typescript',
     'svelte': 'text/x-svelte',
     'vue': 'text/x-vue',
+    'py': 'text/x-python',
+    'lua': 'text/x-lua',
 
     'json': 'application/json',
     

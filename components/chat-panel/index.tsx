@@ -83,6 +83,10 @@ interface ChatPanelProps {
   supportsVision?: boolean;
   // Provider has credentials configured
   providerReady?: boolean;
+  // Runtime errors
+  runtimeErrors?: string[];
+  onSendRuntimeErrors?: () => void;
+  onClearRuntimeErrors?: () => void;
 }
 
 interface ToolCall {
@@ -144,6 +148,9 @@ export function ChatPanel({
   onClose,
   supportsVision = false,
   providerReady = true,
+  runtimeErrors = [],
+  onSendRuntimeErrors,
+  onClearRuntimeErrors,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -718,6 +725,49 @@ export function ChatPanel({
     </div>
   ) : null;
 
+  // Runtime error card
+  const runtimeErrorHint = !generating && runtimeErrors.length > 0 ? (
+    <div
+      className="rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-muted-foreground shadow-sm"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 text-foreground">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-xs uppercase tracking-wide text-destructive">runtime errors</span>
+          <span className="inline-flex items-center justify-center rounded-full bg-destructive/15 text-destructive text-[10px] font-medium px-1.5 min-w-[18px] h-[18px]">
+            {runtimeErrors.length}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {onClearRuntimeErrors && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              onClick={onClearRuntimeErrors}
+              title="Dismiss runtime errors"
+            >
+              Clear
+            </Button>
+          )}
+          {onSendRuntimeErrors && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs text-destructive"
+              onClick={onSendRuntimeErrors}
+              title="Send errors to AI for correction"
+            >
+              Send
+            </Button>
+          )}
+        </div>
+      </div>
+      <pre className="mt-2 max-h-24 overflow-auto rounded border border-border/50 bg-background/90 px-2 py-1 text-[11px] text-foreground leading-relaxed">
+        <code>{runtimeErrors.map(e => `• ${e}`).join('\n')}</code>
+      </pre>
+    </div>
+  ) : null;
+
   return (
     <div className="h-full flex flex-col bg-card border border-border rounded-lg overflow-hidden" data-tour-id="assistant-panel">
       {/* Header */}
@@ -783,6 +833,7 @@ export function ChatPanel({
 
       {/* Input */}
       <div className="p-3 space-y-2">
+        {runtimeErrorHint}
         {focusContextHint}
         <div
           className={`bg-card border rounded-lg shadow-sm overflow-hidden transition-all ${

@@ -1,14 +1,9 @@
 import { VirtualFileSystem } from './index';
 
-export type ShellOpts = {
-  cwd?: string;
-  timeoutMs?: number;
-};
-
-export type ShellResult = {
+type ShellResult = {
   stdout: string;
   stderr: string;
-  exitCode: number; // 0 success
+  exitCode: number;
 };
 
 const TRUNCATE_CHARS = 100000;
@@ -168,7 +163,6 @@ async function vfsShellExecute(
   vfs: VirtualFileSystem,
   projectId: string,
   cmd: string[],
-  _opts: ShellOpts = {},
   stdin?: string
 ): Promise<ShellResult> {
   // Validate inputs
@@ -211,7 +205,7 @@ async function vfsShellExecute(
     const allStderr: string[] = [];
 
     for (const singleCmd of commands) {
-      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd, _opts);
+      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd);
       if (result.stdout) allStdout.push(result.stdout);
       if (result.stderr) allStderr.push(result.stderr);
 
@@ -254,7 +248,7 @@ async function vfsShellExecute(
     // Execute commands sequentially, stop on first success
     let lastResult: ShellResult = { stdout: '', stderr: '', exitCode: 1 };
     for (const singleCmd of commands) {
-      lastResult = await vfsShellExecuteSingle(vfs, projectId, singleCmd, _opts);
+      lastResult = await vfsShellExecuteSingle(vfs, projectId, singleCmd);
       if (lastResult.exitCode === 0) {
         return lastResult;
       }
@@ -281,13 +275,13 @@ async function vfsShellExecute(
     if (currentSeg.length > 0) segments.push(currentSeg);
 
     if (segments.length < 2) {
-      return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts);
+      return vfsShellExecuteSingle(vfs, projectId, cleanCmd);
     }
 
     // Execute pipe chain left-to-right, passing stdout as stdin
     let pipeStdin: string | undefined = stdin;
     for (let i = 0; i < segments.length; i++) {
-      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], _opts, pipeStdin);
+      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], pipeStdin);
       if (result.exitCode !== 0) return result;
       pipeStdin = result.stdout;
     }
@@ -295,14 +289,13 @@ async function vfsShellExecute(
     return { stdout: pipeStdin || '', stderr: '', exitCode: 0 };
   }
 
-  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, _opts, stdin);
+  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, stdin);
 }
 
 async function vfsShellExecuteSingle(
   vfs: VirtualFileSystem,
   projectId: string,
   cleanCmd: string[],
-  _opts: ShellOpts = {},
   stdin?: string
 ): Promise<ShellResult> {
   // Extract redirect operators (> or >>) before processing the command
@@ -1259,8 +1252,8 @@ Examples:
       }
       case 'curl': {
         // curl localhost/path — fetch compiled HTML from preview engine
-        // Flags: -s/--silent, -I/--head, -o FILE/--output FILE
-        const curlFlags = { silent: false, head: false, outputFile: '' };
+        // Flags: -s/--silent, -I/--head, -o FILE/--output FILE, -X METHOD, -H header, -d body
+        const curlFlags = { silent: false, head: false, outputFile: '', method: '', headers: [] as string[], body: '' };
         let curlUrl = '';
 
         for (let i = 0; i < args.length; i++) {
@@ -1268,6 +1261,9 @@ Examples:
           if (a === '-s' || a === '--silent') { curlFlags.silent = true; continue; }
           if (a === '-I' || a === '--head') { curlFlags.head = true; continue; }
           if ((a === '-o' || a === '--output') && args[i + 1]) { curlFlags.outputFile = args[++i]; continue; }
+          if ((a === '-X' || a === '--request') && args[i + 1]) { curlFlags.method = args[++i]; continue; }
+          if ((a === '-H' || a === '--header') && args[i + 1]) { curlFlags.headers.push(args[++i]); continue; }
+          if ((a === '-d' || a === '--data' || a === '--data-raw') && args[i + 1]) { curlFlags.body = args[++i]; continue; }
           if (!a.startsWith('-') && a) curlUrl = a;
         }
 
@@ -1476,7 +1472,7 @@ export const vfsShell = {
     // Import singleton vfs to ensure transient files (skills) are available
     const { vfs } = await import('./index');
     await vfs.init();
-    const result = await vfsShellExecute(vfs, projectId, cmd, {}, stdin);
+    const result = await vfsShellExecute(vfs, projectId, cmd, stdin);
     return {
       success: result.exitCode === 0,
       stdout: result.stdout,

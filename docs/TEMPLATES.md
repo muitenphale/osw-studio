@@ -29,7 +29,8 @@ Each template has a **runtime** that determines how the project is built and pre
 
 | Runtime | Description |
 |---------|-------------|
-| **Static** | HTML, CSS, and JavaScript with optional Handlebars templating |
+| **Static** | Pure HTML, CSS, and JavaScript |
+| **Handlebars** | HTML, CSS, and JavaScript with Handlebars templating |
 | **React** | Component-based React + TypeScript with automatic bundling |
 | **Preact** | Lightweight React alternative (~3KB) with signals support |
 | **Svelte** | Svelte 5 with compile-time reactivity and runes |

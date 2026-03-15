@@ -34,17 +34,15 @@ export function TemplatesTab({
 }: TemplatesTabProps) {
   const syncManager = getSyncManager();
 
-  // Use refs to hold the latest values for use in handlers
+  // Use refs to hold the latest values for use in mount-only handlers
   const selectedIdsRef = useRef(selectedIds);
-  const syncingIdsRef = useRef(syncingIds);
   const itemsRef = useRef(items);
 
   // Keep refs up to date
   useEffect(() => {
     selectedIdsRef.current = selectedIds;
-    syncingIdsRef.current = syncingIds;
     itemsRef.current = items;
-  }, [selectedIds, syncingIds, items]);
+  }, [selectedIds, items]);
 
   const handleSelectChange = (id: string, selected: boolean) => {
     const newSelected = new Set(selectedIds);
@@ -57,7 +55,7 @@ export function TemplatesTab({
   };
 
   const handlePushSingle = async (item: SyncableItem) => {
-    onSyncingIdsChange(new Set(syncingIdsRef.current).add(item.id));
+    (onSyncingIdsChange as Function)((prev: Set<string>) => new Set(prev).add(item.id));
     try {
       // Get template from IndexedDB
       await vfs.init();
@@ -81,14 +79,16 @@ export function TemplatesTab({
       logger.error('Push template error:', error);
       toast.error('Failed to push template');
     } finally {
-      const next = new Set(syncingIdsRef.current);
-      next.delete(item.id);
-      onSyncingIdsChange(next);
+      (onSyncingIdsChange as Function)((prev: Set<string>) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
     }
   };
 
   const handlePullSingle = async (item: SyncableItem) => {
-    onSyncingIdsChange(new Set(syncingIdsRef.current).add(item.id));
+    (onSyncingIdsChange as Function)((prev: Set<string>) => new Set(prev).add(item.id));
     try {
       const result = await syncManager.pullTemplate(item.id);
 
@@ -116,9 +116,11 @@ export function TemplatesTab({
       logger.error('Pull template error:', error);
       toast.error('Failed to pull template');
     } finally {
-      const next = new Set(syncingIdsRef.current);
-      next.delete(item.id);
-      onSyncingIdsChange(next);
+      (onSyncingIdsChange as Function)((prev: Set<string>) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
     }
   };
 

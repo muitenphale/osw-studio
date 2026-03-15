@@ -1,0 +1,859 @@
+'use client';
+
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { Terminal as TerminalIcon, Play, Square, Trash2, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { scriptRunner } from '@/lib/scripting/script-runner';
+import { vfsShell } from '@/lib/vfs/cli-shell';
+import { vfs } from '@/lib/vfs';
+import type { ScriptRuntime, ScriptWorkerResponse } from '@/lib/scripting/types';
+import type { ProjectRuntime } from '@/lib/vfs/types';
+import { getRuntimeConfig } from '@/lib/runtimes/registry';
+import { logger } from '@/lib/utils';
+
+interface ConsolePanelProps {
+  projectId: string;
+  runtime: ProjectRuntime;
+  onClose?: () => void;
+  bufferedMessages?: { level: string; text: string }[];
+  onBufferConsumed?: () => void;
+}
+
+/** Tokenize a command string into argv, respecting quotes. */
+function tokenize(input: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && !inSingle) {
+      escaped = true;
+      continue;
+    }
+
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (ch === ' ' && !inSingle && !inDouble) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+/** Get the script runtime from a file extension. */
+function runtimeFromExtension(path: string): ScriptRuntime | null {
+  if (path.endsWith('.py')) return 'python';
+  if (path.endsWith('.lua')) return 'lua';
+  return null;
+}
+
+/** Check if a file is executable in the console. */
+function isExecutableFile(path: string): boolean {
+  return runtimeFromExtension(path) !== null;
+}
+
+const MAX_HISTORY = 50;
+
+/** Write a colored log line to the terminal based on level. */
+function writeLogLine(term: import('@xterm/xterm').Terminal, level: string, text: string) {
+  switch (level) {
+    case 'warn':
+      term.writeln(`\x1b[33m[warn] ${text}\x1b[0m`);
+      break;
+    case 'error':
+      term.writeln(`\x1b[31m[error] ${text}\x1b[0m`);
+      break;
+    case 'info':
+      term.writeln(`\x1b[36m[info] ${text}\x1b[0m`);
+      break;
+    case 'debug':
+      term.writeln(`\x1b[2m[debug] ${text}\x1b[0m`);
+      break;
+    default:
+      term.writeln(text);
+      break;
+  }
+}
+
+export function ConsolePanel({ projectId, runtime, onClose, bufferedMessages, onBufferConsumed }: ConsolePanelProps) {
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<import('@xterm/xterm').Terminal | null>(null);
+  const fitAddonRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Entry point / file dropdown
+  const isTerminalRuntime = getRuntimeConfig(runtime).previewMode === 'terminal';
+  const defaultEntryPoint = runtime === 'python' ? '/main.py' : runtime === 'lua' ? '/main.lua' : '';
+  const [selectedEntryPoint, setSelectedEntryPoint] = useState(defaultEntryPoint);
+  const [executableFiles, setExecutableFiles] = useState<string[]>([]);
+
+  // Input line buffer
+  const inputBufferRef = useRef('');
+  const cursorPosRef = useRef(0);
+  const isRunningRef = useRef(false);
+
+  // Command history
+  const historyRef = useRef<string[]>([]);
+  const historyIndexRef = useRef(-1);
+  const savedInputRef = useRef('');
+
+  // Cooldown: ignore filesChanged for 1s after script completion
+  // (output-file VFS writes arrive after 'complete', re-triggering auto-run)
+  const lastRunCompletedRef = useRef(0);
+
+  // Track AI generation state to suppress auto-run during generation
+  const generatingRef = useRef(false);
+  const lastBuildSuccessRef = useRef(false);
+
+  // Load executable files from VFS
+  const loadExecutableFiles = useCallback(async () => {
+    try {
+      await vfs.init();
+      const files = await vfs.listFiles(projectId);
+      const execs = files
+        .filter((f: { path: string }) => isExecutableFile(f.path))
+        .map((f: { path: string }) => f.path)
+        .sort();
+      setExecutableFiles(execs);
+    } catch (_err) {
+      // ignore
+    }
+  }, [projectId]);
+
+  // Initialize xterm
+  useEffect(() => {
+    let cancelled = false;
+    let terminal: import('@xterm/xterm').Terminal | null = null;
+    let fitAddon: import('@xterm/addon-fit').FitAddon | null = null;
+
+    const init = async () => {
+      if (!terminalRef.current) return;
+
+      const { Terminal } = await import('@xterm/xterm');
+      const { FitAddon } = await import('@xterm/addon-fit');
+      try {
+        // @ts-expect-error — CSS module import handled by Next.js bundler
+        await import('@xterm/xterm/css/xterm.css');
+      } catch (_cssErr) { /* non-fatal */ }
+
+      if (cancelled || !terminalRef.current) return;
+
+      terminalRef.current.innerHTML = '';
+
+      terminal = new Terminal({
+        theme: {
+          background: '#1a1a2e',
+          foreground: '#e0e0e0',
+          cursor: '#e0e0e0',
+          cursorAccent: '#1a1a2e',
+          selectionBackground: 'rgba(255, 255, 255, 0.2)',
+          black: '#1a1a2e',
+          red: '#ff6b6b',
+          green: '#51cf66',
+          yellow: '#ffd43b',
+          blue: '#748ffc',
+          magenta: '#cc5de8',
+          cyan: '#66d9e8',
+          white: '#e0e0e0',
+          brightBlack: '#495057',
+          brightRed: '#ff8787',
+          brightGreen: '#69db7c',
+          brightYellow: '#ffe066',
+          brightBlue: '#91a7ff',
+          brightMagenta: '#e599f7',
+          brightCyan: '#99e9f2',
+          brightWhite: '#f8f9fa',
+        },
+        fontSize: 13,
+        fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Menlo, Monaco, monospace',
+        lineHeight: 1.4,
+        cursorBlink: true,
+        disableStdin: false,
+        convertEol: true,
+        scrollback: 5000,
+      });
+
+      fitAddon = new FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.open(terminalRef.current);
+
+      requestAnimationFrame(() => {
+        if (fitAddon && !cancelled) {
+          try { fitAddon.fit(); } catch (_e) { /* not attached yet */ }
+        }
+      });
+
+      xtermRef.current = terminal;
+      fitAddonRef.current = fitAddon;
+      setIsReady(true);
+
+      // Welcome message
+      terminal.writeln('\x1b[2mConsole ready \u2014 type \'help\' for commands\x1b[0m');
+      writePrompt(terminal);
+
+      // Replay buffered messages captured while console was hidden
+      if (bufferedMessages && bufferedMessages.length > 0) {
+        for (const msg of bufferedMessages) {
+          writeLogLine(terminal, msg.level, msg.text);
+        }
+        onBufferConsumed?.();
+        writePrompt(terminal);
+      }
+
+      // Wire up input handler
+      terminal.onData((data) => {
+        handleTerminalInput(data);
+      });
+    };
+
+    init().catch(err => logger.error('Failed to initialize console:', err));
+
+    return () => {
+      cancelled = true;
+      terminal?.dispose();
+      xtermRef.current = null;
+      fitAddonRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load files on mount and when files change
+  useEffect(() => {
+    loadExecutableFiles();
+    const handler = () => loadExecutableFiles();
+    window.addEventListener('filesChanged', handler);
+    return () => window.removeEventListener('filesChanged', handler);
+  }, [loadExecutableFiles]);
+
+  // Resize handler
+  useEffect(() => {
+    const handleResize = () => {
+      if (fitAddonRef.current) {
+        try { fitAddonRef.current.fit(); } catch (_e) { /* ignore */ }
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    const observer = new ResizeObserver(handleResize);
+    if (terminalRef.current?.parentElement) {
+      observer.observe(terminalRef.current.parentElement);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      observer.disconnect();
+    };
+  }, [isReady]);
+
+  // Track AI generation state to suppress auto-run
+  useEffect(() => {
+    const handler = (e: Event) => {
+      generatingRef.current = (e as CustomEvent).detail?.generating ?? false;
+    };
+    window.addEventListener('generationStateChanged', handler);
+    return () => window.removeEventListener('generationStateChanged', handler);
+  }, []);
+
+  // Show compilation output for non-terminal runtimes (React, Preact, Svelte, Vue, static)
+  useEffect(() => {
+    if (isTerminalRuntime) return;
+
+    const handleCompilation = (e: Event) => {
+      // Suppress during AI generation
+      if (generatingRef.current) return;
+
+      const detail = (e as CustomEvent).detail;
+      const term = xtermRef.current;
+      if (!term) return;
+
+      if (detail.success) {
+        // Skip consecutive success messages (multiple compiles on load)
+        if (!lastBuildSuccessRef.current) {
+          term.writeln('\x1b[32m\u2713 Build successful\x1b[0m');
+        }
+        lastBuildSuccessRef.current = true;
+      } else {
+        lastBuildSuccessRef.current = false;
+        for (const err of detail.errors) {
+          term.writeln(`\x1b[31m\u2717 ${err.file}: ${err.error}\x1b[0m`);
+        }
+      }
+    };
+
+    window.addEventListener('compilationComplete', handleCompilation);
+    return () => window.removeEventListener('compilationComplete', handleCompilation);
+  }, [isTerminalRuntime]);
+
+  // Capture console.log/warn/error/info/debug from preview iframe
+  useEffect(() => {
+    if (isTerminalRuntime) return;
+
+    const handler = (e: Event) => {
+      if (generatingRef.current) return;
+      const term = xtermRef.current;
+      if (!term) return;
+
+      const { level, args } = (e as CustomEvent<{ level: string; args: string[] }>).detail;
+      writeLogLine(term, level, args.join(' '));
+    };
+
+    window.addEventListener('previewConsole', handler);
+    return () => window.removeEventListener('previewConsole', handler);
+  }, [isTerminalRuntime]);
+
+  // Listen for "runInConsole" custom event from file explorer
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ path: string }>).detail;
+      if (detail?.path) {
+        setSelectedEntryPoint(detail.path);
+        runFile(detail.path);
+      }
+    };
+    window.addEventListener('runInConsole', handler);
+    return () => window.removeEventListener('runInConsole', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // Subscribe to script runner output
+  useEffect(() => {
+    const unsubscribe = scriptRunner.onOutput((msg: ScriptWorkerResponse) => {
+      const term = xtermRef.current;
+      if (!term) return;
+
+      switch (msg.type) {
+        case 'stdout':
+          term.writeln(msg.data);
+          break;
+        case 'stderr':
+          term.writeln(`\x1b[31m${msg.data}\x1b[0m`);
+          break;
+        case 'status':
+          term.writeln(`\x1b[2m${msg.data}\x1b[0m`);
+          break;
+        case 'error':
+          term.writeln(`\x1b[31;1m${msg.data}\x1b[0m`);
+          break;
+        case 'complete':
+          isRunningRef.current = false;
+          lastRunCompletedRef.current = Date.now();
+          setIsRunning(false);
+          if (msg.exitCode === 0) {
+            term.writeln('\x1b[2m--- Script completed ---\x1b[0m');
+          } else {
+            term.writeln(`\x1b[31;2m--- Script exited with code ${msg.exitCode} ---\x1b[0m`);
+          }
+          writePrompt(term);
+          break;
+        case 'output-file':
+          handleOutputFile(msg.path, msg.content);
+          break;
+      }
+    });
+
+    return unsubscribe;
+  }, [projectId]);
+
+  // Handle output files from script execution
+  const handleOutputFile = useCallback(async (path: string, content: string) => {
+    try {
+      await vfs.init();
+      const files = await vfs.listFiles(projectId);
+      const existing = files.find((f: { path: string }) => f.path === path);
+
+      if (existing) {
+        await vfs.updateFile(projectId, path, content);
+      } else {
+        try { await vfs.createDirectory(projectId, '/output'); } catch (_e) { /* exists */ }
+        await vfs.createFile(projectId, path, content);
+      }
+    } catch (err) {
+      logger.error('Failed to write output file:', err);
+    }
+  }, [projectId]);
+
+  // Auto-run on file changes (terminal runtimes only)
+  useEffect(() => {
+    if (!isTerminalRuntime) return;
+
+    const handleFilesChanged = () => {
+      // Skip if AI is generating — wait for explicit python/lua command
+      if (generatingRef.current) return;
+      // Skip if a script is running or just finished (output-file writes trigger filesChanged)
+      if (isRunningRef.current) return;
+      if (Date.now() - lastRunCompletedRef.current < 1000) return;
+
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+      debounceRef.current = setTimeout(() => {
+        if (isRunningRef.current) return;
+        if (Date.now() - lastRunCompletedRef.current < 1000) return;
+        const ep = selectedEntryPoint || defaultEntryPoint;
+        if (ep) runFile(ep);
+      }, 150);
+    };
+
+    window.addEventListener('filesChanged', handleFilesChanged);
+
+    return () => {
+      window.removeEventListener('filesChanged', handleFilesChanged);
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEntryPoint, defaultEntryPoint, isTerminalRuntime, projectId]);
+
+  // Auto-run entry point on initial ready (terminal runtimes only)
+  useEffect(() => {
+    if (!isReady || !isTerminalRuntime) return;
+    const ep = selectedEntryPoint || defaultEntryPoint;
+    if (ep) {
+      // Short delay to let the terminal render the welcome message first
+      const timer = setTimeout(() => runFile(ep), 100);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      scriptRunner.dispose();
+    };
+  }, []);
+
+  // --- Input handling ---
+
+  function writePrompt(term: import('@xterm/xterm').Terminal) {
+    term.write('\r\n\x1b[32m$\x1b[0m ');
+  }
+
+  function redrawLine() {
+    const term = xtermRef.current;
+    if (!term) return;
+    const buf = inputBufferRef.current;
+    const pos = cursorPosRef.current;
+
+    // Move to start of line, clear it, rewrite prompt + buffer
+    term.write('\r\x1b[K\x1b[32m$\x1b[0m ' + buf);
+
+    // Position cursor correctly
+    const charsAfterCursor = buf.length - pos;
+    if (charsAfterCursor > 0) {
+      term.write(`\x1b[${charsAfterCursor}D`);
+    }
+  }
+
+  function handleTerminalInput(data: string) {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    // During script execution, only Ctrl+C is handled
+    if (isRunningRef.current) {
+      if (data === '\x03') {
+        stopScript();
+      }
+      return;
+    }
+
+    for (let i = 0; i < data.length; i++) {
+      const ch = data[i];
+
+      // Check for escape sequences (arrow keys etc.)
+      if (ch === '\x1b' && i + 2 < data.length && data[i + 1] === '[') {
+        const code = data[i + 2];
+        i += 2; // skip '[' and code
+
+        switch (code) {
+          case 'A': // Up arrow — history back
+            navigateHistory(-1);
+            break;
+          case 'B': // Down arrow — history forward
+            navigateHistory(1);
+            break;
+          case 'C': // Right arrow
+            if (cursorPosRef.current < inputBufferRef.current.length) {
+              cursorPosRef.current++;
+              term.write('\x1b[C');
+            }
+            break;
+          case 'D': // Left arrow
+            if (cursorPosRef.current > 0) {
+              cursorPosRef.current--;
+              term.write('\x1b[D');
+            }
+            break;
+        }
+        continue;
+      }
+
+      switch (ch) {
+        case '\r': // Enter
+          term.write('\r\n');
+          processCommand();
+          break;
+
+        case '\x7f': // Backspace
+          if (cursorPosRef.current > 0) {
+            const buf = inputBufferRef.current;
+            inputBufferRef.current = buf.slice(0, cursorPosRef.current - 1) + buf.slice(cursorPosRef.current);
+            cursorPosRef.current--;
+            redrawLine();
+          }
+          break;
+
+        case '\x03': // Ctrl+C
+          term.write('^C');
+          inputBufferRef.current = '';
+          cursorPosRef.current = 0;
+          historyIndexRef.current = -1;
+          writePrompt(term);
+          break;
+
+        case '\x0c': // Ctrl+L — clear
+          term.clear();
+          redrawLine();
+          break;
+
+        default:
+          // Only insert printable characters
+          if (ch >= ' ') {
+            const buf = inputBufferRef.current;
+            inputBufferRef.current = buf.slice(0, cursorPosRef.current) + ch + buf.slice(cursorPosRef.current);
+            cursorPosRef.current++;
+            redrawLine();
+          }
+          break;
+      }
+    }
+  }
+
+  function navigateHistory(direction: number) {
+    const history = historyRef.current;
+    if (history.length === 0) return;
+
+    const idx = historyIndexRef.current;
+
+    if (direction < 0) {
+      // Going back in history
+      if (idx === -1) {
+        // Save current input before navigating
+        savedInputRef.current = inputBufferRef.current;
+        historyIndexRef.current = history.length - 1;
+      } else if (idx > 0) {
+        historyIndexRef.current = idx - 1;
+      } else {
+        return; // Already at oldest
+      }
+    } else {
+      // Going forward in history
+      if (idx === -1) return; // Already at current input
+      if (idx < history.length - 1) {
+        historyIndexRef.current = idx + 1;
+      } else {
+        // Return to saved input
+        historyIndexRef.current = -1;
+        inputBufferRef.current = savedInputRef.current;
+        cursorPosRef.current = inputBufferRef.current.length;
+        redrawLine();
+        return;
+      }
+    }
+
+    inputBufferRef.current = history[historyIndexRef.current];
+    cursorPosRef.current = inputBufferRef.current.length;
+    redrawLine();
+  }
+
+  async function processCommand() {
+    const line = inputBufferRef.current.trim();
+    inputBufferRef.current = '';
+    cursorPosRef.current = 0;
+    historyIndexRef.current = -1;
+
+    if (!line) {
+      writePrompt(xtermRef.current!);
+      return;
+    }
+
+    // Push to history (avoid consecutive duplicates)
+    const history = historyRef.current;
+    if (history.length === 0 || history[history.length - 1] !== line) {
+      history.push(line);
+      if (history.length > MAX_HISTORY) history.shift();
+    }
+
+    const tokens = tokenize(line);
+    if (tokens.length === 0) {
+      writePrompt(xtermRef.current!);
+      return;
+    }
+
+    const cmd = tokens[0];
+
+    // Route commands
+    switch (cmd) {
+      case 'exec':
+        await handleExec(tokens.slice(1));
+        break;
+      case 'clear':
+        xtermRef.current?.clear();
+        writePrompt(xtermRef.current!);
+        break;
+      case 'help':
+        printHelp();
+        break;
+      default:
+        // Route to VFS shell
+        await handleShellCommand(tokens);
+        break;
+    }
+  }
+
+  async function handleExec(args: string[]) {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    if (args.length === 0) {
+      term.writeln('\x1b[33mUsage: exec <file.py|file.lua>\x1b[0m');
+      writePrompt(term);
+      return;
+    }
+
+    const filePath = args[0].startsWith('/') ? args[0] : '/' + args[0];
+    const sr = runtimeFromExtension(filePath);
+
+    if (!sr) {
+      term.writeln(`\x1b[31mUnsupported file type: ${filePath}\x1b[0m`);
+      term.writeln('\x1b[2mSupported: .py, .lua\x1b[0m');
+      writePrompt(term);
+      return;
+    }
+
+    setSelectedEntryPoint(filePath);
+    runFile(filePath);
+  }
+
+  function runFile(filePath: string) {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    const sr = runtimeFromExtension(filePath);
+    if (!sr) return;
+
+    // Abort any running execution
+    if (isRunningRef.current) {
+      scriptRunner.abort();
+    }
+
+    isRunningRef.current = true;
+    setIsRunning(true);
+
+    term.writeln(`\x1b[2m--- Running ${filePath} ---\x1b[0m`);
+
+    scriptRunner.execute(projectId, sr, filePath).catch(err => {
+      term.writeln(`\x1b[31mFailed to execute: ${err}\x1b[0m`);
+      isRunningRef.current = false;
+      setIsRunning(false);
+      writePrompt(term);
+    });
+  }
+
+  async function handleShellCommand(tokens: string[]) {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    try {
+      const result = await vfsShell.execute(projectId, tokens);
+
+      if (result.success) {
+        if (result.stdout) {
+          // Write each line individually to handle EOL properly
+          const lines = result.stdout.split('\n');
+          for (const line of lines) {
+            term.writeln(line);
+          }
+        }
+      } else {
+        if (result.stderr) {
+          term.writeln(`\x1b[31m${result.stderr}\x1b[0m`);
+        }
+      }
+    } catch (err) {
+      term.writeln(`\x1b[31mError: ${err instanceof Error ? err.message : 'Unknown error'}\x1b[0m`);
+    }
+
+    writePrompt(term);
+  }
+
+  function printHelp() {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    term.writeln('');
+    term.writeln('\x1b[1mAvailable commands:\x1b[0m');
+    term.writeln('  \x1b[36mexec <file>\x1b[0m     Run a script (.py, .lua)');
+    term.writeln('  \x1b[36mclear\x1b[0m           Clear the console');
+    term.writeln('  \x1b[36mhelp\x1b[0m            Show this help');
+    term.writeln('');
+    term.writeln('\x1b[1mVFS shell commands:\x1b[0m');
+    term.writeln('  ls, cat, head, tail, grep, rg, find, mkdir, touch,');
+    term.writeln('  rm, mv, cp, echo, sed, wc, tree, curl');
+    term.writeln('');
+    term.writeln('\x1b[1mOperators:\x1b[0m | (pipe), > >> (redirect), && || (chain)');
+    term.writeln('');
+
+    writePrompt(term);
+  }
+
+  // --- Button handlers ---
+
+  const handleRun = useCallback(() => {
+    const ep = selectedEntryPoint || defaultEntryPoint;
+    if (ep) runFile(ep);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEntryPoint, defaultEntryPoint, projectId]);
+
+  const stopScript = useCallback(() => {
+    scriptRunner.abort();
+    isRunningRef.current = false;
+    setIsRunning(false);
+    const term = xtermRef.current;
+    if (term) {
+      term.writeln('\x1b[33m--- Script aborted ---\x1b[0m');
+      writePrompt(term);
+    }
+  }, []);
+
+  const clearConsole = useCallback(() => {
+    xtermRef.current?.clear();
+  }, []);
+
+  // Determine if we should show run/stop buttons
+  const hasExecutableFiles = executableFiles.length > 0 || isTerminalRuntime;
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="p-3 border-b bg-muted/70 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <TerminalIcon
+            className="h-4 w-4 md:hidden"
+            style={{ color: 'var(--button-terminal-active, #22c55e)' }}
+          />
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Hide console"
+              className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
+            >
+              <TerminalIcon
+                className="h-4 w-4 transition-opacity group-hover:opacity-0"
+                style={{ color: 'var(--button-terminal-active, #22c55e)' }}
+              />
+              <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+            </button>
+          ) : (
+            <TerminalIcon
+              className="hidden h-4 w-4 md:inline-flex"
+              style={{ color: 'var(--button-terminal-active, #22c55e)' }}
+            />
+          )}
+          <h3 className="text-sm font-medium">Console</h3>
+
+          {/* File dropdown (when executable files exist) */}
+          {hasExecutableFiles && (
+            <select
+              value={selectedEntryPoint}
+              onChange={(e) => setSelectedEntryPoint(e.target.value)}
+              className="text-xs bg-background border border-border rounded px-1.5 py-0.5 max-w-[140px] ml-1"
+            >
+              {executableFiles.map(f => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+              {/* If selected entry point is not in the list, still show it */}
+              {selectedEntryPoint && !executableFiles.includes(selectedEntryPoint) && (
+                <option value={selectedEntryPoint}>{selectedEntryPoint}</option>
+              )}
+            </select>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {hasExecutableFiles && (
+            isRunning ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 px-2 gap-1.5 text-destructive hover:text-destructive"
+                onClick={stopScript}
+              >
+                <Square className="h-3 w-3" />
+                <span className="text-xs">Stop</span>
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 px-2 gap-1.5"
+                onClick={handleRun}
+                disabled={!selectedEntryPoint && !defaultEntryPoint}
+              >
+                <Play className="h-3 w-3" />
+                <span className="text-xs">Run</span>
+              </Button>
+            )
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-5 px-2 gap-1.5"
+            onClick={clearConsole}
+          >
+            <Trash2 className="h-3 w-3" />
+            <span className="text-xs">Clear</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Terminal area */}
+      <div className="flex-1 overflow-hidden p-1" style={{ backgroundColor: '#1a1a2e' }}>
+        <div ref={terminalRef} className="h-full w-full" />
+      </div>
+    </div>
+  );
+}

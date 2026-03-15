@@ -1,10 +1,10 @@
 import { ProjectTemplate } from '../../project-templates';
-import { STATIC_DOMAIN_PROMPT } from '@/lib/llm/prompts/static';
+import { HANDLEBARS_DOMAIN_PROMPT } from '@/lib/llm/prompts/handlebars';
 
-export const BAREBONES_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Website Starter',
-  description: 'Minimal starting template with basic HTML/CSS/JS structure',
-  directories: ['/styles', '/scripts'],
+export const HANDLEBARS_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
+  name: 'Starter (Handlebars)',
+  description: 'Minimal starting template with Handlebars partials and data',
+  directories: ['/styles', '/scripts', '/templates'],
   files: [
     {
       path: '/index.html',
@@ -17,10 +17,7 @@ export const BAREBONES_PROJECT_TEMPLATE: ProjectTemplate = {
     <link rel="stylesheet" href="/styles/style.css">
 </head>
 <body>
-    <div class="welcome-card">
-        <h1>Welcome</h1>
-        <p>Start building your website!</p>
-    </div>
+    {{> welcome-card}}
 
     <script src="/scripts/main.js"></script>
 </body>
@@ -63,8 +60,22 @@ p {
 `
     },
     {
+      path: '/templates/welcome-card.hbs',
+      content: `<div class="welcome-card">
+    <h1>{{title}}</h1>
+    <p>{{message}}</p>
+</div>`
+    },
+    {
+      path: '/data.json',
+      content: `{
+  "title": "Welcome",
+  "message": "Start building your website!"
+}`
+    },
+    {
       path: '/.PROMPT.md',
-      content: STATIC_DOMAIN_PROMPT
+      content: HANDLEBARS_DOMAIN_PROMPT
     }
   ]
 };

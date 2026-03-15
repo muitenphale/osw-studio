@@ -10,7 +10,7 @@ import { Skill } from '../skills/types';
 import { StorageAdapter } from './types';
 
 const DB_NAME = 'osw-studio-db';
-const DB_VERSION = 5; // Incremented to add project-scoped backend feature stores
+const DB_VERSION = 6; // Migrate runtime 'static' → 'handlebars' for existing projects/templates
 
 export class IndexedDBAdapter implements StorageAdapter {
   private db: IDBDatabase | null = null;
@@ -30,6 +30,7 @@ export class IndexedDBAdapter implements StorageAdapter {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        const oldVersion = event.oldVersion;
 
         // VFS object stores
         if (!db.objectStoreNames.contains('projects')) {
@@ -113,6 +114,42 @@ export class IndexedDBAdapter implements StorageAdapter {
           const schedFnStore = db.createObjectStore('scheduledFunctions', { keyPath: 'id' });
           schedFnStore.createIndex('projectId', 'projectId', { unique: false });
           schedFnStore.createIndex('projectIdName', ['projectId', 'name'], { unique: true });
+        }
+
+        // v6: Migrate runtime 'static' → 'handlebars' for existing projects and custom templates
+        if (oldVersion < 6) {
+          const tx = (event.target as IDBOpenDBRequest).transaction!;
+
+          if (db.objectStoreNames.contains('projects')) {
+            const projectStore = tx.objectStore('projects');
+            projectStore.openCursor().onsuccess = (e) => {
+              const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+              if (cursor) {
+                const project = cursor.value;
+                if (!project.settings?.runtime || project.settings.runtime === 'static') {
+                  project.settings = project.settings || {};
+                  project.settings.runtime = 'handlebars';
+                  cursor.update(project);
+                }
+                cursor.continue();
+              }
+            };
+          }
+
+          if (db.objectStoreNames.contains('customTemplates')) {
+            const templateStore = tx.objectStore('customTemplates');
+            templateStore.openCursor().onsuccess = (e) => {
+              const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+              if (cursor) {
+                const template = cursor.value;
+                if (!template.runtime || template.runtime === 'static') {
+                  template.runtime = 'handlebars';
+                  cursor.update(template);
+                }
+                cursor.continue();
+              }
+            };
+          }
         }
       };
     });

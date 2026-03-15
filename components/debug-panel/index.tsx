@@ -3,8 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, Bug, X, Trash2, Terminal } from 'lucide-react';
-import { vfsShell } from '@/lib/vfs/cli-shell';
+import { ChevronDown, ChevronUp, Bug, X, Trash2 } from 'lucide-react';
 import { MemoryMonitor } from './memory-monitor';
 
 export interface DebugEvent {
@@ -23,17 +22,11 @@ interface DebugPanelProps {
   projectId?: string;
 }
 
-export function DebugPanel({ events, onClear, onClose, projectId }: DebugPanelProps) {
+export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
   const [filter, setFilter] = useState<string>('');
   const [isExpanded, setIsExpanded] = useState(true);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-
-  // Mini terminal state
-  const [command, setCommand] = useState('');
-  const [shellOutput, setShellOutput] = useState<{cmd: string, output: string, isError?: boolean}[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const shellOutputRef = useRef<HTMLDivElement>(null);
 
   // Compress consecutive assistant_delta, tool_param_delta, and reasoning_delta events
   // Only store count, not individual events - prevents O(N²) memory growth
@@ -99,39 +92,6 @@ export function DebugPanel({ events, onClear, onClose, projectId }: DebugPanelPr
     a.download = `debug-events-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  };
-
-  // Run shell command
-  const handleRunCommand = async () => {
-    if (!command.trim() || !projectId || isRunning) return;
-
-    const cmd = command.trim();
-    setCommand('');
-    setIsRunning(true);
-
-    try {
-      // Parse command string into argv array
-      const argv = cmd.split(/\s+/);
-      const result = await vfsShell.execute(projectId, argv);
-
-      const output = result.success
-        ? result.stdout || '(no output)'
-        : result.stderr || 'Command failed';
-
-      setShellOutput(prev => [...prev, { cmd, output, isError: !result.success }]);
-    } catch (err) {
-      setShellOutput(prev => [...prev, {
-        cmd,
-        output: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        isError: true
-      }]);
-    } finally {
-      setIsRunning(false);
-      // Scroll to bottom of shell output
-      setTimeout(() => {
-        shellOutputRef.current?.scrollTo({ top: shellOutputRef.current.scrollHeight, behavior: 'smooth' });
-      }, 50);
-    }
   };
 
   // Filter events
@@ -251,64 +211,6 @@ export function DebugPanel({ events, onClear, onClose, projectId }: DebugPanelPr
         <div ref={eventsEndRef} />
       </div>
 
-      {/* Mini Terminal */}
-      {projectId && (
-        <div className="border-t border-border shrink-0">
-          {/* Terminal Header */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 border-b border-border">
-            <Terminal className="h-3 w-3 text-muted-foreground" />
-            <span className="text-xs font-medium">VFS Shell</span>
-            {shellOutput.length > 0 && (
-              <button
-                onClick={() => setShellOutput([])}
-                className="ml-auto text-xs text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-
-          {/* Output history */}
-          {shellOutput.length > 0 && (
-            <div
-              ref={shellOutputRef}
-              className="max-h-32 overflow-y-auto p-2 bg-zinc-950 font-mono text-xs"
-            >
-              {shellOutput.map((entry, i) => (
-                <div key={i} className="mb-2">
-                  <div className="text-emerald-400">$ {entry.cmd}</div>
-                  <pre className={`whitespace-pre-wrap ${entry.isError ? 'text-red-400' : 'text-zinc-300'}`}>
-                    {entry.output}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Command input */}
-          <div className="flex items-center gap-2 p-2 bg-zinc-950">
-            <span className="text-emerald-400 font-mono text-xs">$</span>
-            <input
-              type="text"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleRunCommand()}
-              placeholder="ls -la /.skills/"
-              disabled={isRunning}
-              className="flex-1 bg-transparent border-none outline-none text-xs font-mono text-zinc-100 placeholder:text-zinc-600"
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleRunCommand}
-              disabled={isRunning || !command.trim()}
-              className="h-6 px-2 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
-            >
-              {isRunning ? '...' : 'Run'}
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

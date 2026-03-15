@@ -255,7 +255,9 @@ export function MultiTabEditor({ projectId, runtime, onFilesChange: _onFilesChan
       'txt': 'plaintext',
       'xml': 'xml',
       'yaml': 'yaml',
-      'yml': 'yaml'
+      'yml': 'yaml',
+      'py': 'python',
+      'lua': 'lua'
     };
     
     if (textExtensions[ext || '']) {
@@ -427,7 +429,7 @@ export function MultiTabEditor({ projectId, runtime, onFilesChange: _onFilesChan
                     height="100%"
                     path={activeFile.file.path}
                     language={getLanguageFromPath(activeFile.file.path)}
-                    value={activeFile.content}
+                    value={activeFile.content ?? ''}
                     onChange={(value) => handleContentChange(value, activeFile.file.path)}
                     theme={mounted ? (resolvedTheme === 'dark' ? 'vs-dark' : 'light') : 'vs-dark'}
                     options={{

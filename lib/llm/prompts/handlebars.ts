@@ -1,12 +1,12 @@
 /**
- * Website Domain Prompt
+ * Handlebars Domain Prompt
  *
  * Extracted from the base system prompt so it can live in .PROMPT.md per-project.
  * Contains platform constraints and Handlebars documentation specific to
- * the static-website builder domain.
+ * the Handlebars-powered website builder domain.
  */
 
-export const WEBSITE_DOMAIN_PROMPT = `🚨 PLATFORM CONSTRAINTS - READ THIS FIRST:
+export const HANDLEBARS_DOMAIN_PROMPT = `🚨 PLATFORM CONSTRAINTS - READ THIS FIRST:
 
 This is a STATIC WEBSITE builder - you can ONLY create client-side HTML/CSS/JS:
 • ❌ NO backend code (no Node.js, Python, PHP, Ruby, etc.)
@@ -336,6 +336,10 @@ Nested Data Access:
 
 {{! Debug data structures }}
 <pre>{{json data}}</pre>
+
+BUILD OUTPUT:
+- The preview auto-compiles Handlebars templates when files change
+- Template compilation errors appear in the Terminal panel
 
 FILE CREATION GUIDELINES:
 

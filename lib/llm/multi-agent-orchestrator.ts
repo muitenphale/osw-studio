@@ -19,6 +19,7 @@ import { fetchAvailableModels } from './models-api';
 import { parseStreamingResponse, buildFileTree, ReasoningDetail } from './streaming-parser';
 import { extractPartialContent, getContinuationMarker, PartialContentExtraction } from './json-repair';
 import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
+import { drainRuntimeErrors, formatRuntimeErrors } from '@/lib/preview/runtime-errors';
 import { buildShellSystemPrompt, buildProjectContext } from './system-prompt';
 import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
@@ -662,6 +663,15 @@ export class MultiAgentOrchestrator {
           this.addMessage(conversationId, {
             role: 'user',
             content: formatCompileErrors(compileErrors),
+            ui_metadata: { isSyntheticError: true }
+          });
+        }
+
+        const runtimeErrors = drainRuntimeErrors();
+        if (runtimeErrors.length > 0) {
+          this.addMessage(conversationId, {
+            role: 'user',
+            content: formatRuntimeErrors(runtimeErrors),
             ui_metadata: { isSyntheticError: true }
           });
         }

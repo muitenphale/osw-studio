@@ -279,7 +279,32 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
         throw new Error('Project not found in local storage');
       }
 
-      const files = await vfs.listFiles(deployment.projectId);
+      // Block publishing for terminal-mode runtimes (Python, Lua) — they can't be
+      // served as static sites. Use ZIP export instead.
+      const { isRuntimeBundled, getRuntimeConfig } = await import('@/lib/runtimes/registry');
+      const runtime = project.settings?.runtime;
+      if (runtime && getRuntimeConfig(runtime).previewMode === 'terminal') {
+        throw new Error(`${getRuntimeConfig(runtime).label} projects cannot be published as static sites. Use ZIP export instead.`);
+      }
+
+      let files = await vfs.listFiles(deployment.projectId);
+
+      if (runtime && isRuntimeBundled(runtime)) {
+        // Always compile fresh — generated files may be stale or absent
+        // (e.g. user publishes without opening the preview first)
+        toast.info('Compiling project bundles...');
+        const { VirtualServer } = await import('@/lib/preview/virtual-server');
+        const vs = new VirtualServer(vfs as any, deployment.projectId, undefined, undefined, undefined, runtime);
+        await vs.compileProject();
+        vs.cleanupBlobUrls();
+
+        const generatedFiles = vfs.getGeneratedFiles();
+        if (generatedFiles.length > 0) {
+          const withProjectId = generatedFiles.map(f => ({ ...f, projectId: deployment.projectId }));
+          files = [...files, ...withProjectId];
+        }
+      }
+
       const syncManager = getSyncManager();
 
       // Push project and files to server

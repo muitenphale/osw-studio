@@ -5,7 +5,7 @@ import { CustomTemplate, BackendFeatures } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { createProjectFromTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
-import { BAREBONES_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
+import { BAREBONES_PROJECT_TEMPLATE, HANDLEBARS_STARTER_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TemplateCard } from './template-card';
@@ -121,6 +121,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
         // Populate with template content
         if (template.id === 'blank') {
           await createProjectFromTemplate(vfs, tempProject.id, BAREBONES_PROJECT_TEMPLATE);
+        } else if (template.id === 'handlebars-starter') {
+          await createProjectFromTemplate(vfs, tempProject.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
         } else if (template.id === 'demo') {
           await createProjectFromTemplate(vfs, tempProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
         } else if (template.id === 'contact-landing') {
@@ -194,6 +196,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       if ('isBuiltIn' in template && template.isBuiltIn) {
         if (template.id === 'blank') {
           await createProjectFromTemplate(vfs, project.id, BAREBONES_PROJECT_TEMPLATE);
+        } else if (template.id === 'handlebars-starter') {
+          await createProjectFromTemplate(vfs, project.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
         } else if (template.id === 'demo') {
           await createProjectFromTemplate(vfs, project.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
         } else if (template.id === 'contact-landing') {

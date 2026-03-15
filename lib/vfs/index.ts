@@ -12,17 +12,18 @@ import {
   PatchOperation
 } from './types';
 import { saveManager } from './save-manager';
-import { VirtualServer } from '@/lib/preview/virtual-server';
 import { skillsService } from './skills';
 import { StorageAdapter } from './adapters/types';
 import { createClientAdapter } from './adapters/factory';
 import { IndexedDBAdapter } from './adapters/indexeddb-adapter';
+import { getRuntimeConfig } from '@/lib/runtimes/registry';
 
 export class VirtualFileSystem {
   private adapter: StorageAdapter;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
   private transientFiles: Map<string, VirtualFile> = new Map();
+  private generatedFiles: Map<string, VirtualFile> = new Map();
   private syncTimeouts: Map<string, NodeJS.Timeout> = new Map(); // Debounce sync calls
 
   constructor() {
@@ -109,6 +110,37 @@ export class VirtualFileSystem {
     return path.startsWith('/.server/') || path.startsWith('/.skills/');
   }
 
+  // --- Generated files (bundle.js, bundle.css) ---
+
+  setGeneratedFile(path: string, content: string, mimeType: string): void {
+    const now = new Date();
+    this.generatedFiles.set(path, {
+      id: `generated-${path}`,
+      projectId: 'generated',
+      path,
+      name: path.split('/').pop() || path,
+      type: path.endsWith('.css') ? 'css' : 'js',
+      content,
+      mimeType,
+      size: content.length,
+      createdAt: now,
+      updatedAt: now,
+      metadata: { isGenerated: true },
+    });
+  }
+
+  clearGeneratedFiles(): void {
+    this.generatedFiles.clear();
+  }
+
+  getGeneratedFiles(): VirtualFile[] {
+    return Array.from(this.generatedFiles.values());
+  }
+
+  isGeneratedPath(path: string): boolean {
+    return this.generatedFiles.has(path);
+  }
+
   /**
    * Reload transient skills (call after adding/updating/deleting skills)
    */
@@ -158,13 +190,6 @@ export class VirtualFileSystem {
    * Get runtime deployment ID (for sqlite3, logs)
    */
   getRuntimeDeploymentId(): string | null {
-    return this.runtimeDeploymentId;
-  }
-
-  /**
-   * @deprecated Use getServerContextProjectId() or getRuntimeDeploymentId()
-   */
-  getServerContextDeploymentId(): string | null {
     return this.runtimeDeploymentId;
   }
 
@@ -374,17 +399,6 @@ export class VirtualFileSystem {
         window.dispatchEvent(new Event('filesChanged'));
       }
     }
-  }
-
-  /**
-   * @deprecated Use mountProjectBackendContext(projectId). Note: this deprecated method now only
-   * mounts deployment runtime context (database schema), not the full backend features.
-   * The deploymentName parameter is ignored.
-   */
-  async mountBackendContext(deploymentId: string, deploymentName: string): Promise<void> {
-    // Backward compat: old callers mount via deployment — extract projectId from deployment
-    // For now, just mount runtime context (project context should be auto-mounted separately)
-    await this.mountDeploymentRuntimeContext(deploymentId);
   }
 
   /**
@@ -994,6 +1008,12 @@ export class VirtualFileSystem {
       throw new Error(`Transient file not found: ${cleanPath}`);
     }
 
+    // Check generated files (bundle.js, bundle.css)
+    const generatedFile = this.generatedFiles.get(cleanPath);
+    if (generatedFile) {
+      return generatedFile;
+    }
+
     const file = await this.adapter.getFile(projectId, cleanPath);
     if (!file) {
       logger.debug('VFS: File not found for read', { projectId, path: cleanPath, originalPath: path });
@@ -1010,6 +1030,11 @@ export class VirtualFileSystem {
       // Check transient files first
       if (this.isTransientPath(path)) {
         return this.transientFiles.has(path);
+      }
+
+      // Check generated files
+      if (this.generatedFiles.has(path)) {
+        return true;
       }
 
       const file = await this.adapter.getFile(projectId, path);
@@ -1148,6 +1173,16 @@ export class VirtualFileSystem {
       });
     }
 
+    // Include generated files (bundle.js, bundle.css) — always visible at root
+    if (path === '/' && this.generatedFiles.size > 0) {
+      const existingPaths = new Set(files.map(f => f.path));
+      for (const gf of this.generatedFiles.values()) {
+        if (!existingPaths.has(gf.path)) {
+          files.push(gf);
+        }
+      }
+    }
+
     // Include transient files if requested
     if (options?.includeTransient) {
       const transientFilesArray = Array.from(this.transientFiles.values());
@@ -1215,6 +1250,16 @@ export class VirtualFileSystem {
       }));
 
     let result: Array<VirtualFile | { path: string; name: string; type: 'directory' }> = [...allFiles, ...directories];
+
+    // Include generated files (bundle.js, bundle.css) — always visible
+    if (this.generatedFiles.size > 0) {
+      const existingPaths = new Set(result.map(item => item.path));
+      for (const gf of this.generatedFiles.values()) {
+        if (!existingPaths.has(gf.path)) {
+          result.push(gf);
+        }
+      }
+    }
 
     // Include transient files if requested
     if (options?.includeTransient) {
@@ -1334,11 +1379,6 @@ export class VirtualFileSystem {
     }
     
     await this.renameDirectory(projectId, oldPath, newPath);
-    
-    
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('filesChanged'));
-    }
   }
 
   async createProject(name: string, description?: string, id?: string): Promise<Project> {
@@ -1765,12 +1805,48 @@ export class VirtualFileSystem {
 
   async exportProjectAsZip(projectId: string): Promise<Blob> {
     this.ensureInitialized();
-    
+
     const zip = new JSZip();
-    
+
     try {
-      // Create VirtualServer instance and compile the project through Handlebars
       const project = await this.getProject(projectId);
+      const runtime = project?.settings?.runtime || 'handlebars';
+      const runtimeConfig = getRuntimeConfig(runtime);
+
+      // For terminal-mode runtimes (Python, Lua), package raw source files
+      if (runtimeConfig.previewMode === 'terminal') {
+        const files = await this.adapter.listFiles(projectId);
+        for (const file of files) {
+          if (this.shouldExcludeFromExport(file.path)) continue;
+          const zipPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
+          if (typeof file.content === 'string') {
+            zip.file(zipPath, file.content);
+          } else {
+            zip.file(zipPath, file.content);
+          }
+        }
+
+        // Add a README with run instructions
+        const readmeLines = [
+          `# ${project?.name || 'Project'}`,
+          '',
+          project?.description || '',
+          '',
+          '## How to Run',
+          '',
+        ];
+        if (runtime === 'python') {
+          readmeLines.push('```bash', 'python main.py', '```');
+        } else if (runtime === 'lua') {
+          readmeLines.push('```bash', 'lua main.lua', '```');
+        }
+        zip.file('README.md', readmeLines.join('\n'));
+
+        return zip.generateAsync({ type: 'blob' });
+      }
+
+      // Create VirtualServer instance and compile the project
+      const { VirtualServer } = await import('@/lib/preview/virtual-server');
       const server = new VirtualServer(this, projectId, undefined, undefined, undefined, project?.settings?.runtime);
       const compiledProject = await server.compileProject();
       
@@ -1870,7 +1946,12 @@ export class VirtualFileSystem {
     if (filePath === '/data.json') {
       return true;
     }
-    
+
+    // Exclude internal system files
+    if (filePath === '/.PROMPT.md') {
+      return true;
+    }
+
     return false;
   }
 

@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2 } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
@@ -45,6 +45,9 @@ import { ChatPanel } from '@/components/chat-panel';
 import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
 import { ProjectSettingsModal } from '@/components/project-backend';
+import { ConsolePanel } from '@/components/console';
+import { getRuntimeConfig } from '@/lib/runtimes/registry';
+import { drainRuntimeErrors, peekRuntimeErrors, formatRuntimeErrors } from '@/lib/preview/runtime-errors';
 
 interface WorkspaceProps {
   project: Project;
@@ -59,7 +62,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [generating, setGenerating] = useState(false);
   const [currentOrchestrator, setCurrentOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
   const [persistedOrchestrator, setPersistedOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
-  const [activeMobilePanel, setActiveMobilePanel] = useState<'chat' | 'files' | 'editor' | 'preview'>('preview');
+  const [activeMobilePanel, setActiveMobilePanel] = useState<'chat' | 'files' | 'editor' | 'preview' | 'console'>('preview');
   const [isDirty, setIsDirty] = useState(false);
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
@@ -75,16 +78,30 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const lastFocusSignatureRef = useRef<{ signature: string; timestamp: number } | null>(null);
   const previewRef = useRef<MultipagePreviewHandle>(null);
   const retryTriggerRef = useRef<boolean>(false);
+  const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
+  const generatingRef = useRef(false);
   const [initialCheckpointId, setInitialCheckpointId] = useState<string | null>(null);
   const [checkpointRefreshKey, setCheckpointRefreshKey] = useState(0);
   const [currentModel, setCurrentModel] = useState(configManager.getDefaultModel());
-  const [showDesktopSettings, setShowDesktopSettings] = useState(false);
-  const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [projectCost, setProjectCost] = useState(0);
   const { state: tourState, start: startTour, setWorkspaceHandler } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
   const isTourLockingInput = tourRunning && tourStep !== 'wrap-up';
+
+  // Keep generatingRef in sync for runtime error listener
+  useEffect(() => { generatingRef.current = generating; }, [generating]);
+
+  // Subscribe to runtime errors that arrive after generation completes
+  useEffect(() => {
+    const handler = () => {
+      if (!generatingRef.current) {
+        setRuntimeErrors(peekRuntimeErrors());
+      }
+    };
+    window.addEventListener('runtimeErrorsChanged', handler);
+    return () => window.removeEventListener('runtimeErrorsChanged', handler);
+  }, []);
 
   // Get cost settings for conditional display
   const { shouldShowCosts } = useCostSettings();
@@ -117,13 +134,46 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     return true;
   }, [currentModel]);
   
+  // Console panel — visible by default for terminal-mode runtimes (Python, Lua), togglable for all
+  const isTerminalRuntime = getRuntimeConfig(project.settings?.runtime || 'handlebars').previewMode === 'terminal';
+
   const [showChat, setShowChat] = useState(true);    // Column 1: Chat v2 (event-driven)
   const [showFiles, setShowFiles] = useState(true);      // Column 2: File explorer
   const [showEditor, setShowEditor] = useState(false);   // Column 3: Monaco editor
-  const [showPreview, setShowPreview] = useState(true);  // Column 4: Live preview
+  const [showPreview, setShowPreview] = useState(!isTerminalRuntime);  // Column 4: Hidden for terminal runtimes, auto-shown on server-ready
   const [showCheckpoints, setShowCheckpoints] = useState(false); // Column 5: Checkpoint history
   const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 6: Debug events
   const [showProjectSettingsModal, setShowProjectSettingsModal] = useState(false); // Project settings modal
+
+  const [showConsole, setShowConsole] = useState(isTerminalRuntime);
+  const [hasUnreadConsole, setHasUnreadConsole] = useState(false);
+  const consoleBufferRef = useRef<{ level: string; text: string }[]>([]);
+  const showConsoleRef = useRef(showConsole);
+
+  // Keep showConsoleRef in sync for buffering logic (tracks both desktop and mobile)
+  useEffect(() => {
+    showConsoleRef.current = showConsole || activeMobilePanel === 'console';
+  }, [showConsole, activeMobilePanel]);
+
+  // Buffer previewConsole events when console is hidden
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if (!showConsoleRef.current) {
+        const { level, args } = (e as CustomEvent<{ level: string; args: string[] }>).detail;
+        consoleBufferRef.current.push({ level, text: args.join(' ') });
+        setHasUnreadConsole(true);
+      }
+    };
+    window.addEventListener('previewConsole', handler);
+    return () => window.removeEventListener('previewConsole', handler);
+  }, []);
+
+  // Clear unread flag when console opens (desktop or mobile)
+  useEffect(() => {
+    if (showConsole || activeMobilePanel === 'console') {
+      setHasUnreadConsole(false);
+    }
+  }, [showConsole, activeMobilePanel]);
 
   // Backend enabled state (persisted per-project in localStorage)
   const [backendEnabled, setBackendEnabled] = useState<boolean>(() => {
@@ -132,7 +182,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   // Backend context state (deployment selection for backend features)
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
-  const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | null>(null);
 
   // Debug events state
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
@@ -219,18 +268,22 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   }, [project.id]);
   
   const getDefaultSizes = () => {
-    const visiblePanels = [showChat, showFiles, showEditor, showPreview, showCheckpoints, showDebugPanel].filter(Boolean).length;
+    const visiblePanels = [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel].filter(Boolean).length;
 
-    if (visiblePanels >= 5) {
-      return { chat: 18, files: 13, editor: 22, preview: 18, checkpoints: 14, debug: 15 };
+    // Each visible panel gets an equal share by default, with minor adjustments
+    // for better aesthetics. The sizes for visible panels must sum to 100%.
+    if (visiblePanels >= 6) {
+      return { chat: 16, files: 12, editor: 18, terminal: 18, preview: 18, checkpoints: 9, debug: 9 };
+    } else if (visiblePanels === 5) {
+      return { chat: 20, files: 15, editor: 25, terminal: 20, preview: 20, checkpoints: 20, debug: 20 };
     } else if (visiblePanels === 4) {
-      return { chat: 25, files: 15, editor: 35, preview: 25, checkpoints: 15, debug: 15 };
+      return { chat: 25, files: 15, editor: 35, terminal: 25, preview: 25, checkpoints: 25, debug: 25 };
     } else if (visiblePanels === 3) {
-      return { chat: 33, files: 33, editor: 33, preview: 33, checkpoints: 33, debug: 33 };
+      return { chat: 34, files: 33, editor: 33, terminal: 34, preview: 33, checkpoints: 33, debug: 34 };
     } else if (visiblePanels === 2) {
-      return { chat: 50, files: 50, editor: 50, preview: 50, checkpoints: 50, debug: 50 };
+      return { chat: 50, files: 50, editor: 50, terminal: 50, preview: 50, checkpoints: 50, debug: 50 };
     }
-    return { chat: 100, files: 100, editor: 100, preview: 100, checkpoints: 100, debug: 100 };
+    return { chat: 100, files: 100, editor: 100, terminal: 100, preview: 100, checkpoints: 100, debug: 100 };
   };
   
   const defaultSizes = getDefaultSizes();
@@ -314,6 +367,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setShowPreview(false);
   }, []);
 
+  // Listen for showPreview event (dispatched by AI preview command)
+  useEffect(() => {
+    const handler = () => setShowPreview(true);
+    window.addEventListener('showPreview', handler);
+    return () => window.removeEventListener('showPreview', handler);
+  }, []);
+
   const handleSetEntryPoint = useCallback(async (path: string) => {
     try {
       const proj = await vfs.getProject(project.id);
@@ -331,7 +391,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const handleAddPromptFile = useCallback(async () => {
     try {
       const { getDomainPrompt } = await import('@/lib/llm/prompts');
-      const runtime = project.settings?.runtime || 'static';
+      const runtime = project.settings?.runtime || 'handlebars';
       await vfs.createFile(project.id, '/.PROMPT.md', getDomainPrompt(runtime));
       window.dispatchEvent(new CustomEvent('filesChanged', { detail: { projectId: project.id } }));
       toast.success('.PROMPT.md added to project');
@@ -341,45 +401,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
   }, [project.id, project.settings?.runtime]);
 
-  const focusDescriptor = focusContext ? describeFocusTarget(focusContext) : '';
   const focusPreviewSnippet = focusContext ? truncateHtmlSnippet(focusContext.outerHTML, 240) : '';
-
-  const trimmedSnippet = focusPreviewSnippet?.trim() ?? '';
-
-  const focusContextHint = focusContext ? (
-    <div
-      id="focus-context-hint"
-      className="rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-xs text-muted-foreground shadow-sm"
-    >
-        <div className="flex flex-wrap items-center justify-between gap-2 text-foreground">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-xs uppercase tracking-wide text-primary">context</span>
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">included in next message</span>
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 px-2 text-xs"
-            onClick={() => setFocusContext(null)}
-            title="Clear focus context"
-          >
-            Clear
-          </Button>
-        </div>
-        <div className="mt-2 space-y-2">
-        {focusContext.domPath && (
-          <div className="text-[11px] font-mono text-muted-foreground/80 break-all leading-snug">
-            {focusContext.domPath}
-          </div>
-        )}
-        {trimmedSnippet && (
-          <pre className="max-h-24 overflow-auto rounded border border-border/50 bg-background/90 px-2 py-1 text-[11px] text-foreground leading-relaxed">
-            <code>{trimmedSnippet}</code>
-          </pre>
-        )}
-      </div>
-    </div>
-  ) : null;
 
   useEffect(() => {
     setIsDirty(saveManager.isDirty(project.id));
@@ -480,26 +502,12 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   }, [project.id]);
 
   useEffect(() => {
-    if (!tourRunning) {
-      setShowDesktopSettings(false);
-      setShowMobileSettings(false);
-      return;
-    }
+    if (!tourRunning) return;
 
     if (tourStep === 'provider-settings') {
-      // Open the provider settings popup in the chat panel
-      // This will be controlled by the ChatPanel's showMobileSettings state
-      // We trigger it by dispatching a custom event
-      setShowDesktopSettings(true);
-      setShowMobileSettings(true);
-
-      // Trigger the ChatPanel to open its settings popover
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tour-open-provider-settings'));
       }
-    } else {
-      setShowDesktopSettings(false);
-      setShowMobileSettings(false);
     }
   }, [tourRunning, tourStep]);
 
@@ -651,7 +659,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   // Handle deployment selection change - mount/unmount backend context
   const handleDeploymentChange = useCallback(async (deploymentId: string | null, deploymentName: string | null) => {
     setSelectedDeploymentId(deploymentId);
-    setSelectedDeploymentName(deploymentName);
 
     // Reset orchestrator so it picks up new backend context on next message
     setPersistedOrchestrator(null);
@@ -917,12 +924,16 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
   }, [handleFilesChange, project.id, debugEvents, setPrompt]);
 
-  const handleGenerate = async (images?: PendingImage[]) => {
+  const handleGenerate = async (images?: PendingImage[], overridePrompt?: string) => {
     if (isTourLockingInput) {
       return;
     }
 
-    const trimmedPrompt = prompt.trim();
+    // Clear any pending runtime errors when starting a new generation
+    drainRuntimeErrors();
+    setRuntimeErrors([]);
+
+    const trimmedPrompt = (overridePrompt ?? prompt).trim();
 
     if (!trimmedPrompt && (!images || images.length === 0)) {
       toast.error('Please enter a prompt');
@@ -941,8 +952,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
     // For local providers, check if they have models available
     if (providerConfig.isLocal) {
-      const currentModel = configManager.getProviderModel(currentProvider);
-      if (!currentModel) {
+      const localModel = configManager.getProviderModel(currentProvider);
+      if (!localModel) {
         toast.error(`No model selected for ${providerConfig.name}. Please select a model in settings.`);
         return;
       }
@@ -970,6 +981,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
 
     setGenerating(true);
+    window.dispatchEvent(new CustomEvent('generationStateChanged', { detail: { generating: true } }));
     track('task_started', { provider: currentProvider, model: modelToUse });
     const taskStartTime = Date.now();
     const messageContent = focusContext
@@ -983,10 +995,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       // Reuse existing orchestrator or create new one
       let orchestrator = persistedOrchestrator;
 
-      // Create new orchestrator if:
-      // 1. No existing orchestrator
-      // 2. Chat mode changed (not implemented yet - would need to store mode)
-      // 3. Model changed (not implemented yet - would need to store model)
       if (!orchestrator) {
         orchestrator = new MultiAgentOrchestrator(
           project.id,
@@ -1077,6 +1085,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       });
     } finally {
       setGenerating(false);
+      window.dispatchEvent(new CustomEvent('generationStateChanged', { detail: { generating: false } }));
       // Don't clear currentOrchestrator - only used for stop functionality
       // The persisted orchestrator maintains conversation history
       setCurrentOrchestrator(null);
@@ -1094,6 +1103,18 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       toast.info('Generation stopped');
     }
   }, [currentOrchestrator]);
+
+  const handleSendRuntimeErrors = useCallback(() => {
+    const errors = drainRuntimeErrors();
+    if (errors.length === 0) return;
+    setRuntimeErrors([]);
+    handleGenerate(undefined, formatRuntimeErrors(errors));
+  }, [handleGenerate]);
+
+  const handleClearRuntimeErrors = useCallback(() => {
+    drainRuntimeErrors();
+    setRuntimeErrors([]);
+  }, []);
 
   // Watch for retry trigger and execute generation
   useEffect(() => {
@@ -1222,7 +1243,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   return (
     <TooltipProvider>
-      <div className="h-screen flex flex-col">
+      <div className="h-[100dvh] flex flex-col">
         {/* Header */}
         <AppHeader
           leftText={project.name}
@@ -1372,6 +1393,42 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  className={`relative h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
+                    showConsole
+                      ? 'shadow-sm'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  style={{
+                    backgroundColor: showConsole ? 'var(--button-terminal-active, #22c55e)' : undefined,
+                    color: showConsole ? 'white' : undefined
+                  }}
+                  onClick={() => setShowConsole(!showConsole)}
+                >
+                  <TerminalIcon className="h-3.5 w-3.5" />
+                  {hasUnreadConsole && !showConsole && (
+                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-[var(--button-terminal-active,#22c55e)]" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="border-0"
+                style={{
+                  backgroundColor: 'var(--button-terminal-active, #22c55e)',
+                  color: 'white'
+                }}
+                arrowStyle={{
+                  backgroundColor: 'var(--button-terminal-active, #22c55e)',
+                  fill: 'var(--button-terminal-active, #22c55e)'
+                }}
+              >
+                <p>Console</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
                   className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
                     showCheckpoints
                       ? 'shadow-sm'
@@ -1465,10 +1522,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onClose={() => setShowChat(false)}
                   supportsVision={supportsVision}
                   providerReady={providerReady}
+                  runtimeErrors={runtimeErrors}
+                  onSendRuntimeErrors={handleSendRuntimeErrors}
+                  onClearRuntimeErrors={handleClearRuntimeErrors}
                 />
               </ResizablePanel>
             )}
-            {showChat && (showFiles || showEditor || showPreview || showCheckpoints || showDebugPanel) && (
+            {showChat && (showFiles || showEditor || showConsole || showPreview || showCheckpoints || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
@@ -1492,7 +1552,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     </div>
                 </ResizablePanel>
             )}
-            {showFiles && (showEditor || showPreview || showCheckpoints || showDebugPanel) && (
+            {showFiles && (showEditor || showConsole || showPreview || showCheckpoints || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
@@ -1514,15 +1574,38 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     </div>
                 </ResizablePanel>
             )}
-            {showEditor && (showPreview || showCheckpoints || showDebugPanel) && (
+            {showEditor && (showConsole || showPreview || showCheckpoints || showDebugPanel) && (
               <ResizableHandle withHandle />
             )}
 
-            {/* Column 4: Preview */}
+            {/* Column 3.5: Console */}
+            {showConsole && (
+              <ResizablePanel
+                id="console"
+                order={4}
+                defaultSize={defaultSizes.terminal}
+                minSize={15}
+              >
+                <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ minWidth: '240px' }}>
+                  <ConsolePanel
+                    projectId={project.id}
+                    runtime={project.settings?.runtime || 'handlebars'}
+                    bufferedMessages={consoleBufferRef.current}
+                    onBufferConsumed={() => { consoleBufferRef.current = []; }}
+                    onClose={() => setShowConsole(false)}
+                  />
+                </div>
+              </ResizablePanel>
+            )}
+            {showConsole && (showPreview || showCheckpoints || showDebugPanel) && (
+              <ResizableHandle withHandle />
+            )}
+
+            {/* Column 5: Preview */}
             {showPreview && (
               <ResizablePanel
                 id="preview"
-                order={4}
+                order={5}
                 defaultSize={defaultSizes.preview}
                 minSize={20}
               >
@@ -1545,11 +1628,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
             {showPreview && (showCheckpoints || showDebugPanel) && <ResizableHandle withHandle />}
 
-            {/* Column 5: Checkpoint Panel */}
+            {/* Column 6: Checkpoint Panel */}
             {showCheckpoints && (
               <ResizablePanel
                 id="checkpoints"
-                order={5}
+                order={6}
                 defaultSize={defaultSizes.checkpoints}
                 minSize={12}
               >
@@ -1567,11 +1650,11 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
             {showCheckpoints && showDebugPanel && <ResizableHandle withHandle />}
 
-            {/* Column 6: Debug Panel */}
+            {/* Column 7: Debug Panel */}
             {showDebugPanel && (
               <ResizablePanel
                 id="debug"
-                order={6}
+                order={7}
                 defaultSize={defaultSizes.debug}
                 minSize={15}
               >
@@ -1609,6 +1692,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 onClearChat={clearDebugEvents}
                 supportsVision={supportsVision}
                 providerReady={providerReady}
+                runtimeErrors={runtimeErrors}
+                onSendRuntimeErrors={handleSendRuntimeErrors}
+                onClearRuntimeErrors={handleClearRuntimeErrors}
               />
             )}
 
@@ -1652,10 +1738,21 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 />
               </div>
             )}
+
+            {activeMobilePanel === 'console' && (
+              <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative">
+                <ConsolePanel
+                  projectId={project.id}
+                  runtime={project.settings?.runtime || 'handlebars'}
+                  bufferedMessages={consoleBufferRef.current}
+                  onBufferConsumed={() => { consoleBufferRef.current = []; }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Bottom Navigation Bar */}
-          <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border">
+          <div className="fixed bottom-0 left-0 right-0 z-20 bg-card border-t border-border">
             <div className="flex justify-center items-center p-2 gap-2">
               <button
                 className={`flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
@@ -1711,6 +1808,23 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 onClick={() => setActiveMobilePanel('preview')}
               >
                 <Eye className="h-4 w-4" />
+              </button>
+
+              <button
+                className={`relative flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
+                  activeMobilePanel === 'console'
+                    ? 'text-white'
+                    : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                }`}
+                style={{
+                  backgroundColor: activeMobilePanel === 'console' ? 'var(--button-terminal-active, #22c55e)' : undefined,
+                }}
+                onClick={() => setActiveMobilePanel('console')}
+              >
+                <TerminalIcon className="h-4 w-4" />
+                {hasUnreadConsole && activeMobilePanel !== 'console' && (
+                  <span className="absolute top-1 right-0.5 h-2 w-2 rounded-full bg-[var(--button-terminal-active,#22c55e)]" />
+                )}
               </button>
             </div>
           </div>

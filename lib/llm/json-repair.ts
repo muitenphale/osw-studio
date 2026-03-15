@@ -137,7 +137,8 @@ export function getContinuationMarker(content: string, chars: number = 100): str
 }
 
 /**
- * Check if an error is a JSON truncation error
+ * Check if an error is a JSON parse error from malformed LLM output.
+ * Covers truncation (hit max_tokens) AND encoding errors (unescaped quotes in content).
  */
 export function isJSONTruncationError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -147,7 +148,8 @@ export function isJSONTruncationError(error: unknown): boolean {
     message.includes('unterminated string') ||
     message.includes('unexpected end of json') ||
     message.includes('unexpected end of input') ||
-    message.includes('unexpected token')
+    message.includes('unexpected token') ||
+    message.includes('expected')  // "Expected ',' or '}' after property value" — unescaped quote in content
   );
 }
 

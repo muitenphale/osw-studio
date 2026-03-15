@@ -90,8 +90,8 @@ Let's build a simple personal website.
 2. Click **+ New Project**
 3. Name your project (e.g., "My Portfolio")
 4. Choose a runtime and template:
-   - **Static: Website Starter** - Minimal HTML/CSS/JS starting point
-   - **Static: Example Studios** - Pre-built multi-page portfolio
+   - **Static: Website Starter** - Minimal pure HTML/CSS/JS starting point
+   - **Handlebars: Example Studios** - Multi-page portfolio with Handlebars templating
    - **Starter (React + TypeScript)** - Component-based React app
    - **Starter (Preact + TypeScript)** - Lightweight React alternative (~3KB)
    - **Starter (Svelte)** - Compile-time reactive framework

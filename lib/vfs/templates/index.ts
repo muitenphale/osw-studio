@@ -1,5 +1,6 @@
 export { DEMO_PROJECT_TEMPLATE } from './demo';
 export { BAREBONES_PROJECT_TEMPLATE } from './barebones';
+export { HANDLEBARS_STARTER_PROJECT_TEMPLATE } from './handlebars-starter';
 export { CONTACT_LANDING_PROJECT_TEMPLATE } from './contact-landing';
 export { BLOG_PROJECT_TEMPLATE } from './blog';
 export { REACT_STARTER_PROJECT_TEMPLATE } from './react-starter';
@@ -7,5 +8,7 @@ export { REACT_DEMO_PROJECT_TEMPLATE } from './react-demo';
 export { PREACT_STARTER_PROJECT_TEMPLATE } from './preact-starter';
 export { SVELTE_STARTER_PROJECT_TEMPLATE } from './svelte-starter';
 export { VUE_STARTER_PROJECT_TEMPLATE } from './vue-starter';
+export { PYTHON_STARTER_PROJECT_TEMPLATE } from './python-starter';
+export { LUA_STARTER_PROJECT_TEMPLATE } from './lua-starter';
 export { createProjectFromTemplate, type AssetConfig } from './utils';
 export { BUILT_IN_TEMPLATES, getBuiltInTemplatesForRuntime, type BuiltInTemplateMetadata } from './registry';

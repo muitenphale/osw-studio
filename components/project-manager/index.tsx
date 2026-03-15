@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import {
   BAREBONES_PROJECT_TEMPLATE,
+  HANDLEBARS_STARTER_PROJECT_TEMPLATE,
   DEMO_PROJECT_TEMPLATE,
   CONTACT_LANDING_PROJECT_TEMPLATE,
   BLOG_PROJECT_TEMPLATE,
@@ -46,6 +47,8 @@ import {
   PREACT_STARTER_PROJECT_TEMPLATE,
   SVELTE_STARTER_PROJECT_TEMPLATE,
   VUE_STARTER_PROJECT_TEMPLATE,
+  PYTHON_STARTER_PROJECT_TEMPLATE,
+  LUA_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   BUILT_IN_TEMPLATES,
   getBuiltInTemplatesForRuntime,
@@ -312,6 +315,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       } else {
         // Built-in template
         switch (newProjectTemplate) {
+          case 'handlebars-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
+            break;
           case 'demo':
             await createProjectFromTemplate(vfs, finalProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
             break;
@@ -335,6 +341,12 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
             break;
           case 'vue-starter':
             await createProjectFromTemplate(vfs, finalProject.id, VUE_STARTER_PROJECT_TEMPLATE);
+            break;
+          case 'python-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, PYTHON_STARTER_PROJECT_TEMPLATE);
+            break;
+          case 'lua-starter':
+            await createProjectFromTemplate(vfs, finalProject.id, LUA_STARTER_PROJECT_TEMPLATE);
             break;
           case 'blank':
           default:
@@ -509,7 +521,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   }
 
   return (
-    <div className="flex flex-col h-[100dvh]" style={{ background: `linear-gradient(var(--project-background-tint), var(--project-background-tint)), var(--background)` }}>
+    <div className={`flex flex-col ${hideHeader ? 'h-full' : 'h-[100dvh]'}`} style={{ background: `linear-gradient(var(--project-background-tint), var(--project-background-tint)), var(--background)` }}>
       {/* Main Content */}
       <main className="flex-1 min-h-0 overflow-auto">
         <div className="h-full flex flex-col">
@@ -791,7 +803,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                     </SelectGroup>
                   )}
                   {(() => {
-                    const filtered = customTemplates.filter(t => (t.runtime || 'static') === newProjectRuntime);
+                    const filtered = customTemplates.filter(t => (t.runtime || 'handlebars') === newProjectRuntime);
                     return filtered.length > 0 ? (
                       <SelectGroup>
                         <SelectLabel>Custom Templates</SelectLabel>

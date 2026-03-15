@@ -68,6 +68,13 @@ DO NOT:
 - Try to install packages with npm/yarn
 - Import from "react" — use "preact/hooks" and "preact/compat" instead
 
+BUILD OUTPUT:
+- The project auto-compiles when files change
+- Build errors appear in the Terminal panel (esbuild compilation errors)
+- /bundle.js and /bundle.css are generated files visible in the file explorer
+- If bundle.js is missing, the build failed — check Terminal for errors
+- Use 'cat /bundle.js' to inspect the compiled output if needed
+
 IMPORTANT:
 - The preview rebuilds automatically when any file changes
 - Component state is lost on rebuild (expected behavior)

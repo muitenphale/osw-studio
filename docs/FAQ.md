@@ -6,7 +6,7 @@
 
 ### What is OSW Studio?
 
-OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — Static websites (HTML/CSS/JS), React, Preact, Svelte, and Vue — all compiled in the browser with no build tools needed.
+OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — Static (pure HTML/CSS/JS), Handlebars (HTML with templating), React, Preact, Svelte, and Vue — all compiled in the browser with no build tools needed.
 
 ### Is OSW Studio free?
 
@@ -176,7 +176,7 @@ In **static projects**, use CDN links or `<script>` tags:
 
 ### How does Handlebars work?
 
-**Build-time templating**:
+Available in the **Handlebars** runtime. **Build-time templating**:
 - Write `.hbs` files in `/templates/` as reusable partials
 - Include them in HTML files with `{{> partialName}}`
 - Define data in `/data.json` — it's automatically loaded as template context

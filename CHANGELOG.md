@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.43.0 - 2026-03-12
+
+Python & Lua scripting runtimes, a unified interactive Console, and a runtime split separating pure static sites from Handlebars-powered templates.
+
+- **Handlebars Runtime Split**: The existing `static` runtime has been renamed to `handlebars` to reflect its Handlebars templating capabilities (partials, data.json, helpers). A new `static` runtime provides pure HTML/CSS/JS with no template engine — `{{mustache}}` syntax in HTML is rendered literally, not compiled. Existing projects are automatically migrated. New projects default to `static`
+- **Python Runtime**: Full Python 3 support via Pyodide (CPython compiled to WebAssembly). Supports the Python standard library, `import` between project files, and output file generation (e.g. matplotlib plots written to `/output/`). Pyodide loads from CDN on first execution and is cached by the browser
+- **Lua Runtime**: Lua 5.4 support via wasmoon (Lua VM compiled to WebAssembly). Supports `require()` for multi-file projects and standard library modules (string, table, math, io)
+- **Interactive Console**: A unified terminal panel replacing the previous output-only Terminal. Combines a VFS shell (commands with pipes, redirects, chaining) and script execution (`exec main.py`) in one xterm.js instance. Command history with Up/Down arrows, Ctrl+C to cancel, Ctrl+L to clear. For Python/Lua projects, auto-runs the entry point on file changes. Available for all project types via the sidebar toggle
+- **File Explorer: Run in Console**: Right-click any `.py` or `.lua` file to execute it in the Console
+- **Starter Templates**: Handlebars Starter (partials + data.json), Python Starter, and Lua Starter — each with entry points and framework-specific `.PROMPT.md` for the AI
+- **Runtime Error Feedback**: JS runtime errors from the preview iframe (uncaught exceptions, unhandled rejections, `console.error()`) now feed back to the AI for auto-correction. Post-completion errors surface as a card above the chat input with "Send" (auto-sends to AI) and "Clear" actions
+- **ZIP Export**: Python and Lua projects export raw source files with a README containing run instructions. No compilation step
+- **Server Publish: Bundled Runtimes**: Publishing React, Preact, Svelte, and Vue projects in Server mode now compiles bundles client-side before syncing — the server detects pre-compiled `bundle.js`/`bundle.css` and skips the esbuild step
+- **Server Publish: Terminal Runtimes Blocked**: Python and Lua projects cannot be published as static deployments. Attempting to publish shows a clear error directing users to ZIP export instead
+- **Publish Cleanup**: `.PROMPT.md` excluded from both ZIP exports and published deployments. Preview-only scripts (VFS Asset Interceptor, Console Capture) stripped from published HTML
+- **Bug Fix**: Fixed duplicate console messages in the preview caused by React StrictMode double-mounting
+
 ## v1.42.0 - 2026-03-08
 
 Multi-framework support — Svelte, Vue, and Preact join React as first-class project runtimes with in-browser SFC compilation, starter templates, and AI domain prompts. Plus publish output cleanup.

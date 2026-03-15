@@ -92,7 +92,7 @@ export function PageLayout({
   }
 
   return (
-    <div className="relative flex h-screen overflow-hidden">
+    <div className="relative flex h-full overflow-hidden">
       <Sidebar
         currentView={currentView}
         onNavigate={onNavigate}

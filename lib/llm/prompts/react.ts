@@ -68,6 +68,13 @@ DO NOT:
 - Create build configs (vite.config.ts, webpack.config.js, etc.)
 - Try to install packages with npm/yarn
 
+BUILD OUTPUT:
+- The project auto-compiles when files change
+- Build errors appear in the Terminal panel (esbuild compilation errors)
+- /bundle.js and /bundle.css are generated files visible in the file explorer
+- If bundle.js is missing, the build failed — check Terminal for errors
+- Use 'cat /bundle.js' to inspect the compiled output if needed
+
 IMPORTANT:
 - The preview rebuilds automatically when any file changes
 - React state is lost on rebuild (expected behavior)

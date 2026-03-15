@@ -1,5 +1,5 @@
 import { ProjectTemplate } from '../../project-templates';
-import { WEBSITE_DOMAIN_PROMPT } from '@/lib/llm/prompts/website';
+import { HANDLEBARS_DOMAIN_PROMPT } from '@/lib/llm/prompts/handlebars';
 
 export const DEMO_PROJECT_TEMPLATE: ProjectTemplate = {
   name: 'Example Studios',
@@ -3003,7 +3003,7 @@ This demonstrates the VFS capability to handle multiple file types and organize 
     },
     {
       path: '/.PROMPT.md',
-      content: WEBSITE_DOMAIN_PROMPT
+      content: HANDLEBARS_DOMAIN_PROMPT
     }
   ],
   assets: [

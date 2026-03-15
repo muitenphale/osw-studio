@@ -26,6 +26,7 @@ npm-shrinkwrap.json
 /public/sites
 /public/sites/*
 /deployments
+/deployments/*
 /public/deployments
 /public/deployments/*
 

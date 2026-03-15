@@ -32,45 +32,60 @@ function createServerVfs(
   projectId: string,
   allFiles: VirtualFile[]
 ) {
+  const generatedFiles = new Map<string, VirtualFile>();
+
   return {
-    // VirtualServer calls this to get all files and directories
     async getAllFilesAndDirectories(pid: string): Promise<VirtualFile[]> {
-      if (pid !== projectId) {
-        throw new Error('Invalid project ID');
-      }
+      if (pid !== projectId) throw new Error('Invalid project ID');
       return allFiles;
     },
 
-    // VirtualServer calls this to list files in a directory
     async listDirectory(pid: string, dirPath: string): Promise<VirtualFile[]> {
-      if (pid !== projectId) {
-        throw new Error('Invalid project ID');
-      }
-      // Filter files based on directory path
-      if (dirPath === '/') {
-        return allFiles;
-      }
+      if (pid !== projectId) throw new Error('Invalid project ID');
+      if (dirPath === '/') return allFiles;
       return allFiles.filter(f => f.path.startsWith(dirPath));
     },
 
-    // VirtualServer calls this to read individual files
     async readFile(pid: string, filePath: string): Promise<VirtualFile> {
-      if (pid !== projectId) {
-        throw new Error('Invalid project ID');
-      }
+      if (pid !== projectId) throw new Error('Invalid project ID');
       const file = allFiles.find(f => f.path === filePath);
-      if (!file) {
-        throw new Error(`File not found: ${filePath}`);
-      }
+      if (!file) throw new Error(`File not found: ${filePath}`);
       return file;
     },
 
-    // VirtualServer calls this to check if data.json exists for Handlebars context
     async fileExists(pid: string, filePath: string): Promise<boolean> {
-      if (pid !== projectId) {
-        throw new Error('Invalid project ID');
-      }
+      if (pid !== projectId) throw new Error('Invalid project ID');
       return allFiles.some(f => f.path === filePath);
+    },
+
+    // Generated file methods used by VirtualServer during bundled runtime compilation
+    clearGeneratedFiles(): void {
+      generatedFiles.clear();
+    },
+
+    setGeneratedFile(path: string, content: string, mimeType: string): void {
+      const now = new Date();
+      generatedFiles.set(path, {
+        id: `generated-${path}`,
+        projectId,
+        path,
+        name: path.split('/').pop() || path,
+        type: path.endsWith('.css') ? 'css' : 'js',
+        content,
+        mimeType,
+        size: content.length,
+        createdAt: now,
+        updatedAt: now,
+        metadata: { isGenerated: true },
+      });
+    },
+
+    getGeneratedFiles(): VirtualFile[] {
+      return Array.from(generatedFiles.values());
+    },
+
+    isGeneratedPath(path: string): boolean {
+      return generatedFiles.has(path);
     },
   };
 }
@@ -192,7 +207,7 @@ export async function buildStaticDeployment(deploymentId: string): Promise<Build
 
         // Remove VFS interceptor script from HTML files
         if (file.path.endsWith('.html')) {
-          file.content = removeVfsInterceptor(file.content);
+          file.content = removePreviewScripts(file.content);
           htmlFiles.push(file.path);
 
           // Apply deployment settings to HTML files
@@ -394,6 +409,11 @@ function shouldExcludeFromExport(filePath: string): boolean {
     return true;
   }
 
+  // Exclude internal system files
+  if (filePath === '/.PROMPT.md') {
+    return true;
+  }
+
   return false;
 }
 
@@ -489,13 +509,18 @@ function replaceAssetPathsWithDeploymentPrefix(
 }
 
 /**
- * Remove VFS interceptor script from HTML
+ * Remove live-preview-only scripts from HTML
  */
-function removeVfsInterceptor(html: string): string {
+function removePreviewScripts(html: string): string {
   // Remove the VFS Asset Interceptor script tag
-  // This script is only needed for live preview, not static sites
-  const scriptRegex = /<script>\s*\/\/ VFS Asset Interceptor[\s\S]*?<\/script>\s*/;
-  return html.replace(scriptRegex, '');
+  const vfsRegex = /<script>\s*\/\/ VFS Asset Interceptor[\s\S]*?<\/script>\s*/;
+  html = html.replace(vfsRegex, '');
+
+  // Remove the Console Capture script tag (only used inside preview iframe)
+  const consoleRegex = /<script>\s*\/\/ Console Capture[\s\S]*?<\/script>\s*/;
+  html = html.replace(consoleRegex, '');
+
+  return html;
 }
 
 /**
