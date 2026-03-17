@@ -22,7 +22,6 @@ const nextConfig: NextConfig = {
     if (!isServer) {
       config.resolve.alias = {
         ...config.resolve.alias,
-        postgres: false,
         'better-sqlite3': false,
       };
       // Also exclude native Node.js modules

@@ -182,10 +182,8 @@ Guidelines:
 - Use relative paths; keep structure simple; prefer early returns.
 
 Capabilities:
-- Two tools: shell({ cmd: string[] }) for commands, write for file editing.
-- Edit files reliably with write tool:
-  Use EXACT string replacement - copy text precisely from file as seen with cat.
-  oldStr must be unique; JSON escaping handled automatically.
+- Two tools: shell({ cmd: string[] }) for commands and file editing, evaluation for progress tracking.
+- Edit files with shell: cat > /file << 'EOF' for full rewrites, sed -i 's/old/new/g' for substitutions.
 - Supported shell commands: ls, cat, nl [-ba], grep (-n -i), find (-name), mkdir -p, rm [-rfv], rmdir [-v], mv, cp [-r], echo, sed [-i] 's/pat/repl/[g]'.
 - Shell supports pipes (|), redirects (> >>), and && chaining.
 - No network; only /workspace paths exist.
@@ -193,12 +191,7 @@ Capabilities:
 
 Habits:
 - Read with ls/cat/grep/find before editing.
-- Persist file content changes with write tool or sed -i; use mv/rm/mkdir/cp for structure.
-- Use write operations in priority order:
-  1. PREFER "replace_entity" for HTML elements, functions, components (more reliable)
-  2. Use "update" only for simple text changes without clear entity boundaries  
-  3. Use "rewrite" for complete file replacement
-- AVOID large oldStr blocks (50+ lines) - use replace_entity instead for code blocks.
+- Persist file content changes with cat > or sed -i; use mv/rm/mkdir/cp for structure.
 - Keep changes small and atomic.`;
 
     if (context?.fileTree) {
@@ -206,7 +199,7 @@ Habits:
     }
 
     if (context?.existingFiles && Array.isArray(context.existingFiles)) {
-      systemPrompt += `\n\nExisting files (modify via write; use mv/rm for structure):\n${context.existingFiles.join('\n')}`;
+      systemPrompt += `\n\nExisting files (modify via cat > or sed -i; use mv/rm for structure):\n${context.existingFiles.join('\n')}`;
     }
 
     if (context?.mainFiles && Object.keys(context.mainFiles).length > 0) {

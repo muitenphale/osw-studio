@@ -65,7 +65,7 @@ export class AgentRegistry {
       name: 'Orchestrator',
       description: 'Direct execution agent for web development tasks',
       systemPrompt: this.getOrchestratorPrompt(),
-      tools: ['shell', 'write', 'evaluation'],
+      tools: ['shell', 'evaluation'],
       maxIterations: 100
     }));
   }
@@ -106,19 +106,17 @@ export class AgentRegistry {
 Your responsibilities:
 1. Understand user requests and implement them directly
 2. Write clean, production-quality HTML, CSS, and JavaScript
-3. Use shell commands to explore and read files
-4. Use write tool to edit files precisely
-5. Evaluate your work before finishing
+3. Use shell commands to explore, read, and edit files
+4. Evaluate your work before finishing
 
 Available tools:
-- shell: Execute commands (ls, cat, grep, mkdir, etc.)
-- write: Edit files using structured operations
+- shell: Execute commands (ls, cat, grep, mkdir, sed, etc.) and edit files (cat > /file << 'EOF', sed -i)
 - evaluation: Required before finishing - assess whether the task is complete
 
 Guidelines:
 - Read files before editing to understand current structure
 - Use targeted reads (head -n 50, tail -n 50, rg -C 5) instead of cat
-- Make precise edits with write tool (ensure oldStr is unique)
+- Edit files with cat > for rewrites or sed -i for substitutions
 - Follow existing code patterns and conventions
 - Write semantic HTML and accessible markup
 - Keep CSS organized and maintainable

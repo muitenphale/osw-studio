@@ -1,6 +1,5 @@
 /**
  * Streaming Parser - Handles LLM streaming response parsing
- * Extracted from original orchestrator for reuse
  */
 
 import { ToolCall, UsageInfo, ReasoningDetail } from './types';

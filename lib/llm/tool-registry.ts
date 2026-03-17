@@ -6,21 +6,15 @@
 import { ToolDefinition, ToolCall } from './types';
 import { vfs } from '@/lib/vfs';
 import { vfsShell } from '@/lib/vfs/cli-shell';
-import { execStringPatch } from './string-patch';
 import { logger } from '../utils';
 import {
   isJSONTruncationError,
   attemptJSONRepair,
-  extractPartialContent,
-  getContinuationMarker,
-  analyzeOperationType,
-  generateContinuationMessage,
-  generateUnsafeOperationError
 } from './json-repair';
 import { scriptRunner } from '@/lib/scripting/script-runner';
 import type { ScriptRuntime } from '@/lib/scripting/types';
 
-export type ToolId = 'shell' | 'write' | 'evaluation';
+export type ToolId = 'shell' | 'evaluation';
 
 export interface ToolExecutor {
   /**
@@ -68,7 +62,7 @@ export class ToolRegistry {
       id: 'shell',
       definition: {
         name: 'shell',
-        description: `Execute shell commands in the virtual file system.
+        description: `Run shell commands in the virtual file system.
 
 Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, curl, sqlite3, python, python3, lua, preview.
 Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), and brace expansion ({a,b,c}) are supported.
@@ -76,7 +70,7 @@ Run scripts: python <file>, lua <file>. Show output in preview: preview <path>.
 
 For large file writes, use heredoc: cat > /file << 'EOF'\\ncontent\\nEOF
 
-Execute ONE command at a time as a single string.`,
+One command at a time as a single string.`,
         parameters: {
           type: 'object',
           properties: {
@@ -169,164 +163,6 @@ Execute ONE command at a time as a single string.`,
           }
 
           return mainResult || 'Command succeeded with no output';
-        }
-      }
-    });
-
-    // Write tool - Write and edit files using structured operations
-    this.register({
-      id: 'write',
-      definition: {
-        name: 'write',
-        description: `Write and edit files using structured operations.
-
-operations must be a direct array, not a JSON string.
-
-Operation types:
-- UPDATE: {"type": "update", "oldStr": "exact text", "newStr": "replacement"} — oldStr must be unique
-- REWRITE: {"type": "rewrite", "content": "complete file content"}
-- REPLACE_ENTITY: {"type": "replace_entity", "selector": "opening pattern", "replacement": "new content"}`,
-        parameters: {
-          type: 'object',
-          properties: {
-            file_path: {
-              type: 'string',
-              description: 'Path to file to edit (must start with /)'
-            },
-            operations: {
-              type: 'array',
-              description: 'Array of patch operations',
-              items: {
-                oneOf: [
-                  {
-                    type: 'object',
-                    properties: {
-                      type: { type: 'string', enum: ['update'], description: 'Update operation type' },
-                      oldStr: { type: 'string', description: 'Exact text to find (must be unique)' },
-                      newStr: { type: 'string', description: 'Replacement text' }
-                    },
-                    required: ['type', 'oldStr', 'newStr']
-                  },
-                  {
-                    type: 'object',
-                    properties: {
-                      type: { type: 'string', enum: ['rewrite'], description: 'Rewrite operation type' },
-                      content: { type: 'string', description: 'Complete new file content' }
-                    },
-                    required: ['type', 'content']
-                  },
-                  {
-                    type: 'object',
-                    properties: {
-                      type: { type: 'string', enum: ['replace_entity'], description: 'Replace entity operation type' },
-                      selector: { type: 'string', description: 'Opening pattern to identify entity' },
-                      replacement: { type: 'string', description: 'New entity content' },
-                      entity_type: { type: 'string', description: 'Optional: html_element, function, css_rule, etc.' }
-                    },
-                    required: ['type', 'selector', 'replacement']
-                  }
-                ]
-              } as any
-            }
-          },
-          required: ['file_path', 'operations']
-        }
-      },
-      executor: {
-        execute: async (projectId, args, context) => {
-          // Block in read-only mode
-          if (context.isReadOnly) {
-            return 'Error: File editing is disabled in read-only mode.';
-          }
-
-          // Check if operations itself is a string (the whole array was stringified)
-          if (typeof args.operations === 'string') {
-            let parsed = false;
-
-            // Try 1: Direct parse
-            try {
-              args.operations = JSON.parse(args.operations);
-              parsed = true;
-            } catch {
-              // Try 2: Fix literal newlines/tabs inside the JSON string
-              try {
-                const healed = args.operations
-                  .replace(/\r\n/g, '\\n')
-                  .replace(/\r/g, '\\n')
-                  .replace(/\n/g, '\\n')
-                  .replace(/\t/g, '\\t');
-                args.operations = JSON.parse(healed);
-                parsed = true;
-              } catch {
-                // Try 3: JSON structure repair (close truncated brackets)
-                const repairResult = attemptJSONRepair(args.operations);
-                if (repairResult.success) {
-                  args.operations = repairResult.repaired;
-                  parsed = true;
-                } else {
-                  // Try 4: Extract content for rewrite operations via regex
-                  const extraction = extractPartialContent(args.operations);
-                  if (extraction.success && extraction.content) {
-                    args.file_path = extraction.filePath || args.file_path;
-                    args.operations = [{ type: 'rewrite', content: extraction.content }];
-                    parsed = true;
-                  }
-                }
-              }
-            }
-
-            if (!parsed) {
-              return `Error: operations parameter is a stringified JSON array that could not be parsed or healed.
-
-Tip: Pass operations as a direct array, not a JSON string.
-❌ Wrong: "operations": "[{...}]" (stringified)
-✅ Correct: "operations": [{...}] (direct array)
-
-For large file rewrites, use the shell tool with heredoc:
-cat > /path/to/file << 'EOF'
-file content here
-EOF`;
-            }
-          }
-
-          // Auto-parse double-encoded JSON (common LLM mistake)
-          if (Array.isArray(args.operations)) {
-            args.operations = args.operations.map((op: any) => {
-              // If it's a string that looks like JSON (starts with { or [), try to parse it
-              if (typeof op === 'string' && /^\s*[{\[]/.test(op)) {
-                try {
-                  return JSON.parse(op);
-                } catch {
-                  // Return as-is if parse fails - will trigger normal validation error
-                  return op;
-                }
-              }
-              return op;
-            });
-          }
-
-          await vfs.init();
-
-          const result = await execStringPatch(vfs, projectId, args.file_path, args.operations);
-
-          // Refresh server context if write tool modified .server/ files
-          if (result.applied && args.file_path?.startsWith('/.server/')) {
-            if (vfs.hasServerContext()) {
-              await vfs.refreshServerContext();
-            }
-          }
-
-          let resultMessage = result.summary;
-          if (result.warnings && result.warnings.length > 0) {
-            resultMessage += '\n\nWarnings:\n' + result.warnings.map(w => `• ${w}`).join('\n');
-          }
-
-          // If no operations were applied, treat as error
-          if (!result.applied) {
-            return `Error: ${resultMessage}`;
-          }
-
-          return resultMessage;
         }
       }
     });
@@ -457,7 +293,7 @@ EOF`;
   }
 
   /**
-   * Get all tool definitions for a list of tool IDs
+   * Get all tool definitions for a list of tool IDs.
    */
   getDefinitions(toolIds: string[]): ToolDefinition[] {
     return toolIds
@@ -518,88 +354,12 @@ EOF`;
         const repairResult = attemptJSONRepair(toolCall.function.arguments);
 
         if (repairResult.success) {
-          // Successfully repaired JSON - check if it's safe to execute
-          if (toolId === 'write') {
-            const operations = repairResult.repaired?.operations;
-
-            if (Array.isArray(operations) && operations.length > 0) {
-              const safety = analyzeOperationType(operations);
-
-              if (safety === 'safe') {
-                // Safe to execute - these are rewrite operations that can be continued
-                logger.info(`[ToolRegistry] Auto-executing repaired ${toolId} (safe operations)`);
-
-                try {
-                  const result = await tool.executor.execute(projectId, repairResult.repaired, context);
-
-                  // Return success with continuation message
-                  return generateContinuationMessage(
-                    result,
-                    repairResult.repaired.file_path || 'unknown',
-                    operations,
-                    repairResult.originalLength
-                  );
-                } catch (execError) {
-                  const execMessage = execError instanceof Error ? execError.message : String(execError);
-                  logger.error(`[ToolRegistry] Repaired ${toolId} execution failed:`, execMessage);
-                  return `Error: Repaired JSON execution failed: ${execMessage}`;
-                }
-              } else if (safety === 'unsafe') {
-                // Unsafe operations - don't execute, provide helpful error
-                logger.warn(`[ToolRegistry] Repaired ${toolId} contains unsafe operations, not executing`);
-                return generateUnsafeOperationError(operations, repairResult.originalLength);
-              }
-            }
-          }
-
-          // For other tools or unknown safety, log but don't execute
           logger.warn(`[ToolRegistry] Repaired ${toolId} but safety unknown, not executing`);
           return `Error: ${errorMessage}\n\nNote: JSON repair succeeded but operation type is unclear. Please split into smaller operations.`;
-        } else {
-          // Repair failed — for write tools, try to salvage content via regex extraction
-          if (toolId === 'write') {
-            const extraction = extractPartialContent(toolCall.function.arguments);
-            if (extraction.success && extraction.content && extraction.filePath) {
-              logger.info(`[ToolRegistry] JSON repair failed but extracted ${extraction.content.length} chars for ${extraction.filePath}`);
-              try {
-                const partialResult = await tool.executor.execute(projectId, {
-                  file_path: extraction.filePath,
-                  operations: [{ type: 'rewrite', content: extraction.content }]
-                }, context);
-
-                const lineCount = extraction.content.split('\n').length;
-                const marker = getContinuationMarker(extraction.content, 200);
-
-                return `${partialResult}
-
-⚠️ Your tool call had a JSON encoding error (likely an unescaped quote in the content).
-The file was written with ${lineCount} lines of salvaged content.
-
-The file currently ends with:
-\`\`\`
-${marker}
-\`\`\`
-
-The file is INCOMPLETE. Continue writing the rest from where it ends.
-Use the write tool with type "update": set oldStr to the last few lines above, and newStr to those lines + the remaining content.`;
-              } catch (salvageError) {
-                logger.error(`[ToolRegistry] Salvage write failed for ${extraction.filePath}:`, salvageError);
-                // Fall through to generic error
-              }
-            }
-          }
-
-          // Repair and extraction both failed
-          logger.error(`[ToolRegistry] JSON repair failed for ${toolId}:`, repairResult.error);
-          return `Error: ${errorMessage}
-
-JSON repair attempt failed. The tool call was likely truncated due to max_tokens limit.
-
-💡 Solution: Split into smaller operations
-• Each operation should be <2KB (~500 tokens)
-• Use multiple sequential tool calls
-• For large files, break into logical sections`;
         }
+
+        logger.error(`[ToolRegistry] JSON repair failed for ${toolId}:`, repairResult.error);
+        return `Error: ${errorMessage}\n\nJSON repair failed. The tool call was likely truncated due to max_tokens limit. Split into smaller operations.`;
       }
 
       // Not a truncation error - return regular error
@@ -789,19 +549,23 @@ function parseShellCommand(cmdStr: string): string[] {
       continue;
     }
 
-    if (char === '\\') {
-      escaped = true;
-      continue;
-    }
-
     if (inQuotes) {
       if (char === quoteChar) {
         inQuotes = false;
         quoteChar = '';
+      } else if (quoteChar === '"' && char === '\\') {
+        // Double quotes: backslash escapes the next character
+        escaped = true;
+        continue;
       } else {
+        // Single quotes: everything is literal (including backslashes)
         current += char;
       }
     } else {
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
       if (char === '"' || char === "'") {
         inQuotes = true;
         quoteChar = char;

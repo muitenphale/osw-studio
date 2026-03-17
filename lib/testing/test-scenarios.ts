@@ -310,15 +310,14 @@ export const testScenarios: TestScenario[] = [
     ],
   },
 
-  // ─── Write Tool (5 tests) ───────────────────────────────────────────
+  // ─── File Editing (5 tests) ─────────────────────────────────────────
   {
     id: 'write-update',
     name: 'Update text in file',
-    category: 'write-tool',
+    category: 'file-editing',
     prompt: "Change the page title from 'Test App' to 'My Application' in index.html.",
     setupFiles: standardSetup,
     assertions: [
-      { type: 'tool_used', toolName: 'write', description: 'Used write tool' },
       { type: 'file_contains', path: '/index.html', value: 'My Application', description: 'New title present' },
       { type: 'file_not_contains', path: '/index.html', value: '<title>Test App</title>', description: 'Old title removed' },
     ],
@@ -326,11 +325,10 @@ export const testScenarios: TestScenario[] = [
   {
     id: 'write-rewrite',
     name: 'Rewrite entire file',
-    category: 'write-tool',
+    category: 'file-editing',
     prompt: 'Replace styles.css entirely with a modern CSS reset.',
     setupFiles: standardSetup,
     assertions: [
-      { type: 'tool_used', toolName: 'write', description: 'Used write tool' },
       { type: 'file_not_contains', path: '/styles.css', value: '.btn:hover', description: 'Original content replaced' },
       { type: 'file_matches', path: '/styles.css', pattern: 'box-sizing|margin:\\s*0|border-box', description: 'Contains CSS reset content' },
     ],
@@ -338,37 +336,115 @@ export const testScenarios: TestScenario[] = [
   {
     id: 'write-replace-entity',
     name: 'Replace HTML entity',
-    category: 'write-tool',
+    category: 'file-editing',
     prompt: 'Replace the nav element in index.html with a new nav containing a logo and three links: Home, Portfolio, Contact.',
     setupFiles: standardSetup,
     assertions: [
-      { type: 'tool_used', toolName: 'write', description: 'Used write tool' },
       { type: 'file_matches', path: '/index.html', pattern: 'logo|brand|site-name|site-title', description: 'Has logo/brand element' },
       { type: 'file_matches', path: '/index.html', pattern: 'Portfolio|Contact', description: 'Has new nav links' },
     ],
   },
   {
     id: 'write-multi-op',
-    name: 'Multiple write operations',
-    category: 'write-tool',
+    name: 'Multiple edits to same file',
+    category: 'file-editing',
     prompt: "In index.html: change the title to 'Portfolio', update the h1 text, and add a footer before the closing body tag.",
     setupFiles: standardSetup,
     assertions: [
-      { type: 'tool_used', toolName: 'write', description: 'Used write tool' },
       { type: 'file_matches', path: '/index.html', pattern: '<title>.*Portfolio.*<\\/title>', description: 'Title changed to Portfolio' },
       { type: 'file_matches', path: '/index.html', pattern: 'footer', description: 'Footer added' },
     ],
   },
   {
     id: 'write-new-file',
-    name: 'Create new file with write',
-    category: 'write-tool',
+    name: 'Create new file',
+    category: 'file-editing',
     prompt: "Create a new /about.html with heading 'About Us' and a paragraph of placeholder text.",
     setupFiles: standardSetup,
     assertions: [
-      { type: 'tool_used', toolName: 'write', description: 'Used write tool' },
       { type: 'file_exists', path: '/about.html', description: 'about.html created' },
       { type: 'file_matches', path: '/about.html', pattern: 'About Us', description: 'Contains About Us heading' },
+    ],
+  },
+
+  // ─── File Editing Stress Tests (6 tests) ───────────────────────────
+  {
+    id: 'write-stress-special-chars',
+    name: 'Edit file with special characters',
+    category: 'file-editing',
+    prompt: "Update index.html: change the script tag content to include a template literal that logs `Hello, ${name}! Welcome to \"OSW Studio\" — it's great.` and a regex /\\d+\\.\\d+/g.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_contains', path: '/index.html', value: '${name}', description: 'Contains template literal variable' },
+      { type: 'file_matches', path: '/index.html', pattern: 'it.s great', description: 'Contains apostrophe text' },
+      { type: 'file_matches', path: '/index.html', pattern: '\\\\d', description: 'Contains regex pattern' },
+    ],
+  },
+  {
+    id: 'write-stress-multiline',
+    name: 'Update multi-line block',
+    category: 'file-editing',
+    prompt: "Replace the entire nav element in index.html (from <nav to </nav>) with a new nav containing: a logo div with text 'BRAND', and links to Home, Gallery, Portfolio, and Contact. Do not include the old About or Services links.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'BRAND', description: 'Has brand logo' },
+      { type: 'file_matches', path: '/index.html', pattern: 'Portfolio', description: 'Has Portfolio link' },
+      { type: 'file_contains', path: '/index.html', value: 'Contact', description: 'Has Contact link' },
+      { type: 'file_contains', path: '/index.html', value: 'Gallery', description: 'Has Gallery link' },
+      { type: 'file_not_contains', path: '/index.html', value: '#services', description: 'Old Services link removed' },
+      { type: 'file_not_contains', path: '/index.html', value: '#about', description: 'Old About link removed' },
+    ],
+  },
+  {
+    id: 'write-stress-large-rewrite',
+    name: 'Rewrite large file',
+    category: 'file-editing',
+    prompt: "Rewrite index.html with a complete landing page: a header with logo and nav, a hero section with heading and CTA button, three feature cards in a grid, a testimonials section, and a footer with copyright. Include all CSS inline in a style tag. Make it at least 100 lines.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'hero|banner', description: 'Has hero section' },
+      { type: 'file_matches', path: '/index.html', pattern: 'feature|card', description: 'Has feature cards' },
+      { type: 'file_matches', path: '/index.html', pattern: 'testimonial|review|quote', description: 'Has testimonials' },
+      { type: 'file_matches', path: '/index.html', pattern: 'footer', description: 'Has footer' },
+    ],
+  },
+  {
+    id: 'write-stress-sequential-edits',
+    name: 'Sequential edits to same file',
+    category: 'file-editing',
+    prompt: "Make these changes to index.html in order: 1) Change the title to 'My Portfolio', 2) Add a class 'dark-theme' to the body tag, 3) Add a footer with text 'Built with OSW Studio' before </body>.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_contains', path: '/index.html', value: 'My Portfolio', description: 'Title changed' },
+      { type: 'file_contains', path: '/index.html', value: 'dark-theme', description: 'Body class added' },
+      { type: 'file_contains', path: '/index.html', value: 'Built with OSW Studio', description: 'Footer added' },
+    ],
+  },
+  {
+    id: 'write-stress-json-edit',
+    name: 'Create and edit JSON file',
+    category: 'file-editing',
+    prompt: "Create /config.json with a JSON object containing: name (string), version (string \"1.0.0\"), features (array of 3 strings), settings (nested object with theme: \"dark\", language: \"en\", debug: false).",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_exists', path: '/config.json', description: 'config.json created' },
+      { type: 'valid_json', path: '/config.json', description: 'Valid JSON' },
+      { type: 'file_contains', path: '/config.json', value: '"version"', description: 'Has version field' },
+      { type: 'file_contains', path: '/config.json', value: '"debug"', description: 'Has nested debug setting' },
+    ],
+  },
+  {
+    id: 'write-stress-create-css',
+    name: 'Create complex CSS file',
+    category: 'file-editing',
+    prompt: "Create /theme.css with: CSS custom properties on :root (--primary, --secondary, --bg, --text colors), a .container class with max-width, .btn with multiple states (:hover, :active, :disabled), a @media query for mobile, and a @keyframes fadeIn animation.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_exists', path: '/theme.css', description: 'theme.css created' },
+      { type: 'file_contains', path: '/theme.css', value: '--primary', description: 'Has CSS custom property' },
+      { type: 'file_matches', path: '/theme.css', pattern: ':hover', description: 'Has hover state' },
+      { type: 'file_matches', path: '/theme.css', pattern: '@media', description: 'Has media query' },
+      { type: 'file_matches', path: '/theme.css', pattern: '@keyframes', description: 'Has keyframes animation' },
     ],
   },
 
@@ -486,10 +562,10 @@ export const testTracks: TestTrack[] = [
     scenarioIds: testScenarios.filter(s => s.category.startsWith('shell-')).map(s => s.id),
   },
   {
-    id: 'write',
-    name: 'Write',
-    description: 'Write tool: update, rewrite, replace, create',
-    scenarioIds: testScenarios.filter(s => s.category === 'write-tool').map(s => s.id),
+    id: 'file-editing',
+    name: 'File Editing',
+    description: 'File editing: update, rewrite, replace, create',
+    scenarioIds: testScenarios.filter(s => s.category === 'file-editing').map(s => s.id),
   },
   {
     id: 'eval',
@@ -500,7 +576,7 @@ export const testTracks: TestTrack[] = [
   {
     id: 'multi',
     name: 'Multi',
-    description: 'Multi-tool: combined shell, write, and evaluation',
+    description: 'Multi-tool: combined shell and evaluation',
     scenarioIds: testScenarios.filter(s => s.category === 'multi-tool').map(s => s.id),
   },
 ];

@@ -148,7 +148,27 @@ export async function runAssertions(
 
         case 'tool_used': {
           const calls = getToolCalls(conversation);
-          const found = calls.some(c => c.name === assertion.toolName);
+          let found = calls.some(c => c.name === assertion.toolName);
+          // For 'write' assertions, also check for file-modifying shell commands
+          // Detects: cat > /file, sed -i, write /file, echo > /file
+          if (!found && assertion.toolName === 'write') {
+            const fileWritePattern = /^\s*(cat\s*>|sed\s+-i|write\s+|echo\s+.*>)/;
+            found = calls.some(c => {
+              if (c.name !== 'shell') return false;
+              try {
+                const args = JSON.parse(c.args);
+                const cmd = typeof args === 'string' ? args : args.cmd || args.command || '';
+                return typeof cmd === 'string' && fileWritePattern.test(cmd);
+              } catch {
+                return fileWritePattern.test(c.args);
+              }
+            });
+            if (found) {
+              actual = 'file edited via shell command';
+              passed = true;
+              break;
+            }
+          }
           passed = found;
           actual = found
             ? `${assertion.toolName} was called`

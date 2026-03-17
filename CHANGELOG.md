@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.44.0 - 2026-03-16
+
+Unified shell-only file editing — the structured `write` tool is removed in favor of standard shell commands (`cat >`, `sed -i`). Major `sed` enhancements to support the expanded role of shell-based editing.
+
+### Shell-Only File Editing
+
+A/B benchmarking across multiple models (Grok Code Fast, Qwen 3.5 Flash, MiMo v2 Flash) showed that shell-only editing (`cat >`, `sed -i`) was 6-9% cheaper in tokens and eliminated the #1 source of tool call failures (malformed JSON in structured write operations). The structured `write` tool is now removed — the AI edits files exclusively via shell commands.
+
+- **Removed `write` tool**: The JSON-based write tool (update, rewrite, replace_entity operations), its executor `string-patch.ts`, and `ContinuationHandler` are deleted. Tool surface simplified from 3 tools to 2 (`shell`, `evaluation`)
+- **Removed `ToolMode` plumbing**: The `'standard' | 'unified'` mode type, mode-conditional system prompts, and write tool rejection logic are removed. There is now only one mode
+- **Cleaned up `json-repair.ts`**: Removed write-specific functions (`analyzeOperationType`, `generateContinuationMessage`, `generateUnsafeOperationError`). General repair utilities retained for orchestrator use
+
+### sed Enhancements
+
+With file editing fully reliant on shell commands, the virtual `sed` implementation received a major upgrade to support real-world editing patterns that AI models produce.
+
+- **BRE-to-ERE conversion**: New `breToEre()` function converts sed's Basic Regular Expression syntax to JavaScript ERE — fixes patterns like `darken(var(--primary), 10%)` being treated as regex groups
+- **Address-based commands**: Line number addresses (`6s/old/new/`), pattern addresses (`/pattern/d`), and range addresses (`/start/,/end/d`)
+- **New commands**: Delete (`d`), change (`c\`), insert (`i\`), append (`a\`), and print (`p`) with full address and range support
+- **`-n` flag support**: Enables the suppress-and-print idiom (`-n '/pattern/p'`)
+- **`-i` variant handling**: Supports GNU (`-i`), BSD/macOS (`-i ''`), and backup (`-i.bak`) syntax
+
+### Codebase Cleanup
+
+- **Deleted dead files**: `generation-api.ts` (superseded by pricing-cache), `database.ts` (legacy VFS class superseded by `indexeddb-adapter.ts`), `validation.ts` (every export unused)
+- **Purged stale write tool references**: Replaced write tool JSON examples in domain prompts, skill content, system prompts, and guided tour with shell equivalents
+- **Removed dead code**: Unused types, ConfigManager methods, component props, analytics handlers, and orchestrator plumbing left behind by the write tool removal and earlier refactors
+
+### Benchmark Infrastructure
+
+- **New file editing stress scenarios**: 6 scenarios validating shell-based file editing (special characters, multiline, sequential edits, JSON/CSS files)
+- **Updated tracks**: "Write tool" track renamed to "File Editing"
+
 ## v1.43.0 - 2026-03-12
 
 Python & Lua scripting runtimes, a unified interactive Console, and a runtime split separating pure static sites from Handlebars-powered templates.

@@ -44,20 +44,6 @@ export interface ToolCall {
   };
 }
 
-export interface ToolResult {
-  success: boolean;
-  message?: string;
-  data?: unknown;
-  error?: string;
-}
-
-export interface FileContext {
-  projectId: string;
-  fileTree?: string;
-  currentFiles?: string[];
-  openFile?: string;
-}
-
 // Reasoning detail from OpenRouter (Gemini thinking models)
 export interface ReasoningDetail {
   type: string;
@@ -77,30 +63,6 @@ export interface LLMMessage {
   reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
 }
 
-export interface OpenRouterConfig {
-  apiKey: string;
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
-  stream?: boolean;
-}
-
-export interface OpenRouterResponse {
-  choices: Array<{
-    message: {
-      content?: string;
-      tool_calls?: Array<{
-        id: string;
-        function: {
-          name: string;
-          arguments: string;
-        };
-      }>;
-    };
-    finish_reason?: string;
-  }>;
-}
-
 export interface UsageInfo {
   promptTokens: number;
   completionTokens: number;
@@ -114,9 +76,3 @@ export interface UsageInfo {
   isEstimated?: boolean; // Flag to indicate if cost is estimated vs actual
 }
 
-export interface StreamChunk {
-  type: 'content' | 'tool_call' | 'done' | 'usage';
-  content?: string;
-  toolCall?: ToolCall;
-  usage?: UsageInfo;
-}

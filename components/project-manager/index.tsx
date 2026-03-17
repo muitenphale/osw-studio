@@ -80,7 +80,7 @@ interface ProjectManagerProps {
   hideFooter?: boolean; // Hide footer when used in PageLayout
 }
 
-type SortOption = 'updated' | 'created' | 'name' | 'size';
+type SortOption = 'updated' | 'created' | 'name';
 type ViewMode = 'grid' | 'list';
 
 export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false }: ProjectManagerProps) {
@@ -492,10 +492,6 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         return sorted.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       case 'name':
         return sorted.sort((a, b) => a.name.localeCompare(b.name));
-      case 'size':
-        // Note: This would require loading stats for all projects
-        // For now, fallback to updated date
-        return sorted.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
       default:
         return sorted;
     }

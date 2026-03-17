@@ -68,8 +68,13 @@ function extractRedirect(args: string[]): { cleanArgs: string[]; redirect?: { fi
   const appendIdx = args.indexOf('>>');
   const overwriteIdx = args.indexOf('>');
 
-  // Prefer >> if it appears before >
-  const idx = appendIdx !== -1 ? appendIdx : overwriteIdx;
+  // Use whichever redirect appears first; prefer >> when at the same position
+  let idx: number;
+  if (appendIdx !== -1 && overwriteIdx !== -1) {
+    idx = appendIdx <= overwriteIdx ? appendIdx : overwriteIdx;
+  } else {
+    idx = appendIdx !== -1 ? appendIdx : overwriteIdx;
+  }
   if (idx === -1) return { cleanArgs: args };
 
   const append = args[idx] === '>>';
@@ -118,9 +123,62 @@ async function applyRedirect(
 }
 
 /**
- * Parse sed s/pattern/replacement/[flags] expression
- * Supports delimiters: / | # @
+ * Convert sed's Basic Regular Expression (BRE) to JavaScript Extended Regular Expression (ERE).
+ * In BRE: ( ) { } + ? | are LITERAL unless preceded by \
+ * In ERE/JS: ( ) { } + ? | are SPECIAL unless preceded by \
+ * This swap ensures sed patterns like `darken(var(--primary), 10%)` match literally.
  */
+function breToEre(pat: string): string {
+  let result = '';
+  let escaped = false;
+  let inCharClass = false;
+  for (let i = 0; i < pat.length; i++) {
+    const ch = pat[i];
+    if (escaped) {
+      if (inCharClass) {
+        // Inside [...], keep escapes as-is — no BRE-to-ERE swap
+        result += '\\' + ch;
+      } else {
+        // \( in BRE = grouping → ( in ERE
+        // \) in BRE = grouping → ) in ERE
+        // \{ \} \+ \? \| — same swap
+        if ('(){}+?|'.includes(ch)) {
+          result += ch; // drop the backslash, keep special meaning
+        } else {
+          result += '\\' + ch; // keep escape as-is (\n, \d, \/, etc.)
+        }
+      }
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') { escaped = true; continue; }
+    // Track character class boundaries
+    if (ch === '[' && !inCharClass) {
+      inCharClass = true;
+      result += ch;
+      continue;
+    }
+    if (ch === ']' && inCharClass) {
+      inCharClass = false;
+      result += ch;
+      continue;
+    }
+    // Inside [...], all chars are literal — no BRE-to-ERE transformation
+    if (inCharClass) {
+      result += ch;
+      continue;
+    }
+    // Unescaped ( ) { } + ? | in BRE are literal → escape for ERE
+    if ('(){}+?|'.includes(ch)) {
+      result += '\\' + ch;
+    } else {
+      result += ch;
+    }
+  }
+  if (escaped) result += '\\'; // trailing backslash
+  return result;
+}
+
 function parseSedExpression(expr: string): { pattern: RegExp; replacement: string } | { error: string } {
   if (!expr.startsWith('s')) return { error: `sed: invalid expression: ${expr}` };
 
@@ -150,12 +208,139 @@ function parseSedExpression(expr: string): { pattern: RegExp; replacement: strin
   const globalFlag = (flagStr || '').includes('g');
 
   try {
-    const pattern = new RegExp(patStr, globalFlag ? 'g' : '');
+    // Convert BRE pattern to JavaScript ERE (unescaped parens become literal, etc.)
+    const erePattern = breToEre(patStr);
+    const pattern = new RegExp(erePattern, globalFlag ? 'g' : '');
     // Unescape the replacement string (remove backslash-delimiter escapes)
     const replacement = replStr.replace(new RegExp('\\\\' + delim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), delim);
     return { pattern, replacement };
   } catch (e: any) {
     return { error: `sed: invalid regex "${patStr}": ${e?.message || 'parse error'}` };
+  }
+}
+
+/** Address type for sed range commands */
+type SedAddress = { type: 'line'; line: number } | { type: 'pattern'; pattern: RegExp } | { type: 'last' };
+
+/** Parsed sed command — substitution, delete, change, insert, append, or print */
+type SedCommand =
+  | { kind: 'substitute'; pattern: RegExp; replacement: string; start?: SedAddress; end?: SedAddress }
+  | { kind: 'delete'; start: SedAddress; end?: SedAddress }
+  | { kind: 'change'; start: SedAddress; end?: SedAddress; text: string }
+  | { kind: 'insert'; start: SedAddress; text: string }
+  | { kind: 'append'; start: SedAddress; text: string }
+  | { kind: 'print'; start: SedAddress; end?: SedAddress };
+
+/**
+ * Parse a sed address like /pattern/, a line number, or $
+ * Returns the address and the remaining string after it.
+ */
+function parseSedAddress(expr: string): { addr: SedAddress; rest: string } | null {
+  if (!expr) return null;
+
+  // Line number
+  const lineMatch = expr.match(/^(\d+)(.*)/);
+  if (lineMatch) {
+    return { addr: { type: 'line', line: parseInt(lineMatch[1], 10) }, rest: lineMatch[2] };
+  }
+
+  // $ = last line
+  if (expr[0] === '$') {
+    return { addr: { type: 'last' }, rest: expr.slice(1) };
+  }
+
+  // /pattern/ or \xpatternx (alternate delimiter)
+  if (expr[0] === '/' || expr[0] === '\\') {
+    const delim = expr[0] === '\\' ? expr[1] : '/';
+    const start = expr[0] === '\\' ? 2 : 1;
+    let pattern = '';
+    let escaped = false;
+    let i = start;
+    for (; i < expr.length; i++) {
+      if (escaped) { pattern += expr[i]; escaped = false; continue; }
+      if (expr[i] === '\\') { escaped = true; pattern += '\\'; continue; }
+      if (expr[i] === delim) { i++; break; }
+      pattern += expr[i];
+    }
+    try {
+      return { addr: { type: 'pattern', pattern: new RegExp(breToEre(pattern)) }, rest: expr.slice(i) };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse a full sed command expression including optional addresses.
+ * Supports: /addr1/,/addr2/d  /addr1/,/addr2/c\text  /addr1/,/addr2/p  s/old/new/g
+ */
+function parseSedCommand(expr: string): SedCommand | { error: string } {
+  // Try substitution first (most common)
+  if (expr.startsWith('s') && expr.length > 2 && /[\/|#@]/.test(expr[1])) {
+    const parsed = parseSedExpression(expr);
+    if ('error' in parsed) return parsed;
+    return { kind: 'substitute', ...parsed };
+  }
+
+  // Try address-based commands: /pattern/,/pattern/d  or  5,10d  etc.
+  const addr1Result = parseSedAddress(expr);
+  if (!addr1Result) {
+    return { error: `sed: unrecognized command: ${expr}` };
+  }
+
+  let addr2: SedAddress | undefined;
+  let remaining = addr1Result.rest;
+
+  // Check for ,addr2
+  if (remaining.startsWith(',')) {
+    const addr2Result = parseSedAddress(remaining.slice(1));
+    if (!addr2Result) {
+      return { error: `sed: invalid end address in: ${expr}` };
+    }
+    addr2 = addr2Result.addr;
+    remaining = addr2Result.rest;
+  }
+
+  // Parse the command character
+  remaining = remaining.trim();
+  if (remaining === 'd') {
+    return { kind: 'delete', start: addr1Result.addr, end: addr2 };
+  }
+  if (remaining === 'p') {
+    return { kind: 'print', start: addr1Result.addr, end: addr2 };
+  }
+  if (remaining.startsWith('c\\') || remaining.startsWith('c ')) {
+    const text = remaining.slice(2).replace(/\\n/g, '\n');
+    return { kind: 'change', start: addr1Result.addr, end: addr2, text };
+  }
+  // i\ — insert text before matched line (single address only)
+  if (remaining.startsWith('i\\') || remaining.startsWith('i ')) {
+    const text = remaining.slice(2).replace(/\\n/g, '\n');
+    return { kind: 'insert', start: addr1Result.addr, text };
+  }
+  // a\ — append text after matched line (single address only)
+  if (remaining.startsWith('a\\') || remaining.startsWith('a ')) {
+    const text = remaining.slice(2).replace(/\\n/g, '\n');
+    return { kind: 'append', start: addr1Result.addr, text };
+  }
+  // Address + substitution: 6s/old/new/ or /pattern/s/old/new/g
+  if (remaining.startsWith('s') && remaining.length > 2 && /[\/|#@]/.test(remaining[1])) {
+    const parsed = parseSedExpression(remaining);
+    if ('error' in parsed) return parsed;
+    return { kind: 'substitute', ...parsed, start: addr1Result.addr, end: addr2 };
+  }
+
+  return { error: `sed: unsupported command "${remaining}" in: ${expr}` };
+}
+
+/** Check if a sed address matches a given line */
+function addressMatches(addr: SedAddress, lineNum: number, lineContent: string, totalLines: number): boolean {
+  switch (addr.type) {
+    case 'line': return lineNum === addr.line;
+    case 'last': return lineNum === totalLines;
+    case 'pattern': return addr.pattern.test(lineContent);
   }
 }
 
@@ -1084,33 +1269,31 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         return { stdout: truncate(output), stderr: '', exitCode: 0 };
       }
       case 'sed': {
-        // sed [-i] [-e expr]... 's/pattern/replacement/[flags]' [file]
-        // Supports: stdin via pipe, -i for in-place, multiple -e expressions
+        // sed [-i] [-n] [-e expr]... 'expr' [file]
+        // Supports: substitution, range delete, range change, range print
         let inPlace = false;
+        let suppressOutput = false;
         const expressions: string[] = [];
         let filePath = '';
 
-        // Check for unsupported flags/addressing before parsing
-        if (args.includes('-n')) {
-          return {
-            stdout: '',
-            stderr: `sed: -n flag (line addressing) is not supported
-
-This shell only supports substitution: sed 's/pattern/replacement/[flags]' [file]
-
-For line ranges, use head/tail instead:
-  head -n 45 /file | tail -n 9    — lines 37-45
-  head -n 20 /file                — first 20 lines
-  tail -n 10 /file                — last 10 lines`,
-            exitCode: 2
-          };
-        }
-
+        // Parse arguments
         for (let i = 0; i < args.length; i++) {
           const a = args[i];
-          if (a === '-i') { inPlace = true; continue; }
+          // -i (GNU), -i '' (BSD/macOS), -i.bak (backup extension) — all mean in-place
+          // Guard against combined flags like -in or -ie — only match -i alone or -i with non-alpha suffix (.bak)
+          if (a === '-i' || (a.startsWith('-i') && a.length > 2 && !/^-i[a-z]$/i.test(a))) { inPlace = true; continue; }
+          if (a === '-n') { suppressOutput = true; continue; }
           if (a === '-e' && args[i + 1]) { expressions.push(args[++i]); continue; }
+          // Substitution expression (s/old/new/g)
           if (a.startsWith('s') && a.length > 2 && /[\/|#@]/.test(a[1])) {
+            expressions.push(a);
+            continue;
+          }
+          // Address-based expression (/pattern/d, 5,10d, $d, /p1/,/p2/c\text, etc.)
+          // Must distinguish from file paths like /index.html:
+          //   Address: /pattern/<cmd> or /pattern/,  (closed /.../ followed by command or comma)
+          //   Path:    /filename.ext                  (no closing / + command)
+          if (/^\d+[,dpcians]/.test(a) || /^[\\$]/.test(a) || /^\/[^/]*\/[,dpcians]/.test(a)) {
             expressions.push(a);
             continue;
           }
@@ -1122,30 +1305,32 @@ For line ranges, use head/tail instead:
             stdout: '',
             stderr: `sed: missing expression
 
-Usage: sed [-i] [-e expr] 's/pattern/replacement/[flags]' [file]
+Usage: sed [-i] [-n] [-e expr] 'expr' [file]
 
-Flags:
-  -i      Edit file in-place
-  -e EXPR Apply expression (can specify multiple)
-  g       Global flag (replace all occurrences per line)
-
-Supported delimiters: / | # @
+Commands:
+  s/pattern/replacement/[g]       Substitute (BRE: parens are literal)
+  /pattern1/,/pattern2/d          Delete lines in range
+  /pattern1/,/pattern2/c\\text     Replace range with text
+  /pattern/i\\text                 Insert text before matching line
+  /pattern/a\\text                 Append text after matching line
+  -n '/pattern/p'                 Print matching lines only
 
 Examples:
-  sed 's/old/new/g' /file.txt           (stdout)
-  sed -i 's/old/new/g' /file.txt        (in-place)
-  sed -e 's/a/b/' -e 's/c/d/' /file.txt (multiple)
-  cat /file.txt | sed 's/old/new/'       (stdin via pipe)`,
+  sed -i 's/old/new/g' /file.txt
+  sed -i '/<nav>/,/<\\/nav>/d' /file.txt
+  sed -i '/<nav>/,/<\\/nav>/c\\<nav>new</nav>' /file.txt
+  sed -i '/<\\/body>/i\\<footer>My footer</footer>' /file.txt
+  sed -n '/<script>/,/<\\/script>/p' /file.txt`,
             exitCode: 2
           };
         }
 
-        // Parse all expressions
-        const parsedExprs: { pattern: RegExp; replacement: string }[] = [];
+        // Parse all expressions using the unified parser
+        const parsedCmds: SedCommand[] = [];
         for (const expr of expressions) {
-          const parsed = parseSedExpression(expr);
+          const parsed = parseSedCommand(expr);
           if ('error' in parsed) return { stdout: '', stderr: parsed.error, exitCode: 2 };
-          parsedExprs.push(parsed);
+          parsedCmds.push(parsed);
         }
 
         // Get input content
@@ -1168,15 +1353,119 @@ Examples:
           return { stdout: '', stderr: 'sed: no input file or stdin', exitCode: 2 };
         }
 
-        // Apply all expressions
+        // Apply all commands
         const lines = inputContent.split(/\r?\n/);
-        const outputLines = lines.map(line => {
-          let result = line;
-          for (const { pattern, replacement } of parsedExprs) {
-            result = result.replace(pattern, replacement);
+        const totalLines = lines.length;
+        const outputLines: string[] = [];
+
+        // Track range state per command (for multi-line ranges)
+        const inRange = new Array(parsedCmds.length).fill(false);
+
+        for (let lineIdx = 0; lineIdx < totalLines; lineIdx++) {
+          let line = lines[lineIdx];
+          const lineNum = lineIdx + 1; // 1-based
+          let deleted = false;
+          let printed = false;
+          const appendAfter: string[] = [];
+
+          for (let ci = 0; ci < parsedCmds.length; ci++) {
+            const cmd = parsedCmds[ci];
+
+            if (cmd.kind === 'substitute') {
+              // If address-constrained (e.g., 6s/old/new/), only apply on matching lines
+              if (cmd.start) {
+                if (cmd.end) {
+                  // Range-addressed substitution: /start/,/end/s/old/new/
+                  if (!inRange[ci] && addressMatches(cmd.start, lineNum, line, totalLines)) {
+                    inRange[ci] = true;
+                  }
+                  if (inRange[ci]) {
+                    // Check end-address against original line before substitution
+                    const endMatch = addressMatches(cmd.end, lineNum, line, totalLines);
+                    line = line.replace(cmd.pattern, cmd.replacement);
+                    if (endMatch) {
+                      inRange[ci] = false;
+                    }
+                  }
+                } else {
+                  // Single-addressed substitution: 6s/old/new/
+                  if (addressMatches(cmd.start, lineNum, line, totalLines)) {
+                    line = line.replace(cmd.pattern, cmd.replacement);
+                  }
+                }
+              } else {
+                line = line.replace(cmd.pattern, cmd.replacement);
+              }
+              continue;
+            }
+
+            // Address-based commands: delete, change, insert, append, print
+            const startMatch = addressMatches(cmd.start, lineNum, line, totalLines);
+
+            // Insert/append are single-address only, handled before range logic
+            if (cmd.kind === 'insert' && startMatch) {
+              outputLines.push(cmd.text); // insert text before the current line
+              continue;
+            }
+            if (cmd.kind === 'append' && startMatch) {
+              appendAfter.push(cmd.text); // queue text to add after the current line
+              continue;
+            }
+
+            if ('end' in cmd && cmd.end) {
+              // Range: /start/,/end/cmd
+              if (!inRange[ci]) {
+                if (startMatch) inRange[ci] = true;
+              }
+
+              if (inRange[ci]) {
+                const endMatch = addressMatches(cmd.end, lineNum, line, totalLines);
+
+                if (cmd.kind === 'delete') {
+                  deleted = true;
+                } else if (cmd.kind === 'print') {
+                  printed = true;
+                } else if (cmd.kind === 'change') {
+                  deleted = true; // suppress original lines
+                }
+
+                if (endMatch) {
+                  // End of range — emit change text if applicable
+                  if (cmd.kind === 'change') {
+                    outputLines.push(cmd.text);
+                  }
+                  inRange[ci] = false;
+                }
+              }
+            } else {
+              // Single address: /pattern/cmd or 5cmd
+              if (startMatch) {
+                if (cmd.kind === 'delete') {
+                  deleted = true;
+                } else if (cmd.kind === 'print') {
+                  printed = true;
+                } else if (cmd.kind === 'change') {
+                  deleted = true;
+                  outputLines.push(cmd.text);
+                }
+              }
+            }
           }
-          return result;
-        });
+
+          if (!deleted) {
+            if (suppressOutput) {
+              // -n mode: only output explicitly printed lines
+              if (printed) outputLines.push(line);
+            } else {
+              outputLines.push(line);
+            }
+          }
+          // Flush append-after-line text (from 'a' command)
+          for (const text of appendAfter) {
+            outputLines.push(text);
+          }
+        }
+
         const outputContent = outputLines.join('\n');
 
         if (inPlace) {
@@ -1455,7 +1744,7 @@ Correct shell tool usage:
   {"cmd": ["sqlite3", "SELECT * FROM users"]} - Execute SQL (Server Mode)
   {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 
-Note: Use write tool for file editing. Use rg (ripgrep) instead of grep for better context management.
+Note: Use cat > for file creation, sed -i for substitutions. Use rg (ripgrep) instead of grep for better context management.
 Note: sqlite3 is only available in Server Mode and when a deployment context is selected.`,
           exitCode: 127
         };

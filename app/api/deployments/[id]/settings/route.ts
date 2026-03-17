@@ -6,7 +6,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerAdapter } from '@/lib/vfs/adapters/server';
-import { buildStaticDeployment } from '@/lib/compiler/static-builder';
 
 export async function GET(
   request: NextRequest,

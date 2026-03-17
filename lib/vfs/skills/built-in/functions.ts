@@ -215,41 +215,31 @@ if (!auth.valid) {
 
 ## Creating Functions
 
-**IMPORTANT: Use write rewrite operation, NOT echo for creating functions.**
+**IMPORTANT: Use cat with heredoc, NOT echo, for creating functions.**
 
-Echo with complex JSON strings causes escaping issues. The write tool handles JSON encoding automatically.
+Echo with complex JSON strings causes escaping issues. Heredocs handle JSON content cleanly.
 
-### Create Edge Function (Recommended)
-` + "```" + `javascript
-// Use write tool with type: "rewrite"
-write({
-  "file_path": "/.server/edge-functions/list-products.json",
-  "operations": [{
-    "type": "rewrite",
-    "content": JSON.stringify({
-      "name": "list-products",
-      "method": "GET",
-      "enabled": true,
-      "code": "const products = db.query('SELECT * FROM products WHERE active = 1');\\nResponse.json({ products });"
-    }, null, 2)
-  }]
-})
+### Create Edge Function
+` + "```" + `bash
+cat > /.server/edge-functions/list-products.json << 'EOF'
+{
+  "name": "list-products",
+  "method": "GET",
+  "enabled": true,
+  "code": "const products = db.query('SELECT * FROM products WHERE active = 1');\\nResponse.json({ products });"
+}
+EOF
 ` + "```" + `
 
-### Create Server Function (Recommended)
-` + "```" + `javascript
-// Use write tool with type: "rewrite"
-write({
-  "file_path": "/.server/server-functions/formatPrice.json",
-  "operations": [{
-    "type": "rewrite",
-    "content": JSON.stringify({
-      "name": "formatPrice",
-      "enabled": true,
-      "code": "const [amount] = args;\\nreturn '$' + Number(amount).toFixed(2);"
-    }, null, 2)
-  }]
-})
+### Create Server Function
+` + "```" + `bash
+cat > /.server/server-functions/formatPrice.json << 'EOF'
+{
+  "name": "formatPrice",
+  "enabled": true,
+  "code": "const [amount] = args;\\nreturn '$' + Number(amount).toFixed(2);"
+}
+EOF
 ` + "```" + `
 
 ### Why NOT to use echo

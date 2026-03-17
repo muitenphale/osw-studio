@@ -169,9 +169,9 @@ export async function runGuidedDemoEdit({
   await emitEvent({
     id: toTranscriptId(),
     role: 'tool',
-    name: 'write',
-    command: 'update /styles/main.css (--primary → #22c55e)',
-    output: 'Applied 2/2 operations to /styles/main.css. Updated primary palette to emerald green.',
+    name: 'shell',
+    command: 'sed -i /styles/main.css (--primary → #22c55e)',
+    output: 'Updated /styles/main.css. Applied primary palette change to emerald green.',
   });
 
   if (cssContent !== updatedCss) {

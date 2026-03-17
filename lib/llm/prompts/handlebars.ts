@@ -64,38 +64,26 @@ The system supports Handlebars templating for reusable components and dynamic co
 BASIC HANDLEBARS WORKFLOW - START HERE:
 
 Step 1: Create the template file (.hbs):
-{
-  "file_path": "/templates/card.hbs",
-  "operations": [
-    {
-      "type": "rewrite",
-      "content": "<div class=\\"card\\">\\n  <h3>{{title}}</h3>\\n  <p>{{description}}</p>\\n</div>"
-    }
-  ]
-}
+cat > /templates/card.hbs << 'EOF'
+<div class="card">
+  <h3>{{title}}</h3>
+  <p>{{description}}</p>
+</div>
+EOF
 
 Step 2: Create data file (optional but recommended):
+cat > /data.json << 'EOF'
 {
-  "file_path": "/data.json",
-  "operations": [
-    {
-      "type": "rewrite",
-      "content": "{\\n  \\"title\\": \\"Welcome\\",\\n  \\"description\\": \\"This data is available in all templates\\",\\n  \\"products\\": [\\n    {\\"name\\": \\"Product 1\\", \\"price\\": 99}\\n  ]\\n}"
-    }
+  "title": "Welcome",
+  "description": "This data is available in all templates",
+  "products": [
+    {"name": "Product 1", "price": 99}
   ]
 }
+EOF
 
 Step 3: Use the partial in HTML:
-{
-  "file_path": "/index.html",
-  "operations": [
-    {
-      "type": "update",
-      "oldStr": "<body>\\n</body>",
-      "newStr": "<body>\\n  {{> card}}\\n</body>"
-    }
-  ]
-}
+sed -i 's|<body>|<body>\\n  {{> card}}|' /index.html
 
 Result: The {{> card}} will be replaced with the card.hbs content, with {{title}} and {{description}} filled from data.json.
 
@@ -124,38 +112,28 @@ File structure:
 /styles/style.css
 
 1. Create template:
-{
-  "file_path": "/templates/product-card.hbs",
-  "operations": [
-    {
-      "type": "rewrite",
-      "content": "<div class=\\"product-card\\">\\n  <h3>{{name}}</h3>\\n  <p class=\\"price\\">\${{price}}</p>\\n  {{#if onSale}}\\n    <span class=\\"badge\\">On Sale!</span>\\n  {{/if}}\\n</div>"
-    }
-  ]
-}
+cat > /templates/product-card.hbs << 'EOF'
+<div class="product-card">
+  <h3>{{name}}</h3>
+  <p class="price">\${{price}}</p>
+  {{#if onSale}}
+    <span class="badge">On Sale!</span>
+  {{/if}}
+</div>
+EOF
 
 2. Create data:
+cat > /data.json << 'EOF'
 {
-  "file_path": "/data.json",
-  "operations": [
-    {
-      "type": "rewrite",
-      "content": "{\\n  \\"products\\": [\\n    {\\"name\\": \\"Widget\\", \\"price\\": 99, \\"onSale\\": true},\\n    {\\"name\\": \\"Gadget\\", \\"price\\": 149, \\"onSale\\": false}\\n  ]\\n}"
-    }
+  "products": [
+    {"name": "Widget", "price": 99, "onSale": true},
+    {"name": "Gadget", "price": 149, "onSale": false}
   ]
 }
+EOF
 
 3. Use in HTML:
-{
-  "file_path": "/index.html",
-  "operations": [
-    {
-      "type": "update",
-      "oldStr": "<body>\\n</body>",
-      "newStr": "<body>\\n  <div class=\\"product-grid\\">\\n    {{#each products}}\\n      {{> product-card}}\\n    {{/each}}\\n  </div>\\n</body>"
-    }
-  ]
-}
+sed -i 's|<body>|<body>\\n  <div class="product-grid">\\n    {{#each products}}\\n      {{> product-card}}\\n    {{/each}}\\n  </div>|' /index.html
 
 ⚠️ COMMON LLM MISTAKES - AVOID THESE:
 
@@ -234,15 +212,15 @@ HTML: {{#with product}}{{> card}}{{/with}}
 
 Template Data Context:
 All .hbs files have access to the root data.json context:
+cat > /data.json << 'EOF'
 {
-  "file_path": "/data.json",
-  "operations": [
-    {
-      "type": "rewrite",
-      "content": "{\\n  \\"pageTitle\\": \\"My Website\\",\\n  \\"products\\": [\\n    {\\"name\\": \\"Product 1\\", \\"price\\": 99},\\n    {\\"name\\": \\"Product 2\\", \\"price\\": 149}\\n  ]\\n}"
-    }
+  "pageTitle": "My Website",
+  "products": [
+    {"name": "Product 1", "price": 99},
+    {"name": "Product 2", "price": 149}
   ]
 }
+EOF
 
 In any .hbs file, you can access: {{pageTitle}}, {{#each products}}...{{/each}}, etc.
 

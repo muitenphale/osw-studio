@@ -36,7 +36,6 @@ import { toast } from 'sonner';
 interface FileExplorerProps {
   projectId: string;
   onFileSelect?: (file: VirtualFile) => void;
-  selectedPath?: string;
   onClose?: () => void;
   entryPoint?: string;
   onSetEntryPoint?: (path: string) => void;
@@ -50,7 +49,7 @@ interface FileTreeItem {
   children?: FileTreeItem[];
 }
 
-export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, entryPoint, onSetEntryPoint, onAddPromptFile }: FileExplorerProps) {
+export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onSetEntryPoint, onAddPromptFile }: FileExplorerProps) {
   const [files, setFiles] = useState<VirtualFile[]>([]);
   const [fileTree, setFileTree] = useState<FileTreeItem[]>([]);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['/']));
@@ -487,7 +486,6 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
 
   const renderTreeItem = (item: FileTreeItem, level: number = 0) => {
     const isExpanded = expandedDirs.has(item.path);
-    const isSelected = selectedPath === item.path;
     const isRenaming = renamingPath === item.path;
     const isDropTarget = dropTarget === item.path;
     const isTransient = isTransientPath(item.path);
@@ -526,7 +524,6 @@ export function FileExplorer({ projectId, onFileSelect, selectedPath, onClose, e
             <div
             className={cn(
               'flex items-center gap-2 px-2 py-1.5 hover:bg-accent hover:text-accent-foreground cursor-pointer rounded-md transition-colors',
-              isSelected && 'bg-accent text-accent-foreground',
               isDropTarget && item.type === 'directory' && 'bg-blue-500/20 border border-blue-500',
               draggedItem?.path === item.path && 'opacity-50',
               (isTransient || isGenerated || isHiddenDotFile) && 'opacity-75',

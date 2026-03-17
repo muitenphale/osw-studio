@@ -87,11 +87,11 @@ function buildServerContextSection(serverContext: ServerContextMetadata): string
     section += `Put complete SQL in double quotes. Do not use dot commands. Schema: cat /.server/db/schema.sql\n`;
   }
 
-  section += `\nCreating backend features (use write tool):\n`;
-  section += `- Secret: write /.server/secrets/NAME.json rewrite '{"name":"NAME","description":"..."}'\n`;
-  section += `- Edge function: write /.server/edge-functions/name.json rewrite '{"name":"name","method":"GET","enabled":true,"code":"..."}'\n`;
-  section += `- Server function: write /.server/server-functions/name.json rewrite '{"name":"name","enabled":true,"code":"..."}'\n`;
-  section += `- Scheduled: write /.server/scheduled-functions/name.json rewrite '{"name":"name","functionName":"edgeFn","cronExpression":"0 * * * *","timezone":"UTC","enabled":true,"config":{}}'\n`;
+  section += `\nCreating backend features (use shell commands):\n`;
+  section += `- Secret: cat > /.server/secrets/NAME.json << 'EOF'\n{"name":"NAME","description":"..."}\nEOF\n`;
+  section += `- Edge function: cat > /.server/edge-functions/name.json << 'EOF'\n{"name":"name","method":"GET","enabled":true,"code":"..."}\nEOF\n`;
+  section += `- Server function: cat > /.server/server-functions/name.json << 'EOF'\n{"name":"name","enabled":true,"code":"..."}\nEOF\n`;
+  section += `- Scheduled: cat > /.server/scheduled-functions/name.json << 'EOF'\n{"name":"name","functionName":"edgeFn","cronExpression":"0 * * * *","timezone":"UTC","enabled":true,"config":{}}\nEOF\n`;
   section += `Call edge functions from client: fetch('/function-name') — the platform auto-routes.\n`;
   section += `Full reference: cat /.server/README.md\n`;
 
@@ -199,7 +199,7 @@ async function buildChatModePrompt(serverContext?: ServerContextMetadata | null,
   prompt += `
 
 Read-only mode — file modifications are disabled.
-Disabled: mkdir, touch, mv, rm, cp, echo >, sed -i, write tool, evaluation tool.
+Disabled: mkdir, touch, mv, rm, cp, echo >, sed -i, evaluation tool.
 Focus on exploration, analysis, and planning.`;
 
   prompt += await buildDynamicContent(projectId, serverContext);
@@ -209,38 +209,13 @@ Focus on exploration, analysis, and planning.`;
 async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
   let prompt = buildSharedPreamble(false);
 
-  // Write tool section
   prompt += `
 
-File Editing with write:
-
-Inspect the relevant snippet before editing (rg -C 5, head, or tail — not cat).
-Make one write call per response.
-
-Operation types:
-- UPDATE: replace exact string (oldStr must be unique in file)
-- REWRITE: replace entire file content
-- REPLACE_ENTITY: replace code entity by opening pattern (function, HTML element, CSS rule)
-
-Examples:
-
-UPDATE (title change):
-{"file_path": "/index.html", "operations": [{"type": "update", "oldStr": "<title>Old Title</title>", "newStr": "<title>New Title</title>"}]}
-
-REWRITE (small file):
-{"file_path": "/README.md", "operations": [{"type": "rewrite", "content": "# New Project\\n\\nComplete new content."}]}
-
-REPLACE_ENTITY (function):
-{"file_path": "/utils/helpers.js", "operations": [{"type": "replace_entity", "selector": "function calculateTotal(", "replacement": "function calculateTotal(items, tax = 0.1) {\\n  const subtotal = items.reduce((sum, item) => sum + item.price, 0);\\n  return subtotal * (1 + tax);\\n}"}]}
-
-Rules:
-- oldStr must match exactly and be unique — include more context if ambiguous
-- For replace_entity, copy the opening pattern without leading indentation
-- Inspect the snippet before editing (rg -C 5, head, or tail)
-- One write call per response
-- If update keeps failing, switch to rewrite
-- Prefer editing existing files over creating new ones
-- For large files (200+ lines), build progressively: skeleton rewrite, then fill with updates`;
+You have two tools: shell and evaluation.
+Edit files with standard commands:
+- Rewrite: cat > /file << 'EOF'
+- Substitute: sed -i 's/old/new/' /file
+- Inspect before editing (rg -C 5 or head/tail).`;
 
   // Evaluation section
   prompt += `

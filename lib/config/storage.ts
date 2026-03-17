@@ -25,7 +25,7 @@ export interface CostSettings {
   warningThreshold?: number;
 }
 
-export interface ModelCacheEntry {
+interface ModelCacheEntry {
   models: ProviderModel[];
   timestamp: string;
   expiresAt: string;
@@ -202,19 +202,6 @@ class ConfigManager {
     ) || null;
   }
 
-  setModelPricing(provider: ProviderId, model: string, pricing: ProviderPricingEntry): void {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const settings = this.getSettings();
-    const modelPricing = { ...(settings.modelPricing || {}) };
-    const providerPricing = { ...(modelPricing[provider] || {}) };
-    providerPricing[model] = pricing;
-    modelPricing[provider] = providerPricing;
-    this.setSetting('modelPricing', modelPricing);
-  }
-
   setProviderPricing(provider: ProviderId, pricingMap: Record<string, ProviderPricingEntry>): void {
     if (typeof window === 'undefined') {
       return;
@@ -233,26 +220,6 @@ class ConfigManager {
     }
 
     modelPricing[provider] = providerPricing;
-    this.setSetting('modelPricing', modelPricing);
-  }
-
-  clearProviderPricing(provider?: ProviderId): void {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (!provider) {
-      this.setSetting('modelPricing', {});
-      return;
-    }
-
-    const settings = this.getSettings();
-    if (!settings.modelPricing?.[provider]) {
-      return;
-    }
-
-    const modelPricing = { ...(settings.modelPricing || {}) };
-    delete modelPricing[provider];
     this.setSetting('modelPricing', modelPricing);
   }
 
@@ -346,46 +313,6 @@ class ConfigManager {
     this.setSetting('lifetimeCosts', lifetimeCosts);
   }
 
-  adjustSessionCost(provider: string, deltaCost: number, tokenDelta?: { input: number; output: number }): void {
-    if (!deltaCost && !tokenDelta) {
-      return;
-    }
-
-    const session = this.getCurrentSession();
-    if (!session) {
-      return;
-    }
-
-    const providerKey = provider || 'unknown';
-
-    session.totalCost += deltaCost;
-
-    if (!session.providerBreakdown[providerKey]) {
-      session.providerBreakdown[providerKey] = {
-        cost: 0,
-        tokenUsage: { input: 0, output: 0 },
-        requestCount: 0
-      };
-    }
-
-    session.providerBreakdown[providerKey].cost += deltaCost;
-
-    if (tokenDelta) {
-      session.providerBreakdown[providerKey].tokenUsage.input += tokenDelta.input;
-      session.providerBreakdown[providerKey].tokenUsage.output += tokenDelta.output;
-    }
-
-    const lifetimeCosts = this.getSettings().lifetimeCosts || {
-      total: 0,
-      byProvider: {}
-    };
-    lifetimeCosts.total += deltaCost;
-    lifetimeCosts.byProvider[providerKey] = (lifetimeCosts.byProvider[providerKey] || 0) + deltaCost;
-
-    this.setSetting('currentSession', session);
-    this.setSetting('lifetimeCosts', lifetimeCosts);
-  }
-
   getLifetimeCosts() {
     return this.getSettings().lifetimeCosts || {
       total: 0,
@@ -399,35 +326,6 @@ class ConfigManager {
       byProvider: {},
       lastReset: new Date()
     });
-  }
-
-  checkCostLimits(): { warning: boolean; exceeded: boolean; message?: string } {
-    const settings = this.getCostSettings();
-    const session = this.getCurrentSession();
-    
-    if (!session || !settings.dailyLimit) {
-      return { warning: false, exceeded: false };
-    }
-
-    const percentUsed = (session.totalCost / settings.dailyLimit) * 100;
-    
-    if (percentUsed >= 100) {
-      return {
-        warning: false,
-        exceeded: true,
-        message: `Daily limit of $${settings.dailyLimit.toFixed(2)} exceeded`
-      };
-    }
-
-    if (settings.warningThreshold && percentUsed >= settings.warningThreshold) {
-      return {
-        warning: true,
-        exceeded: false,
-        message: `${percentUsed.toFixed(0)}% of daily limit used ($${session.totalCost.toFixed(2)} of $${settings.dailyLimit.toFixed(2)})`
-      };
-    }
-
-    return { warning: false, exceeded: false };
   }
 
   // Model cache management
@@ -475,11 +373,6 @@ class ConfigManager {
       // Clear all cache
       this.setSetting('modelCache', {});
     }
-  }
-
-  isCacheValid(provider: ProviderId): boolean {
-    const cache = this.getCachedModels(provider);
-    return cache !== null;
   }
 
   // Codex auth management

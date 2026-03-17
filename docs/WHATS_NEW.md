@@ -6,6 +6,17 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.44.0 - Unified Shell Editing (2026-03-16)
+
+The AI now edits files using standard shell commands instead of a separate structured tool — resulting in more reliable and efficient code generation. The virtual `sed` command has been significantly expanded to support the full range of editing patterns.
+
+- **Shell-Only Editing** - File creation and modification now use `cat > /file << 'EOF'` and `sed -i` instead of the previous JSON-based write tool. This matches how developers naturally work in a terminal and eliminates the most common source of tool call failures
+- **Faster & Cheaper** - Benchmarking across multiple models showed 6-9% lower token usage with shell-only editing compared to the previous structured approach
+- **Simpler Tool Surface** - The AI has two tools: `shell` (for all commands including file editing) and `evaluation` (for progress tracking). Fewer tools means fewer opportunities for the AI to pick the wrong one
+- **Smarter sed** - The virtual `sed` now supports address-based commands (`/pattern/d` to delete lines, `/start/,/end/c\text` to replace ranges, `i\` and `a\` to insert/append), the `-n` flag with print, and proper regex handling for patterns containing parentheses and special characters
+
+---
+
 ## v1.43.0 - Python, Lua, Console & Runtime Split (2026-03-12)
 
 Write and run Python and Lua scripts directly in the browser. A new interactive Console works across all project types. Plus: the Static runtime is now pure HTML/CSS/JS, with Handlebars templating moved to its own dedicated runtime.

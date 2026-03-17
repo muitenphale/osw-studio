@@ -16,12 +16,8 @@ import { setTelemetryOptIn } from '@/lib/telemetry';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface SettingsPanelProps {
-  onClose?: () => void;
-}
-
-export function SettingsPanel({ onClose: _onClose }: SettingsPanelProps) {
-  const [_settings, setSettings] = useState<AppSettings>({});
+export function SettingsPanel() {
+  const [, setSettings] = useState<AppSettings>({});
   const [costSettings, setCostSettings] = useState<CostSettings>({});
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);

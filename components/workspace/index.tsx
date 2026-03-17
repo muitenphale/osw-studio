@@ -1568,7 +1568,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                       <MultiTabEditor
                         projectId={project.id}
                         runtime={project.settings?.runtime}
-                        onFilesChange={handleFilesChange}
+
                         onClose={() => setShowEditor(false)}
                       />
                     </div>
@@ -1716,7 +1716,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 <MultiTabEditor
                   projectId={project.id}
                   runtime={project.settings?.runtime}
-                  onFilesChange={handleFilesChange}
                   onClose={() => setShowEditor(false)}
                 />
               </div>

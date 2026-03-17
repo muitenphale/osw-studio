@@ -5,10 +5,9 @@ import { Button } from '@/components/ui/button';
 import { MultiAgentOrchestrator } from '@/lib/llm/multi-agent-orchestrator';
 import { testScenarios, testTracks } from '@/lib/testing/test-scenarios';
 import type { AssertionResult } from '@/lib/testing/types';
-import { ArrowLeft, Play, CheckCircle, XCircle, Clock, RefreshCw, ChevronDown, ChevronUp, Square, Download, Minus, Plus } from 'lucide-react';
+import { ArrowLeft, Play, CheckCircle, XCircle, Clock, RefreshCw, ChevronDown, ChevronUp, Square, Download, Minus, Plus, AlertCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { AlertCircle } from 'lucide-react';
 import { ModelSettingsPanel } from '@/components/settings/model-settings';
 import { configManager } from '@/lib/config/storage';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
@@ -24,7 +23,7 @@ interface ToolCallDetail {
   args?: string;
 }
 
-const KNOWN_TOOLS = new Set(['shell', 'write', 'evaluation']);
+const KNOWN_TOOLS = new Set(['shell', 'evaluation']);
 
 interface ToolStats {
   total: number;
@@ -145,8 +144,7 @@ export default function TestGenerationPage() {
   );
   const [runningTest, setRunningTest] = useState<string | null>(null);
   const [activeTrack, setActiveTrack] = useState<string | null>(null);
-  const [orchestratorInstances, setOrchestratorInstances] = useState<Map<string, MultiAgentOrchestrator>>(new Map());
-  const [generationOutputs, setGenerationOutputs] = useState<Map<string, string>>(new Map());
+  const orchestratorInstances = useRef<Map<string, MultiAgentOrchestrator>>(new Map());
   const [expandedTests, setExpandedTests] = useState<Set<string>>(new Set());
   const generationOutputRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const batchCancelledRef = useRef(false);
@@ -222,19 +220,14 @@ export default function TestGenerationPage() {
         }
       }
 
-      const appendOutput = (scenarioId: string, text: string) => {
-        setGenerationOutputs(prev => {
-          const newMap = new Map(prev);
-          newMap.set(scenarioId, (newMap.get(scenarioId) || '') + text);
-          return newMap;
-        });
+      const appendOutput = (key: string, text: string) => {
         setTestResults(prev => prev.map(result =>
-          result.id === scenarioId
+          result.id === key
             ? { ...result, generationOutput: (result.generationOutput || '') + text }
             : result
         ));
         setTimeout(() => {
-          const outputElement = generationOutputRefs.current.get(scenarioId);
+          const outputElement = generationOutputRefs.current.get(key);
           if (outputElement) {
             outputElement.scrollTop = outputElement.scrollHeight;
           }
@@ -252,11 +245,6 @@ export default function TestGenerationPage() {
             if (!deltaText && !snapshot) return;
 
             if (snapshot !== undefined) {
-              setGenerationOutputs(prev => {
-                const newMap = new Map(prev);
-                newMap.set(scenarioId, snapshot);
-                return newMap;
-              });
               setTestResults(prev => prev.map(result =>
                 result.id === scenarioId
                   ? { ...result, generationOutput: snapshot }
@@ -283,7 +271,6 @@ export default function TestGenerationPage() {
                 try {
                   const parsed = JSON.parse(data.args);
                   if (toolName === 'shell') argSnippet = parsed.cmd || parsed.command || '';
-                  else if (toolName === 'write') argSnippet = parsed.path || parsed.filePath || '';
                   else if (toolName === 'evaluation') {
                     const g = parsed.goal_achieved;
                     argSnippet = g !== undefined ? `goal_achieved: ${g}` : '';
@@ -305,11 +292,7 @@ export default function TestGenerationPage() {
         { chatMode: false }
       );
 
-      setOrchestratorInstances(prev => {
-        const newMap = new Map(prev);
-        newMap.set(scenarioId, orchestrator);
-        return newMap;
-      });
+      orchestratorInstances.current.set(scenarioId, orchestrator);
 
       const result = await orchestrator.execute(scenario.prompt);
 
@@ -337,8 +320,6 @@ export default function TestGenerationPage() {
                 const parsed = JSON.parse(tc.function.arguments);
                 if (tc.function.name === 'shell') {
                   argSnippet = parsed.cmd || parsed.command || '';
-                } else if (tc.function.name === 'write') {
-                  argSnippet = parsed.path || parsed.filePath || '';
                 } else if (tc.function.name === 'evaluation') {
                   const goal = parsed.goal_achieved;
                   argSnippet = goal !== undefined ? `goal_achieved: ${goal}` : '';
@@ -434,6 +415,7 @@ export default function TestGenerationPage() {
               assertionScore,
               judgeResult,
               selfEvalCorrect: assertionResults.length > 0 ? result.success === testPassed : undefined,
+
             }
           : testResult
       ));
@@ -456,6 +438,7 @@ export default function TestGenerationPage() {
               errors: [errorMessage],
               details: `Error: ${errorMessage}`,
               toolCallDetails: toolDetails.length > 0 ? toolDetails : undefined,
+
             }
           : result
       ));
@@ -463,11 +446,7 @@ export default function TestGenerationPage() {
       toast.error(`Test error: ${scenario.name}`);
     }
 
-    setOrchestratorInstances(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(scenarioId);
-      return newMap;
-    });
+    orchestratorInstances.current.delete(scenarioId);
 
     if (projectId) {
       try {
@@ -480,11 +459,17 @@ export default function TestGenerationPage() {
   };
 
   const stopTest = (scenarioId: string) => {
-    const orchestrator = orchestratorInstances.get(scenarioId);
+    const orchestrator = orchestratorInstances.current.get(scenarioId);
     if (orchestrator) {
       orchestrator.stop();
       toast.info(`Stopping test: ${testScenarios.find(s => s.id === scenarioId)?.name}`);
     }
+  };
+
+  /** Build initial pending result entries */
+  const buildPendingResults = (scenarioIds: string[]): TestResult[] => {
+    const scenarios = testScenarios.filter(s => scenarioIds.includes(s.id));
+    return scenarios.map(s => ({ id: s.id, name: s.name, status: 'pending' as const }));
   };
 
   const runTrack = async (trackId: string) => {
@@ -504,14 +489,7 @@ export default function TestGenerationPage() {
       setCurrentRound(round);
 
       // Reset test results to pending for this round
-      setTestResults(
-        testScenarios.map(scenario => ({
-          id: scenario.id,
-          name: scenario.name,
-          status: 'pending'
-        }))
-      );
-      setGenerationOutputs(new Map());
+      setTestResults(buildPendingResults(scenarioIds));
 
       for (const testId of scenarioIds) {
         if (batchCancelledRef.current) break;
@@ -539,6 +517,7 @@ export default function TestGenerationPage() {
           selfEvalCorrect: r.selfEvalCorrect,
           errors: r.errors,
           details: r.details,
+
         }));
       setRoundHistory(prev => [...prev, snapshot]);
     }
@@ -574,25 +553,18 @@ export default function TestGenerationPage() {
 
   const stopBenchmark = () => {
     batchCancelledRef.current = true;
-    orchestratorInstances.forEach((orchestrator) => {
+    orchestratorInstances.current.forEach((orchestrator) => {
       orchestrator.stop();
     });
   };
 
   const resetTests = () => {
     stopBenchmark();
-    setTestResults(
-      testScenarios.map(scenario => ({
-        id: scenario.id,
-        name: scenario.name,
-        status: 'pending'
-      }))
-    );
+    setTestResults(buildPendingResults(allScenarioIds));
     setOverallStats({ total: 0, passed: 0, failed: 0, successRate: 0, totalCost: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, toolStats: { total: 0, success: 0, failed: 0, invalid: 0, invalidNames: [], breakdown: {} } });
     setRunningTest(null);
     setActiveTrack(null);
-    setOrchestratorInstances(new Map());
-    setGenerationOutputs(new Map());
+    orchestratorInstances.current = new Map();
     setExpandedTests(new Set());
     setRoundHistory([]);
     setCurrentRound(0);
@@ -778,6 +750,7 @@ export default function TestGenerationPage() {
               selfEvalCorrect: r.selfEvalCorrect,
               errors: r.errors,
               details: r.details,
+    
             }))
         }];
 
@@ -958,7 +931,7 @@ export default function TestGenerationPage() {
             <div className="flex-1">
               <h3 className="font-medium text-blue-900 dark:text-blue-100 mb-1">How to Interpret Benchmark Results</h3>
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                This benchmark evaluates how well a model performs with OSW Studio&apos;s agentic tools (shell, write, evaluation).
+                This benchmark evaluates how well a model performs with OSW Studio&apos;s agentic tools (shell, evaluation).
                 A <strong>passing test</strong> means the model completed the task using the right tools.
                 A <strong>failing test</strong> means the model couldn&apos;t complete the task or encountered errors.
               </p>
@@ -1220,11 +1193,11 @@ export default function TestGenerationPage() {
                 {/* Scenarios in this track */}
                 <div className="grid gap-4">
                   {track.scenarioIds.map(scenarioId => {
-                    const result = testResults.find(r => r.id === scenarioId);
+                    const matchingResults = testResults.filter(r => r.id === scenarioId);
                     const scenario = testScenarios.find(s => s.id === scenarioId);
-                    if (!result || !scenario) return null;
+                    if (matchingResults.length === 0 || !scenario) return null;
 
-                    return (
+                    return matchingResults.map(result => (
                       <div key={result.id} className="bg-card border rounded-lg p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div>
@@ -1291,7 +1264,7 @@ export default function TestGenerationPage() {
                           </div>
                         </div>
                         {/* Generation Output Display */}
-                        {(result.status === 'running' || expandedTests.has(result.id)) && (result.generationOutput || generationOutputs.get(result.id)) && (
+                        {(result.status === 'running' || expandedTests.has(result.id)) && (result.generationOutput) && (
                           <div className="mt-3 pt-3 border-t">
                             <div className="flex items-center gap-2 mb-2">
                               <div className="text-sm font-medium text-muted-foreground">Generation Output</div>
@@ -1311,7 +1284,7 @@ export default function TestGenerationPage() {
                               }}
                             >
                               <pre className="text-xs font-mono whitespace-pre-wrap text-foreground/80">
-                                {result.generationOutput || generationOutputs.get(result.id) || ''}
+                                {result.generationOutput || ''}
                               </pre>
                             </div>
                           </div>
@@ -1411,7 +1384,7 @@ export default function TestGenerationPage() {
                           </div>
                         )}
                       </div>
-                    );
+                    ));
                   })}
                 </div>
 

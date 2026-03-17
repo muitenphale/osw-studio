@@ -13,7 +13,6 @@ import { useTypescriptIntelliSense } from '@/lib/hooks/use-typescript-intellisen
 interface MultiTabEditorProps {
   projectId: string;
   runtime?: ProjectRuntime;
-  onFilesChange?: () => void;
   onClose?: () => void;
 }
 
@@ -23,7 +22,7 @@ interface OpenFile {
   modified: boolean;
 }
 
-export function MultiTabEditor({ projectId, runtime, onFilesChange: _onFilesChange, onClose }: MultiTabEditorProps) {
+export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorProps) {
   const [openFiles, setOpenFiles] = useState<Map<string, OpenFile>>(new Map());
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const { resolvedTheme } = useTheme();

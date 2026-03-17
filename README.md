@@ -116,11 +116,10 @@ See [Server Mode](#server-mode-optional) for full details.
 
 ## How It Works
 
-OSW Studio uses an agentic AI system with 3 core tools:
+OSW Studio uses an agentic AI system with 2 core tools:
 
-1. **Shell Tool** - File system operations (`ls`, `cat`, `grep`, `find`, `mkdir`, `rm`, `mv`, `cp`, `rg`, `head`, `tail`, `tree`, `touch`, `echo >`)
-2. **JSON Patch Tool** - Precise file edits with string-based operations
-3. **Evaluation Tool** - AI self-assesses progress and decides next steps
+1. **Shell Tool** - File system operations and editing (`ls`, `cat`, `grep`, `find`, `mkdir`, `rm`, `mv`, `cp`, `sed -i`, `cat >`, `echo >`, `tree`, `head`, `tail`)
+2. **Evaluation Tool** - AI self-assesses progress and decides next steps
 
 **Command validation** → **Execution** → **Checkpoint** → **Continue**
 
