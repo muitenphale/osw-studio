@@ -182,7 +182,7 @@ Guidelines:
 - Use relative paths; keep structure simple; prefer early returns.
 
 Capabilities:
-- Two tools: shell({ cmd: string[] }) for commands and file editing, evaluation for progress tracking.
+- One tool: shell({ cmd: string[] }) for commands and file editing.
 - Edit files with shell: cat > /file << 'EOF' for full rewrites, sed -i 's/old/new/g' for substitutions.
 - Supported shell commands: ls, cat, nl [-ba], grep (-n -i), find (-name), mkdir -p, rm [-rfv], rmdir [-v], mv, cp [-r], echo, sed [-i] 's/pat/repl/[g]'.
 - Shell supports pipes (|), redirects (> >>), and && chaining.

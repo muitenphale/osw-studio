@@ -132,6 +132,29 @@ export async function runAssertions(
           break;
         }
 
+        case 'file_matches_any': {
+          // Check multiple files — pass if ANY file matches the pattern
+          const re = new RegExp(assertion.pattern, 'i');
+          for (const filePath of assertion.paths) {
+            try {
+              const file = await vfs.readFile(projectId, filePath);
+              const content = typeof file.content === 'string' ? file.content : '';
+              const match = re.exec(content);
+              if (match) {
+                passed = true;
+                actual = `matched in ${filePath}: "${truncate(match[0], 40)}"`;
+                break;
+              }
+            } catch {
+              // File doesn't exist, try next
+            }
+          }
+          if (!passed) {
+            actual = `pattern not found in any of: ${assertion.paths.join(', ')}`;
+          }
+          break;
+        }
+
         case 'valid_json': {
           const file = await vfs.readFile(projectId, assertion.path);
           const content = typeof file.content === 'string' ? file.content : '';

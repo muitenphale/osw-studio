@@ -2,8 +2,13 @@
  * Runtime Error Buffer
  *
  * Accumulates JS runtime errors (uncaught exceptions, console.error calls)
- * captured from the preview iframe via postMessage. The orchestrator drains
- * these between iterations to give the AI feedback, mirroring compile-errors.ts.
+ * captured from the preview iframe via postMessage.
+ *
+ * Errors are NOT injected between orchestrator iterations (they're usually
+ * transient — e.g. new JS running against old HTML mid-rewrite). Instead,
+ * they're only drained when the AI signals completion (status --complete).
+ * The preview clears the buffer on each recompilation so only errors from
+ * the latest compilation are present at drain time.
  */
 
 let pending: string[] = [];
@@ -21,10 +26,29 @@ export function peekRuntimeErrors(): string[] {
   return [...new Set(pending)];
 }
 
+/**
+ * Drain runtime errors, returning deduplicated list and clearing the buffer.
+ */
 export function drainRuntimeErrors(): string[] {
-  const errors = pending;
+  const errors = [...new Set(pending)];
   pending = [];
-  return [...new Set(errors)];
+  return errors;
+}
+
+/**
+ * Clear pending errors. Called by the preview on each recompilation
+ * so only errors from the latest compilation are retained.
+ */
+export function clearRuntimeErrors(): void {
+  pending = [];
+}
+
+/**
+ * Reset all state. Called at the start of each generation
+ * so errors from a previous generation don't carry over.
+ */
+export function resetRuntimeErrors(): void {
+  pending = [];
 }
 
 export function formatRuntimeErrors(errors: string[]): string {

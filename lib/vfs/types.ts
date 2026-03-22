@@ -225,11 +225,6 @@ export interface FileOperation {
   newPath?: string;
 }
 
-export interface PatchOperation {
-  search: string;
-  replace: string;
-}
-
 export type FileType = VirtualFile['type'];
 
 export const MIME_TYPES: Record<FileType, string> = {

@@ -6,13 +6,26 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.45.0 - AI Reliability Improvements (2026-03-22)
+
+Significant improvements to how the AI writes code, understands your project runtime, and evaluates its own work. Shell command parsing is more robust, domain prompts automatically match your project's framework, and the evaluation system has been streamlined.
+
+- **One Tool, No Escape Hatches** - The separate `evaluation` tool has been removed. Previously, models could call `goal_achieved: true` on the evaluation tool to end a task even when work was incomplete. Now the AI must reason through completion via `status --task "..." --done "..." --remaining "..." --complete` — forcing it to articulate what it did and what's left before marking a task done
+- **Smarter Shell Parsing** - Fixed three bugs that caused the AI's file write commands to fail silently: heredoc blocks containing their delimiter word no longer truncate early, successful file redirects no longer report as errors, and multiline quoted strings are no longer split into broken fragments. These were the #1 source of cascading failures in longer AI sessions
+- **Domain Prompts Follow Runtime** - When you change a project's runtime (e.g. Static to React, or Handlebars to Vue), the `.PROMPT.md` file now automatically updates with the correct framework-specific instructions. If you've customized `.PROMPT.md`, you'll be asked before it's overwritten. This ensures the AI always knows how to write code for your chosen framework
+- **Better Skills for All Frameworks** - The built-in Planning and One-Shot skills no longer assume Handlebars. They now provide general best practices (plan first, build main page first, quality checklist) and direct the AI to read `.PROMPT.md` for runtime-specific patterns. Previously, enabling these skills while using React or Vue would actively confuse the AI with Handlebars-specific instructions
+- **Browser Mode Awareness** - When using Browser Mode, the AI now knows that backend features (edge functions, database, server functions) aren't available and will suggest client-side alternatives instead of trying to create them
+- **Backend Settings Always Accessible** - The server feature tabs (Database, Edge Functions, etc.) are no longer grayed out and unclickable. You can now open each tab to see what's available and why certain features require Server Mode
+
+---
+
 ## v1.44.0 - Unified Shell Editing (2026-03-16)
 
 The AI now edits files using standard shell commands instead of a separate structured tool — resulting in more reliable and efficient code generation. The virtual `sed` command has been significantly expanded to support the full range of editing patterns.
 
 - **Shell-Only Editing** - File creation and modification now use `cat > /file << 'EOF'` and `sed -i` instead of the previous JSON-based write tool. This matches how developers naturally work in a terminal and eliminates the most common source of tool call failures
 - **Faster & Cheaper** - Benchmarking across multiple models showed 6-9% lower token usage with shell-only editing compared to the previous structured approach
-- **Simpler Tool Surface** - The AI has two tools: `shell` (for all commands including file editing) and `evaluation` (for progress tracking). Fewer tools means fewer opportunities for the AI to pick the wrong one
+- **Simpler Tool Surface** - The AI's tool surface was reduced from 3 tools to 2 (`shell` and `evaluation`). Fewer tools means fewer opportunities for the AI to pick the wrong one
 - **Smarter sed** - The virtual `sed` now supports address-based commands (`/pattern/d` to delete lines, `/start/,/end/c\text` to replace ranges, `i\` and `a\` to insert/append), the `-n` flag with print, and proper regex handling for patterns containing parentheses and special characters
 
 ---

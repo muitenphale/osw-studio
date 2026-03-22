@@ -72,17 +72,41 @@ By default, the AI decides on its own whether to read a skill — but it doesn't
 
 OSW Studio includes skills to get you started:
 
-### OSW Workflow
+### Workflow
 
 Teaches AI the recommended workflow for building in OSW Studio.
 
 **What it does:**
-- Plan before coding
-- Build incrementally
-- Test in preview
-- Explain changes clearly
+- Plan before coding (PLAN.md)
+- Build incrementally (main page first)
+- Run `build` to verify compilation
+- File structure and modularity guidance
 
 **When to use**: Always - this is the foundation
+
+### Responsive
+
+Dedicated responsive design skill.
+
+**What it does:**
+- Mobile-first CSS with key breakpoints
+- Navigation collapse patterns (hamburger menus)
+- Fluid typography with `clamp()`
+- Touch targets and common mobile failures
+
+**When to use**: When building sites that need to work on mobile
+
+### Frontend Design
+
+Visual design quality guidance.
+
+**What it does:**
+- Typography and font pairing
+- Color systems with CSS custom properties
+- Spatial composition and motion
+- Avoiding generic AI aesthetics
+
+**When to use**: When you want polished, professional-looking output
 
 ### Handlebars Advanced
 

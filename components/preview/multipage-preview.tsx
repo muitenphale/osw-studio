@@ -28,7 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn, logger } from '@/lib/utils';
 import { captureIframeScreenshot } from '@/lib/utils/screenshot';
 import type { ProjectRuntime } from '@/lib/vfs/types';
-import { pushRuntimeError } from '@/lib/preview/runtime-errors';
+import { pushRuntimeError, clearRuntimeErrors } from '@/lib/preview/runtime-errors';
 
 export interface MultipagePreviewHandle {
   captureScreenshot: (waitForContent?: boolean) => Promise<string | null>;
@@ -739,6 +739,9 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       processedHtml += navigationScript;
     }
 
+    // Clear stale runtime errors before loading new content —
+    // only errors from this compilation should be in the buffer.
+    clearRuntimeErrors();
     iframeRef.current.srcdoc = processedHtml;
     setActivePath(normalizedPath);
     activePathRef.current = normalizedPath;

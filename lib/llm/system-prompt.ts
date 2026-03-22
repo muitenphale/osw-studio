@@ -22,7 +22,7 @@ export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?:
  * Shared preamble for both chat and code modes.
  * Contains: role, tool calling, file reading preferences, command list.
  */
-function buildSharedPreamble(isReadOnly: boolean): string {
+function buildSharedPreamble(isReadOnly: boolean, hasServerContext: boolean): string {
   let prompt = `You are an AI assistant helping users with coding projects in a sandboxed virtual file system.
 
 Invoke tools via function calling — never output tool syntax as text.
@@ -41,8 +41,12 @@ Shell commands:
 - List: ls [-R] path, tree [-L depth] path
 - Find: find path -name pattern
 - Count: wc [-l] [-w] [-c] file
-- Preview: curl localhost/[path] (view compiled HTML output)
+- Preview: curl localhost/[path] (view compiled HTML output)`;
+
+  if (hasServerContext) {
+    prompt += `
 - Database (Server Mode): sqlite3 "SQL QUERY"`;
+  }
 
   if (!isReadOnly) {
     prompt += `
@@ -56,7 +60,7 @@ Shell commands:
 
   prompt += `
 
-grep does not support -A/-B/-C flags. Use rg for context around matches.`;
+grep supports -A/-B/-C context flags. Use rg for the best search experience.`;
 
   return prompt;
 }
@@ -188,18 +192,20 @@ async function buildDynamicContent(
   // Server context instructions (behavioral — stays in system prompt)
   if (serverContext) {
     content += buildServerContextSection(serverContext);
+  } else {
+    content += `\n\nThis project runs in Browser Mode (client-side only). Backend features (edge functions, server functions, database, scheduled functions, secrets) are NOT available. The /.server/ directory does not exist. If the user asks for backend or multiplayer features, explain that these require Server Mode (self-hosted) and suggest client-side alternatives.`;
   }
 
   return content;
 }
 
 async function buildChatModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
-  let prompt = buildSharedPreamble(true);
+  let prompt = buildSharedPreamble(true, !!serverContext);
 
   prompt += `
 
 Read-only mode — file modifications are disabled.
-Disabled: mkdir, touch, mv, rm, cp, echo >, sed -i, evaluation tool.
+Disabled: mkdir, touch, mv, rm, cp, echo >, sed -i, status command.
 Focus on exploration, analysis, and planning.`;
 
   prompt += await buildDynamicContent(projectId, serverContext);
@@ -207,29 +213,31 @@ Focus on exploration, analysis, and planning.`;
 }
 
 async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
-  let prompt = buildSharedPreamble(false);
+  let prompt = buildSharedPreamble(false, !!serverContext);
 
   prompt += `
 
-You have two tools: shell and evaluation.
+You have exactly ONE tool: shell. Do not call any other tool.
 Edit files with standard commands:
 - Rewrite: cat > /file << 'EOF'
 - Substitute: sed -i 's/old/new/' /file
-- Inspect before editing (rg -C 5 or head/tail).`;
+- Inspect before editing (rg -C 5 or head/tail).
 
-  // Evaluation section
-  prompt += `
+Build command (run after writing files):
+  build
+Returns "Build successful — 0 errors" or lists compilation errors.
+Run build after writing a batch of files to verify they compile. Do not inspect bundle.js or grep compiled output — use build instead.
 
-Evaluation Tool:
-Use evaluation to track progress on complex tasks (3+ operations).
-Set goal_achieved=true when done, list remaining_work if continuing.
-Skip for simple tasks.`;
-
-  // General notes
-  prompt += `
+Status command (always run before finishing):
+  status --task "the original request" --done "work completed" --remaining "what's left or none" --complete
+End with --complete when done, or --incomplete if more work remains.
 
 All paths are relative to the project root (/).
-Reuse snippets from earlier in the conversation when possible.`;
+Reuse snippets from earlier in the conversation when possible.
+
+The user sees a live preview that updates as you write files — you cannot see it.
+After writing code, run build to check for errors, then run status when done.
+Do not run diagnostic loops (repeated curl/grep/rg/wc) to verify visual output — you cannot assess rendering from raw HTML.`;
 
   prompt += await buildDynamicContent(projectId, serverContext);
   return prompt;

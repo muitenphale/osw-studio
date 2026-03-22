@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Skill } from '@/lib/vfs/skills/types';
 import { skillsService } from '@/lib/vfs/skills';
+import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,6 +97,7 @@ export function SkillsManager() {
     try {
       await skillsService.setGlobalEnabled(enabled);
       setGlobalEnabled(enabled);
+      await vfs.reloadTransientSkills();
       toast.success(enabled ? 'Skills enabled' : 'Skills disabled');
     } catch (error) {
       toast.error('Failed to update skills state');
@@ -125,6 +127,7 @@ export function SkillsManager() {
           return newSet;
         });
       }
+      await vfs.reloadTransientSkills();
     } catch (error) {
       toast.error('Failed to toggle skill');
     }
@@ -153,6 +156,7 @@ export function SkillsManager() {
       toast.success(`Deleted skill: ${skillToDelete.name}`);
       await loadSkills();
       await loadEnabledState();
+      await vfs.reloadTransientSkills();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to delete skill';
       toast.error(message);
@@ -182,6 +186,7 @@ export function SkillsManager() {
         }
         await loadSkills();
         await loadEnabledState();
+        await vfs.reloadTransientSkills();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to import skill';
         toast.error(message);
@@ -217,6 +222,7 @@ export function SkillsManager() {
     setSelectedSkill(null);
     await loadSkills();
     await loadEnabledState();
+    await vfs.reloadTransientSkills();
   };
 
   const handleEditorCancel = () => {

@@ -436,7 +436,7 @@ or
 Error: Parse error on line 5
 ```
 
-**Auto-fix**: In Code Mode, the AI automatically detects Handlebars compilation errors from the preview and attempts to fix them on the next iteration — you don't need to copy-paste error messages manually.
+**Auto-fix**: In Code Mode, the AI can run `build` to check for compilation errors and fix them. You can also ask the AI to run `build` if you see errors in the preview.
 
 **Manual solutions** (if the AI doesn't catch it, or in Chat Mode):
 1. **Check partial exists**:

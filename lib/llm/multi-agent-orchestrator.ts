@@ -17,8 +17,7 @@ import { toast } from 'sonner';
 import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from './pricing-cache';
 import { fetchAvailableModels } from './models-api';
 import { parseStreamingResponse, buildFileTree, ReasoningDetail } from './streaming-parser';
-import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
-import { drainRuntimeErrors, formatRuntimeErrors } from '@/lib/preview/runtime-errors';
+import { drainRuntimeErrors, formatRuntimeErrors, resetRuntimeErrors } from '@/lib/preview/runtime-errors';
 import { buildShellSystemPrompt, buildProjectContext } from './system-prompt';
 import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
@@ -49,8 +48,6 @@ function detectMalformedToolCalls(content: string): boolean {
     /^shell\s*\[\s*["']/m,
     // JSON code block with cmd
     /```json\s*\n\s*\{\s*["']?cmd["']?\s*:/,
-    // evaluation tool written as text
-    /^evaluation\s*\{/m,
   ];
 
   // Check if ANY pattern matches
@@ -164,8 +161,12 @@ export class MultiAgentOrchestrator {
   private model?: string;
   private lastToolCallSignature: string | null = null; // Loop detection
   private duplicateToolCallCount: number = 0; // Track consecutive duplicates
-  private evaluationRequested = false; // Track if we requested evaluation
-  private lastEvaluationResult: { should_continue: boolean } | null = null; // Track evaluation result
+  private recentToolSignatures: string[] = []; // Window for pattern loop detection
+  private readonly patternWindowSize = 8; // How many recent calls to track (max cycle 4 * threshold 2)
+  private readonly patternRepeatThreshold = 2; // How many repeats of a pattern to trigger termination
+  private nudgeCount = 0; // Track how many times we've nudged for status
+  private readonly maxNudges = 3; // Max nudge attempts before giving up
+  private lastStatusResult: { task: string; done: string; remaining: string; complete: boolean; hasExplicitFlag: boolean } | null = null; // Track status result
   private malformedToolCallRetries = 0; // Track consecutive retries for malformed tool call detection
   private totalMalformedToolCalls = 0; // Track total malformed calls in session (doesn't reset)
   private readonly maxMalformedRetries = 2; // Max consecutive retries before allowing through
@@ -245,13 +246,11 @@ export class MultiAgentOrchestrator {
     // Reset state for new execution
     this.lastToolCallSignature = null;
     this.duplicateToolCallCount = 0;
-    this.evaluationRequested = false;
-    this.lastEvaluationResult = null;
+    this.recentToolSignatures = [];
+    this.nudgeCount = 0;
+    this.lastStatusResult = null;
 
     try {
-      // Note: Initial checkpoint removed - checkpoints only created at task completion
-      // The previous task's completion checkpoint serves as the "before" state
-
       // Get file tree for context
       let fileTreeStr: string | undefined;
       try {
@@ -411,8 +410,13 @@ export class MultiAgentOrchestrator {
     }
 
     const maxIterations = agent.maxIterations;
+    let lastIteration = 0;
+
+    // Clear runtime error state so previous generation errors don't leak in
+    resetRuntimeErrors();
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      lastIteration = iteration;
       if (this.stopped) {
         logger.info('[MultiAgentOrchestrator] Loop stopped by user');
         this.onProgress?.('stopped', { reason: 'user' });
@@ -425,29 +429,6 @@ export class MultiAgentOrchestrator {
         max: maxIterations,
         agent: agent.type
       });
-
-      // Before calling LLM, drain compile errors from previous iteration's file changes.
-      // Preview compilation is debounced (150ms) so we must wait before draining.
-      if (iteration > 0) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-        const compileErrors = drainCompileErrors();
-        if (compileErrors.length > 0) {
-          this.addMessage(conversationId, {
-            role: 'user',
-            content: formatCompileErrors(compileErrors),
-            ui_metadata: { isSyntheticError: true }
-          });
-        }
-
-        const runtimeErrors = drainRuntimeErrors();
-        if (runtimeErrors.length > 0) {
-          this.addMessage(conversationId, {
-            role: 'user',
-            content: formatRuntimeErrors(runtimeErrors),
-            ui_metadata: { isSyntheticError: true }
-          });
-        }
-      }
 
       // Get LLM response - emit 'waiting' to show we're waiting for first token
       // Note: actual reasoning tokens are handled via 'reasoning_delta' events from streaming-parser
@@ -512,7 +493,7 @@ export class MultiAgentOrchestrator {
         if (!hasContent) {
           logger.warn('[MultiAgentOrchestrator] Response has no content and no tool calls (reasoning-only response)', {
             hasReasoningDetails: !!response.reasoningDetails,
-            evaluationRequested: this.evaluationRequested,
+            nudgeCount: this.nudgeCount,
             iteration
           });
         }
@@ -524,41 +505,81 @@ export class MultiAgentOrchestrator {
           });
         }
 
-        // Check if we've received an evaluation
-        if (this.lastEvaluationResult) {
-          if (this.lastEvaluationResult.should_continue) {
-            // Evaluation says more work needed - continue loop
-            logger.info('[MultiAgentOrchestrator] Evaluation indicates more work needed, continuing');
-            this.lastEvaluationResult = null;
-            this.evaluationRequested = false;
+        // Check structured status result
+        if (this.lastStatusResult) {
+          if (this.lastStatusResult.complete) {
+            // Gate: check for runtime errors before allowing completion
+            await new Promise(resolve => setTimeout(resolve, 400));
+            const runtimeErrors = drainRuntimeErrors();
+            if (runtimeErrors.length > 0) {
+              logger.info(`[MultiAgentOrchestrator] Completion blocked: ${runtimeErrors.length} runtime error(s)`);
+              this.addMessage(conversationId, {
+                role: 'user',
+                content: formatRuntimeErrors(runtimeErrors),
+                ui_metadata: { isSyntheticError: true }
+              });
+              this.lastStatusResult = null;
+              continue;
+            }
+            logger.info('[MultiAgentOrchestrator] Exit: status --complete flag');
+            this.onProgress?.('exit_reason', { reason: 'status_complete', iteration });
+            break;
+          } else if (this.lastStatusResult.hasExplicitFlag) {
+            logger.info('[MultiAgentOrchestrator] Status --incomplete flag, continuing');
+            this.lastStatusResult = null;
+            this.nudgeCount = 0;
             continue;
           } else {
-            // Evaluation says complete - allow finish
-            logger.info('[MultiAgentOrchestrator] Evaluation indicates task complete, finishing');
-            break;
+            // No flag — fall back to remaining field
+            const rem = this.lastStatusResult.remaining.trim().toLowerCase();
+            if (!rem || rem === 'none' || rem === 'n/a' || rem === 'nothing') {
+              // Gate: check for runtime errors before allowing completion
+              await new Promise(resolve => setTimeout(resolve, 400));
+              const runtimeErrors = drainRuntimeErrors();
+              if (runtimeErrors.length > 0) {
+                logger.info(`[MultiAgentOrchestrator] Completion blocked: ${runtimeErrors.length} runtime error(s)`);
+                this.addMessage(conversationId, {
+                  role: 'user',
+                  content: formatRuntimeErrors(runtimeErrors),
+                  ui_metadata: { isSyntheticError: true }
+                });
+                this.lastStatusResult = null;
+                continue;
+              }
+              logger.info('[MultiAgentOrchestrator] Exit: status remaining empty/none (fallback)');
+              this.onProgress?.('exit_reason', { reason: 'status_remaining_empty', iteration });
+              break;
+            } else {
+              logger.info('[MultiAgentOrchestrator] Status remaining has content, continuing');
+              this.lastStatusResult = null;
+              this.nudgeCount = 0;
+              continue;
+            }
           }
         }
 
-        // No evaluation yet - request it
-        if (!this.evaluationRequested) {
-          logger.info('[MultiAgentOrchestrator] Requesting evaluation before finishing');
-          this.evaluationRequested = true;
+        // No status yet - nudge (up to maxNudges times)
+        if (this.nudgeCount < this.maxNudges) {
+          this.nudgeCount++;
+          logger.info(`[MultiAgentOrchestrator] Nudge ${this.nudgeCount}/${this.maxNudges}`);
+          this.onProgress?.('nudge', { attempt: this.nudgeCount, max: this.maxNudges });
+          const nudgeMessage = 'Before finishing, run the status command:\n  status --task "..." --done "..." --remaining "..." --complete';
           this.addMessage(conversationId, {
             role: 'user',
-            content: 'Before finishing, you must call the evaluation tool to assess whether the task has been completed successfully.'
+            content: nudgeMessage
           });
           continue;
         }
 
-        // Evaluation was requested but not received - break to avoid infinite loop
-        logger.warn('[MultiAgentOrchestrator] Evaluation requested but not received, finishing anyway');
+        // Exhausted all nudge attempts - finish without status
+        logger.warn(`[MultiAgentOrchestrator] Exit: nudge exhaustion (${this.maxNudges} nudges)`);
+        this.onProgress?.('exit_reason', { reason: 'nudge_exhaustion', nudges: this.maxNudges, iteration });
         break;
       }
 
       // Execute tool calls
       const toolResults = await this.executeToolCalls(
         response.toolCalls,
-        conversationId,
         agent
       );
 
@@ -574,6 +595,42 @@ export class MultiAgentOrchestrator {
       for (const result of toolResults) {
         this.addMessage(conversationId, result);
       }
+
+      // Check status result immediately after tool execution
+      if (this.lastStatusResult) {
+        const isDone = this.lastStatusResult.complete || (
+          !this.lastStatusResult.hasExplicitFlag &&
+          (!this.lastStatusResult.remaining.trim() ||
+            ['none', 'n/a', 'nothing'].includes(this.lastStatusResult.remaining.trim().toLowerCase()))
+        );
+        if (isDone) {
+          // Gate: check for runtime errors before allowing completion.
+          // Wait for the latest compilation to settle, then drain.
+          await new Promise(resolve => setTimeout(resolve, 400));
+          const runtimeErrors = drainRuntimeErrors();
+          if (runtimeErrors.length > 0) {
+            logger.info(`[MultiAgentOrchestrator] Completion blocked: ${runtimeErrors.length} runtime error(s)`);
+            this.addMessage(conversationId, {
+              role: 'user',
+              content: formatRuntimeErrors(runtimeErrors),
+              ui_metadata: { isSyntheticError: true }
+            });
+            this.lastStatusResult = null;
+            continue;
+          }
+
+          const reason = this.lastStatusResult.complete ? 'status_complete_post_tool' : 'status_remaining_empty_post_tool';
+          logger.info(`[MultiAgentOrchestrator] Exit: ${reason}`);
+          this.onProgress?.('exit_reason', { reason, iteration });
+          break;
+        }
+      }
+    }
+
+    // Check if loop exhausted max iterations
+    if (lastIteration >= maxIterations - 1 && !this.stopped) {
+      logger.warn(`[MultiAgentOrchestrator] Exit: max iterations reached (${maxIterations})`);
+      this.onProgress?.('exit_reason', { reason: 'max_iterations', maxIterations, iteration: lastIteration });
     }
 
     // Mark conversation as completed
@@ -586,34 +643,54 @@ export class MultiAgentOrchestrator {
    */
   private async executeToolCalls(
     toolCalls: ToolCall[],
-    conversationId: string,
     agent: Agent
   ): Promise<AgentMessage[]> {
     const results: AgentMessage[] = [];
-    const conversation = this.conversations.get(conversationId)!;
 
     for (let toolIndex = 0; toolIndex < toolCalls.length; toolIndex++) {
       const toolCall = toolCalls[toolIndex];
 
       if (this.stopped) break;
 
-      const toolId = toolCall.function?.name;
-      if (!toolId) continue;
+      // Sanitize tool name: strip <|...|> tokens that some models emit (e.g. shell<|channel|>)
+      const rawToolId = toolCall.function?.name;
+      const toolId = rawToolId?.replace(/<\|[^|]*\|>[a-z]*/gi, '').trim();
+
+      if (!toolId) {
+        results.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: 'Error: Tool call has no function name. Available tools: shell.'
+        });
+        this.onProgress?.('tool_status', { toolIndex, status: 'failed', toolName: '(empty)', args: toolCall.function?.arguments });
+        continue;
+      }
 
       // Check if agent has access to this tool
       if (!agent.hasTool(toolId)) {
-        const errorMsg = `Error: Agent "${agent.type}" does not have access to tool "${toolId}"`;
+        const knownShellCommands = new Set([
+          'ls', 'tree', 'cat', 'head', 'tail', 'rg', 'grep', 'find',
+          'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc',
+          'sort', 'uniq', 'tr', 'curl', 'sqlite3', 'build', 'status'
+        ]);
+        let errorMsg: string;
+        if (knownShellCommands.has(toolId)) {
+          // Model hallucinated a shell command as a tool name
+          errorMsg = `Error: "${toolId}" is not a tool — it is a shell command. Use the shell tool to run it:\n\n  shell({ cmd: "${toolId} ..." })`;
+        } else {
+          // Completely unknown tool — list available tools and commands
+          errorMsg = `Error: Unknown tool "${toolId}". Available tools: shell.\n\nThe shell tool supports these commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, sort, uniq, tr, curl, sqlite3, build, status`;
+        }
         results.push({
           role: 'tool',
           tool_call_id: toolCall.id,
           content: errorMsg
         });
-
-        // Emit tool failure
         this.onProgress?.('tool_status', {
           toolIndex,
           status: 'failed',
-          error: errorMsg
+          toolName: toolId,
+          args: toolCall.function?.arguments
         });
         continue;
       }
@@ -679,6 +756,19 @@ Please revise your approach.`;
       // Update last tool call signature
       this.lastToolCallSignature = currentSignature;
 
+      // Pattern loop detection — track recent signatures in a sliding window
+      this.recentToolSignatures.push(currentSignature);
+      if (this.recentToolSignatures.length > this.patternWindowSize) {
+        this.recentToolSignatures.shift();
+      }
+      if (this.recentToolSignatures.length === this.patternWindowSize) {
+        const repeatingPattern = this.detectRepeatingPattern(this.recentToolSignatures);
+        if (repeatingPattern) {
+          logger.error(`[MultiAgentOrchestrator] Repeating pattern detected (cycle length ${repeatingPattern}), terminating`);
+          throw new Error(`Execution terminated: Repeating tool call pattern detected. The model appears stuck in a loop.`);
+        }
+      }
+
       // Emit tool execution start
       this.onProgress?.('tool_status', {
         toolIndex,
@@ -698,25 +788,18 @@ Please revise your approach.`;
         // Execute tool
         const result = await toolRegistry.execute(toolCall, this.projectId, context);
 
-        // Capture evaluation result if this was an evaluation tool call
-        if (toolId === 'evaluation') {
+        // Detect `status --task ... --done ... --remaining ...` in shell commands
+        if (toolId === 'shell' && !this.lastStatusResult) {
           try {
             const args = JSON.parse(toolCall.function.arguments);
-            // Handle should_continue - LLM sometimes sends as string "true"/"false"
-            let shouldContinue = true; // Default to true
-            if (typeof args.should_continue === 'boolean') {
-              shouldContinue = args.should_continue;
-            } else if (typeof args.should_continue === 'string') {
-              shouldContinue = args.should_continue.toLowerCase() === 'true' || args.should_continue === '1';
-            } else if (args.should_continue !== undefined) {
-              shouldContinue = Boolean(args.should_continue);
+            const cmd = typeof args.cmd === 'string' ? args.cmd : '';
+            const statusResult = this.extractStatusResult(cmd, result);
+            if (statusResult) {
+              this.lastStatusResult = statusResult;
+              logger.info(`[MultiAgentOrchestrator] Captured status result: remaining="${statusResult.remaining}"`);
             }
-            this.lastEvaluationResult = {
-              should_continue: shouldContinue
-            };
-            logger.info(`[MultiAgentOrchestrator] Captured evaluation result: should_continue=${this.lastEvaluationResult.should_continue}`);
-          } catch (error) {
-            logger.error('[MultiAgentOrchestrator] Failed to parse evaluation arguments:', error);
+          } catch {
+            // Ignore parse errors
           }
         }
 
@@ -740,14 +823,11 @@ Please revise your approach.`;
 
         track('tool_call', extractToolAnalytics(toolCall.function.name, toolCall.function.arguments, !isError));
 
-        // Also emit tool_result for backward compatibility
         this.onProgress?.('tool_result', {
           toolIndex,
           result
         });
 
-        // Note: Checkpoint creation after each tool removed to reduce checkpoint frequency
-        // Checkpoints are now only created at task completion boundaries
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -1063,6 +1143,76 @@ Please revise your approach.`;
   }
 
   /**
+   * Extract status result from a shell command or its output.
+   * Detects: `status --task "..." --done "..." --remaining "..." --complete`
+   */
+  private extractStatusResult(cmd: string, output: string): { task: string; done: string; remaining: string; complete: boolean; hasExplicitFlag: boolean } | null {
+    // 1. Check the command itself for `status --task ... --done ... --remaining ...`
+    if (/^\s*status\b/i.test(cmd)) {
+      const taskMatch = cmd.match(/--task\s+"([^"]*)"/) || cmd.match(/--task\s+'([^']*)'/) || cmd.match(/--task\s+(\S+)/);
+      const doneMatch = cmd.match(/--done\s+"([^"]*)"/) || cmd.match(/--done\s+'([^']*)'/) || cmd.match(/--done\s+(\S+)/);
+      const remainingMatch = cmd.match(/--remaining\s+"([^"]*)"/) || cmd.match(/--remaining\s+'([^']*)'/) || cmd.match(/--remaining\s+(\S+)/);
+      const hasComplete = /--complete\b/.test(cmd);
+      const hasIncomplete = /--incomplete\b/.test(cmd);
+      if (taskMatch && doneMatch) {
+        return {
+          task: taskMatch[1],
+          done: doneMatch[1],
+          remaining: remainingMatch ? remainingMatch[1] : 'none',
+          complete: hasComplete && !hasIncomplete,
+          hasExplicitFlag: hasComplete || hasIncomplete
+        };
+      }
+    }
+
+    // 2. Check shell output for Task:/Done:/Remaining:/Complete: lines (from cli-shell status handler)
+    if (output) {
+      const taskLine = output.match(/^Task:\s*(.+)/im);
+      const doneLine = output.match(/^Done:\s*(.+)/im);
+      const remainingLine = output.match(/^Remaining:\s*(.*)/im);
+      const completeLine = output.match(/^Complete:\s*(yes|no)/im);
+      if (taskLine && doneLine) {
+        return {
+          task: taskLine[1].trim(),
+          done: doneLine[1].trim(),
+          remaining: remainingLine ? remainingLine[1].trim() : 'none',
+          complete: completeLine ? completeLine[1].toLowerCase() === 'yes' : false,
+          hasExplicitFlag: !!completeLine
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect repeating patterns in a window of tool call signatures.
+   * Checks for cycles of length 1-4 that repeat at least patternRepeatThreshold times.
+   * e.g. [A,B,A,B,A,B,A,B,A,B,A,B] → cycle length 2, repeated 6 times.
+   * Returns the cycle length if found, null otherwise.
+   */
+  private detectRepeatingPattern(signatures: string[]): number | null {
+    const len = signatures.length;
+    // Check cycle lengths 2 through 4 (length 1 handled by consecutive duplicate check)
+    for (let cycleLen = 2; cycleLen <= 4; cycleLen++) {
+      if (len < cycleLen * this.patternRepeatThreshold) continue;
+      // Check if the last N entries are all repetitions of the same cycle
+      const checkLen = cycleLen * this.patternRepeatThreshold;
+      const tail = signatures.slice(len - checkLen);
+      const cycle = tail.slice(0, cycleLen);
+      let isRepeating = true;
+      for (let i = cycleLen; i < checkLen; i++) {
+        if (tail[i] !== cycle[i % cycleLen]) {
+          isRepeating = false;
+          break;
+        }
+      }
+      if (isRepeating) return cycleLen;
+    }
+    return null;
+  }
+
+  /**
    * Generate a normalized signature for a tool call to detect duplicates
    */
   private getToolCallSignature(toolCall: ToolCall): string {
@@ -1080,7 +1230,7 @@ Please revise your approach.`;
         return `shell:${cmd}`;
       }
 
-      // For other tools, use stable JSON stringify with recursive key sorting
+      // Fallback for unknown tool names: use stable JSON stringify
       const sortedArgs = this.stableStringify(args);
       return `${toolName}:${sortedArgs}`;
     } catch {

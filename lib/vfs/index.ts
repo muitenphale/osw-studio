@@ -8,8 +8,6 @@ import {
   getFileTypeFromPath,
   getSpecificMimeType,
   FILE_SIZE_LIMITS,
-  isFileSupported,
-  PatchOperation
 } from './types';
 import { saveManager } from './save-manager';
 import { skillsService } from './skills';
@@ -934,10 +932,6 @@ export class VirtualFileSystem {
         throw new Error(`File already exists: ${path}`);
       }
 
-      if (!isFileSupported(path)) {
-        throw new Error(`Unsupported file type: ${path}`);
-      }
-
       const type = getFileTypeFromPath(path);
 
       const size = content instanceof ArrayBuffer ? content.byteLength : new Blob([content]).size;
@@ -1086,27 +1080,6 @@ export class VirtualFileSystem {
     } catch (error) {
       throw error;
     }
-  }
-
-  async patchFile(projectId: string, path: string, patches: PatchOperation[]): Promise<VirtualFile> {
-    this.ensureInitialized();
-    
-    const file = await this.readFile(projectId, path);
-    let content = file.content as string;
-    
-    for (const patch of patches) {
-      if (!content.includes(patch.search)) {
-        logger.error('VFS: Pattern not found in file', {
-          path,
-          searchPattern: patch.search.substring(0, 100),
-          contentSnippet: content.substring(0, 300)
-        });
-        throw new Error(`Pattern not found in file: ${patch.search.substring(0, 50)}...`);
-      }
-      content = content.replace(patch.search, patch.replace);
-    }
-    
-    return await this.updateFile(projectId, path, content);
   }
 
   async deleteFile(projectId: string, path: string): Promise<void> {

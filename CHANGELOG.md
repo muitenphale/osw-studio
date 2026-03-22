@@ -1,5 +1,61 @@
 # Changelog
 
+## v1.45.0 - 2026-03-22
+
+Single-tool architecture — the `evaluation` tool is removed and the AI's tool surface is reduced to 1 (`shell` only). Benchmarking across models showed that the `status` shell command produces better task completion and tool use than a separate evaluation tool. Shell reliability improvements across the board.
+
+### Status-Only Evaluation
+
+Benchmark analysis confirmed structural problems with the other evaluation modes: the separate `evaluation` tool acted as an escape hatch (models call `goal_achieved: true` after failed work), and the unified `evaluation done` command front-loaded the decision before reasoning. The `status` command forces reasoning-first — `--task`, `--done`, `--remaining` before `--complete` — producing better completion rates across models. Status is now the sole evaluation approach.
+
+- **Removed `evaluation` tool**: Tool definition, executor, `ToolId` union member, shell command handler, and analytics extractor all deleted. Tool surface: 2 → 1
+- **Removed `EvaluationMode` type**: The `'standard' | 'unified' | 'status'` type and all mode-branching logic removed from system prompt, orchestrator, and benchmark UI
+- **Simplified orchestrator**: Removed evaluation tool state, capture, detection, and rejection intercept. Status detection and nudging run unconditionally
+- **Simplified benchmark**: Mode selector buttons removed. Tests always run with status mode
+
+### Explicit Build Command
+
+Added `build` as a shell command for explicit compilation feedback. Returns `"Build successful — 0 errors"` or a formatted error list. Replaces the previous automatic compile error injection between orchestrator iterations — the AI now controls when it checks compilation. Uses event-based synchronization (`compilationComplete` event) instead of fixed delays, so compile errors are never missed on slower framework builds (React/Svelte/Vue)
+
+### Error Handling Improvements
+
+- **Runtime errors deferred to completion**: Runtime errors are no longer injected between iterations (where they cause false positives during multi-file rewrites). Now deferred to the completion gate at `status --complete` — the orchestrator waits for compilation to settle, then blocks completion if errors exist
+- **Preview blindness guidance**: System prompt and workflow skill now explicitly state the AI cannot see the preview, directing it to use `build` instead of diagnostic loops
+
+### VFS Shell Improvements
+
+- **Glob expansion**: `*` and `?` patterns in file arguments are expanded against the VFS file listing for commands like `wc`, `ls`, `cat`, `rm`, `cp`, `mv`, `touch`
+- **`wc` multi-file output**: Per-file counts with a `total` line, matching real `wc` behavior
+- **`ls -l` / `-la` / `-lh`**: Long format with file size, modification date, human-readable sizes, and multi-file/directory support
+- **`rg`/`grep` no-match**: Returns empty stdout instead of an error-framed stderr message
+- **`sleep` no-op**: Silent pass-through instead of "command not found" error
+- **File extension whitelist removed**: `createFile` no longer blocks files with uncommon extensions (`.bak`, `.env`, `.toml`, etc.)
+
+### Shell Parsing Fixes
+
+- **Heredoc greedy matching**: Fixed heredocs truncating when content contains the delimiter word
+- **Trailing command after redirect**: Fixed successful `cat > /file` being treated as failure
+- **Quote-aware line splitting**: Fixed multiline quoted strings being split into broken fragments
+
+### Skills Restructure
+
+- **`workflow`** (new): Merged from `osw-planning` + `osw-one-shot`. Covers the full project lifecycle, runtime-agnostic. References `build` for post-write verification
+- **`responsive`** (new): Dedicated responsive design skill — mobile-first CSS, breakpoints, nav collapse patterns, common mobile failures, touch targets
+- **`frontend-design`** (new): Visual design quality — typography, color systems, spatial composition, motion, avoiding generic AI aesthetics
+- **Deleted**: `osw-planning`, `osw-one-shot` (content merged into the above)
+
+### Other Changes
+
+- **Runtime-aware domain prompts**: `.PROMPT.md` auto-updates when the project runtime changes. Confirmation dialog if user has customized it
+- **Browser Mode awareness**: AI system prompt states backend features are unavailable and suggests client-side alternatives
+- **Shell tool visual classification**: Tool call badges now show distinct icons — write (orange), status (orange), shell (blue) — parsed from the `cmd` string
+- **Reasoning display fixes**: Fixed coalesced reasoning events dropped during React batching; replaced content-length streaming heuristic with explicit `complete` flag
+
+### Bug Fixes
+
+- **Skills not loading**: `reloadTransientSkills()` was never called from the SkillsManager component — added calls to all 5 mutation paths
+- **Backend settings tabs inaccessible**: Server feature tabs had `disabled` prop preventing access to the Browser Mode notice. Now always clickable
+
 ## v1.44.0 - 2026-03-16
 
 Unified shell-only file editing — the structured `write` tool is removed in favor of standard shell commands (`cat >`, `sed -i`). Major `sed` enhancements to support the expanded role of shell-based editing.

@@ -17,8 +17,7 @@ const basicHTMLTemplate = `<!DOCTYPE html>
             line-height: 1.6;
         }
         nav {
-            background: #333;
-            color: white;
+            background: #2c3e50;
             padding: 1rem;
         }
         nav ul {
@@ -27,7 +26,7 @@ const basicHTMLTemplate = `<!DOCTYPE html>
             gap: 2rem;
         }
         nav a {
-            color: white;
+            color: #ecf0f1;
             text-decoration: none;
         }
         main {
@@ -448,11 +447,11 @@ export const testScenarios: TestScenario[] = [
     ],
   },
 
-  // ─── Evaluation Tool (3 tests) ──────────────────────────────────────
+  // ─── Status / Task Completion (7 tests) ─────────────────────────────
   {
     id: 'eval-complete-task',
     name: 'Evaluate simple completed task',
-    category: 'evaluation',
+    category: 'status',
     prompt: "Change the h1 text to 'Hello World' in index.html.",
     setupFiles: standardSetup,
     timeout: 60000,
@@ -463,7 +462,7 @@ export const testScenarios: TestScenario[] = [
   {
     id: 'eval-missing-work',
     name: 'Evaluate multi-element creation',
-    category: 'evaluation',
+    category: 'status',
     prompt: 'Create index.html with a nav, hero section, and footer.',
     setupFiles: { '/.PROMPT.md': defaultPromptMd },
     timeout: 60000,
@@ -476,13 +475,63 @@ export const testScenarios: TestScenario[] = [
   {
     id: 'eval-multi-step',
     name: 'Evaluate multi-file task completion',
-    category: 'evaluation',
+    category: 'status',
     prompt: 'Create an about.html page, add a link to it from index.html nav, and add matching styles in styles.css.',
     setupFiles: standardSetup,
     timeout: 90000,
     assertions: [
       { type: 'file_exists', path: '/about.html', description: 'about.html created' },
       { type: 'file_matches', path: '/index.html', pattern: 'about', description: 'Nav links to about' },
+    ],
+  },
+  {
+    id: 'eval-verify-then-finish',
+    name: 'Evaluate task with verification step',
+    category: 'status',
+    prompt: "Add a 'contact' link to the nav in index.html, then verify it was added correctly by reading the file.",
+    setupFiles: standardSetup,
+    timeout: 60000,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: '[Cc]ontact', description: 'Contact link added to nav' },
+      { type: 'tool_used', toolName: 'shell', description: 'Used shell to verify' },
+    ],
+  },
+  {
+    id: 'eval-multi-file-create',
+    name: 'Evaluate multi-file project scaffold',
+    category: 'status',
+    prompt: "Create a blog structure: /blog/index.html (list page), /blog/post-1.html (first post with title 'Getting Started'), and /blog/styles.css (blog-specific styles).",
+    setupFiles: { '/.PROMPT.md': defaultPromptMd },
+    timeout: 90000,
+    assertions: [
+      { type: 'file_exists', path: '/blog/index.html', description: 'Blog index created' },
+      { type: 'file_exists', path: '/blog/post-1.html', description: 'Blog post created' },
+      { type: 'file_exists', path: '/blog/styles.css', description: 'Blog styles created' },
+      { type: 'file_matches', path: '/blog/post-1.html', pattern: 'Getting Started', description: 'Post has correct title' },
+    ],
+  },
+  {
+    id: 'eval-edit-and-confirm',
+    name: 'Evaluate edit with confirmation read',
+    category: 'status',
+    prompt: "Change the nav background color from '#2c3e50' to '#1a1a2e' and all nav link colors from '#ecf0f1' to '#e94560'. After editing, read back the file to verify both changes are present.",
+    setupFiles: standardSetup,
+    timeout: 60000,
+    assertions: [
+      { type: 'file_matches_any', paths: ['/index.html', '/styles.css'], pattern: '#1a1a2e', description: 'Nav background color changed' },
+      { type: 'file_matches_any', paths: ['/index.html', '/styles.css'], pattern: '#e94560', description: 'Nav link color changed' },
+    ],
+  },
+  {
+    id: 'eval-conditional-work',
+    name: 'Evaluate task requiring inspection first',
+    category: 'status',
+    prompt: "Check if index.html has a footer. If not, add one with copyright text '2024 Test App'. If it does, update the footer text.",
+    setupFiles: standardSetup,
+    timeout: 60000,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'footer', description: 'Has footer element' },
+      { type: 'file_matches', path: '/index.html', pattern: '2024.*Test App|Test App.*2024', description: 'Footer has copyright text' },
     ],
   },
 
@@ -569,14 +618,14 @@ export const testTracks: TestTrack[] = [
   },
   {
     id: 'eval',
-    name: 'Eval',
-    description: 'Evaluation tool: task completion assessment',
-    scenarioIds: testScenarios.filter(s => s.category === 'evaluation').map(s => s.id),
+    name: 'Status',
+    description: 'Status: task completion assessment',
+    scenarioIds: testScenarios.filter(s => s.category === 'status').map(s => s.id),
   },
   {
     id: 'multi',
     name: 'Multi',
-    description: 'Multi-tool: combined shell and evaluation',
+    description: 'Multi-step: combined read, edit, and verify',
     scenarioIds: testScenarios.filter(s => s.category === 'multi-tool').map(s => s.id),
   },
 ];

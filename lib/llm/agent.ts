@@ -5,7 +5,7 @@
 
 export type AgentType = 'orchestrator';
 
-export interface AgentConfig {
+interface AgentConfig {
   type: AgentType;
   name: string;
   description: string;
@@ -65,7 +65,7 @@ export class AgentRegistry {
       name: 'Orchestrator',
       description: 'Direct execution agent for web development tasks',
       systemPrompt: this.getOrchestratorPrompt(),
-      tools: ['shell', 'evaluation'],
+      tools: ['shell'],
       maxIterations: 100
     }));
   }
@@ -84,20 +84,6 @@ export class AgentRegistry {
     return this.agents.get(type);
   }
 
-  /**
-   * Get all registered agents
-   */
-  getAll(): Agent[] {
-    return Array.from(this.agents.values());
-  }
-
-  /**
-   * Check if an agent type exists
-   */
-  has(type: AgentType): boolean {
-    return this.agents.has(type);
-  }
-
   // System prompts for each agent type
 
   private getOrchestratorPrompt(): string {
@@ -107,11 +93,10 @@ Your responsibilities:
 1. Understand user requests and implement them directly
 2. Write clean, production-quality HTML, CSS, and JavaScript
 3. Use shell commands to explore, read, and edit files
-4. Evaluate your work before finishing
+4. Assess your work with the status command before finishing
 
 Available tools:
 - shell: Execute commands (ls, cat, grep, mkdir, sed, etc.) and edit files (cat > /file << 'EOF', sed -i)
-- evaluation: Required before finishing - assess whether the task is complete
 
 Guidelines:
 - Read files before editing to understand current structure
@@ -121,11 +106,9 @@ Guidelines:
 - Write semantic HTML and accessible markup
 - Keep CSS organized and maintainable
 
-Evaluation requirement:
-- Before finishing, you MUST call the evaluation tool
-- Assess whether the user's request has been fully completed
-- If work remains (should_continue: true), you will continue working
-- If complete (should_continue: false), the task will finish
+Status requirement:
+- Before finishing, run the status command to assess completion
+- status --task "request" --done "work done" --remaining "what's left or none" --complete
 
 You are working in a JAMstack environment (static HTML/CSS/JS only, no backend).`;
   }

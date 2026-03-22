@@ -23,7 +23,7 @@ interface ToolCallDetail {
   args?: string;
 }
 
-const KNOWN_TOOLS = new Set(['shell', 'evaluation']);
+const KNOWN_TOOLS = new Set(['shell']);
 
 interface ToolStats {
   total: number;
@@ -92,6 +92,8 @@ interface TestResult {
   assertionScore?: number;
   judgeResult?: { passed: boolean; reasoning: string };
   selfEvalCorrect?: boolean;
+  exitReason?: string;
+  nudgeCount?: number;
 }
 
 interface RoundResult {
@@ -111,6 +113,8 @@ interface RoundResult {
   selfEvalCorrect?: boolean;
   errors?: string[];
   details?: string;
+  exitReason?: string;
+  nudgeCount?: number;
 }
 
 interface AggregatedTestResult {
@@ -194,13 +198,15 @@ export default function TestGenerationPage() {
     const scenario = testScenarios.find(s => s.id === scenarioId);
     if (!scenario) return;
 
+    const key = scenarioId;
+
     const startTime = Date.now();
-    setRunningTest(scenarioId);
-    setExpandedTests(prev => new Set([...prev, scenarioId]));
+    setRunningTest(key);
+    setExpandedTests(prev => new Set([...prev, key]));
 
     // Update status to running
     setTestResults(prev => prev.map(result =>
-      result.id === scenarioId
+      result.id === key
         ? { ...result, status: 'running', generationOutput: '' }
         : result
     ));
@@ -220,19 +226,24 @@ export default function TestGenerationPage() {
         }
       }
 
-      const appendOutput = (key: string, text: string) => {
+      const appendOutput = (resultId: string, text: string) => {
         setTestResults(prev => prev.map(result =>
-          result.id === key
+          result.id === resultId
             ? { ...result, generationOutput: (result.generationOutput || '') + text }
             : result
         ));
         setTimeout(() => {
-          const outputElement = generationOutputRefs.current.get(key);
+          const outputElement = generationOutputRefs.current.get(resultId);
           if (outputElement) {
             outputElement.scrollTop = outputElement.scrollHeight;
           }
         }, 0);
       };
+
+      appendOutput(key, `[config] evaluationMode=status\n`);
+
+      let exitReason: string | undefined;
+      let nudgeCount = 0;
 
       const orchestrator = new MultiAgentOrchestrator(
         projectId,
@@ -246,16 +257,16 @@ export default function TestGenerationPage() {
 
             if (snapshot !== undefined) {
               setTestResults(prev => prev.map(result =>
-                result.id === scenarioId
+                result.id === key
                   ? { ...result, generationOutput: snapshot }
                   : result
               ));
             } else if (deltaText) {
-              appendOutput(scenarioId, deltaText);
+              appendOutput(key, deltaText);
             }
 
             setTimeout(() => {
-              const outputElement = generationOutputRefs.current.get(scenarioId);
+              const outputElement = generationOutputRefs.current.get(key);
               if (outputElement) {
                 outputElement.scrollTop = outputElement.scrollHeight;
               }
@@ -271,12 +282,9 @@ export default function TestGenerationPage() {
                 try {
                   const parsed = JSON.parse(data.args);
                   if (toolName === 'shell') argSnippet = parsed.cmd || parsed.command || '';
-                  else if (toolName === 'evaluation') {
-                    const g = parsed.goal_achieved;
-                    argSnippet = g !== undefined ? `goal_achieved: ${g}` : '';
-                  }
                 } catch {}
-                if (argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
+                const isStatusCmd = argSnippet.trimStart().startsWith('status ');
+                if (!isStatusCmd && argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
               }
               toolDetails.push({ name: toolName, status: 'success', args: argSnippet });
               appendOutput(scenarioId, `\n[tool] ${toolName}${argSnippet ? ` — ${argSnippet}` : ' ...'}\n`);
@@ -288,11 +296,23 @@ export default function TestGenerationPage() {
               appendOutput(scenarioId, `[tool] ${toolName} failed\n`);
             }
           }
+
+          if (message === 'exit_reason') {
+            const data = step as Record<string, unknown>;
+            exitReason = String(data?.reason || 'unknown');
+            appendOutput(scenarioId, `\n[exit] ${exitReason} (iteration ${data?.iteration})\n`);
+          }
+
+          if (message === 'nudge') {
+            const data = step as Record<string, unknown>;
+            nudgeCount = Number(data?.attempt || 0);
+            appendOutput(scenarioId, `[nudge] ${data?.attempt}/${data?.max}\n`);
+          }
         },
         { chatMode: false }
       );
 
-      orchestratorInstances.current.set(scenarioId, orchestrator);
+      orchestratorInstances.current.set(key, orchestrator);
 
       const result = await orchestrator.execute(scenario.prompt);
 
@@ -320,12 +340,10 @@ export default function TestGenerationPage() {
                 const parsed = JSON.parse(tc.function.arguments);
                 if (tc.function.name === 'shell') {
                   argSnippet = parsed.cmd || parsed.command || '';
-                } else if (tc.function.name === 'evaluation') {
-                  const goal = parsed.goal_achieved;
-                  argSnippet = goal !== undefined ? `goal_achieved: ${goal}` : '';
                 }
               } catch {}
-              if (argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
+              const isStatusCmd = argSnippet.trimStart().startsWith('status ');
+              if (!isStatusCmd && argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
 
               const succeeded = toolResultMap.has(tc.id) ? toolResultMap.get(tc.id)! : true;
               conversationToolDetails.push({
@@ -394,7 +412,7 @@ export default function TestGenerationPage() {
         : result.success;
 
       setTestResults(prev => prev.map(testResult =>
-        testResult.id === scenarioId
+        testResult.id === key
           ? {
               ...testResult,
               status: testPassed ? 'success' : 'failed',
@@ -415,7 +433,8 @@ export default function TestGenerationPage() {
               assertionScore,
               judgeResult,
               selfEvalCorrect: assertionResults.length > 0 ? result.success === testPassed : undefined,
-
+              exitReason,
+              nudgeCount: nudgeCount > 0 ? nudgeCount : undefined,
             }
           : testResult
       ));
@@ -430,7 +449,7 @@ export default function TestGenerationPage() {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       setTestResults(prev => prev.map(result =>
-        result.id === scenarioId
+        result.id === key
           ? {
               ...result,
               status: 'failed',
@@ -438,7 +457,6 @@ export default function TestGenerationPage() {
               errors: [errorMessage],
               details: `Error: ${errorMessage}`,
               toolCallDetails: toolDetails.length > 0 ? toolDetails : undefined,
-
             }
           : result
       ));
@@ -446,7 +464,7 @@ export default function TestGenerationPage() {
       toast.error(`Test error: ${scenario.name}`);
     }
 
-    orchestratorInstances.current.delete(scenarioId);
+    orchestratorInstances.current.delete(key);
 
     if (projectId) {
       try {
@@ -517,7 +535,8 @@ export default function TestGenerationPage() {
           selfEvalCorrect: r.selfEvalCorrect,
           errors: r.errors,
           details: r.details,
-
+          exitReason: r.exitReason,
+          nudgeCount: r.nudgeCount,
         }));
       setRoundHistory(prev => [...prev, snapshot]);
     }
@@ -663,7 +682,7 @@ export default function TestGenerationPage() {
       }
     }
 
-    return Array.from(scenarioMap.entries()).map(([id, rounds]) => {
+    return Array.from(scenarioMap.entries()).map(([key, rounds]) => {
       const name = rounds[0].name;
       const passCount = rounds.filter(r => r.status === 'success').length;
       const failCount = rounds.length - passCount;
@@ -674,7 +693,7 @@ export default function TestGenerationPage() {
       const assertionScores = rounds.filter(r => r.assertionScore !== undefined).map(r => r.assertionScore!);
 
       return {
-        id,
+        id: key,
         name,
         roundCount: rounds.length,
         passCount,
@@ -748,9 +767,10 @@ export default function TestGenerationPage() {
               toolStats: r.toolCallDetails ? computeToolStats(r.toolCallDetails) : undefined,
               assertionScore: r.assertionScore,
               selfEvalCorrect: r.selfEvalCorrect,
+              exitReason: r.exitReason,
+              nudgeCount: r.nudgeCount,
               errors: r.errors,
               details: r.details,
-    
             }))
         }];
 
@@ -806,6 +826,7 @@ export default function TestGenerationPage() {
         provider,
         model,
         judgeModel: judgeModel || undefined,
+        evaluationMode: 'status',
         totalRounds: roundHistory.length || (overallStats.total > 0 ? 1 : 0),
       },
       rounds,
@@ -845,6 +866,7 @@ export default function TestGenerationPage() {
     lines.push(`**Provider:** ${data.meta.provider}`);
     lines.push(`**Model:** ${data.meta.model}`);
     if (data.meta.judgeModel) lines.push(`**Judge Model:** ${data.meta.judgeModel}`);
+    lines.push(`**Evaluation Mode:** ${data.meta.evaluationMode}`);
     lines.push(`**Rounds:** ${data.meta.totalRounds}`);
     lines.push('');
 
@@ -931,7 +953,7 @@ export default function TestGenerationPage() {
             <div className="flex-1">
               <h3 className="font-medium text-blue-900 dark:text-blue-100 mb-1">How to Interpret Benchmark Results</h3>
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                This benchmark evaluates how well a model performs with OSW Studio&apos;s agentic tools (shell, evaluation).
+                This benchmark evaluates how well a model performs with OSW Studio&apos;s agentic tools (shell + status).
                 A <strong>passing test</strong> means the model completed the task using the right tools.
                 A <strong>failing test</strong> means the model couldn&apos;t complete the task or encountered errors.
               </p>
@@ -963,8 +985,8 @@ export default function TestGenerationPage() {
 
         {/* Round progress indicator */}
         {totalRounds > 1 && activeTrack && (
-          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2 mb-4 text-sm text-blue-800 dark:text-blue-200">
-            Round {currentRound + 1} of {totalRounds} ({roundHistory.length} completed)
+          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2 mb-4 text-sm text-blue-800 dark:text-blue-200 flex items-center gap-2">
+            <span>Round {currentRound + 1} of {totalRounds} ({roundHistory.length} completed)</span>
           </div>
         )}
 

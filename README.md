@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.43.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.45.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -83,7 +83,7 @@ npm run dev
   - 🔧 **Code Mode** - Full implementation with file operations
 - **12 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp
 - **200+ Models** - From tiny 4B tool models to SOTA frontier models
-- **Smart Agent** - Uses shell commands, JSON patch edits, self-evaluation
+- **Smart Agent** - Uses shell commands for all file operations, with explicit build verification and status evaluation
 - **Skills System** - Teach AI your workflow preferences with Anthropic-style skills
 
 ### Project Management
@@ -116,10 +116,11 @@ See [Server Mode](#server-mode-optional) for full details.
 
 ## How It Works
 
-OSW Studio uses an agentic AI system with 2 core tools:
+OSW Studio uses an agentic AI system with a single tool:
 
-1. **Shell Tool** - File system operations and editing (`ls`, `cat`, `grep`, `find`, `mkdir`, `rm`, `mv`, `cp`, `sed -i`, `cat >`, `echo >`, `tree`, `head`, `tail`)
-2. **Evaluation Tool** - AI self-assesses progress and decides next steps
+1. **Shell Tool** - File system operations and editing (`ls`, `cat`, `grep`, `find`, `mkdir`, `rm`, `mv`, `cp`, `sed -i`, `cat >`, `echo >`, `tree`, `head`, `tail`, `build`, `status`)
+
+The `status` command signals task completion — the AI must articulate what it did and what remains before finishing.
 
 **Command validation** → **Execution** → **Checkpoint** → **Continue**
 
@@ -305,7 +306,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 **Technical Inspiration:**
 - [Google AI Studio](https://aistudio.google.com) - App Builder workflow
 - [OpenAI Codex CLI](https://github.com/openai/codex-cli) - Agentic patterns
-- [Anthropic Claude](https://www.anthropic.com) - Artifact/string patch editing
+- [Anthropic Claude](https://www.anthropic.com) - Agentic patterns
 
 **Special Thanks:**
 - All open source contributors making projects like this possible

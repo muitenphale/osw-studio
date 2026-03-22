@@ -1,4 +1,5 @@
 import { VirtualFileSystem } from './index';
+import { waitForCompilation, drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
 
 type ShellResult = {
   stdout: string;
@@ -205,6 +206,12 @@ function parseSedExpression(expr: string): { pattern: RegExp; replacement: strin
   }
 
   const [patStr, replStr, flagStr] = parts;
+
+  // Detect multiline \n patterns — not supported in VFS sed
+  if (patStr.includes('\\n') || replStr.includes('\\n')) {
+    return { error: `sed: multiline patterns with \\n are not supported.\n\nTo edit multiline content, rewrite the entire file:\n  cat > /file << 'EOF'\n  ...new content...\n  EOF` };
+  }
+
   const globalFlag = (flagStr || '').includes('g');
 
   try {
@@ -366,6 +373,44 @@ async function vfsShellExecute(
     return { stdout: '', stderr: 'No valid command arguments provided', exitCode: 2 };
   }
 
+  // Handle ; separator - execute all sequentially regardless of exit codes
+  if (cleanCmd.some(arg => arg === ';')) {
+    const commands: string[][] = [];
+    let currentCmd: string[] = [];
+
+    for (const arg of cleanCmd) {
+      if (arg === ';') {
+        if (currentCmd.length > 0) {
+          commands.push(currentCmd);
+          currentCmd = [];
+        }
+      } else {
+        currentCmd.push(arg);
+      }
+    }
+    if (currentCmd.length > 0) {
+      commands.push(currentCmd);
+    }
+
+    // Execute all commands sequentially regardless of exit codes
+    const allStdout: string[] = [];
+    const allStderr: string[] = [];
+    let lastExitCode = 0;
+
+    for (const singleCmd of commands) {
+      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd);
+      if (result.stdout) allStdout.push(result.stdout);
+      if (result.stderr) allStderr.push(result.stderr);
+      lastExitCode = result.exitCode;
+    }
+
+    return {
+      stdout: allStdout.join('\n'),
+      stderr: allStderr.join('\n'),
+      exitCode: lastExitCode
+    };
+  }
+
   // Handle && command chaining - execute sequentially, stop on first failure
   if (cleanCmd.some(arg => arg === '&&')) {
     const commands: string[][] = [];
@@ -477,6 +522,62 @@ async function vfsShellExecute(
   return vfsShellExecuteSingle(vfs, projectId, cleanCmd, stdin);
 }
 
+/**
+ * Expand glob patterns (*, ?) in arguments against the VFS file listing.
+ * Converts e.g. `/scripts/*.js` into ['/scripts/main.js', '/scripts/app.js'].
+ * Only expands args that contain glob characters and aren't flags.
+ * If a pattern matches nothing, the original arg is kept (bash default).
+ */
+async function expandGlobs(
+  vfs: VirtualFileSystem,
+  projectId: string,
+  args: string[]
+): Promise<string[]> {
+  // Quick check: any args need expansion?
+  if (!args.some(a => a && !a.startsWith('-') && (a.includes('*') || a.includes('?')))) {
+    return args;
+  }
+
+  // Get all file paths once
+  const allEntries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
+  const allPaths = allEntries.map((e: any) => e.path as string);
+
+  const expanded: string[] = [];
+  for (const arg of args) {
+    if (!arg || arg.startsWith('-') || (!arg.includes('*') && !arg.includes('?'))) {
+      expanded.push(arg);
+      continue;
+    }
+
+    // Normalize path (adds / prefix if missing)
+    const normalized = normalizePath(arg) || arg;
+
+    // Convert glob to regex: escape regex chars, then replace * and ?
+    const regexStr = normalized
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '[^/]*')
+      .replace(/\?/g, '[^/]');
+
+    const regex = new RegExp(`^${regexStr}$`);
+    const matches = allPaths.filter(p => regex.test(p)).sort();
+
+    if (matches.length > 0) {
+      expanded.push(...matches);
+    } else {
+      expanded.push(arg); // No matches — keep original
+    }
+  }
+
+  return expanded;
+}
+
+// Commands where file-path arguments should be glob-expanded.
+// Excludes: rg, grep, sed (pattern args), find (-name takes its own glob),
+// echo (text content), curl (URLs), status (special).
+const GLOB_EXPAND_COMMANDS = new Set([
+  'wc', 'ls', 'cat', 'rm', 'cp', 'mv', 'touch',
+]);
+
 async function vfsShellExecuteSingle(
   vfs: VirtualFileSystem,
   projectId: string,
@@ -486,32 +587,86 @@ async function vfsShellExecuteSingle(
   // Extract redirect operators (> or >>) before processing the command
   const { cleanArgs: argsAfterRedirect, redirect } = extractRedirect(cleanCmd.slice(1));
   const program = cleanCmd[0];
-  const args = argsAfterRedirect;
+  const args = GLOB_EXPAND_COMMANDS.has(program)
+    ? await expandGlobs(vfs, projectId, argsAfterRedirect)
+    : argsAfterRedirect;
 
   try {
     switch (program) {
       case 'ls': {
-        // Support basic flags like -R (recursive). Ignore unknown flags gracefully.
-        const flags = new Set<string>();
-        const paths: string[] = [];
+        // Support flags: -R (recursive), -l/-la/-lh (long format with size & date).
+        const lsFlags = new Set<string>();
+        const lsPaths: string[] = [];
         for (const a of args) {
-          if (a && a.startsWith('-')) flags.add(a);
-          else if (a) paths.push(a);
+          if (a && a.startsWith('-')) lsFlags.add(a);
+          else if (a) lsPaths.push(a);
         }
-        const recursive = flags.has('-R') || flags.has('-r');
-        const path = normalizePath(paths[0]) || '/';
+        const recursive = lsFlags.has('-R') || lsFlags.has('-r');
+        const longFormat = lsFlags.has('-l') || lsFlags.has('-la') || lsFlags.has('-al') || lsFlags.has('-lh') || lsFlags.has('-lha') || lsFlags.has('-lah');
+        const humanReadable = lsFlags.has('-lh') || lsFlags.has('-lha') || lsFlags.has('-lah') || lsFlags.has('-h');
+
+        const formatFileSize = (bytes: number): string => {
+          if (!humanReadable) return String(bytes).padStart(8);
+          if (bytes < 1024) return `${bytes}B`.padStart(8);
+          if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`.padStart(8);
+          return `${(bytes / (1024 * 1024)).toFixed(1)}M`.padStart(8);
+        };
+
+        const formatFileLong = (f: { path: string; size?: number; updatedAt?: Date }) => {
+          const size = formatFileSize(f.size || 0);
+          const date = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0, 16).replace('T', ' ') : '                ';
+          return `${size}  ${date}  ${f.path}`;
+        };
+
+        // Multiple paths: each could be a file or directory
+        if (lsPaths.length > 1) {
+          const lines: string[] = [];
+          for (let pi = 0; pi < lsPaths.length; pi++) {
+            const np = normalizePath(lsPaths[pi]);
+            if (!np) continue;
+            // Try as file first
+            try {
+              const file = await vfs.readFile(projectId, np);
+              lines.push(longFormat ? formatFileLong(file) : file.path);
+              continue;
+            } catch { /* not a file — try as directory */ }
+            // Try as directory
+            const dirFiles = await vfs.listDirectory(projectId, np, { includeTransient: true });
+            if (dirFiles.length > 0) {
+              if (pi > 0) lines.push(''); // blank line between directory sections
+              lines.push(`${np}:`);
+              const sorted = dirFiles.sort((a, b) => a.path.localeCompare(b.path));
+              for (const f of sorted) {
+                lines.push(longFormat ? formatFileLong(f) : f.path);
+              }
+            } else {
+              lines.push(`ls: ${np}: No such file or directory`);
+            }
+          }
+          const lsOutput = lines.join('\n');
+          const lsResult: ShellResult = { stdout: truncate(lsOutput), stderr: '', exitCode: 0 };
+          if (redirect) return applyRedirect(vfs, projectId, lsResult.stdout, redirect);
+          return lsResult;
+        }
+
+        // Single path: directory listing
+        const lsPath = normalizePath(lsPaths[0]) || '/';
         let lsOutput: string;
         if (!recursive) {
-          const files = await vfs.listDirectory(projectId, path, { includeTransient: true });
-          lsOutput = files.map(f => f.path).sort().join('\n');
+          const files = await vfs.listDirectory(projectId, lsPath, { includeTransient: true });
+          const sorted = files.sort((a, b) => a.path.localeCompare(b.path));
+          lsOutput = longFormat
+            ? sorted.map(f => formatFileLong(f)).join('\n')
+            : sorted.map(f => f.path).join('\n');
         } else {
           const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
-          const prefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
-          lsOutput = entries
-            .filter((e: any) => e.path === path || e.path.startsWith(prefix))
-            .map((e: any) => e.path)
-            .sort()
-            .join('\n');
+          const prefix = lsPath === '/' ? '/' : (lsPath.endsWith('/') ? lsPath : lsPath + '/');
+          const filtered = entries
+            .filter((e: any) => e.path === lsPath || e.path.startsWith(prefix))
+            .sort((a: any, b: any) => a.path.localeCompare(b.path));
+          lsOutput = longFormat
+            ? filtered.map((e: any) => formatFileLong(e)).join('\n')
+            : filtered.map((e: any) => e.path).join('\n');
         }
         const lsResult: ShellResult = { stdout: truncate(lsOutput), stderr: '', exitCode: 0 };
         if (redirect) return applyRedirect(vfs, projectId, lsResult.stdout, redirect);
@@ -793,12 +948,22 @@ async function vfsShellExecuteSingle(
         }
       }
       case 'grep': {
-        // Supported: grep [-n] [-i] [-F] pattern path  (always recursive)
-        const flags: Record<string, boolean> = { n: false, i: false, F: false };
+        // Supported: grep [-n] [-i] [-F] [-A num] [-B num] [-C num] pattern path  (always recursive)
+        const flags: Record<string, any> = { n: false, i: false, F: false, C: 0, A: 0, B: 0 };
         const fargs: string[] = [];
-        for (const a of args) {
-          if (a.startsWith('-')) {
-            for (const ch of a.slice(1)) if (ch in flags) flags[ch] = true;
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (a.startsWith('-') && a.length > 1 && !/^-\d+$/.test(a)) {
+            const flagStr = a.slice(1);
+            for (let j = 0; j < flagStr.length; j++) {
+              const ch = flagStr[j];
+              if (ch === 'n') flags.n = true;
+              else if (ch === 'i') flags.i = true;
+              else if (ch === 'F') flags.F = true;
+              else if (ch === 'C') { flags.C = parseInt(args[++i]) || 2; break; }
+              else if (ch === 'A') { flags.A = parseInt(args[++i]) || 2; break; }
+              else if (ch === 'B') { flags.B = parseInt(args[++i]) || 2; break; }
+            }
           } else {
             fargs.push(a);
           }
@@ -813,17 +978,22 @@ async function vfsShellExecuteSingle(
 Usage: grep [FLAGS] PATTERN [PATH]
 
 Supported flags:
-  -n  Show line numbers
-  -i  Case insensitive search
-  -F  Treat pattern as literal string (not regex)
+  -n      Show line numbers
+  -i      Case insensitive search
+  -F      Treat pattern as literal string (not regex)
+  -A NUM  Show NUM lines after each match
+  -B NUM  Show NUM lines before each match
+  -C NUM  Show NUM lines of context (before and after)
 
 Examples:
   {"cmd": ["grep", "searchterm", "/path"]}
   {"cmd": ["grep", "-n", "pattern", "/file.txt"]}
   {"cmd": ["grep", "-i", "TODO", "/"]}
   {"cmd": ["grep", "-F", "exact.string", "/src"]}
+  {"cmd": ["grep", "-A", "3", "pattern", "/file.txt"]}
+  {"cmd": ["grep", "-C", "5", "function", "/src"]}
 
-Note: grep always searches recursively. For context around matches, use rg (ripgrep) instead.`,
+Note: grep always searches recursively. rg (ripgrep) is also available.`,
             exitCode: 2
           };
         }
@@ -831,7 +1001,6 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
         // Create regex - escape special chars if -F flag is used
         let regex: RegExp;
         if (flags.F) {
-          // Escape special regex characters for literal string matching
           const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           regex = new RegExp(escaped, flags.i ? 'i' : '');
         } else {
@@ -839,13 +1008,34 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
         }
 
         const outLines: string[] = [];
+        const hasContext = flags.C > 0 || flags.A > 0 || flags.B > 0;
 
         // If no file path provided and stdin is available, search stdin
         if (!fargs[1] && stdin !== undefined) {
           const stdinLines = stdin.split(/\r?\n/);
-          for (let i = 0; i < stdinLines.length; i++) {
-            if (regex.test(stdinLines[i])) {
-              outLines.push(flags.n ? `${i + 1}:${stdinLines[i]}` : stdinLines[i]);
+          if (hasContext) {
+            const matchedStdinLines = new Set<number>();
+            for (let i = 0; i < stdinLines.length; i++) {
+              if (regex.test(stdinLines[i])) matchedStdinLines.add(i);
+            }
+            if (matchedStdinLines.size > 0) {
+              const contextStdinLines = new Set<number>();
+              const beforeCtx = flags.C || flags.B;
+              const afterCtx = flags.C || flags.A;
+              for (const ln of matchedStdinLines) {
+                for (let j = Math.max(0, ln - beforeCtx); j <= Math.min(stdinLines.length - 1, ln + afterCtx); j++) {
+                  contextStdinLines.add(j);
+                }
+              }
+              for (const ln of Array.from(contextStdinLines).sort((a, b) => a - b)) {
+                outLines.push(flags.n ? `${ln + 1}:${stdinLines[ln]}` : stdinLines[ln]);
+              }
+            }
+          } else {
+            for (let i = 0; i < stdinLines.length; i++) {
+              if (regex.test(stdinLines[i])) {
+                outLines.push(flags.n ? `${i + 1}:${stdinLines[i]}` : stdinLines[i]);
+              }
             }
           }
         } else {
@@ -857,12 +1047,33 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
             if (!file.path.startsWith(dirPrefix) && file.path !== path) continue;
             if (typeof file.content !== 'string') continue;
             const lines = file.content.split(/\r?\n/);
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i];
-              if (regex.test(line)) {
-                outLines.push(
-                  `${file.path}${flags.n ? ':' + (i + 1) : ''}:${line}`
-                );
+
+            if (hasContext) {
+              const matchedLines = new Set<number>();
+              for (let i = 0; i < lines.length; i++) {
+                if (regex.test(lines[i])) matchedLines.add(i);
+              }
+              if (matchedLines.size === 0) continue;
+
+              const contextLines = new Set<number>();
+              const beforeContext = flags.C || flags.B;
+              const afterContext = flags.C || flags.A;
+              for (const lineNum of matchedLines) {
+                for (let j = Math.max(0, lineNum - beforeContext); j <= Math.min(lines.length - 1, lineNum + afterContext); j++) {
+                  contextLines.add(j);
+                }
+              }
+
+              const sortedLines = Array.from(contextLines).sort((a, b) => a - b);
+              if (outLines.length > 0) outLines.push(''); // separator between files
+              for (const lineNum of sortedLines) {
+                outLines.push(`${file.path}${flags.n ? ':' + (lineNum + 1) : ''}:${lines[lineNum]}`);
+              }
+            } else {
+              for (let i = 0; i < lines.length; i++) {
+                if (regex.test(lines[i])) {
+                  outLines.push(`${file.path}${flags.n ? ':' + (i + 1) : ''}:${lines[i]}`);
+                }
               }
             }
           }
@@ -870,8 +1081,7 @@ Note: grep always searches recursively. For context around matches, use rg (ripg
 
         const output = outLines.join('\n');
         if (outLines.length === 0) {
-          const location = stdin !== undefined ? 'stdin' : (path === '/' ? 'workspace root' : path);
-          return { stdout: '', stderr: `grep: pattern "${pattern}" not found in ${location}`, exitCode: 1 };
+          return { stdout: '', stderr: '', exitCode: 0 };
         }
         const grepResult: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
         if (redirect) return applyRedirect(vfs, projectId, grepResult.stdout, redirect);
@@ -995,8 +1205,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
 
         if (outLines.length === 0) {
-          const location = stdin !== undefined ? 'stdin' : (path === '/' ? 'workspace root' : path);
-          return { stdout: '', stderr: `rg: pattern "${pattern}" not found in ${location}`, exitCode: 1 };
+          return { stdout: '', stderr: '', exitCode: 0 };
         }
         const rgResult: ShellResult = { stdout: truncate(outLines.join('\n')), stderr: '', exitCode: 0 };
         if (redirect) return applyRedirect(vfs, projectId, rgResult.stdout, redirect);
@@ -1007,6 +1216,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         let rootArg: string | undefined;
         let pattern: string | undefined;
         let typeFilter: 'f' | 'd' | undefined;
+        let maxDepth = Infinity;
 
         for (let i = 0; i < args.length; i++) {
           const a = args[i];
@@ -1020,7 +1230,7 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
             i++;
             continue;
           }
-          if (a === '-maxdepth') { i++; continue; }
+          if (a === '-maxdepth') { maxDepth = parseInt(args[i + 1]) || 0; i++; continue; }
           if (!a.startsWith('-') && !rootArg) rootArg = a;
         }
 
@@ -1030,9 +1240,15 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         const toGlob = (s: string) => new RegExp('^' + s.replace(/[.+^${}()|\[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
         const regex = pattern ? toGlob(pattern) : null;
 
+        // Count depth relative to root: /root/a = depth 1, /root/a/b = depth 2
+        const rootDepth = root === '/' ? 0 : root.split('/').filter(Boolean).length;
+
         const res = entries
           .filter((e: any) => e.path === root || e.path.startsWith(prefix))
           .filter((e: any) => {
+            // Filter by maxdepth
+            const entryDepth = e.path === '/' ? 0 : e.path.split('/').filter(Boolean).length;
+            if (entryDepth - rootDepth > maxDepth) return false;
             // Filter by type if specified
             if (typeFilter === 'f') {
               return !('type' in e) || e.type !== 'directory';
@@ -1263,8 +1479,37 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
         }
       }
       case 'echo': {
-        // echo text (stdout) — redirect handled generically by extractRedirect/applyRedirect
-        const output = args.join(' ');
+        // echo [-n] [-e] text — redirect handled generically by extractRedirect/applyRedirect
+        let suppressNewline = false;
+        let interpretEscapes = false;
+        let startIdx = 0;
+
+        // Consume leading flag args (bash behavior: only leading args that are purely valid flag chars)
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (a.startsWith('-') && a.length > 1 && /^-[ne]+$/.test(a)) {
+            for (const ch of a.slice(1)) {
+              if (ch === 'n') suppressNewline = true;
+              else if (ch === 'e') interpretEscapes = true;
+            }
+            startIdx = i + 1;
+          } else {
+            break;
+          }
+        }
+
+        let output = args.slice(startIdx).join(' ');
+
+        if (interpretEscapes) {
+          output = output
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t')
+            .replace(/\\\\/g, '\\');
+        }
+
+        // suppressNewline: our shell doesn't auto-append newlines so it's effectively a no-op,
+        // but the flag is consumed so it doesn't appear in output.
+
         if (redirect) return applyRedirect(vfs, projectId, output, redirect);
         return { stdout: truncate(output), stderr: '', exitCode: 0 };
       }
@@ -1485,59 +1730,235 @@ Examples:
         return { stdout: truncate(outputContent), stderr: '', exitCode: 0 };
       }
       case 'wc': {
-        // wc [-l] [-w] [-c] [file]  (or stdin via pipe)
+        // wc [-l] [-w] [-c] [file ...]  (or stdin via pipe)
         // Default (no flags): show lines, words, chars
-        const flags = { l: false, w: false, c: false };
-        let filePath = '';
-        let anyFlag = false;
+        // Multiple files: per-file counts + total line
+        const wcFlags = { l: false, w: false, c: false };
+        const wcFilePaths: string[] = [];
+        let wcAnyFlag = false;
 
         for (const a of args) {
           if (a && a.startsWith('-')) {
             for (const ch of a.slice(1)) {
-              if (ch === 'l') { flags.l = true; anyFlag = true; }
-              else if (ch === 'w') { flags.w = true; anyFlag = true; }
-              else if (ch === 'c') { flags.c = true; anyFlag = true; }
+              if (ch === 'l') { wcFlags.l = true; wcAnyFlag = true; }
+              else if (ch === 'w') { wcFlags.w = true; wcAnyFlag = true; }
+              else if (ch === 'c') { wcFlags.c = true; wcAnyFlag = true; }
+            }
+          } else if (a) {
+            wcFilePaths.push(a);
+          }
+        }
+
+        if (!wcAnyFlag) { wcFlags.l = true; wcFlags.w = true; wcFlags.c = true; }
+
+        const wcCount = (content: string) => ({
+          l: content === '' ? 0 : (content.match(/\r?\n/g) || []).length,
+          w: content.trim() === '' ? 0 : content.trim().split(/\s+/).length,
+          c: content.length,
+        });
+
+        const wcFormatLine = (counts: { l: number; w: number; c: number }, label?: string) => {
+          const parts: string[] = [];
+          if (wcFlags.l) parts.push(String(counts.l));
+          if (wcFlags.w) parts.push(String(counts.w));
+          if (wcFlags.c) parts.push(String(counts.c));
+          if (label) parts.push(label);
+          return parts.join(' ');
+        };
+
+        // Stdin-only (no file args)
+        if (wcFilePaths.length === 0) {
+          if (stdin === undefined) {
+            return { stdout: '', stderr: 'wc: no input file or stdin', exitCode: 2 };
+          }
+          const wcOutput = wcFormatLine(wcCount(stdin));
+          if (redirect) return applyRedirect(vfs, projectId, wcOutput, redirect);
+          return { stdout: truncate(wcOutput), stderr: '', exitCode: 0 };
+        }
+
+        // File args (one or many)
+        const wcLines: string[] = [];
+        const wcTotals = { l: 0, w: 0, c: 0 };
+
+        for (const fp of wcFilePaths) {
+          const wcPath = normalizePath(fp);
+          if (!wcPath) continue;
+          try {
+            const file = await vfs.readFile(projectId, wcPath);
+            if (typeof file.content !== 'string') {
+              wcLines.push(`wc: ${wcPath}: binary file`);
+              continue;
+            }
+            const counts = wcCount(file.content);
+            wcTotals.l += counts.l;
+            wcTotals.w += counts.w;
+            wcTotals.c += counts.c;
+            wcLines.push(wcFormatLine(counts, wcPath));
+          } catch (e: any) {
+            wcLines.push(`wc: ${wcPath}: ${e?.message || 'file not found'}`);
+          }
+        }
+
+        // Total line when multiple files
+        if (wcFilePaths.length > 1) {
+          wcLines.push(wcFormatLine(wcTotals, 'total'));
+        }
+
+        const wcOutput = wcLines.join('\n');
+        if (redirect) return applyRedirect(vfs, projectId, wcOutput, redirect);
+        return { stdout: truncate(wcOutput), stderr: '', exitCode: 0 };
+      }
+      case 'sort': {
+        // sort [-r] [-n] [-u] [file]  (or stdin via pipe)
+        const sortFlags = { r: false, n: false, u: false };
+        let filePath = '';
+
+        for (const a of args) {
+          if (a && a.startsWith('-') && /^-[rnu]+$/.test(a)) {
+            for (const ch of a.slice(1)) {
+              if (ch === 'r') sortFlags.r = true;
+              else if (ch === 'n') sortFlags.n = true;
+              else if (ch === 'u') sortFlags.u = true;
             }
           } else if (a) {
             filePath = a;
           }
         }
 
-        // If no flags specified, show all three
-        if (!anyFlag) { flags.l = true; flags.w = true; flags.c = true; }
-
         let inputContent: string;
-        const wcPath = normalizePath(filePath);
+        const sortPath = normalizePath(filePath);
 
-        if (wcPath) {
+        if (sortPath) {
           try {
-            const file = await vfs.readFile(projectId, wcPath);
+            const file = await vfs.readFile(projectId, sortPath);
             if (typeof file.content !== 'string') {
-              return { stdout: '', stderr: `wc: ${wcPath}: binary file`, exitCode: 1 };
+              return { stdout: '', stderr: `sort: ${sortPath}: binary file`, exitCode: 1 };
             }
             inputContent = file.content;
           } catch (e: any) {
-            return { stdout: '', stderr: `wc: ${wcPath}: ${e?.message || 'file not found'}`, exitCode: 1 };
+            return { stdout: '', stderr: `sort: ${sortPath}: ${e?.message || 'file not found'}`, exitCode: 1 };
           }
         } else if (stdin !== undefined) {
           inputContent = stdin;
         } else {
-          return { stdout: '', stderr: 'wc: no input file or stdin', exitCode: 2 };
+          return { stdout: '', stderr: 'sort: no input file or stdin', exitCode: 2 };
         }
 
-        const lineCount = inputContent === '' ? 0 : (inputContent.match(/\r?\n/g) || []).length;
-        const wordCount = inputContent.trim() === '' ? 0 : inputContent.trim().split(/\s+/).length;
-        const charCount = inputContent.length;
+        let lines = inputContent.split(/\r?\n/);
+        if (sortFlags.n) {
+          lines.sort((a, b) => {
+            const na = parseFloat(a) || 0;
+            const nb = parseFloat(b) || 0;
+            return na - nb;
+          });
+        } else {
+          lines.sort();
+        }
+        if (sortFlags.r) lines.reverse();
+        if (sortFlags.u) lines = lines.filter((line, i, arr) => i === 0 || line !== arr[i - 1]);
 
-        const parts: string[] = [];
-        if (flags.l) parts.push(String(lineCount));
-        if (flags.w) parts.push(String(wordCount));
-        if (flags.c) parts.push(String(charCount));
-        if (wcPath) parts.push(wcPath);
+        const sortOutput = lines.join('\n');
+        if (redirect) return applyRedirect(vfs, projectId, sortOutput, redirect);
+        return { stdout: truncate(sortOutput), stderr: '', exitCode: 0 };
+      }
+      case 'uniq': {
+        // uniq [-c] [file]  (or stdin via pipe)
+        let countPrefix = false;
+        let filePath = '';
 
-        const wcOutput = parts.join(' ');
-        if (redirect) return applyRedirect(vfs, projectId, wcOutput, redirect);
-        return { stdout: truncate(wcOutput), stderr: '', exitCode: 0 };
+        for (const a of args) {
+          if (a === '-c') countPrefix = true;
+          else if (a && !a.startsWith('-')) filePath = a;
+        }
+
+        let inputContent: string;
+        const uniqPath = normalizePath(filePath);
+
+        if (uniqPath) {
+          try {
+            const file = await vfs.readFile(projectId, uniqPath);
+            if (typeof file.content !== 'string') {
+              return { stdout: '', stderr: `uniq: ${uniqPath}: binary file`, exitCode: 1 };
+            }
+            inputContent = file.content;
+          } catch (e: any) {
+            return { stdout: '', stderr: `uniq: ${uniqPath}: ${e?.message || 'file not found'}`, exitCode: 1 };
+          }
+        } else if (stdin !== undefined) {
+          inputContent = stdin;
+        } else {
+          return { stdout: '', stderr: 'uniq: no input file or stdin', exitCode: 2 };
+        }
+
+        const lines = inputContent.split(/\r?\n/);
+        const resultLines: string[] = [];
+        let i = 0;
+        while (i < lines.length) {
+          let count = 1;
+          while (i + count < lines.length && lines[i + count] === lines[i]) count++;
+          resultLines.push(countPrefix ? `${String(count).padStart(7)} ${lines[i]}` : lines[i]);
+          i += count;
+        }
+
+        const uniqOutput = resultLines.join('\n');
+        if (redirect) return applyRedirect(vfs, projectId, uniqOutput, redirect);
+        return { stdout: truncate(uniqOutput), stderr: '', exitCode: 0 };
+      }
+      case 'tr': {
+        // tr [-d] SET1 [SET2]  (operates on stdin)
+        let deleteMode = false;
+        const trArgs: string[] = [];
+
+        for (const a of args) {
+          if (a === '-d') deleteMode = true;
+          else trArgs.push(a);
+        }
+
+        if (stdin === undefined) {
+          return { stdout: '', stderr: 'tr: no stdin (use with pipe, e.g. cat file | tr ...)', exitCode: 2 };
+        }
+
+        const set1 = trArgs[0] || '';
+        const set2 = trArgs[1] || '';
+
+        if (!set1) {
+          return { stdout: '', stderr: 'tr: missing SET1\n\nUsage: tr [-d] SET1 [SET2]\n  tr \'a-z\' \'A-Z\'  — translate lowercase to uppercase\n  tr -d \'chars\'    — delete characters', exitCode: 2 };
+        }
+
+        // Expand ranges like a-z, A-Z, 0-9
+        const expandRange = (s: string): string => {
+          let result = '';
+          for (let i = 0; i < s.length; i++) {
+            if (i + 2 < s.length && s[i + 1] === '-') {
+              const start = s.charCodeAt(i);
+              const end = s.charCodeAt(i + 2);
+              for (let c = start; c <= end; c++) result += String.fromCharCode(c);
+              i += 2;
+            } else {
+              result += s[i];
+            }
+          }
+          return result;
+        };
+
+        const expandedSet1 = expandRange(set1);
+
+        if (deleteMode) {
+          const deleteChars = new Set(expandedSet1.split(''));
+          const trOutput = stdin.split('').filter(ch => !deleteChars.has(ch)).join('');
+          if (redirect) return applyRedirect(vfs, projectId, trOutput, redirect);
+          return { stdout: truncate(trOutput), stderr: '', exitCode: 0 };
+        }
+
+        const expandedSet2 = expandRange(set2);
+        const charMap = new Map<string, string>();
+        for (let i = 0; i < expandedSet1.length; i++) {
+          charMap.set(expandedSet1[i], expandedSet2[Math.min(i, expandedSet2.length - 1)] || '');
+        }
+
+        const trOutput = stdin.split('').map(ch => charMap.get(ch) ?? ch).join('');
+        if (redirect) return applyRedirect(vfs, projectId, trOutput, redirect);
+        return { stdout: truncate(trOutput), stderr: '', exitCode: 0 };
       }
       case 'curl': {
         // curl localhost/path — fetch compiled HTML from preview engine
@@ -1699,6 +2120,73 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
           exitCode: 1
         };
       }
+      case 'build': {
+        // Build pseudo-command — waits for any pending compilation and reports errors
+        await waitForCompilation(2000);
+        const compileErrors = drainCompileErrors();
+        if (compileErrors.length === 0) {
+          return { stdout: 'Build successful — 0 errors', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: formatCompileErrors(compileErrors), exitCode: 1 };
+      }
+      case 'status': {
+        // Status pseudo-command
+        // Usage: status --task "..." --done "..." --remaining "..." --complete
+        const flags: Record<string, string> = {};
+        let currentFlag: string | null = null;
+        const tokens: string[] = [];
+        let isComplete = false;
+        let isIncomplete = false;
+        for (const arg of args) {
+          if (arg === '--complete') {
+            if (currentFlag && tokens.length > 0) {
+              flags[currentFlag] = tokens.join(' ');
+              tokens.length = 0;
+            }
+            currentFlag = null;
+            isComplete = true;
+          } else if (arg === '--incomplete') {
+            if (currentFlag && tokens.length > 0) {
+              flags[currentFlag] = tokens.join(' ');
+              tokens.length = 0;
+            }
+            currentFlag = null;
+            isIncomplete = true;
+          } else if (arg === '--task' || arg === '--done' || arg === '--remaining') {
+            if (currentFlag && tokens.length > 0) {
+              flags[currentFlag] = tokens.join(' ');
+              tokens.length = 0;
+            }
+            currentFlag = arg.slice(2); // strip '--'
+          } else if (currentFlag) {
+            tokens.push(arg);
+          }
+        }
+        if (currentFlag && tokens.length > 0) {
+          flags[currentFlag] = tokens.join(' ');
+        }
+
+        if (!flags.task || !flags.done) {
+          return {
+            stdout: '',
+            stderr: 'Usage: status --task "what was asked" --done "what I accomplished" --remaining "what\'s left or none" --complete',
+            exitCode: 1
+          };
+        }
+        const remaining = flags.remaining || 'none';
+        // --complete wins over --incomplete if both present; neither = incomplete
+        const complete = isComplete && !isIncomplete;
+        return {
+          stdout: `Task: ${flags.task}\nDone: ${flags.done}\nRemaining: ${remaining}\nComplete: ${complete ? 'yes' : 'no'}`,
+          stderr: '',
+          exitCode: 0
+        };
+      }
+      case 'sleep': {
+        // No-op — LLMs reflexively use sleep between commands.
+        // Parse the duration to avoid "command not found" errors but don't actually wait.
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }
       default: {
         const bashHint = program === 'bash' ? `
 Don't use "bash" as a command - call the shell tool directly with your command.
@@ -1710,8 +2198,8 @@ Right: {"cmd": ["ls", "-la"]}
           stdout: '',
           stderr: `${program}: command not found${bashHint}
 
-Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, curl, sqlite3
-Operators: | (pipe), > (redirect), >> (append), && (chain), || (fallback)
+Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, sort, uniq, tr, curl, sleep, sqlite3, build, status
+Operators: | (pipe), > (redirect), >> (append), && (chain), || (fallback), ; (sequence)
 
 Correct shell tool usage:
   {"cmd": ["ls", "/"]}                        - List files

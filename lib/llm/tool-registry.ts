@@ -14,9 +14,9 @@ import {
 import { scriptRunner } from '@/lib/scripting/script-runner';
 import type { ScriptRuntime } from '@/lib/scripting/types';
 
-export type ToolId = 'shell' | 'evaluation';
+export type ToolId = 'shell';
 
-export interface ToolExecutor {
+interface ToolExecutor {
   /**
    * Execute the tool with given arguments
    * @param projectId - Current project ID
@@ -37,7 +37,7 @@ export interface ToolExecutionContext {
   onProgress?: (event: string, data?: any) => void;
 }
 
-export interface RegisteredTool {
+interface RegisteredTool {
   id: ToolId;
   definition: ToolDefinition;
   executor: ToolExecutor;
@@ -64,8 +64,8 @@ export class ToolRegistry {
         name: 'shell',
         description: `Run shell commands in the virtual file system.
 
-Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, curl, sqlite3, python, python3, lua, preview.
-Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), and brace expansion ({a,b,c}) are supported.
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status.
+Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), chaining (&&, ||, ;), and brace expansion ({a,b,c}) are supported.
 Run scripts: python <file>, lua <file>. Show output in preview: preview <path>.
 
 For large file writes, use heredoc: cat > /file << 'EOF'\\ncontent\\nEOF
@@ -89,26 +89,55 @@ One command at a time as a single string.`,
             return 'Error: cmd must be a string. Pass the complete command as a single string (e.g., "ls -la /")';
           }
 
-          // Extract heredoc content if present (e.g., cat > file << 'EOF'\ncontent\nEOF)
+          // Extract heredoc content if present
+          // Supports both orderings:
+          //   cat > file << 'EOF'\ncontent\nEOF   (standard)
+          //   cat << 'EOF' > file\ncontent\nEOF   (reversed — common with Gemini models)
           // Also handles chained commands after the heredoc (e.g., ... EOF\npython file.py)
           let heredocStdin: string | undefined;
-          let cmdString = args.cmd;
+          let cmdString = unescapeHtmlEntities(args.cmd);
           let trailingCommands: string | undefined;
-          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\1(?:[ \t]*\n([\s\S]+))?\s*$/);
+          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?([^\n]*)\n([\s\S]*)\n\1(?:[ \t]*\n([\s\S]+))?\s*$/);
           if (heredocMatch) {
-            heredocStdin = heredocMatch[2];
+            heredocStdin = heredocMatch[3];
             cmdString = cmdString.slice(0, heredocMatch.index!).trim();
-            if (heredocMatch[3]) {
-              trailingCommands = heredocMatch[3].trim();
+            // Append any content after the delimiter but before the newline
+            // (e.g., " > file" from "cat << 'EOF' > file")
+            const afterDelimiter = (heredocMatch[2] || '').trim();
+            if (afterDelimiter) {
+              cmdString = cmdString + ' ' + afterDelimiter;
+            }
+            if (heredocMatch[4]) {
+              trailingCommands = heredocMatch[4].trim();
+            }
+          }
+
+          // Handle newline-chained commands (e.g., "ls -la\ncat file\ngrep pattern")
+          // Some models chain commands with \n instead of && or ;
+          // Only applies when no heredoc was extracted (heredoc content has its own \n handling)
+          if (!heredocStdin && cmdString.includes('\n')) {
+            const multiCmds = splitNewlineCommands(cmdString);
+            if (multiCmds.length > 1) {
+              const outputs: string[] = [];
+              for (const singleCmd of multiCmds) {
+                // Each command may itself contain a heredoc — recurse through the full executor
+                const lineResult = await this.get('shell')!.executor.execute(projectId, { cmd: singleCmd }, context);
+                if (lineResult && lineResult !== 'Command succeeded with no output') {
+                  outputs.push(lineResult);
+                }
+                // Stop on error (same as && semantics)
+                if (lineResult.startsWith('Error')) break;
+              }
+              return outputs.length > 0 ? outputs.join('\n') : 'Command succeeded with no output';
             }
           }
 
           // Parse command string into array
           const cmdArray = parseShellCommand(cmdString);
 
-          // Check for && / || chain operators — handle at this level so
+          // Check for && / || / ; chain operators — handle at this level so
           // python/lua/preview/cd work when chained (e.g., "python main.py && preview /output/chart.html")
-          if (cmdArray.some(t => t === '&&' || t === '||')) {
+          if (cmdArray.some(t => t === '&&' || t === '||' || t === ';')) {
             const segments = splitChainOperators(cmdArray);
             const outputs: string[] = [];
 
@@ -119,6 +148,7 @@ One command at a time as a single string.`,
                 const prevSuccess = !prevResult.startsWith('Error');
                 if (prevOp === '&&' && !prevSuccess) break;
                 if (prevOp === '||' && prevSuccess) continue;
+                // ';' — always proceed to next command
               }
 
               const segResult = await executeShellSegment(
@@ -139,11 +169,10 @@ One command at a time as a single string.`,
           // execute them sequentially as a chained && command.
           if (trailingCommands) {
             const outputs: string[] = [];
-            if (mainResult && !mainResult.startsWith('Error')) {
-              if (mainResult) outputs.push(mainResult);
-            } else {
-              return mainResult || 'Error: Command failed';
+            if (mainResult.startsWith('Error')) {
+              return mainResult;
             }
+            if (mainResult) outputs.push(mainResult);
 
             const lines = trailingCommands.split('\n').map(l => l.trim()).filter(Boolean);
             for (const line of lines) {
@@ -167,101 +196,6 @@ One command at a time as a single string.`,
       }
     });
 
-    // Evaluation tool - Self-assessment and progress tracking
-    this.register({
-      id: 'evaluation',
-      definition: {
-        name: 'evaluation',
-        description: 'Track progress on complex tasks. Not needed for simple tasks.',
-        parameters: {
-          type: 'object',
-          properties: {
-            goal_achieved: {
-              type: 'boolean',
-              description: 'Whether the original task/goal has been fully achieved'
-            },
-            progress_summary: {
-              type: 'string',
-              description: 'Brief summary of work completed so far'
-            },
-            remaining_work: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'List of specific tasks still needed. Empty array if goal_achieved is true.'
-            },
-            blockers: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Current blockers preventing progress. Empty array if no blockers.'
-            },
-            reasoning: {
-              type: 'string',
-              description: 'Detailed explanation of current status and next steps'
-            },
-            should_continue: {
-              type: 'boolean',
-              description: 'Whether to continue working (false if complete or permanently blocked)'
-            }
-          },
-          required: ['goal_achieved', 'progress_summary', 'remaining_work', 'reasoning', 'should_continue']
-        }
-      },
-      executor: {
-        execute: async (projectId, args, context) => {
-          // Evaluation is handled by orchestrator loop logic
-          // This executor just formats the response for the LLM
-
-          // Handle remaining_work - LLM sometimes sends as string "[]" instead of array
-          let remainingWork: string[] = [];
-          if (Array.isArray(args.remaining_work)) {
-            remainingWork = args.remaining_work;
-          } else if (typeof args.remaining_work === 'string') {
-            try {
-              const parsed = JSON.parse(args.remaining_work);
-              if (Array.isArray(parsed)) remainingWork = parsed;
-            } catch {
-              // Not valid JSON, treat as single item if non-empty
-              if (args.remaining_work.trim()) remainingWork = [args.remaining_work];
-            }
-          }
-
-          // Handle blockers similarly
-          let blockers: string[] = [];
-          if (Array.isArray(args.blockers)) {
-            blockers = args.blockers;
-          } else if (typeof args.blockers === 'string') {
-            try {
-              const parsed = JSON.parse(args.blockers);
-              if (Array.isArray(parsed)) blockers = parsed;
-            } catch {
-              if (args.blockers.trim()) blockers = [args.blockers];
-            }
-          }
-
-          // Handle boolean fields - LLM sometimes sends as string "true"/"false"
-          const parseBool = (val: any): boolean => {
-            if (typeof val === 'boolean') return val;
-            if (typeof val === 'string') {
-              return val.toLowerCase() === 'true' || val === '1';
-            }
-            return Boolean(val);
-          };
-
-          const goalAchieved = parseBool(args.goal_achieved);
-          const shouldContinue = parseBool(args.should_continue);
-
-          const summary = [
-            `Goal achieved: ${goalAchieved ? 'Yes' : 'No'}`,
-            `Progress: ${args.progress_summary}`,
-            remainingWork.length > 0 ? `Remaining: ${remainingWork.join(', ')}` : '',
-            blockers.length > 0 ? `Blockers: ${blockers.join(', ')}` : '',
-            `Should continue: ${shouldContinue ? 'Yes' : 'No'}`
-          ].filter(Boolean).join('\n');
-
-          return summary;
-        }
-      }
-    });
   }
 
   /**
@@ -283,13 +217,6 @@ One command at a time as a single string.`,
    */
   getDefinition(id: ToolId): ToolDefinition | undefined {
     return this.tools.get(id)?.definition;
-  }
-
-  /**
-   * Get tool executor by ID
-   */
-  getExecutor(id: ToolId): ToolExecutor | undefined {
-    return this.tools.get(id)?.executor;
   }
 
   /**
@@ -315,7 +242,7 @@ One command at a time as a single string.`,
     if (!tool) {
       // Auto-route known shell commands called as standalone tools
       // LLMs sometimes call "cat", "curl", "grep" etc. as tool names instead of using shell
-      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview'];
+      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview', 'build', 'status'];
 
       // Map common "read file" tool names to cat
       const readAliases: Record<string, string> = {
@@ -368,19 +295,6 @@ One command at a time as a single string.`,
     }
   }
 
-  /**
-   * Check if a tool exists
-   */
-  has(id: ToolId): boolean {
-    return this.tools.has(id);
-  }
-
-  /**
-   * Get all registered tools
-   */
-  getAll(): RegisteredTool[] {
-    return Array.from(this.tools.values());
-  }
 }
 
 /**
@@ -508,14 +422,14 @@ async function executeShellSegment(
 /**
  * Split a parsed command array by && and || chain operators into segments.
  */
-function splitChainOperators(cmdArray: string[]): { args: string[]; nextOp: '&&' | '||' | null }[] {
-  const segments: { args: string[]; nextOp: '&&' | '||' | null }[] = [];
+function splitChainOperators(cmdArray: string[]): { args: string[]; nextOp: '&&' | '||' | ';' | null }[] {
+  const segments: { args: string[]; nextOp: '&&' | '||' | ';' | null }[] = [];
   let current: string[] = [];
 
   for (const token of cmdArray) {
-    if (token === '&&' || token === '||') {
+    if (token === '&&' || token === '||' || token === ';') {
       if (current.length > 0) {
-        segments.push({ args: current, nextOp: token as '&&' | '||' });
+        segments.push({ args: current, nextOp: token as '&&' | '||' | ';' });
         current = [];
       }
     } else {
@@ -528,6 +442,21 @@ function splitChainOperators(cmdArray: string[]): { args: string[]; nextOp: '&&'
   }
 
   return segments;
+}
+
+/**
+ * Unescape HTML entities that models sometimes emit in tool call arguments.
+ * These are never valid in shell commands, so unescaping is always safe.
+ */
+function unescapeHtmlEntities(cmd: string): string {
+  if (!cmd.includes('&')) return cmd;
+  return cmd
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
 }
 
 /**
@@ -688,6 +617,84 @@ function reconstructShellCommand(command: string, args: any): string {
   }
 
   return parts.join(' ');
+}
+
+/**
+ * Check if a string has unbalanced quotes (i.e., we're inside an open quote).
+ * Respects escape sequences in double quotes (\" is not a closing quote).
+ * In single quotes, backslash is literal (no escaping) per POSIX.
+ */
+function hasUnbalancedQuotes(text: string): boolean {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\' && inDouble) { i++; continue; }
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+  }
+  return inSingle || inDouble;
+}
+
+/**
+ * Split a newline-separated command string into individual commands,
+ * preserving heredoc blocks and multiline quoted strings as part of their parent command.
+ * E.g., "mkdir -p dir\ncat > file << 'EOF'\ncontent\nEOF\nls" → 3 commands
+ */
+function splitNewlineCommands(cmdStr: string): string[] {
+  const lines = cmdStr.split('\n');
+  const commands: string[] = [];
+  let current = '';
+  let heredocDelimiter: string | null = null;
+
+  for (const line of lines) {
+    if (heredocDelimiter) {
+      // Inside a heredoc — accumulate until we hit the end delimiter
+      current += '\n' + line;
+      if (line.trim() === heredocDelimiter) {
+        heredocDelimiter = null;
+      }
+      continue;
+    }
+
+    // Inside an unclosed quote — accumulate until quotes balance
+    if (current && hasUnbalancedQuotes(current)) {
+      current += '\n' + line;
+      continue;
+    }
+
+    // Check if this line starts a heredoc
+    const heredocStart = line.match(/<<-?\s*['"]?(\w+)['"]?/);
+    if (heredocStart) {
+      if (current) {
+        const trimmed = current.trim();
+        if (trimmed && !trimmed.startsWith('#')) commands.push(trimmed);
+        current = '';
+      }
+      current = line;
+      heredocDelimiter = heredocStart[1];
+      continue;
+    }
+
+    // Regular line — treat as separate command
+    const trimmed = line.trim();
+    if (current) {
+      const prevTrimmed = current.trim();
+      if (prevTrimmed && !prevTrimmed.startsWith('#')) commands.push(prevTrimmed);
+      current = '';
+    }
+    if (trimmed && !trimmed.startsWith('#')) {
+      commands.push(trimmed);
+    }
+  }
+
+  // Flush remaining
+  if (current) {
+    const trimmed = current.trim();
+    if (trimmed && !trimmed.startsWith('#')) commands.push(trimmed);
+  }
+
+  return commands;
 }
 
 // Singleton instance

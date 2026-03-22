@@ -262,20 +262,26 @@ When AI works in Code Mode, you'll see it use tools:
 
 **Creating files:**
 ```
-🔧 shell: echo "..." > index.html
+🔧 write: cat > index.html << 'EOF' ...
 ✅ Created index.html
 ```
 
 **Editing files:**
 ```
-🔧 write: Updated styles.css
-✅ Changed background color to blue
+🔧 write: sed -i 's/old/new/' styles.css
+✅ Updated styles.css
 ```
 
 **Reading files:**
 ```
-🔍 shell: cat index.html
+🔧 shell: cat index.html
 📄 Read file contents
+```
+
+**Checking compilation:**
+```
+🔧 shell: build
+✅ Build successful — 0 errors
 ```
 
 ### Status Updates

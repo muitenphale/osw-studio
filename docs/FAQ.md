@@ -352,7 +352,7 @@ Yes! **Scheduled Functions** let you run edge functions on a cron schedule. Use 
 
 AI guidance documents injected into the system prompt. They teach the AI how to approach specific tasks.
 
-**Built-in**: OSW Workflow, Handlebars Advanced, Accessibility
+**Built-in**: Workflow, Responsive, Frontend Design, Handlebars Advanced, Accessibility (plus server-specific skills in Server Mode)
 
 **See**: [Skills Guide](?doc=skills)
 
@@ -360,7 +360,7 @@ AI guidance documents injected into the system prompt. They teach the AI how to 
 
 Reusable project starting points with files, structure, and metadata.
 
-**Built-in Templates**: Website Starter (minimal), Example Studios (multi-page portfolio), Starter (React + TypeScript), React Demo: Task Tracker, Starter (Preact + TypeScript), Starter (Svelte), Starter (Vue), Landing Page with Contact Form (backend), Blog with Comments (backend)
+**Built-in Templates**: Website Starter (minimal), Starter (Handlebars), Example Studios (multi-page portfolio), Starter (React + TypeScript), React Demo: Task Tracker, Starter (Preact + TypeScript), Starter (Svelte), Starter (Vue), Starter (Python), Starter (Lua), Landing Page with Contact Form (backend), Blog with Comments (backend)
 
 **See**: [Templates Guide](?doc=templates)
 

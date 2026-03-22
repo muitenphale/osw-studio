@@ -54,6 +54,18 @@ Minimal starting point with basic structure.
 
 **Best for**: Starting from scratch with minimal setup
 
+### Starter (Handlebars)
+
+Handlebars-powered website with templating and partials.
+
+**Includes:**
+- `index.html` with Handlebars partial includes
+- `/templates/` directory for reusable partials
+- `data.json` for template data
+- `.PROMPT.md` with Handlebars-specific AI instructions
+
+**Best for**: Sites that benefit from reusable components (navigation, footer) and data-driven content
+
 ### Example Studios (Project)
 
 A multi-page agency portfolio showing OSW Studio's capabilities.
@@ -127,6 +139,28 @@ Vue 3 app with Composition API and single-file components.
 - `.PROMPT.md` with Vue-specific AI instructions
 
 **Best for**: Progressive apps, gentle learning curve, familiar HTML-like template syntax
+
+### Starter (Python)
+
+Python script running in the browser via Pyodide WASM.
+
+**Includes:**
+- `main.py` entry point
+- `.PROMPT.md` with Python-specific AI instructions
+- Runs in interactive Console (not live preview)
+
+**Best for**: Scripts, data processing, algorithms, learning Python
+
+### Starter (Lua)
+
+Lua script running in the browser via wasmoon WASM.
+
+**Includes:**
+- `main.lua` entry point
+- `.PROMPT.md` with Lua-specific AI instructions
+- Runs in interactive Console (not live preview)
+
+**Best for**: Scripting, game logic prototyping, learning Lua
 
 ### Landing Page with Contact Form (Backend)
 

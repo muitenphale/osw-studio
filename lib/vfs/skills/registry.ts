@@ -4,14 +4,15 @@
  */
 
 import { BuiltInSkillDefinition } from './types';
-import { OSW_PLANNING_SKILL } from './built-in/osw-planning';
-import { OSW_ONE_SHOT_SKILL } from './built-in/osw-one-shot';
+import { WORKFLOW_SKILL } from './built-in/workflow';
+import { RESPONSIVE_SKILL } from './built-in/responsive';
 import { HANDLEBARS_ADVANCED_SKILL } from './built-in/handlebars-advanced';
 import { ACCESSIBILITY_SKILL } from './built-in/accessibility';
 import { SERVER_SKILL } from './built-in/server';
 import { FUNCTIONS_SKILL } from './built-in/functions';
 import { DATABASE_SKILL } from './built-in/database';
 import { SECRETS_SKILL } from './built-in/secrets';
+import { FRONTEND_DESIGN_SKILL } from './built-in/frontend-design';
 
 /**
  * Registry of all built-in skills
@@ -19,12 +20,12 @@ import { SECRETS_SKILL } from './built-in/secrets';
  */
 export const BUILT_IN_SKILLS: BuiltInSkillDefinition[] = [
   {
-    id: 'osw-planning',
-    content: OSW_PLANNING_SKILL
+    id: 'workflow',
+    content: WORKFLOW_SKILL
   },
   {
-    id: 'osw-one-shot',
-    content: OSW_ONE_SHOT_SKILL
+    id: 'responsive',
+    content: RESPONSIVE_SKILL
   },
   {
     id: 'handlebars-advanced',
@@ -49,6 +50,10 @@ export const BUILT_IN_SKILLS: BuiltInSkillDefinition[] = [
   {
     id: 'secrets',
     content: SECRETS_SKILL
+  },
+  {
+    id: 'frontend-design',
+    content: FRONTEND_DESIGN_SKILL
   }
 ];
 

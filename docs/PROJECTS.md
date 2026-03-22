@@ -11,12 +11,15 @@
 3. Enter a project name
 4. Choose a template:
    - **Website Starter** - Minimal starting point with basic HTML/CSS/JS structure
+   - **Starter (Handlebars)** - Handlebars starter with templating
    - **Example Studios** - Pre-built multi-page portfolio example
    - **Starter (React + TypeScript)** - Minimal React app with auto-bundling
    - **React Demo: Task Tracker** - Interactive task tracker showcasing React components and state
    - **Starter (Preact + TypeScript)** - Lightweight React alternative with signals
    - **Starter (Svelte)** - Svelte 5 app with compile-time reactivity
    - **Starter (Vue)** - Vue 3 app with Composition API
+   - **Starter (Python)** - Python script with Pyodide WASM runtime
+   - **Starter (Lua)** - Lua script with wasmoon WASM runtime
    - **Landing Page with Contact Form** - Contact form with Resend email (Backend)
    - **Blog with Comments** - Blog with auth and moderated comments (Backend)
    - Or select any custom template you've created

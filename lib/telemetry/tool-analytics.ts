@@ -5,7 +5,8 @@
 
 const SHELL_COMMAND_WHITELIST = new Set([
   'cat', 'head', 'tail', 'nl', 'ls', 'tree', 'grep', 'rg', 'find',
-  'mkdir', 'mv', 'cp', 'rm', 'rmdir', 'touch', 'sed', 'echo', 'sqlite3'
+  'mkdir', 'mv', 'cp', 'rm', 'rmdir', 'touch', 'sed', 'echo', 'wc',
+  'sort', 'uniq', 'tr', 'curl', 'sleep', 'sqlite3', 'build', 'status'
 ]);
 
 function extractShellAnalytics(args: Record<string, unknown>): Record<string, unknown> {
@@ -16,17 +17,6 @@ function extractShellAnalytics(args: Record<string, unknown>): Record<string, un
     result.command = SHELL_COMMAND_WHITELIST.has(firstWord) ? firstWord : 'other';
     result.has_pipe = cmd.includes(' | ');
     result.has_redirect = / >>? /.test(cmd);
-  }
-  return result;
-}
-
-function extractEvaluationAnalytics(args: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  if (typeof args.goal_achieved === 'boolean') {
-    result.goal_achieved = args.goal_achieved;
-  }
-  if (typeof args.should_continue === 'boolean') {
-    result.should_continue = args.should_continue;
   }
   return result;
 }
@@ -46,12 +36,8 @@ export function extractToolAnalytics(
     return base;
   }
 
-  switch (toolName) {
-    case 'shell':
-      return { ...base, ...extractShellAnalytics(args) };
-    case 'evaluation':
-      return { ...base, ...extractEvaluationAnalytics(args) };
-    default:
-      return base;
+  if (toolName === 'shell') {
+    return { ...base, ...extractShellAnalytics(args) };
   }
+  return base;
 }

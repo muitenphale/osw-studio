@@ -7,7 +7,8 @@ import { FunctionsManager } from '@/components/database-manager/functions-manage
 import { ServerFunctionsManager } from '@/components/database-manager/server-functions-manager';
 import { SecretsManager } from '@/components/database-manager/secrets-manager';
 import { ScheduledFunctionsManager } from '@/components/database-manager/scheduled-functions-manager';
-import { Code2, Wrench, Key, Clock, Lock, Settings2, PowerOff, Database } from 'lucide-react';
+import { Code2, Wrench, Key, Clock, Lock, Settings2, PowerOff, Database, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,12 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-  TooltipProvider,
-} from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
 import type { Project, ProjectRuntime } from '@/lib/vfs/types';
@@ -210,6 +205,55 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
   const [editingEntryPoint, setEditingEntryPoint] = useState(
     project.settings?.previewEntryPoint || '/index.html'
   );
+  const [promptOverwriteConfirm, setPromptOverwriteConfirm] = useState<{
+    runtime: ProjectRuntime;
+    label: string;
+  } | null>(null);
+
+  const updatePromptForRuntime = async (runtime: ProjectRuntime) => {
+    try {
+      const { getDomainPrompt, isDefaultDomainPrompt } = await import('@/lib/llm/prompts');
+      const newPrompt = getDomainPrompt(runtime);
+
+      let currentContent: string | null = null;
+      try {
+        const file = await vfs.readFile(project.id, '/.PROMPT.md');
+        if (file && typeof file.content === 'string') currentContent = file.content;
+      } catch { /* doesn't exist */ }
+
+      if (currentContent === null) {
+        // No .PROMPT.md — create it
+        await vfs.createFile(project.id, '/.PROMPT.md', newPrompt);
+      } else if (isDefaultDomainPrompt(currentContent)) {
+        // Default prompt — silently replace
+        await vfs.updateFile(project.id, '/.PROMPT.md', newPrompt);
+      } else {
+        // Custom prompt — ask user
+        const label = getProjectRuntimes().find(r => r.value === runtime)?.label || runtime;
+        setPromptOverwriteConfirm({ runtime, label });
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('filesChanged', { detail: { projectId: project.id } }));
+    } catch (err) {
+      logger.error('Failed to update .PROMPT.md:', err);
+    }
+  };
+
+  const confirmPromptOverwrite = async () => {
+    if (!promptOverwriteConfirm) return;
+    try {
+      const { getDomainPrompt } = await import('@/lib/llm/prompts');
+      const newPrompt = getDomainPrompt(promptOverwriteConfirm.runtime);
+      await vfs.updateFile(project.id, '/.PROMPT.md', newPrompt);
+      window.dispatchEvent(new CustomEvent('filesChanged', { detail: { projectId: project.id } }));
+      toast.success('.PROMPT.md updated for new runtime');
+    } catch (err) {
+      logger.error('Failed to overwrite .PROMPT.md:', err);
+      toast.error('Failed to update .PROMPT.md');
+    } finally {
+      setPromptOverwriteConfirm(null);
+    }
+  };
 
   const handleRuntimeChange = async (value: ProjectRuntime) => {
     try {
@@ -219,6 +263,7 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
       onProjectUpdate(proj);
       const label = getProjectRuntimes().find(r => r.value === value)?.label || value;
       toast.success(`Runtime changed to ${label}`);
+      await updatePromptForRuntime(value);
     } catch (err) {
       logger.error('Failed to update runtime:', err);
       toast.error('Failed to update runtime');
@@ -278,6 +323,28 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
           The file loaded in the preview panel when opening this project.
         </p>
       </div>
+
+      <Dialog open={!!promptOverwriteConfirm} onOpenChange={(open) => !open && setPromptOverwriteConfirm(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Update .PROMPT.md?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Your .PROMPT.md has custom content. Replace it with the default {promptOverwriteConfirm?.label} instructions?
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setPromptOverwriteConfirm(null)}>
+              Keep current
+            </Button>
+            <Button size="sm" onClick={confirmPromptOverwrite}>
+              Replace
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -285,39 +352,23 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
 export function ProjectSettingsPanel({ project, onProjectUpdate, enabled }: ProjectSettingsPanelProps) {
   const [activeTab, setActiveTab] = useState('general');
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
-  const backendTabsDisabled = !isServerMode || !enabled;
 
   const functionsProvider = useMemo(() => createFunctionsProvider(project.id), [project.id]);
   const serverFunctionsProvider = useMemo(() => createServerFunctionsProvider(project.id), [project.id]);
   const secretsProvider = useMemo(() => createSecretsProvider(project.id), [project.id]);
   const scheduledFunctionsProvider = useMemo(() => createScheduledFunctionsProvider(project.id), [project.id]);
 
-  const backendTabTrigger = (value: string, icon: React.ReactNode, label: string) => {
-    const trigger = (
-      <TabsTrigger
-        value={value}
-        className="flex items-center gap-1 text-xs"
-        disabled={backendTabsDisabled}
-      >
-        {icon}
-        {label}
-      </TabsTrigger>
-    );
-
-    if (!isServerMode) {
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent side="bottom">Requires Server Mode</TooltipContent>
-        </Tooltip>
-      );
-    }
-
-    return trigger;
-  };
+  const backendTabTrigger = (value: string, icon: React.ReactNode, label: string) => (
+    <TabsTrigger
+      value={value}
+      className="flex items-center gap-1 text-xs"
+    >
+      {icon}
+      {label}
+    </TabsTrigger>
+  );
 
   return (
-    <TooltipProvider>
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-hidden p-3">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
@@ -332,6 +383,21 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled }: Proj
             {backendTabTrigger('schedules', <Clock className="h-3 w-3" />, 'Schedules')}
             {backendTabTrigger('schema', <Database className="h-3 w-3" />, 'Schema')}
           </TabsList>
+
+          {!isServerMode && (
+            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
+              <Lock className="h-3 w-3 shrink-0" />
+              Backend features require Server Mode.{' '}
+              <a
+                href="https://github.com/o-stahl/osw-studio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Learn more
+              </a>
+            </p>
+          )}
 
           <div className="flex-1 overflow-hidden mt-3">
             <TabsContent value="general" className="h-full m-0 overflow-auto">
@@ -413,7 +479,6 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled }: Proj
         </Tabs>
       </div>
     </div>
-    </TooltipProvider>
   );
 }
 

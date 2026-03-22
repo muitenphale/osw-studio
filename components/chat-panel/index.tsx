@@ -104,6 +104,7 @@ interface TurnItem {
   timestamp: number;
   data: any;
   eventId?: string;  // Links item to its source debug event (for coalesced updates)
+  complete?: boolean; // For reasoning items: true when reasoning is finished
 }
 
 interface Turn {
@@ -114,9 +115,27 @@ interface Turn {
   checkpointId?: string;
 }
 
+function classifyShellCommand(cmd: string | string[] | undefined): 'shell' | 'write' | 'status' {
+  if (!cmd) return 'shell';
+  const s = (Array.isArray(cmd) ? cmd.join(' ') : String(cmd)).trimStart();
+
+  if (/^status\b/.test(s)) return 'status';
+  if (/^build\b/.test(s)) return 'status';
+
+  if (/^cat\s.*>/.test(s)) return 'write';
+  if (/^cat\s*>/.test(s)) return 'write';
+  if (/<<-?\s*['"]?\w+/.test(s)) return 'write';
+  if (/^sed\s+-i\b/.test(s)) return 'write';
+  if (/^(mkdir|touch|rm|mv|cp)\b/.test(s)) return 'write';
+  if (/^echo\b.*>>?\s*\//.test(s)) return 'write';
+
+  return 'shell';
+}
+
 const toolIcons: Record<string, React.ReactNode> = {
   shell: <ChevronRight className="h-3 w-3 text-blue-500" />,
   write: <FileCode className="h-3 w-3 text-orange-500" />,
+  status: <CheckCircle className="h-3 w-3 text-orange-500" />,
 };
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -295,27 +314,33 @@ export function ChatPanel({
       return [];
     }
 
-    // Check if last event is a streaming event that was updated
-    const lastEvent = events[events.length - 1];
-    const isStreamingEvent = lastEvent && (lastEvent.event === 'assistant_delta' || lastEvent.event === 'tool_param_delta' || lastEvent.event === 'reasoning_delta');
-    const lastEventVersion = lastEventVersionsRef.current.get(lastEvent?.id || '');
-    const eventWasUpdated = isStreamingEvent && lastEvent.version && lastEventVersion !== lastEvent.version;
+    // Check for coalesced streaming events that were updated since last processing.
+    // Coalescing can update events up to 4 positions back, so scan a lookback window.
+    // This handles the case where React batches a coalescing update with a subsequent
+    // new event — the coalesced event is no longer last, but still needs re-processing.
+    const coalescedEvents: typeof events = [];
+    const lookbackStart = Math.max(0, lastProcessedIndexRef.current - 4);
+    for (let i = lookbackStart; i < lastProcessedIndexRef.current; i++) {
+      const evt = events[i];
+      if (evt.event === 'assistant_delta' || evt.event === 'tool_param_delta' || evt.event === 'reasoning_delta') {
+        const storedVersion = lastEventVersionsRef.current.get(evt.id);
+        if (evt.version && storedVersion !== evt.version) {
+          coalescedEvents.push(evt);
+          lastEventVersionsRef.current.set(evt.id, evt.version);
+        }
+      }
+    }
 
-    // Skip processing if no new events AND last event wasn't updated
-    if (newEventsCount === 0 && !eventWasUpdated) {
+    // Skip processing if no new events AND no coalesced events were updated
+    if (newEventsCount === 0 && coalescedEvents.length === 0) {
       return [...state.result, ...(state.currentTurn.items.length > 0 ? [state.currentTurn] : [])];
     }
 
-    // Determine which events to process
-    let eventsToProcess: typeof events;
-    if (eventWasUpdated) {
-      // Re-process the last event (it was updated/coalesced)
-      eventsToProcess = [lastEvent];
-      lastEventVersionsRef.current.set(lastEvent.id, lastEvent.version!);
-    } else {
-      // Process only new events
-      eventsToProcess = events.slice(lastProcessedIndexRef.current);
-    }
+    // Determine which events to process: coalesced updates first, then new events
+    const eventsToProcess = [
+      ...coalescedEvents,
+      ...events.slice(lastProcessedIndexRef.current),
+    ];
 
     for (const event of eventsToProcess) {
       switch (event.event) {
@@ -378,11 +403,19 @@ export function ChatPanel({
           break;
 
         case 'reasoning_complete':
-          // Reasoning is complete - nothing special to do, just ensure waiting is removed
+          // Mark all reasoning items in the current turn as complete
+          state.currentTurn.items.forEach(item => {
+            if (item.type === 'reasoning') item.complete = true;
+          });
           state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
         case 'toolCalls':
+          // Tool calls arriving means reasoning is done (some providers skip reasoning_complete)
+          state.currentTurn.items.forEach(item => {
+            if (item.type === 'reasoning') item.complete = true;
+          });
+
           // New tool calls - push onto flat per-iteration array
           const calls = event.data?.toolCalls || [];
 
@@ -471,6 +504,11 @@ export function ChatPanel({
           break;
 
         case 'assistant_delta':
+          // Text arriving means reasoning is done
+          state.currentTurn.items.forEach(item => {
+            if (item.type === 'reasoning') item.complete = true;
+          });
+
           // Handle both coalesced (data.all) and individual delta formats
           // When coalesced, data.all contains array of {text} objects (snapshots removed for memory efficiency)
           const deltaItems = event.data?.all || [event.data];
@@ -537,8 +575,8 @@ export function ChatPanel({
           // Handle conversation messages (user and system)
           const message = event.data?.message;
           if (message?.role === 'user') {
-            // Skip internal evaluation prompts (orchestration internals)
-            if (message.content?.includes('Before finishing, you must call the evaluation tool')) {
+            // Skip internal status nudge prompts (orchestration internals)
+            if (message.content?.includes('Before finishing, run the status command')) {
               break;
             }
 
@@ -622,8 +660,8 @@ export function ChatPanel({
       }
     }
 
-    // Update last processed index (only when processing new events, not re-processing updated ones)
-    if (!eventWasUpdated) {
+    // Update last processed index (only when there are new events, not for coalesced-only updates)
+    if (newEventsCount > 0) {
       lastProcessedIndexRef.current = events.length;
     }
 
@@ -1004,6 +1042,7 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
                 key={item.id}
                 itemId={item.id}
                 content={item.data}
+                isComplete={item.complete === true}
                 isExpanded={expandedItems.has(item.id)}
                 onToggle={() => onToggleExpanded(item.id)}
               />
@@ -1187,6 +1226,7 @@ interface ToolDisplayProps {
 }
 
 function ToolDisplay({ itemId, tool, isExpanded, onToggle }: ToolDisplayProps) {
+  const category = tool.name === 'shell' ? classifyShellCommand(tool.parameters?.cmd) : tool.name;
   return (
     <div
       className={`bg-muted/30 rounded-md transition-all ${
@@ -1198,8 +1238,8 @@ function ToolDisplay({ itemId, tool, isExpanded, onToggle }: ToolDisplayProps) {
         className="flex items-center gap-2 w-full text-left hover:bg-muted/50 rounded px-1"
       >
         <div className="flex items-center gap-1.5">
-          {toolIcons[tool.name] || <ChevronRight className="h-3 w-3" />}
-          <span className="text-xs font-mono">{tool.name}</span>
+          {toolIcons[category] || <ChevronRight className="h-3 w-3" />}
+          <span className="text-xs font-mono">{category}</span>
         </div>
 
         {/* Tool-specific preview */}
@@ -1303,15 +1343,16 @@ function SyntheticErrorDisplay({ itemId, content, isExpanded, onToggle }: Synthe
 interface ReasoningDisplayProps {
   itemId: string;
   content: string;
+  isComplete: boolean;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function ReasoningDisplay({ itemId, content, isExpanded, onToggle }: ReasoningDisplayProps) {
+function ReasoningDisplay({ itemId, content, isComplete, isExpanded, onToggle }: ReasoningDisplayProps) {
   // Extract first line for preview, clean up common prefixes
   const lines = (content || '').split('\n').filter(l => l.trim());
   const preview = lines[0]?.substring(0, 60) || 'Reasoning...';
-  const isStreaming = !content || content.length < 20; // Short content might still be streaming
+  const isStreaming = !isComplete;
 
   return (
     <div className="bg-violet-500/10 rounded-md transition-all p-1.5 border border-violet-500/20">

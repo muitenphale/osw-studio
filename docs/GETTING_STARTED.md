@@ -90,12 +90,15 @@ Let's build a simple personal website.
 2. Click **+ New Project**
 3. Name your project (e.g., "My Portfolio")
 4. Choose a runtime and template:
-   - **Static: Website Starter** - Minimal pure HTML/CSS/JS starting point
-   - **Handlebars: Example Studios** - Multi-page portfolio with Handlebars templating
+   - **Website Starter** - Minimal pure HTML/CSS/JS starting point
+   - **Starter (Handlebars)** - Handlebars templating with partials
+   - **Example Studios** - Multi-page portfolio with Handlebars
    - **Starter (React + TypeScript)** - Component-based React app
    - **Starter (Preact + TypeScript)** - Lightweight React alternative (~3KB)
    - **Starter (Svelte)** - Compile-time reactive framework
    - **Starter (Vue)** - Progressive framework with SFC support
+   - **Starter (Python)** - Python scripts via Pyodide WASM
+   - **Starter (Lua)** - Lua scripts via wasmoon WASM
 
 You'll see the workspace with 4 panels:
 - **Chat** (left-most) - Talk to AI

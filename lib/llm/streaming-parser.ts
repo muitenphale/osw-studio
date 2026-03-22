@@ -314,7 +314,6 @@ export async function parseStreamingResponse(
                         reasoningDetails[existingIdx].text = rd.text;
 
                         // Emit delta event with just the new portion
-      
                         if (deltaText && !suppressAssistantDelta) {
                           onProgress?.('reasoning_delta', { text: deltaText });
                         }
@@ -326,7 +325,6 @@ export async function parseStreamingResponse(
                   } else {
                     reasoningDetails.push(rd as ReasoningDetail);
                     // Emit delta for new reasoning detail
-  
                     if (rd.text && !suppressAssistantDelta) {
                       onProgress?.('reasoning_delta', { text: rd.text });
                     }
