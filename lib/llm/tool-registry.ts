@@ -64,11 +64,12 @@ export class ToolRegistry {
         name: 'shell',
         description: `Run shell commands in the virtual file system.
 
-Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status.
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, ss, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status.
 Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), chaining (&&, ||, ;), and brace expansion ({a,b,c}) are supported.
 Run scripts: python <file>, lua <file>. Show output in preview: preview <path>.
 
-For large file writes, use heredoc: cat > /file << 'EOF'\\ncontent\\nEOF
+Edit existing files: ss /file << 'EOF'\\nsearch\\n===\\nreplacement\\nEOF
+Create new files: cat > /file << 'EOF'\\ncontent\\nEOF
 
 One command at a time as a single string.`,
         parameters: {
@@ -242,7 +243,7 @@ One command at a time as a single string.`,
     if (!tool) {
       // Auto-route known shell commands called as standalone tools
       // LLMs sometimes call "cat", "curl", "grep" etc. as tool names instead of using shell
-      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview', 'build', 'status'];
+      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview', 'build', 'status'];
 
       // Map common "read file" tool names to cat
       const readAliases: Record<string, string> = {
@@ -547,7 +548,7 @@ function expandBraces(args: string[]): string[] {
 function isWriteOperation(cmd: string[]): boolean {
   if (!cmd || cmd.length === 0) return false;
 
-  const writeCommands = ['mkdir', 'rm', 'rmdir', 'mv', 'cp', 'touch'];
+  const writeCommands = ['mkdir', 'rm', 'rmdir', 'mv', 'cp', 'touch', 'ss'];
 
   // Check if the command is a known write operation
   if (writeCommands.includes(cmd[0])) {

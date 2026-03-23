@@ -209,7 +209,7 @@ function parseSedExpression(expr: string): { pattern: RegExp; replacement: strin
 
   // Detect multiline \n patterns — not supported in VFS sed
   if (patStr.includes('\\n') || replStr.includes('\\n')) {
-    return { error: `sed: multiline patterns with \\n are not supported.\n\nTo edit multiline content, rewrite the entire file:\n  cat > /file << 'EOF'\n  ...new content...\n  EOF` };
+    return { error: `sed: multiline patterns with \\n are not supported.\n\nFor multiline edits, use ss (supersed):\n  ss /file << 'EOF'\n  text to find\n  ===\n  replacement text\n  EOF` };
   }
 
   const globalFlag = (flagStr || '').includes('g');
@@ -349,6 +349,273 @@ function addressMatches(addr: SedAddress, lineNum: number, lineContent: string, 
     case 'last': return lineNum === totalLines;
     case 'pattern': return addr.pattern.test(lineContent);
   }
+}
+
+// ─── ss (supersed) utilities ───────────────────────────────────────────────
+
+/**
+ * Locate selector within content while relaxing leading indentation and trailing whitespace.
+ * Tries exact match first, then trimmed variants.
+ */
+function ssFindSelectorMatch(content: string, selector: string): { index: number; normalizedSelector: string } | null {
+  const variants: string[] = [];
+  const seen = new Set<string>();
+
+  const addVariant = (value: string) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    variants.push(value);
+  };
+
+  addVariant(selector);
+  addVariant(selector.replace(/^\s+/, ''));
+  addVariant(selector.replace(/\s+$/, ''));
+  addVariant(selector.replace(/^\s+/, '').replace(/\s+$/, ''));
+
+  for (const variant of variants) {
+    if (!variant) continue;
+    const index = content.indexOf(variant);
+    if (index !== -1) {
+      return { index, normalizedSelector: variant };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Auto-detect entity type from selector pattern.
+ */
+function ssAutoDetectEntityType(selector: string): string {
+  if (selector.startsWith('<') && selector.includes('>')) return 'html_element';
+  if (selector.includes('function ') || selector.includes(' = (') || selector.includes(' => {')) return 'function';
+  if (/^[.#@]/.test(selector) || /^\w+\s*\{/.test(selector)) return 'css_rule';
+  if (selector.includes('class ')) return 'class';
+  if (selector.includes('interface ') || selector.includes('type ')) return 'bracket_matched';
+  return 'bracket_matched';
+}
+
+/**
+ * Detect entity boundaries — dispatch to HTML tag matching or bracket matching.
+ */
+function ssDetectEntityBoundary(
+  content: string,
+  selectorIndex: number,
+  selector: string,
+  entityType: string
+): { start: number; end: number } | null {
+  if (selectorIndex < 0 || selectorIndex >= content.length) return null;
+
+  if (entityType === 'html_element') {
+    return ssDetectHtmlElementBoundary(content, selectorIndex, selector);
+  }
+  return ssDetectBracketBoundary(content, selectorIndex);
+}
+
+const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+/**
+ * Detect HTML element boundaries by matching opening and closing tags.
+ * Handles nested tags of the same name and self-closing elements.
+ */
+function ssDetectHtmlElementBoundary(
+  content: string,
+  selectorIndex: number,
+  selector: string
+): { start: number; end: number } | null {
+  const tagMatch = selector.match(/<(\w+)(?:\s|>|\/)/);
+  if (!tagMatch) return null;
+
+  const tagName = tagMatch[1];
+  const start = selectorIndex;
+
+  // Self-closing: <br/>, <img ... />, or void elements
+  if (selector.includes('/>') || VOID_ELEMENTS.has(tagName.toLowerCase())) {
+    // Find closing '>' of tag, skipping '>' inside quoted attribute values
+    let tagEnd = selectorIndex;
+    let inQuote: string | null = null;
+    while (tagEnd < content.length) {
+      const ch = content[tagEnd];
+      if (inQuote) {
+        if (ch === inQuote) inQuote = null;
+      } else if (ch === '"' || ch === "'") {
+        inQuote = ch;
+      } else if (ch === '>') {
+        return { start, end: tagEnd + 1 };
+      }
+      tagEnd++;
+    }
+    return null;
+  }
+
+  // Track depth for nested same-name tags
+  const openRe = new RegExp(`<${tagName}(?:\\s[^>]*)?>`, 'gi');
+  const closeRe = new RegExp(`</${tagName}>`, 'gi');
+
+  // Collect all open and close positions after selectorIndex
+  const events: { pos: number; len: number; type: 'open' | 'close' }[] = [];
+
+  openRe.lastIndex = selectorIndex;
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(content)) !== null) {
+    // Skip self-closing tags
+    if (content[m.index + m[0].length - 2] === '/') continue;
+    events.push({ pos: m.index, len: m[0].length, type: 'open' });
+  }
+
+  closeRe.lastIndex = selectorIndex;
+  while ((m = closeRe.exec(content)) !== null) {
+    events.push({ pos: m.index, len: m[0].length, type: 'close' });
+  }
+
+  events.sort((a, b) => a.pos - b.pos);
+
+  let depth = 0;
+  for (const ev of events) {
+    if (ev.type === 'open') {
+      depth++;
+    } else {
+      depth--;
+      if (depth === 0) {
+        return { start, end: ev.pos + ev.len };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Detect bracket-matched entity boundary (functions, classes, CSS rules).
+ * Improved: skips braces inside strings, template literals, and comments.
+ */
+function ssDetectBracketBoundary(
+  content: string,
+  selectorIndex: number
+): { start: number; end: number } | null {
+  if (selectorIndex < 0 || selectorIndex >= content.length) return null;
+
+  // Find the opening bracket
+  const openPos = content.indexOf('{', selectorIndex);
+  if (openPos === -1) return null;
+
+  const start = selectorIndex;
+  let depth = 0;
+  let i = openPos;
+
+  while (i < content.length) {
+    const ch = content[i];
+
+    // Skip single-line comments
+    if (ch === '/' && content[i + 1] === '/') {
+      const eol = content.indexOf('\n', i);
+      i = eol === -1 ? content.length : eol + 1;
+      continue;
+    }
+
+    // Skip multi-line comments
+    if (ch === '/' && content[i + 1] === '*') {
+      const endComment = content.indexOf('*/', i + 2);
+      i = endComment === -1 ? content.length : endComment + 2;
+      continue;
+    }
+
+    // Skip double-quoted strings
+    if (ch === '"') {
+      i++;
+      while (i < content.length) {
+        if (content[i] === '\\') { i += 2; continue; }
+        if (content[i] === '"') { i++; break; }
+        i++;
+      }
+      continue;
+    }
+
+    // Skip single-quoted strings
+    if (ch === "'") {
+      i++;
+      while (i < content.length) {
+        if (content[i] === '\\') { i += 2; continue; }
+        if (content[i] === "'") { i++; break; }
+        i++;
+      }
+      continue;
+    }
+
+    // Skip template literals
+    if (ch === '`') {
+      i++;
+      while (i < content.length) {
+        if (content[i] === '\\') { i += 2; continue; }
+        if (content[i] === '`') { i++; break; }
+        // Skip ${...} expressions inside template literals
+        if (content[i] === '$' && content[i + 1] === '{') {
+          let tDepth = 1;
+          i += 2;
+          while (i < content.length && tDepth > 0) {
+            if (content[i] === '{') tDepth++;
+            else if (content[i] === '}') tDepth--;
+            i++;
+          }
+          continue;
+        }
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return { start, end: i + 1 };
+      }
+    }
+    i++;
+  }
+
+  return null;
+}
+
+/**
+ * Map a normalized (whitespace-collapsed) search string back to the original content.
+ * Returns the start/end positions in the original content.
+ */
+function ssMapNormalizedToOriginal(content: string, normalizedSearch: string): { start: number; end: number } | null {
+  // Build a mapping from normalized positions to original positions
+  // Strategy: walk both the original content and the normalized search simultaneously
+  const contentLen = content.length;
+  const searchLen = normalizedSearch.length;
+
+  // Try each position in the original content as a potential start
+  for (let origStart = 0; origStart < contentLen; origStart++) {
+    let oi = origStart;
+    let si = 0;
+    let matched = true;
+
+    while (si < searchLen && oi < contentLen) {
+      // In normalized form, whitespace runs collapse to a single space
+      if (normalizedSearch[si] === ' ') {
+        // The original must have at least one whitespace character here
+        if (!/\s/.test(content[oi])) { matched = false; break; }
+        // Skip all whitespace in original
+        while (oi < contentLen && /\s/.test(content[oi])) oi++;
+        si++;
+      } else {
+        if (content[oi] !== normalizedSearch[si]) { matched = false; break; }
+        oi++;
+        si++;
+      }
+    }
+
+    if (!matched) continue;
+    if (si === searchLen) {
+      return { start: origStart, end: oi };
+    }
+  }
+
+  return null;
 }
 
 async function vfsShellExecute(
@@ -2182,6 +2449,113 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
           exitCode: 0
         };
       }
+      case 'ss': {
+        // ss (supersed) — smart file editing with multiple modes
+        // Syntax: ss [flags] /path/to/file << 'EOF'\nsearch\n===\nreplacement\nEOF
+        // Modes: (none) literal, --entity, --fuzzy, --regex
+
+        // Parse flags (long form preferred: --entity, --fuzzy, --regex)
+        let ssMode: 'literal' | 'entity' | 'fuzzy' | 'regex' = 'literal';
+        let ssFilePath = '';
+        for (const a of args) {
+          if (a === '--entity' || a === '-e') ssMode = 'entity';
+          else if (a === '--fuzzy' || a === '-f') ssMode = 'fuzzy';
+          else if (a === '--regex' || a === '-r') ssMode = 'regex';
+          else if (a && !a.startsWith('-')) ssFilePath = a;
+        }
+
+        const ssPath = normalizePath(ssFilePath);
+        if (!ssPath) return { stdout: '', stderr: 'ss: missing file path', exitCode: 2 };
+
+        if (stdin === undefined || stdin === '') {
+          return { stdout: '', stderr: 'ss: missing heredoc input (use ss /file << \'EOF\')', exitCode: 2 };
+        }
+
+        // Split on \n===\n separator
+        const sepIdx = stdin.indexOf('\n===\n');
+        if (sepIdx === -1) {
+          return { stdout: '', stderr: 'ss: missing === separator between search and replacement\n\nUsage: ss /file << \'EOF\'\nsearch content\n===\nreplacement content\nEOF', exitCode: 2 };
+        }
+
+        const ssSearch = stdin.substring(0, sepIdx);
+        const ssReplace = stdin.substring(sepIdx + 5); // skip \n===\n
+
+        // Read target file
+        let ssContent: string;
+        try {
+          const file = await vfs.readFile(projectId, ssPath);
+          if (typeof file.content !== 'string') {
+            return { stdout: '', stderr: `ss: ${ssPath}: binary file`, exitCode: 1 };
+          }
+          ssContent = file.content;
+        } catch (e: any) {
+          return { stdout: '', stderr: `ss: ${ssPath}: ${e?.message || 'file not found'}`, exitCode: 1 };
+        }
+
+        let ssResult: string;
+
+        switch (ssMode) {
+          case 'literal': {
+            const idx = ssContent.indexOf(ssSearch);
+            if (idx === -1) {
+              const preview = ssSearch.length > 200 ? ssSearch.substring(0, 200) + '...' : ssSearch;
+              return { stdout: '', stderr: `ss: search text not found in ${ssPath}\n\nSearched for:\n${preview}`, exitCode: 1 };
+            }
+            ssResult = ssContent.substring(0, idx) + ssReplace + ssContent.substring(idx + ssSearch.length);
+            break;
+          }
+          case 'entity': {
+            const selectorMatch = ssFindSelectorMatch(ssContent, ssSearch);
+            if (!selectorMatch) {
+              const preview = ssSearch.length > 200 ? ssSearch.substring(0, 200) + '...' : ssSearch;
+              return { stdout: '', stderr: `ss --entity: selector not found in ${ssPath}\n\nSearched for:\n${preview}`, exitCode: 1 };
+            }
+            const entityType = ssAutoDetectEntityType(selectorMatch.normalizedSelector);
+            const boundary = ssDetectEntityBoundary(ssContent, selectorMatch.index, selectorMatch.normalizedSelector, entityType);
+            if (!boundary) {
+              return { stdout: '', stderr: `ss --entity: could not detect entity boundary for selector in ${ssPath}`, exitCode: 1 };
+            }
+            ssResult = ssContent.substring(0, boundary.start) + ssReplace + ssContent.substring(boundary.end);
+            break;
+          }
+          case 'fuzzy': {
+            const normalizeForFuzzy = (s: string) => s.split('\n').map(l => l.trim()).filter(l => l.length > 0).join(' ').replace(/\s+/g, ' ');
+            const normalizedSearch = normalizeForFuzzy(ssSearch);
+            const origRange = ssMapNormalizedToOriginal(ssContent, normalizedSearch);
+            if (!origRange) {
+              const preview = ssSearch.length > 200 ? ssSearch.substring(0, 200) + '...' : ssSearch;
+              return { stdout: '', stderr: `ss -f: search text not found (even with whitespace normalization) in ${ssPath}\n\nSearched for:\n${preview}`, exitCode: 1 };
+            }
+            ssResult = ssContent.substring(0, origRange.start) + ssReplace + ssContent.substring(origRange.end);
+            break;
+          }
+          case 'regex': {
+            let re: RegExp;
+            try {
+              re = new RegExp(ssSearch, 's'); // dotall mode
+            } catch (e: any) {
+              return { stdout: '', stderr: `ss -r: invalid regex: ${e?.message || 'parse error'}`, exitCode: 2 };
+            }
+            const m = re.exec(ssContent);
+            if (!m) {
+              const preview = ssSearch.length > 200 ? ssSearch.substring(0, 200) + '...' : ssSearch;
+              return { stdout: '', stderr: `ss -r: regex did not match in ${ssPath}\n\nPattern:\n${preview}`, exitCode: 1 };
+            }
+            // Expand $0, $1, $2, ... backreferences in replacement (single-pass to avoid $1 clobbering $10)
+            const expandedReplace = ssReplace.replace(/\$(\d+)/g, (_, idx) => m[Number(idx)] || '');
+            ssResult = ssContent.substring(0, m.index) + expandedReplace + ssContent.substring(m.index + m[0].length);
+            break;
+          }
+        }
+
+        // Write result
+        try {
+          await vfs.updateFile(projectId, ssPath, ssResult);
+          return { stdout: '', stderr: '', exitCode: 0 };
+        } catch (e: any) {
+          return { stdout: '', stderr: `ss: ${ssPath}: ${e?.message || 'cannot write file'}`, exitCode: 1 };
+        }
+      }
       case 'sleep': {
         // No-op — LLMs reflexively use sleep between commands.
         // Parse the duration to avoid "command not found" errors but don't actually wait.
@@ -2198,7 +2572,7 @@ Right: {"cmd": ["ls", "-la"]}
           stdout: '',
           stderr: `${program}: command not found${bashHint}
 
-Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, sort, uniq, tr, curl, sleep, sqlite3, build, status
+Supported commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, ss, wc, sort, uniq, tr, curl, sleep, sqlite3, build, status
 Operators: | (pipe), > (redirect), >> (append), && (chain), || (fallback), ; (sequence)
 
 Correct shell tool usage:
@@ -2232,7 +2606,7 @@ Correct shell tool usage:
   {"cmd": ["sqlite3", "SELECT * FROM users"]} - Execute SQL (Server Mode)
   {"cmd": ["sqlite3", "-json", "SELECT * FROM products"]} - SQL output as JSON
 
-Note: Use cat > for file creation, sed -i for substitutions. Use rg (ripgrep) instead of grep for better context management.
+Note: Use ss for editing existing files, cat > for new file creation, sed -i for single-line substitutions. Use rg (ripgrep) instead of grep for better context management.
 Note: sqlite3 is only available in Server Mode and when a deployment context is selected.`,
           exitCode: 127
         };

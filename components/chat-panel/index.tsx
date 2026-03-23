@@ -126,6 +126,7 @@ function classifyShellCommand(cmd: string | string[] | undefined): 'shell' | 'wr
   if (/^cat\s*>/.test(s)) return 'write';
   if (/<<-?\s*['"]?\w+/.test(s)) return 'write';
   if (/^sed\s+-i\b/.test(s)) return 'write';
+  if (/^ss\b/.test(s)) return 'write';
   if (/^(mkdir|touch|rm|mv|cp)\b/.test(s)) return 'write';
   if (/^echo\b.*>>?\s*\//.test(s)) return 'write';
 

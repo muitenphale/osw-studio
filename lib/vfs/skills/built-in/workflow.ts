@@ -203,24 +203,51 @@ ${"```"}
 ### Write complete files
 Don't write partial files and come back later. Write each file fully the first time.
 
-### Use heredocs for large files
+### Create new files with cat
 ${"```"}bash
 cat > /path/to/file << 'EOF'
 [complete file contents]
 EOF
 ${"```"}
 
+### Edit existing files with ss (supersed)
+To edit an existing file, use ${"```"}ss${"```"} — never rewrite the entire file with ${"```"}cat >${"```"} just to change a section.
+${"```"}bash
+ss /file << 'EOF'
+exact text to find in the file
+===
+replacement text
+EOF
+${"```"}
+Inspect first (${"```"}rg -C 5 'pattern' /file${"```"} or ${"```"}head -50 /file${"```"}), then copy the exact text you want to replace into the search section (before ${"```"}===${"```"}).
+
+To replace a whole function, element, or CSS rule — give just the opening line, ${"```"}ss --entity${"```"} auto-finds the closing tag/bracket:
+${"```"}bash
+ss --entity /file << 'EOF'
+<nav class="main-nav">
+===
+<nav class="main-nav">
+  <a href="/">Home</a>
+  <a href="/about">About</a>
+</nav>
+EOF
+${"```"}
+You don't need to copy the entire element — just the opening line before ${"```"}===${"```"}. Works for HTML tags, JS functions/classes, and CSS rules.
+
+### Editing strategy summary
+| Task | Command |
+|------|---------|
+| Edit existing file (any change) | ${"```"}ss /file << 'EOF'${"```"} |
+| Replace function/element/rule | ${"```"}ss --entity /file << 'EOF'${"```"} |
+| Single-line regex | ${"```"}sed -i 's/old/new/' /file${"```"} |
+| Create new file | ${"```"}cat > /file << 'EOF'${"```"} |
+| Full rewrite (rare) | ${"```"}cat > /file << 'EOF'${"```"} |
+
 ### Verify after writing — use build
 ${"```"}bash
 build    # Check for compilation errors
 ${"```"}
 After writing a batch of files, run ${"```"}build${"```"} to verify they compile. Fix any errors it reports, then run the ${"```"}status${"```"} command when done. Don't run extended diagnostic loops (curl, grep, rg, wc) to verify visual output — you can't see the preview.
-
-### Inspect before editing
-${"```"}bash
-rg -C 5 'pattern' /file    # Find the section to edit
-sed -i 's/old/new/' /file   # Make targeted edits
-${"```"}
 
 ## Quality Checklist
 
@@ -235,6 +262,7 @@ Before finishing, run ${"```"}build${"```"} to confirm 0 errors, then ensure in 
 
 ## Common Mistakes
 
+- **Rewriting entire files for small edits** — use ${"```"}ss /file${"```"} for targeted edits, not ${"```"}cat > /file${"```"} which rewrites the whole file and wastes tokens
 - **Giant monolithic files** — split into small, focused files; a 500-line component is a sign to extract pieces
 - **Building pages in random order** — build main page first, then secondary
 - **Inconsistent styling** — pick one CSS approach and use it everywhere

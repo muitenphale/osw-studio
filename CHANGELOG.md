@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.46.0 - 2026-03-23
+
+`ss` (supersed) shell command for multiline editing. The shell-only approach from v1.44.0 improved tool call reliability but limited edits to full file rewrites (`cat >`) or single-line substitutions (`sed`). `ss` adds targeted multiline search-and-replace without re-introducing a separate tool.
+
+- **`ss` command**: Four modes via heredoc (`ss /file << 'EOF'`): literal (exact match), `--entity` (give opening line, auto-finds closing boundary), `--fuzzy` (whitespace-normalized), `--regex` (multiline regex with `$1` backreferences). Entity detection supports JS/TS functions, HTML elements, and CSS rules with bracket/depth tracking
+- **Editing strategy**: System prompt and workflow skill updated — `ss` for edits, `cat >` for creation/full rewrites, `sed` for single-line regex. `build` and `status` shown with explicit `shell()` wrapper for consistency
+- **Harmony format filtering**: Tool calls containing `<|...|>` tokens (internal channel artifacts from GPT-OSS and other harmony-format models) silently discarded before execution. No impact on non-harmony models
+
 ## v1.45.0 - 2026-03-22
 
 Single-tool architecture — the `evaluation` tool is removed and the AI's tool surface is reduced to 1 (`shell` only). Benchmarking across models showed that the `status` shell command produces better task completion and tool use than a separate evaluation tool. Shell reliability improvements across the board.

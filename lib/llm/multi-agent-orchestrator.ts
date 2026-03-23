@@ -26,6 +26,10 @@ import { extractToolAnalytics } from '@/lib/telemetry/tool-analytics';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/** Harmony format token patterns (GPT-OSS and other harmony-format models) */
+const HARMONY_TOKEN_RE = /<\|[^|]*\|>/;
+const HARMONY_TOKEN_STRIP_RE = /<\|[^|]*\|>[a-z]*/gi;
+
 /**
  * Detect if content contains malformed tool calls written as text/markdown
  * instead of proper function calling invocations.
@@ -439,6 +443,25 @@ export class MultiAgentOrchestrator {
         agent
       );
 
+      // Filter harmony format artifacts from tool calls
+      // GPT-OSS models emit internal channel tokens (<|channel|>, <|start|>, etc.)
+      // that appear as spurious tool calls (e.g., shell<|channel|>commentary).
+      // Real tool calls never contain these tokens — any tool call with <|...|> in
+      // the name is a harmony artifact, regardless of args content.
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        const preFilterCount = response.toolCalls.length;
+        response.toolCalls = response.toolCalls.filter(tc => {
+          const rawName = tc.function?.name || '';
+          return !HARMONY_TOKEN_RE.test(rawName);
+        });
+        if (response.toolCalls.length < preFilterCount) {
+          logger.info(`[MultiAgentOrchestrator] Filtered ${preFilterCount - response.toolCalls.length} harmony artifact(s)`);
+        }
+        if (response.toolCalls.length === 0) {
+          response.toolCalls = undefined;
+        }
+      }
+
       // Check for malformed tool calls (model wrote tool syntax as text instead of invoking)
       if (response.content && (!response.toolCalls || response.toolCalls.length === 0)) {
         if (detectMalformedToolCalls(response.content)) {
@@ -654,7 +677,7 @@ export class MultiAgentOrchestrator {
 
       // Sanitize tool name: strip <|...|> tokens that some models emit (e.g. shell<|channel|>)
       const rawToolId = toolCall.function?.name;
-      const toolId = rawToolId?.replace(/<\|[^|]*\|>[a-z]*/gi, '').trim();
+      const toolId = rawToolId?.replace(HARMONY_TOKEN_STRIP_RE, '').trim();
 
       if (!toolId) {
         results.push({
@@ -670,16 +693,20 @@ export class MultiAgentOrchestrator {
       if (!agent.hasTool(toolId)) {
         const knownShellCommands = new Set([
           'ls', 'tree', 'cat', 'head', 'tail', 'rg', 'grep', 'find',
-          'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'wc',
-          'sort', 'uniq', 'tr', 'curl', 'sqlite3', 'build', 'status'
+          'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc',
+          'sort', 'uniq', 'tr', 'curl', 'sqlite3', 'python', 'python3',
+          'lua', 'preview', 'build', 'status'
         ]);
         let errorMsg: string;
-        if (knownShellCommands.has(toolId)) {
+        if (toolId === 'ss') {
+          // ss is a very common misfire — give a concrete example
+          errorMsg = `Error: "ss" is not a tool — it is a shell command. Call it via the shell tool:\n\n  shell({ cmd: "ss /file << 'EOF'\\nsearch text\\n===\\nreplacement text\\nEOF" })`;
+        } else if (knownShellCommands.has(toolId)) {
           // Model hallucinated a shell command as a tool name
           errorMsg = `Error: "${toolId}" is not a tool — it is a shell command. Use the shell tool to run it:\n\n  shell({ cmd: "${toolId} ..." })`;
         } else {
           // Completely unknown tool — list available tools and commands
-          errorMsg = `Error: Unknown tool "${toolId}". Available tools: shell.\n\nThe shell tool supports these commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, wc, sort, uniq, tr, curl, sqlite3, build, status`;
+          errorMsg = `Error: Unknown tool "${toolId}". Available tools: shell.\n\nThe shell tool supports these commands: ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, ss, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status`;
         }
         results.push({
           role: 'tool',

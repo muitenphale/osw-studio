@@ -6,6 +6,15 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.46.0 - Targeted File Editing (2026-03-23)
+
+The shell-only editing from v1.44.0 improved tool call reliability but limited the AI to full file rewrites (`cat >`) or single-line substitutions (`sed`). A new `ss` (supersed) shell command adds multiline search-and-replace, so the AI can edit specific blocks without rewriting the whole file.
+
+- **`ss` Command** - Multiline find-and-replace via heredoc. Four modes: literal (exact match), `--entity` (give the opening line of a function, element, or CSS rule — boundary detection finds the end), `--fuzzy` (whitespace-normalized matching), `--regex` (multiline regex with backreferences)
+- **Harmony Format Support** - GPT-OSS and other harmony-format models now work cleanly across all providers. Internal channel artifacts (`<|channel|>`, etc.) that previously surfaced as spurious tool calls are filtered before execution
+
+---
+
 ## v1.45.0 - AI Reliability Improvements (2026-03-22)
 
 Significant improvements to how the AI writes code, understands your project runtime, and evaluates its own work. Shell command parsing is more robust, domain prompts automatically match your project's framework, and the evaluation system has been streamlined.

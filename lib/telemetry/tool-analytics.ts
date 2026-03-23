@@ -5,7 +5,7 @@
 
 const SHELL_COMMAND_WHITELIST = new Set([
   'cat', 'head', 'tail', 'nl', 'ls', 'tree', 'grep', 'rg', 'find',
-  'mkdir', 'mv', 'cp', 'rm', 'rmdir', 'touch', 'sed', 'echo', 'wc',
+  'mkdir', 'mv', 'cp', 'rm', 'rmdir', 'touch', 'sed', 'ss', 'echo', 'wc',
   'sort', 'uniq', 'tr', 'curl', 'sleep', 'sqlite3', 'build', 'status'
 ]);
 

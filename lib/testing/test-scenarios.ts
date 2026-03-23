@@ -366,6 +366,162 @@ export const testScenarios: TestScenario[] = [
     ],
   },
 
+  // ─── File Editing — Targeted Multiline (3 tests) ───────────────────
+  {
+    id: 'write-targeted-nav',
+    name: 'Replace nav with new content',
+    category: 'file-editing',
+    prompt: "Replace only the nav element in index.html with a new nav that has a logo span 'MySite' and links to Home, Portfolio, Blog, and Contact. Keep the rest of the page exactly as it is.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'MySite', description: 'Has logo text' },
+      { type: 'file_matches', path: '/index.html', pattern: 'Portfolio', description: 'Has Portfolio link' },
+      { type: 'file_matches', path: '/index.html', pattern: 'Blog', description: 'Has Blog link' },
+      { type: 'file_contains', path: '/index.html', value: '<main', description: 'Main section preserved' },
+      { type: 'file_not_contains', path: '/index.html', value: '#services', description: 'Old Services link removed' },
+    ],
+  },
+  {
+    id: 'write-targeted-style-block',
+    name: 'Replace specific CSS rule block',
+    category: 'file-editing',
+    prompt: "In styles.css, replace the .btn rule (including the .btn:hover rule) with a new .btn that has padding: 12px 24px, background: #e74c3c, border-radius: 8px, and a hover state that changes background to #c0392b and adds transform: translateY(-2px).",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_contains', path: '/styles.css', value: '#e74c3c', description: 'New button color' },
+      { type: 'file_contains', path: '/styles.css', value: 'border-radius: 8px', description: 'New border-radius' },
+      { type: 'file_contains', path: '/styles.css', value: 'translateY', description: 'Has transform on hover' },
+      { type: 'file_not_contains', path: '/styles.css', value: '#007bff', description: 'Old color removed' },
+      { type: 'file_contains', path: '/styles.css', value: '.container', description: 'Container rule preserved' },
+    ],
+  },
+  {
+    id: 'write-targeted-js-handler',
+    name: 'Replace JS event handler',
+    category: 'file-editing',
+    prompt: "In script.js, replace the click event listener with one that adds an 'active' class to the clicked link, removes 'active' from all other links, and smoothly scrolls to the target section.",
+    setupFiles: standardSetup,
+    assertions: [
+      { type: 'file_matches', path: '/script.js', pattern: 'active', description: 'Uses active class' },
+      { type: 'file_matches', path: '/script.js', pattern: 'scroll|scrollIntoView|scrollTo', description: 'Has smooth scroll' },
+      { type: 'file_matches', path: '/script.js', pattern: 'DOMContentLoaded|addEventListener', description: 'Still has event listener structure' },
+    ],
+  },
+
+  // ─── File Editing — Entity Replacement (2 tests) ─────────────────
+  {
+    id: 'write-entity-js-function',
+    name: 'Replace JS function by name',
+    category: 'file-editing',
+    prompt: "In script.js, replace the function renderCards with a new implementation that creates Bootstrap-style cards with image, title, and description. Keep all other code unchanged.",
+    setupFiles: {
+      '/.PROMPT.md': defaultPromptMd,
+      '/index.html': basicHTMLTemplate,
+      '/styles.css': basicCSSFile,
+      '/script.js': `
+const API_URL = 'https://api.example.com';
+
+function renderCards(container, items) {
+    container.innerHTML = '';
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = '<h3>' + item.title + '</h3><p>' + item.desc + '</p>';
+        container.appendChild(div);
+    });
+}
+
+function initApp() {
+    const container = document.getElementById('cards');
+    const items = [
+        { title: 'Card 1', desc: 'Description 1' },
+        { title: 'Card 2', desc: 'Description 2' },
+        { title: 'Card 3', desc: 'Description 3' },
+    ];
+    renderCards(container, items);
+}
+
+document.addEventListener('DOMContentLoaded', initApp);`,
+    },
+    assertions: [
+      { type: 'file_matches', path: '/script.js', pattern: 'img|image|src', description: 'New renderCards has image support' },
+      { type: 'file_contains', path: '/script.js', value: 'initApp', description: 'initApp function preserved' },
+      { type: 'file_contains', path: '/script.js', value: 'API_URL', description: 'API_URL constant preserved' },
+      { type: 'file_contains', path: '/script.js', value: 'DOMContentLoaded', description: 'Event listener preserved' },
+    ],
+  },
+  {
+    id: 'write-entity-html-header',
+    name: 'Replace HTML header section',
+    category: 'file-editing',
+    prompt: "Replace the entire <header> element in index.html with a new sticky header that has a logo 'Acme Co', nav links (Products, Pricing, Blog, Contact), and a 'Sign Up' CTA button. Keep all other page content unchanged.",
+    setupFiles: {
+      '/.PROMPT.md': defaultPromptMd,
+      '/index.html': `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acme Corp</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; }
+    </style>
+</head>
+<body>
+    <header class="site-header">
+        <div class="header-inner">
+            <span class="logo">OldBrand</span>
+            <nav>
+                <ul>
+                    <li><a href="#home">Home</a></li>
+                    <li><a href="#about">About</a></li>
+                    <li><a href="#services">Services</a></li>
+                </ul>
+            </nav>
+            <div class="header-actions">
+                <a href="#login" class="login-link">Log In</a>
+            </div>
+        </div>
+    </header>
+    <main>
+        <section class="hero">
+            <h1>Welcome to Acme</h1>
+            <p>Building the future, one product at a time.</p>
+        </section>
+        <section class="features">
+            <div class="feature-card">
+                <h3>Fast</h3>
+                <p>Lightning quick performance.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Secure</h3>
+                <p>Enterprise-grade security.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Scalable</h3>
+                <p>Grows with your business.</p>
+            </div>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2024 Acme Corp</p>
+    </footer>
+</body>
+</html>`,
+      '/styles.css': basicCSSFile,
+    },
+    assertions: [
+      { type: 'file_contains', path: '/index.html', value: 'Acme Co', description: 'Has new logo text' },
+      { type: 'file_matches', path: '/index.html', pattern: 'Products', description: 'Has Products link' },
+      { type: 'file_matches', path: '/index.html', pattern: 'Pricing', description: 'Has Pricing link' },
+      { type: 'file_matches', path: '/index.html', pattern: 'Sign Up', description: 'Has Sign Up CTA' },
+      { type: 'file_contains', path: '/index.html', value: 'Welcome to Acme', description: 'Hero section preserved' },
+      { type: 'file_contains', path: '/index.html', value: 'feature-card', description: 'Features section preserved' },
+      { type: 'file_not_contains', path: '/index.html', value: 'OldBrand', description: 'Old brand removed' },
+    ],
+  },
+
   // ─── File Editing Stress Tests (6 tests) ───────────────────────────
   {
     id: 'write-stress-special-chars',

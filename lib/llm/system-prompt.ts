@@ -53,9 +53,11 @@ Shell commands:
 - Create: mkdir [-p] path, touch file
 - Move/copy: mv src dest, cp [-r] src dest
 - Remove: rm [-rf] path
-- Text: sed [-i] 's/old/new/g' file, echo text
-- Pipes: cmd1 | cmd2, cmd > file, cmd >> file
-- Heredoc (for large files): cat > /file << 'EOF'\\ncontent\\nEOF`;
+- Substitute: sed -i 's/old/new/g' file (single-line only)
+- Edit: ss /file << 'EOF' (multiline search===replace — primary editing tool)
+- Entity edit: ss --entity /file << 'EOF' (give opening line only — auto-finds closing tag/bracket)
+- New file: cat > /file << 'EOF'\\ncontent\\nEOF (creation and full rewrites only)
+- Pipes: cmd1 | cmd2, cmd > file, cmd >> file`;
   }
 
   prompt += `
@@ -218,18 +220,28 @@ async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null,
   prompt += `
 
 You have exactly ONE tool: shell. Do not call any other tool.
-Edit files with standard commands:
-- Rewrite: cat > /file << 'EOF'
-- Substitute: sed -i 's/old/new/' /file
-- Inspect before editing (rg -C 5 or head/tail).
+ss, sed, cat, and all other commands are shell commands — always call them via the shell tool.
+
+Editing files — use ss for all edits to existing files:
+  shell({ cmd: "ss /file << 'EOF'\\nexact text to find\\n===\\nreplacement text\\nEOF" })
+Copy the exact text you want to replace (use rg -C 5 or head/tail to inspect first).
+To replace a whole function, element, or CSS rule — give just the opening line and ss --entity finds the end:
+  ss --entity /file << 'EOF'
+  function initApp() {
+  ===
+  function initApp() { /* new body */ }
+  EOF
+For creating new files or complete rewrites only: cat > /file << 'EOF'
+For single-line regex substitution: sed -i 's/old/new/' /file
+Do not use cat > to edit existing files — use ss instead.
 
 Build command (run after writing files):
-  build
+  shell({ cmd: "build" })
 Returns "Build successful — 0 errors" or lists compilation errors.
 Run build after writing a batch of files to verify they compile. Do not inspect bundle.js or grep compiled output — use build instead.
 
 Status command (always run before finishing):
-  status --task "the original request" --done "work completed" --remaining "what's left or none" --complete
+  shell({ cmd: "status --task 'the original request' --done 'work completed' --remaining 'none' --complete" })
 End with --complete when done, or --incomplete if more work remains.
 
 All paths are relative to the project root (/).

@@ -96,12 +96,12 @@ Your responsibilities:
 4. Assess your work with the status command before finishing
 
 Available tools:
-- shell: Execute commands (ls, cat, grep, mkdir, sed, etc.) and edit files (cat > /file << 'EOF', sed -i)
+- shell: Execute commands (ls, cat, grep, mkdir, sed, ss, etc.) and edit files (ss /file << 'EOF', cat > /file << 'EOF')
 
 Guidelines:
 - Read files before editing to understand current structure
 - Use targeted reads (head -n 50, tail -n 50, rg -C 5) instead of cat
-- Edit files with cat > for rewrites or sed -i for substitutions
+- Edit existing files with ss (search===replace), create new files with cat >, single-line substitutions with sed -i
 - Follow existing code patterns and conventions
 - Write semantic HTML and accessible markup
 - Keep CSS organized and maintainable
