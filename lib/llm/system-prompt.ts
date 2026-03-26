@@ -1,4 +1,5 @@
 import { skillsService } from '@/lib/vfs/skills';
+import type { AgentType } from './agent';
 
 // Server context metadata type (matches VFS.getServerContextMetadata())
 export interface ServerContextMetadata {
@@ -11,7 +12,10 @@ export interface ServerContextMetadata {
   scheduledFunctionCount: number;
 }
 
-export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
+export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string, agentType?: AgentType): Promise<string> {
+  if (agentType === 'explore') return buildExplorePrompt(serverContext, projectId);
+  if (agentType === 'plan') return buildPlanPrompt(serverContext, projectId);
+  if (agentType === 'task') return buildTaskAgentPrompt(serverContext, projectId);
   if (chatMode) {
     return buildChatModePrompt(serverContext, projectId);
   }
@@ -124,7 +128,7 @@ export async function buildProjectContext(
     if (skillsMetadata.length > 0) {
       context += `\u251C\u2500\u2500 .skills/\n`;
       skillsMetadata.forEach((skill, index) => {
-        const isLast = index === skillsMetadata.length - 1 && !serverContext;
+        const isLast = index === skillsMetadata.length - 1 && !serverContext && !fileTree;
         const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251C\u2500\u2500 ';
         const filename = skill.path.split('/').pop();
         context += `\u2502   ${connector}${filename}\n`;
@@ -145,7 +149,9 @@ export async function buildProjectContext(
       if (serverContext.serverFunctionCount > 0) {
         context += `\u2502   \u251C\u2500\u2500 server-functions/\n`;
       }
-      // Always show secrets folder (can create placeholders)
+      if (serverContext.scheduledFunctionCount > 0) {
+        context += `\u2502   \u251C\u2500\u2500 scheduled-functions/\n`;
+      }
       context += `\u2502   \u2514\u2500\u2500 secrets/\n`;
     }
 
@@ -201,6 +207,67 @@ async function buildDynamicContent(
   return content;
 }
 
+async function buildExplorePrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
+  let prompt = `You are exploring a codebase to answer a question or find specific information.
+
+${buildSharedPreamble(true, !!serverContext)}
+
+Search broadly first (rg, find, tree), then read specifically (head, tail, cat).
+Return a clear, factual summary of what you found.
+Do not speculate about code you haven't read.`;
+
+  prompt += await buildDynamicContent(projectId, serverContext);
+  return prompt;
+}
+
+async function buildPlanPrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
+  let prompt = `You are analyzing a codebase to design an implementation approach.
+
+${buildSharedPreamble(true, !!serverContext)}
+
+Read relevant files to understand current architecture and patterns.
+Return a structured analysis:
+- What exists (files, patterns, conventions)
+- What needs to change
+- Recommended approach with specific file references`;
+
+  prompt += await buildDynamicContent(projectId, serverContext);
+  return prompt;
+}
+
+const SS_EDITING_DOCS = `Editing files — use ss for all edits to existing files:
+  shell({ cmd: "ss /file << 'EOF'\\nexact text to find\\n===\\nreplacement text\\nEOF" })
+Copy the exact text you want to replace (use rg -C 5 or head/tail to inspect first).
+To replace a whole function, element, or CSS rule — give just the opening line and ss --entity finds the end:
+  ss --entity /file << 'EOF'
+  function initApp() {
+  ===
+  function initApp() { /* new body */ }
+  EOF
+For creating new files or complete rewrites only: cat > /file << 'EOF'
+For single-line regex substitution: sed -i 's/old/new/' /file`;
+
+async function buildTaskAgentPrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
+  let prompt = buildSharedPreamble(false, !!serverContext);
+
+  prompt += `
+
+You are executing a focused coding task. Complete the task efficiently.
+
+${SS_EDITING_DOCS}
+
+Build command (run after writing files):
+  shell({ cmd: "build" })
+
+Status command (always run before finishing):
+  shell({ cmd: "status --task 'the task' --done 'work done' --remaining 'none' --complete" })
+
+All paths are relative to the project root (/).`;
+
+  prompt += await buildDynamicContent(projectId, serverContext);
+  return prompt;
+}
+
 async function buildChatModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
   let prompt = buildSharedPreamble(true, !!serverContext);
 
@@ -222,17 +289,7 @@ async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null,
 You have exactly ONE tool: shell. Do not call any other tool.
 ss, sed, cat, and all other commands are shell commands — always call them via the shell tool.
 
-Editing files — use ss for all edits to existing files:
-  shell({ cmd: "ss /file << 'EOF'\\nexact text to find\\n===\\nreplacement text\\nEOF" })
-Copy the exact text you want to replace (use rg -C 5 or head/tail to inspect first).
-To replace a whole function, element, or CSS rule — give just the opening line and ss --entity finds the end:
-  ss --entity /file << 'EOF'
-  function initApp() {
-  ===
-  function initApp() { /* new body */ }
-  EOF
-For creating new files or complete rewrites only: cat > /file << 'EOF'
-For single-line regex substitution: sed -i 's/old/new/' /file
+${SS_EDITING_DOCS}
 Do not use cat > to edit existing files — use ss instead.
 
 Build command (run after writing files):
@@ -249,7 +306,13 @@ Reuse snippets from earlier in the conversation when possible.
 
 The user sees a live preview that updates as you write files — you cannot see it.
 After writing code, run build to check for errors, then run status when done.
-Do not run diagnostic loops (repeated curl/grep/rg/wc) to verify visual output — you cannot assess rendering from raw HTML.`;
+Do not run diagnostic loops (repeated curl/grep/rg/wc) to verify visual output — you cannot assess rendering from raw HTML.
+
+Delegate to keep your context focused — sub-agents explore or edit independently and return a summary:
+  shell({ cmd: "delegate explore 'What colors are used?' 'What fonts?' 'What layout patterns?'" })
+  shell({ cmd: "delegate task 'Add nav to index.html' 'Add nav to about.html' 'Add nav to contact.html'" })
+  shell({ cmd: "delegate plan 'How should we add a blog section?'" })
+Always use ONE delegate call with multiple quoted prompts — never make separate delegate calls. Each starts fresh, so never delegate tasks that depend on each other's output. Build foundational work (e.g. a primary page) yourself first, then delegate independent follow-up work. For quick lookups (1-2 files), just use cat/rg directly.`;
 
   prompt += await buildDynamicContent(projectId, serverContext);
   return prompt;

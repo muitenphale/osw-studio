@@ -248,7 +248,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         serverRef.current.cleanupBlobUrls();
       }
 
-      const server = new VirtualServer(vfs, projectId, undefined, deploymentId || undefined, entryPoint, runtime);
+      const server = new VirtualServer(vfs, projectId, { deploymentId: deploymentId || undefined, entryPoint, runtime });
       serverRef.current = server;
 
       const compiled = await server.compileProject();

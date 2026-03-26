@@ -1,5 +1,71 @@
 # Changelog
 
+## v1.47.0 - 2026-03-27
+
+Sub-agent delegation via the `delegate` shell command, Vue SFC compilation fixes, build command reliability, stop propagation, and project manager performance.
+
+### Sub-Agent Delegation
+
+The orchestrator can now spawn focused sub-agents that run isolated LLM conversations with their own system prompts and iteration limits.
+
+- **`delegate` command**: Three agent types — `explore` (read-only, 5 turns, capped exploration), `task` (full edit, 30 turns, focused coding), `plan` (read-only, 10 turns, structured analysis). Inline and heredoc syntax supported
+- **Multi-prompt parallelism**: Multiple quoted prompts in a single command run as parallel agents — `delegate task "edit A" "edit B" "edit C"` spawns 3 concurrent sub-agents from one tool call. Quote parser handles nested quotes in HTML/code content and heredoc boundaries. Hard cap of 8 concurrent delegates per command
+- **Cost aggregation**: Sub-agent token usage and costs accumulate into the parent orchestrator's totals
+- **Agent isolation**: Each sub-agent gets its own orchestrator instance with fresh conversation, loop counters, and state. Sub-agents start with project context (file tree, `.PROMPT.md`) but no parent history. Nested delegation blocked. Skill evaluation skipped for sub-agents
+- **Stop propagation**: Parent `.stop()` cascades to all running sub-agents and aborts in-flight `fetch()` calls via `AbortController`
+- **Sub-agent visibility**: Real-time sub-agent activity shown in chat UI via `delegate_progress` events with tool call counts. Tool call healing rewrites bare `delegate` tool calls into proper shell calls for conversation history
+- **Event filtering**: Only meaningful sub-agent events (`tool_status`, `tool_result`, `error`, `stopped`, etc.) are forwarded to the parent — streaming deltas are excluded
+- **Agent-specific system prompts**: Each agent type gets a dedicated prompt — explore (search-first, no speculation), plan (structured what-exists/what-changes/approach output), task (full edit with ss/cat/sed/build/status). All include `.PROMPT.md` and server context
+- **Explore/plan exit**: Read-only agents finish when they stop calling tools — no status command or nudging required
+- **UI**: Delegate commands show purple bot icon in chat tool badges. `delegate` added to shell command whitelist in tool analytics
+
+### Vue SFC Compilation Fixes
+
+Two bugs in the Vue SFC compilation pipeline that caused Vue projects to silently fail to render.
+
+- **Template-only SFC support**: `.vue` files without a `<script>` block (like the Vue starter template's `App.vue`) previously produced empty JavaScript — `scriptCode` stayed `''` because `compileScript()` was skipped, so `import App from './App.vue'` got `undefined` and `createApp(undefined).mount("#root")` silently failed. Fix: when no script block exists but a template does, `compileTemplate()` compiles the template into a render function with `compilerOptions: { mode: 'module' }` (for ES module imports), then appends `export default { render }` to produce a valid component module
+- **TypeScript in `<script setup lang="ts">`**: The CDN-loaded `@vue/compiler-sfc` leaves TypeScript annotations in `compileScript()` output (e.g. `defineProps<{...}>()`, `defineEmits<{...}>()`) which esbuild rejects when the loader is `'js'`. Fix: after `compileScript()`, if `scriptBlock.lang === 'ts'`, the output is passed through `esbuild.transform()` with `loader: 'ts'` to strip type annotations — the same technique already used for Svelte's `preprocessSvelteTS()`
+
+### Build Command Reliability
+
+- **Own compilation**: The `build` shell command previously piggybacked on the preview's debounced compilation — `waitForCompilation(2000)` listened for the preview's `compilationComplete` event. This caused a race condition: when the AI writes 3+ files in sequence, the preview may compile after the first file (with incomplete project state), commit that partial result, and `build` immediately drains it — reporting "0 errors" while the bundle wasn't generated. Fix: `build` now creates its own `VirtualServer` instance with the project's `settings.runtime` and calls `compileProject()` directly. The compilation always sees the current VFS state regardless of preview timing. Blob URLs created during compilation are cleaned up immediately since `build` only needs the error output
+
+### Event System
+
+- **ID-based event tracking**: The chat panel's incremental event processor previously used an array index (`lastProcessedIndexRef`) to track which debug events had been processed. When `MAX_DEBUG_EVENTS` was exceeded and events were pruned from the front, the index became stale — pointing past the array boundary or at the wrong event — causing new events to be silently skipped. Fix: replaced with `lastProcessedEventIdRef` which stores the `id` of the last processed event and uses `findIndex()` to locate it after pruning. If the last processed event was pruned, the processor resets and reprocesses all current events
+- **Debug event capacity**: `MAX_DEBUG_EVENTS` increased from 500 to 2000 to accommodate delegate sub-agent event volume without triggering frequent front-pruning
+
+### Performance
+
+- **Project manager typing lag**: Typing in the "Create New Project" dialog was extremely laggy because every keystroke on the project name input re-rendered the entire `ProjectManager` component, including all `ProjectCard` components behind the dialog. Fix: `ProjectCard` wrapped in `React.memo()` to skip re-renders when props haven't changed. Action callbacks (`deleteProject`, `duplicateProject`, `exportProject`, `exportProjectAsZip`) wrapped in `useCallback` with stable dependencies. Inline `onUpdate` handler extracted to a `useCallback`-wrapped `handleProjectUpdate` that uses functional state update (`setProjects(prev => ...)`) instead of closing over `projects`. `filteredBuiltInTemplates` memoized with `useMemo` keyed on `newProjectRuntime`
+
+### Stop & Cancellation
+
+- **Immediate stop**: Clicking "Stop" now immediately aborts in-flight LLM calls via `AbortController` instead of waiting for the current response to complete. The abort signal propagates through the response stream reader, so both the parent orchestrator and any running sub-agents halt mid-stream
+- **Upstream cancellation**: The API route (`/api/generate`) now passes `request.signal` to all upstream provider `fetch()` calls. When the client disconnects, the server-side connection to the provider is also closed — stopping inference and billing for providers that support it (OpenAI, Anthropic, Ollama, LM Studio, HuggingFace TGI). Providers that don't support server-side cancellation (Google Gemini, Groq, MiniMax, SambaNova) will continue generating regardless — this is a provider-side limitation
+- **Codex adapter**: `handleCodexGeneration` now accepts and forwards an `AbortSignal` to the upstream Codex fetch
+
+### Chat UX
+
+- **Per-task usage summary**: Token count, cost, and duration are now shown once per task (on the last turn) instead of after every LLM call. Multi-turn tasks that previously showed 5+ usage lines now show one collated summary with the total
+- **Task duration**: Usage line now includes elapsed time (e.g. `Tokens: 12,400 • Cost: $0.0041 • 8s`)
+- **Turn boundaries**: User follow-up messages now start a new turn, so the previous task's Restore/Retry buttons stay attached to the assistant's last output instead of appearing under the next user prompt
+
+### Code Cleanup
+
+- **Dead code removal**: Removed `Agent.systemPrompt`, `Agent.name`, `Agent.description` fields (stored but never read), `getOrchestratorPrompt()` method, `extractToolCallSummary()` method and unused `toolCallSummary` return value, `stableStringify()` method (unreachable in single-tool architecture), `waitForCompilation()` and its tracking variables from `compile-errors.ts`, dead `providerConfig` from `getProviderConfig()` return
+- **Prompt deduplication**: `.PROMPT.md` loading logic (triplicated across `buildExplorePrompt`, `buildPlanPrompt`, `buildDynamicContent`) consolidated — explore/plan now call `buildDynamicContent()`. `ss` editing docs extracted to shared `SS_EDITING_DOCS` constant
+- **Sub-agent server context**: Explore and plan sub-agents now receive `serverContext` and call `buildDynamicContent()`, gaining awareness of backend features (sqlite3, edge functions) and Browser Mode fallback text. Previously hardcoded `hasServerContext: false`
+- **Sub-agent chatMode inheritance**: Task sub-agents now inherit parent's `chatMode`, preventing writes when parent is in read-only mode
+- **ss entity detection**: `ssAutoDetectEntityType` (5 return values, only 1 distinguished) simplified to `ssIsHtmlEntity` returning boolean. HTML tag regex updated to handle `>` inside quoted attributes. Depth tracking no longer goes negative on malformed HTML
+- **VirtualServer constructor**: Refactored from 6 positional params (3 commonly `undefined`) to options object. All 7 call sites updated
+- **Quote parser fix**: `extractTopLevelQuotedStrings` now captures unterminated trailing prompts regardless of prior successful parses
+- **ss regex `$$` escape**: `$$` in `ss --regex` replacement now produces a literal `$` (previously no escape mechanism)
+- **Analytics whitelist**: Added `preview`, `python`, `python3`, `lua` to `SHELL_COMMAND_WHITELIST` in tool analytics
+- **Project tree fix**: `buildProjectContext` now renders `scheduled-functions/` directory when present; skill connector logic accounts for `fileTree` presence
+- **Miscellaneous**: `agentType` parameter typed as `AgentType` instead of `string`, pre-compiled `/\s/` regex in fuzzy match, removed redundant bounds checks and unreachable guards, `AgentRegistry.register()` made private
+
+
 ## v1.46.0 - 2026-03-23
 
 `ss` (supersed) shell command for multiline editing. The shell-only approach from v1.44.0 improved tool call reliability but limited edits to full file rewrites (`cat >`) or single-line substitutions (`sed`). `ss` adds targeted multiline search-and-replace without re-introducing a separate tool.

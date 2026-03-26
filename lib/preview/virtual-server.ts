@@ -19,16 +19,13 @@ export class VirtualServer {
   private entryPoint: string;
   private runtime: ProjectRuntime;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, existingBlobUrls?: Map<string, string>, deploymentId?: string, entryPoint?: string, runtime?: ProjectRuntime) {
+  constructor(vfs: VirtualFileSystem, projectId: string, opts?: { deploymentId?: string; entryPoint?: string; runtime?: ProjectRuntime }) {
     this.vfs = vfs;
     this.projectId = projectId;
-    this.deploymentId = deploymentId;
-    this.entryPoint = entryPoint || '/index.html';
-    this.runtime = runtime || 'handlebars';
+    this.deploymentId = opts?.deploymentId;
+    this.entryPoint = opts?.entryPoint || '/index.html';
+    this.runtime = opts?.runtime || 'handlebars';
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-    if (existingBlobUrls) {
-      this.blobUrls = new Map(existingBlobUrls);
-    }
 
     // Initialize Handlebars instance
     this.handlebars = Handlebars.create();

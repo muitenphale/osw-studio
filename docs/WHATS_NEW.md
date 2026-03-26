@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.47.0 - Sub-Agent Delegation (2026-03-27)
+
+The AI can now delegate sub-tasks to specialized agents that work independently and return a summary — keeping the main conversation focused while exploring or editing in parallel.
+
+- **`delegate` Command** - Three sub-agent types: `explore` for read-only codebase research, `task` for focused coding work, and `plan` for structured analysis. Multiple quoted prompts in a single command run as parallel agents — e.g. the AI can edit three files simultaneously with one delegate call
+- **Context Isolation** - Sub-agents explore or edit with their own conversation, so file contents and intermediate steps don't clutter your main chat. You get a clean summary of what was done and what was found
+- **Stop Actually Stops** - Clicking "Stop" now immediately halts the AI mid-stream, including any running sub-agents. The cancellation also propagates to the LLM provider so you're not billed for tokens you never see (supported by OpenAI, Anthropic, Ollama, LM Studio, and most OpenRouter providers)
+- **Vue Fix** - Vue projects with template-only components (no `<script>` block) or TypeScript in `<script setup lang="ts">` now render correctly. Previously these silently failed
+- **More Reliable Builds** - The `build` command now runs its own compilation instead of racing against the live preview's debounced compile. AI coding sessions with multiple rapid file writes no longer get false "0 errors" results
+- **Cleaner Chat Log** - Token count, cost, and task duration are now shown once at the end of each task instead of after every AI response. Restore/Retry buttons stay attached to the AI's last output instead of appearing under your follow-up message
+- **Faster Project Gallery** - Typing in the "Create New Project" dialog no longer causes lag from re-rendering every project card behind the modal
+
+---
+
 ## v1.46.0 - Targeted File Editing (2026-03-23)
 
 The shell-only editing from v1.44.0 improved tool call reliability but limited the AI to full file rewrites (`cat >`) or single-line substitutions (`sed`). A new `ss` (supersed) shell command adds multiline search-and-replace, so the AI can edit specific blocks without rewriting the whole file.

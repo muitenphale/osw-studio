@@ -63,7 +63,7 @@ interface ProjectStats {
   formattedSize: string;
 }
 
-export function ProjectCard({
+export const ProjectCard = React.memo(function ProjectCard({
   project,
   onSelect,
   onDelete,
@@ -617,4 +617,4 @@ export function ProjectCard({
       </div>
     </div>
   );
-}
+});

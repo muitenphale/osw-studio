@@ -17,19 +17,6 @@ export interface CompileError {
 let pendingErrors: CompileError[] = [];
 let stagingErrors: CompileError[] = [];
 
-/** Tracks whether a compilation has committed since the last drain. */
-let hasUndrainedCompilation = false;
-
-/** Tracks whether any VFS file changes happened since the last drain. */
-let fileChangesSinceLastDrain = 0;
-
-// Listen for VFS file change events to know whether a compilation is expected.
-// Both events trigger preview recompilation (debounced 150ms).
-if (typeof window !== 'undefined') {
-  window.addEventListener('fileContentChanged', () => { fileChangesSinceLastDrain++; });
-  window.addEventListener('filesChanged', () => { fileChangesSinceLastDrain++; });
-}
-
 /**
  * Called at the start of compileProject() to begin a fresh error collection.
  */
@@ -52,7 +39,6 @@ export function pushCompileError(file: string, error: string): void {
 export function commitCompilation(): void {
   pendingErrors = stagingErrors;
   stagingErrors = [];
-  hasUndrainedCompilation = true;
 
   // Notify listeners (console panel, orchestrator sync) about compilation result
   if (typeof window !== 'undefined') {
@@ -71,41 +57,9 @@ export function commitCompilation(): void {
  * Returns all errors and clears the buffer.
  */
 export function drainCompileErrors(): CompileError[] {
-  hasUndrainedCompilation = false;
-  fileChangesSinceLastDrain = 0;
   const errors = pendingErrors;
   pendingErrors = [];
   return errors;
-}
-
-/**
- * Wait for the preview's compilation to finish before draining errors.
- *
- * The preview debounces file changes (150ms) then runs compileProject() which
- * can take 200-500ms for framework projects (esbuild bundling). A fixed delay
- * can't reliably catch these. Instead, we wait for the compilationComplete event
- * dispatched by commitCompilation().
- *
- * Fast path: returns immediately if no file changes occurred since the last drain
- * or if a compilation already committed.
- */
-export function waitForCompilation(timeoutMs: number = 2000): Promise<void> {
-  // No file changes since last drain → no compilation expected
-  if (fileChangesSinceLastDrain === 0) return Promise.resolve();
-  // Compilation already committed → errors ready to drain
-  if (hasUndrainedCompilation) return Promise.resolve();
-  // No window (SSR) → skip
-  if (typeof window === 'undefined') return Promise.resolve();
-
-  return new Promise(resolve => {
-    const cleanup = () => {
-      clearTimeout(timer);
-      window.removeEventListener('compilationComplete', handler);
-    };
-    const timer = setTimeout(() => { cleanup(); resolve(); }, timeoutMs);
-    const handler = () => { cleanup(); resolve(); };
-    window.addEventListener('compilationComplete', handler, { once: true });
-  });
 }
 
 /**

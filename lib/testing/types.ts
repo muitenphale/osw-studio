@@ -21,7 +21,7 @@ export interface AssertionResult {
 export interface TestScenario {
   id: string;
   name: string;
-  category: 'shell-read' | 'shell-write' | 'shell-search' | 'shell-text' | 'shell-preview' | 'file-editing' | 'status' | 'multi-tool';
+  category: 'shell-read' | 'shell-write' | 'shell-search' | 'shell-text' | 'shell-preview' | 'file-editing' | 'status' | 'multi-tool' | 'delegate';
   prompt: string;
   setupFiles?: Record<string, string>;
   assertions?: TestAssertion[];

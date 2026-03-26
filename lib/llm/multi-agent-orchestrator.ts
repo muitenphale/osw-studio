@@ -160,6 +160,7 @@ export class MultiAgentOrchestrator {
     cost: 0
   };
   private stopped = false;
+  private abortController = new AbortController();
   private pricingEnsured = new Set<string>();
   private chatMode: boolean;
   private model?: string;
@@ -171,6 +172,7 @@ export class MultiAgentOrchestrator {
   private nudgeCount = 0; // Track how many times we've nudged for status
   private readonly maxNudges = 3; // Max nudge attempts before giving up
   private lastStatusResult: { task: string; done: string; remaining: string; complete: boolean; hasExplicitFlag: boolean } | null = null; // Track status result
+  private activeSubOrchestrators = new Set<MultiAgentOrchestrator>(); // Track running sub-agents for stop propagation
   private malformedToolCallRetries = 0; // Track consecutive retries for malformed tool call detection
   private totalMalformedToolCalls = 0; // Track total malformed calls in session (doesn't reset)
   private readonly maxMalformedRetries = 2; // Max consecutive retries before allowing through
@@ -202,6 +204,11 @@ export class MultiAgentOrchestrator {
    */
   stop(): void {
     this.stopped = true;
+    this.abortController.abort();
+    // Propagate stop to all running sub-orchestrators
+    for (const sub of this.activeSubOrchestrators) {
+      sub.stop();
+    }
     logger.info('[MultiAgentOrchestrator] Execution stopped by user');
   }
 
@@ -248,10 +255,13 @@ export class MultiAgentOrchestrator {
     logger.info('[MultiAgentOrchestrator] Starting execution', { agent: this.rootAgent.type });
 
     // Reset state for new execution
+    this.stopped = false;
+    this.abortController = new AbortController();
     this.lastToolCallSignature = null;
     this.duplicateToolCallCount = 0;
     this.recentToolSignatures = [];
     this.nudgeCount = 0;
+    this.malformedToolCallRetries = 0;
     this.lastStatusResult = null;
 
     try {
@@ -270,7 +280,7 @@ export class MultiAgentOrchestrator {
       const serverContext = vfs.getServerContextMetadata();
 
       // Build system prompt (behavioral instructions only — skills/tree go in user message)
-      const systemPrompt = await buildShellSystemPrompt(this.chatMode, serverContext, this.projectId);
+      const systemPrompt = await buildShellSystemPrompt(this.chatMode, serverContext, this.projectId, this.rootAgent.type);
 
       // Get current conversation
       const conversation = this.conversations.get(this.currentConversationId);
@@ -292,11 +302,11 @@ export class MultiAgentOrchestrator {
         projectContext = await buildProjectContext(fileTreeStr, serverContext);
       }
 
-      // Skill evaluation pass - check if any enabled skills are relevant
+      // Skill evaluation pass - check if any enabled skills are relevant (orchestrator only)
       let skillHint = '';
       try {
         const evalEnabled = await skillsService.isEvaluationEnabled();
-        if (evalEnabled) {
+        if (evalEnabled && this.rootAgent.type === 'orchestrator') {
           const skillsMeta = await skillsService.getEnabledSkillsMetadata();
           if (skillsMeta.length > 0) {
             const { provider, apiKey, model } = this.getProviderConfig();
@@ -434,14 +444,22 @@ export class MultiAgentOrchestrator {
         agent: agent.type
       });
 
-      // Get LLM response - emit 'waiting' to show we're waiting for first token
-      // Note: actual reasoning tokens are handled via 'reasoning_delta' events from streaming-parser
+      // Emit 'waiting' before LLM call (reasoning tokens arrive via streaming-parser)
       this.onProgress?.('waiting', {});
 
-      const response = await this.streamLLMResponse(
-        conversation.messages,
-        agent
-      );
+      let response;
+      try {
+        response = await this.streamLLMResponse(
+          conversation.messages,
+          agent
+        );
+      } catch (err) {
+        if (this.stopped) {
+          this.onProgress?.('stopped', { reason: 'user' });
+          break;
+        }
+        throw err;
+      }
 
       // Filter harmony format artifacts from tool calls
       // GPT-OSS models emit internal channel tokens (<|channel|>, <|start|>, etc.)
@@ -511,6 +529,17 @@ export class MultiAgentOrchestrator {
       // No tool calls - LLM wants to finish
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const hasContent = response.content && response.content.trim();
+
+        // Explore/plan agents finish when they stop calling tools — no status needed
+        if (agent.type === 'explore' || agent.type === 'plan') {
+          if (hasContent) {
+            this.addMessage(conversationId, {
+              role: 'assistant',
+              content: response.content!
+            });
+          }
+          break;
+        }
 
         // Log when we get reasoning-only responses (no content, no tool calls)
         if (!hasContent) {
@@ -662,18 +691,449 @@ export class MultiAgentOrchestrator {
   }
 
   /**
+   * Parse a delegate command. Returns array of {type, prompt} — multiple quoted
+   * prompts in a single command spawn parallel agents.
+   *
+   * Supported forms:
+   *   delegate explore "Q1" "Q2" "Q3"     → 3 parallel explore agents
+   *   delegate task "do X" "do Y"          → 2 parallel task agents
+   *   delegate explore "single question"   → 1 agent (backward compat)
+   *   delegate explore unquoted text       → 1 agent (backward compat)
+   *   delegate type << 'EOF'\nprompt\nEOF  → 1 agent (heredoc)
+   */
+  private parseDelegateCommand(rawCmd: string): { type: string; prompt: string }[] | null {
+    if (!rawCmd || !rawCmd.trimStart().startsWith('delegate ')) return null;
+    const trimmed = rawCmd.trim();
+
+    // Heredoc: delegate type << 'EOF'\nprompt\nEOF — always single agent
+    const heredocRe = /^delegate\s+(explore|task|plan)\s*<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\2\s*$/;
+    const hm = trimmed.match(heredocRe);
+    if (hm) return [{ type: hm[1], prompt: hm[3].trim() }];
+
+    // Inline: delegate type followed by prompt(s)
+    const inlineRe = /^delegate\s+(explore|task|plan)\s+([\s\S]+)$/;
+    const im = trimmed.match(inlineRe);
+
+    if (!im) return null;
+
+    const type = im[1];
+    const rest = im[2].trim();
+
+    // Extract top-level quoted strings using a state machine.
+    // Naive regex fails because HTML/code content contains inner quotes.
+    const topLevelPrompts = this.extractTopLevelQuotedStrings(rest);
+
+    if (topLevelPrompts.length >= 2) {
+      return topLevelPrompts.map(prompt => ({ type, prompt }));
+    }
+
+    if (topLevelPrompts.length === 1) {
+      return [{ type, prompt: topLevelPrompts[0] }];
+    }
+
+    // Unquoted text → single agent
+    return [{ type, prompt: rest }];
+  }
+
+  /**
+   * Extract top-level quoted strings from a delegate command's argument portion.
+   * Uses a state machine to handle nested quotes in HTML/code content.
+   * Only splits on quotes that start after whitespace (top-level boundary).
+   */
+  private extractTopLevelQuotedStrings(input: string): string[] {
+    const prompts: string[] = [];
+    let i = 0;
+
+    while (i < input.length) {
+      // Skip whitespace between prompts
+      while (i < input.length && /\s/.test(input[i])) i++;
+      if (i >= input.length) break;
+
+      const quoteChar = input[i];
+      if (quoteChar !== '"' && quoteChar !== "'") {
+        // Not a quoted string — this is unquoted trailing text, consume rest
+        prompts.push(input.slice(i).trim());
+        break;
+      }
+
+      // Found opening quote — scan for the matching UNESCAPED closing quote
+      // at the same level (the next quote char preceded by whitespace or at end).
+      // Strategy: find the closing quote that is followed by either:
+      //   - end of string
+      //   - whitespace then another quote char (next prompt)
+      //   - whitespace then end of string
+      i++; // skip opening quote
+      const start = i;
+
+      while (i < input.length) {
+        const ch = input[i];
+        if (ch === '\\') { i += 2; continue; } // skip escaped chars
+
+        // Track heredoc-style content (<<) — skip until delimiter
+        if (ch === '<' && i + 1 < input.length && input[i + 1] === '<') {
+          // Inside heredoc — skip to matching EOF/delimiter
+          const heredocMatch = input.slice(i).match(/^<<-?\s*['"]?(\w+)['"]?\s*\n/);
+          if (heredocMatch) {
+            const delimiter = heredocMatch[1];
+            const endIdx = input.indexOf('\n' + delimiter, i + heredocMatch[0].length);
+            if (endIdx !== -1) {
+              i = endIdx + delimiter.length + 1;
+              continue;
+            }
+          }
+        }
+
+        if (ch === quoteChar) {
+          // Check if this is the closing top-level quote:
+          // It should be followed by whitespace+quote, whitespace+end, or end
+          const after = input.slice(i + 1).trimStart();
+          if (after.length === 0 || after[0] === '"' || after[0] === "'") {
+            // This is the closing quote
+            prompts.push(input.slice(start, i).trim());
+            i++; // skip closing quote
+            break;
+          }
+          // Otherwise it's an inner quote — keep scanning
+        }
+
+        i++;
+      }
+
+      // If we ran off the end without finding a closing quote, take what we have
+      if (i >= input.length) {
+        const content = input.slice(start).trim();
+        if (content) prompts.push(content);
+      }
+    }
+
+    return prompts;
+  }
+
+  /**
+   * Run one delegate sub-agent. Returns { type, prompt, body }.
+   */
+  private async runSingleDelegate(type: string, prompt: string, agentIndex: number = 1, parentToolIndex?: number): Promise<{
+    type: string; prompt: string; body: string;
+  }> {
+    // Early exit if parent was already stopped
+    if (this.stopped) {
+      return { type, prompt, body: '(Cancelled — parent stopped)' };
+    }
+
+    let delegateToolIndex = 0;
+    const startTime = Date.now();
+    const promptLabel = prompt.length > 80 ? prompt.slice(0, 80) + '...' : prompt;
+
+    // Emit start event
+    this.onProgress?.('delegate_progress', {
+      type, event: 'agent_start', data: {}, agentIndex, parentToolIndex,
+      delegatePrompt: promptLabel,
+    });
+
+    // Forward only events the parent consumes (skip high-volume streaming deltas)
+    const FORWARDED_INNER_EVENTS = new Set([
+      'tool_status', 'tool_result', 'error', 'stopped', 'nudge',
+      'malformed_tool_call', 'tool_healed', 'exit_reason',
+    ]);
+
+    const subOrchestrator = new MultiAgentOrchestrator(
+      this.projectId,
+      type as AgentType,
+      (event, data) => {
+        if (!FORWARDED_INNER_EVENTS.has(event)) return;
+        this.onProgress?.('delegate_progress', {
+          type, event, data, agentIndex, parentToolIndex,
+          delegatePrompt: promptLabel,
+          delegateToolIndex: event === 'tool_status' || event === 'tool_result' ? delegateToolIndex++ : undefined
+        });
+      },
+      { chatMode: this.chatMode || type === 'explore' || type === 'plan', model: this.model }
+    );
+
+    // Register for stop propagation
+    this.activeSubOrchestrators.add(subOrchestrator);
+
+    let result: MultiAgentResult;
+    try {
+      result = await subOrchestrator.execute(prompt);
+    } finally {
+      this.activeSubOrchestrators.delete(subOrchestrator);
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // Accumulate cost into parent (always, even if stopped mid-run)
+    this.totalCost += result.totalCost;
+    this.totalUsage.promptTokens += result.totalUsage.promptTokens;
+    this.totalUsage.completionTokens += result.totalUsage.completionTokens;
+    this.totalUsage.totalTokens += result.totalUsage.totalTokens;
+    this.onProgress?.('usage', { usage: this.totalUsage, totalCost: this.totalCost, totalUsage: { ...this.totalUsage } });
+
+    const conv = result.conversation[0];
+
+    let rawResult = '';
+    let toolCallCount = 0;
+    if (conv) {
+      const lastAssistant = [...conv.messages].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant) {
+        rawResult = typeof lastAssistant.content === 'string'
+          ? lastAssistant.content
+          : lastAssistant.content.map(b => b.type === 'text' ? b.text : '').join('');
+      }
+      toolCallCount = conv.messages.reduce((n, m) => n + (m.role === 'assistant' && m.tool_calls ? m.tool_calls.length : 0), 0);
+    }
+
+    const maxLen = 2500;
+    const body = rawResult.length > maxLen
+      ? rawResult.slice(0, maxLen) + '\n... (truncated)'
+      : rawResult;
+
+    // Emit done event with summary
+    const bodyPreview = body.length > 120 ? body.slice(0, 120) + '...' : body;
+    this.onProgress?.('delegate_progress', {
+      type, event: 'agent_done', agentIndex, parentToolIndex,
+      data: { elapsed, toolCalls: toolCallCount, bodyPreview },
+      delegatePrompt: promptLabel,
+    });
+
+    return { type, prompt, body };
+  }
+
+  /**
+   * Format the footer for a delegate result based on type.
+   */
+  private getDelegateFooter(type: string): string {
+    if (type === 'explore') return 'Use these findings to inform your next steps. The explore agent was read-only — no files were modified.';
+    if (type === 'plan') return 'This is an analysis only — no files were modified. Implement the changes yourself based on this plan.';
+    if (type === 'task') return 'This specific sub-task is done and its files were modified. Do not repeat this same delegate.';
+    return '';
+  }
+
+  /**
+   * Run one or more delegate sub-agents in parallel. Multiple prompts from a
+   * single command (e.g. delegate explore "Q1" "Q2") are all executed concurrently
+   * via Promise.allSettled and returned as a combined result.
+   */
+  private static readonly MAX_PARALLEL_DELEGATES = 8;
+
+  private async runDelegateAgents(delegates: { type: string; prompt: string }[], parentToolIndex?: number): Promise<string> {
+    // Cap parallel delegates to prevent runaway spawning
+    if (delegates.length > MultiAgentOrchestrator.MAX_PARALLEL_DELEGATES) {
+      const cap = MultiAgentOrchestrator.MAX_PARALLEL_DELEGATES;
+      return `Error: Too many parallel delegates (${delegates.length}). Maximum is ${cap}. Break the work into smaller batches.`;
+    }
+
+    // Single delegate — compact result for parent context
+    if (delegates.length === 1) {
+      const { type, prompt } = delegates[0];
+      const r = await this.runSingleDelegate(type, prompt, 1, parentToolIndex);
+      const promptLabel = prompt.length > 120 ? prompt.slice(0, 120) + '...' : prompt;
+      // Keep result concise — parent doesn't need the sub-agent's full tool call log.
+      // The tool call summary is emitted via delegate_progress for observability,
+      // but only the body (capped at 2500 chars) goes into the parent conversation.
+      return `[delegate ${type} — done] "${promptLabel}"\n\n${r.body || '(no result)'}\n\n${this.getDelegateFooter(type)}`;
+    }
+
+    // Multiple delegates — run in parallel, combine results
+    const settled = await Promise.allSettled(
+      delegates.map(({ type, prompt }, i) => this.runSingleDelegate(type, prompt, i + 1, parentToolIndex))
+    );
+
+    const type = delegates[0].type;
+    const sections: string[] = [];
+
+    for (let i = 0; i < settled.length; i++) {
+      const s = settled[i];
+      const promptLabel = delegates[i].prompt.length > 100
+        ? delegates[i].prompt.slice(0, 100) + '...'
+        : delegates[i].prompt;
+
+      if (s.status === 'fulfilled') {
+        const r = s.value;
+        sections.push(`[${i + 1}/${delegates.length}] "${promptLabel}"\n${r.body || '(no result)'}`);
+      } else {
+        sections.push(`[${i + 1}/${delegates.length}] "${promptLabel}"\nError: ${s.reason}`);
+      }
+    }
+
+    return `[delegate ${type} — done] ${delegates.length} agents completed\n\n${sections.join('\n\n')}\n\n${this.getDelegateFooter(type)}`;
+  }
+
+  /**
    * Execute tool calls
    */
   private async executeToolCalls(
     toolCalls: ToolCall[],
     agent: Agent
   ): Promise<AgentMessage[]> {
+    // Phase 1: Identify delegate calls (only for orchestrator — sub-agents cannot delegate)
+    // Also heals bare "delegate" tool calls into shell calls so the conversation
+    // history shows the correct form and the model learns the right pattern.
+    const delegateMap = new Map<number, { type: string; prompt: string }[]>();
+    const isOrchestrator = agent.type === 'orchestrator';
+
+    if (isOrchestrator) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i];
+        const toolName = tc.function?.name?.replace(HARMONY_TOKEN_STRIP_RE, '').trim();
+        try {
+          const args = JSON.parse(tc.function.arguments);
+
+          // Normal path: shell tool call containing a delegate command
+          if (toolName === 'shell') {
+            const info = this.parseDelegateCommand(args?.cmd);
+            if (info) delegateMap.set(i, info);
+            continue;
+          }
+
+          // Heal bare "delegate" tool calls → rewrite as shell in-place
+          if (toolName === 'delegate') {
+            // Reconstruct the delegate command from various arg shapes
+            let cmd = '';
+            if (typeof args.cmd === 'string' && args.cmd.trim().startsWith('delegate')) {
+              cmd = args.cmd.trim();
+            } else if (typeof args.cmd === 'string') {
+              cmd = `delegate ${args.cmd.trim()}`;
+            } else if (typeof args.type === 'string' && typeof args.prompt === 'string') {
+              cmd = `delegate ${args.type} '${args.prompt.replace(/'/g, "'\\''")}'`;
+            } else {
+              // Last resort: stringify all values as the command
+              const vals = Object.values(args).filter(v => typeof v === 'string').join(' ');
+              if (vals) cmd = vals.startsWith('delegate') ? vals : `delegate ${vals}`;
+            }
+
+            if (cmd) {
+              const info = this.parseDelegateCommand(cmd);
+              if (info) {
+                // Rewrite the tool call so conversation history shows shell, not delegate
+                tc.function.name = 'shell';
+                tc.function.arguments = JSON.stringify({ cmd });
+                delegateMap.set(i, info);
+                // Notify UI so the badge updates from "delegate" to "shell"
+                this.onProgress?.('tool_healed', { toolIndex: i, name: 'shell', parameters: { cmd } });
+                continue;
+              }
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    }
+
+    // Phase 2: Execute all delegate tool calls in parallel
+    // Each call may itself contain multiple prompts (handled by runDelegateAgents)
+    const delegateResults = new Map<number, string>();
+    if (delegateMap.size > 0) {
+      for (const [idx] of delegateMap) {
+        this.onProgress?.('tool_status', {
+          toolIndex: idx, status: 'executing',
+          toolName: 'shell', args: toolCalls[idx].function?.arguments
+        });
+      }
+
+      const entries = Array.from(delegateMap.entries());
+      const settled = await Promise.allSettled(
+        entries.map(async ([idx, delegates]) => {
+          const result = await this.runDelegateAgents(delegates, idx);
+          return { idx, result };
+        })
+      );
+
+      for (let i = 0; i < settled.length; i++) {
+        const s = settled[i];
+        const idx = entries[i][0];
+        if (s.status === 'fulfilled') {
+          delegateResults.set(s.value.idx, s.value.result);
+        } else {
+          delegateResults.set(idx, `Error: Delegate failed — ${s.reason}`);
+        }
+      }
+
+      // Merge multiple separate delegate tool calls into ONE.
+      // The LLM should see a single delegate call → single result.
+      // We rewrite the first delegate's args to show the combined command,
+      // splice the extras from toolCalls (same array ref as response.toolCalls,
+      // so the conversation message will also reflect the merge).
+      if (delegateResults.size > 1) {
+        const delegateIndices = Array.from(delegateResults.keys()).sort((a, b) => a - b);
+        const firstIdx = delegateIndices[0];
+
+        // Collect all prompts and results
+        const allPrompts: { type: string; prompt: string }[] = [];
+        const allResults: string[] = [];
+        for (const idx of delegateIndices) {
+          allPrompts.push(...(delegateMap.get(idx) || []));
+          allResults.push(delegateResults.get(idx)!);
+        }
+
+        // Rewrite first delegate's arguments to show the merged multi-prompt command
+        const type = allPrompts[0]?.type || 'task';
+        const promptLabels = allPrompts.map(d => {
+          const p = d.prompt.length > 100 ? d.prompt.slice(0, 100) + '...' : d.prompt;
+          return `'${p.replace(/'/g, "\\'")}'`;
+        });
+        toolCalls[firstIdx].function.arguments = JSON.stringify({
+          cmd: `delegate ${type} ${promptLabels.join(' ')}`
+        });
+
+        // Build single combined result
+        const combinedResult = `[delegate ${type} — ${allPrompts.length} agents completed]\n\n${allResults.join('\n\n---\n\n')}\n\n${this.getDelegateFooter(type)}`;
+        delegateResults.clear();
+        delegateResults.set(firstIdx, combinedResult);
+
+        // Remove extra delegate tool calls from array (descending order preserves indices)
+        const toRemove = delegateIndices.slice(1).sort((a, b) => b - a);
+        for (const idx of toRemove) {
+          this.onProgress?.('tool_status', {
+            toolIndex: idx, status: 'completed',
+            toolName: 'shell', args: '(merged)'
+          });
+          toolCalls.splice(idx, 1);
+        }
+
+        // Notify UI about the merge so badges update
+        this.onProgress?.('tool_healed', {
+          toolIndex: firstIdx,
+          name: 'shell',
+          parameters: JSON.parse(toolCalls[firstIdx].function.arguments)
+        });
+      }
+    }
+
+    // Phase 3: Process all calls in order
     const results: AgentMessage[] = [];
 
     for (let toolIndex = 0; toolIndex < toolCalls.length; toolIndex++) {
       const toolCall = toolCalls[toolIndex];
 
       if (this.stopped) break;
+
+      // Return pre-computed delegate result
+      if (delegateResults.has(toolIndex)) {
+        // Loop detection for delegates — prevent same delegate call repeating
+        const delegateSig = this.getToolCallSignature(toolCall);
+        if (this.lastToolCallSignature === delegateSig) {
+          this.duplicateToolCallCount++;
+          if (this.duplicateToolCallCount >= 2) {
+            results.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: `Error: Duplicate delegate call detected. This delegate already ran and returned a result. Do not call the same delegate again — proceed with your remaining work.`
+            });
+            this.onProgress?.('tool_status', { toolIndex, status: 'failed', toolName: 'shell', args: toolCall.function?.arguments });
+            continue;
+          }
+        } else {
+          this.duplicateToolCallCount = 0;
+        }
+        this.lastToolCallSignature = delegateSig;
+
+        const content = delegateResults.get(toolIndex)!;
+        results.push({ role: 'tool', tool_call_id: toolCall.id, content });
+        this.onProgress?.('tool_status', { toolIndex, status: 'completed', toolName: 'shell', args: toolCall.function?.arguments });
+        this.onProgress?.('tool_result', { toolIndex, result: content });
+        track('tool_call', extractToolAnalytics(toolCall.function.name, toolCall.function.arguments, !content.startsWith('Error:')));
+        continue;
+      }
 
       // Sanitize tool name: strip <|...|> tokens that some models emit (e.g. shell<|channel|>)
       const rawToolId = toolCall.function?.name;
@@ -695,7 +1155,7 @@ export class MultiAgentOrchestrator {
           'ls', 'tree', 'cat', 'head', 'tail', 'rg', 'grep', 'find',
           'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc',
           'sort', 'uniq', 'tr', 'curl', 'sqlite3', 'python', 'python3',
-          'lua', 'preview', 'build', 'status'
+          'lua', 'preview', 'build', 'status', 'delegate'
         ]);
         let errorMsg: string;
         if (toolId === 'ss') {
@@ -1023,7 +1483,6 @@ Please revise your approach.`;
 
     return {
       provider,
-      providerConfig,
       apiKey: apiKey || '',
       model: model || 'default-model'
     };
@@ -1099,7 +1558,7 @@ Please revise your approach.`;
     onRetry?: (attempt: number, delay: number) => void
   ): Promise<Response> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const response = await fetch(url, options);
+      const response = await fetch(url, { ...options, signal: this.abortController.signal });
 
       if (response.status !== 429) {
         return response;
@@ -1110,7 +1569,8 @@ Please revise your approach.`;
       }
 
       const retryAfter = response.headers.get('Retry-After');
-      const delay = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, attempt) * 1000;
+      const parsed = retryAfter ? parseInt(retryAfter) : NaN;
+      const delay = !isNaN(parsed) ? parsed * 1000 : Math.pow(2, attempt) * 1000;
 
       onRetry?.(attempt + 1, delay);
       await sleep(delay);
@@ -1163,7 +1623,7 @@ Please revise your approach.`;
         }).catch(err => logger.error('Failed to update project cost:', err));
       }
 
-      this.onProgress?.('usage', { usage, totalCost: this.totalCost });
+      this.onProgress?.('usage', { usage, totalCost: this.totalCost, totalUsage: { ...this.totalUsage } });
     }
 
     return result;
@@ -1174,25 +1634,11 @@ Please revise your approach.`;
    * Detects: `status --task "..." --done "..." --remaining "..." --complete`
    */
   private extractStatusResult(cmd: string, output: string): { task: string; done: string; remaining: string; complete: boolean; hasExplicitFlag: boolean } | null {
-    // 1. Check the command itself for `status --task ... --done ... --remaining ...`
-    if (/^\s*status\b/i.test(cmd)) {
-      const taskMatch = cmd.match(/--task\s+"([^"]*)"/) || cmd.match(/--task\s+'([^']*)'/) || cmd.match(/--task\s+(\S+)/);
-      const doneMatch = cmd.match(/--done\s+"([^"]*)"/) || cmd.match(/--done\s+'([^']*)'/) || cmd.match(/--done\s+(\S+)/);
-      const remainingMatch = cmd.match(/--remaining\s+"([^"]*)"/) || cmd.match(/--remaining\s+'([^']*)'/) || cmd.match(/--remaining\s+(\S+)/);
-      const hasComplete = /--complete\b/.test(cmd);
-      const hasIncomplete = /--incomplete\b/.test(cmd);
-      if (taskMatch && doneMatch) {
-        return {
-          task: taskMatch[1],
-          done: doneMatch[1],
-          remaining: remainingMatch ? remainingMatch[1] : 'none',
-          complete: hasComplete && !hasIncomplete,
-          hasExplicitFlag: hasComplete || hasIncomplete
-        };
-      }
-    }
+    // If the output contains an error, the status command failed — don't trust command-level parsing
+    const hasError = output && /^Error:\s/im.test(output);
 
-    // 2. Check shell output for Task:/Done:/Remaining:/Complete: lines (from cli-shell status handler)
+    // 1. Check shell output for Task:/Done:/Remaining:/Complete: lines (from cli-shell status handler)
+    // Prefer output over command parsing since it reflects actual execution result
     if (output) {
       const taskLine = output.match(/^Task:\s*(.+)/im);
       const doneLine = output.match(/^Done:\s*(.+)/im);
@@ -1205,6 +1651,25 @@ Please revise your approach.`;
           remaining: remainingLine ? remainingLine[1].trim() : 'none',
           complete: completeLine ? completeLine[1].toLowerCase() === 'yes' : false,
           hasExplicitFlag: !!completeLine
+        };
+      }
+    }
+
+    // 2. Fallback: check the command itself for `status --task ... --done ... --remaining ...`
+    // Skip if the output had errors — the command may have been malformed
+    if (!hasError && /^\s*status\b/i.test(cmd)) {
+      const taskMatch = cmd.match(/--task\s+"([^"]*)"/) || cmd.match(/--task\s+'([^']*)'/) || cmd.match(/--task\s+(\S+)/);
+      const doneMatch = cmd.match(/--done\s+"([^"]*)"/) || cmd.match(/--done\s+'([^']*)'/) || cmd.match(/--done\s+(\S+)/);
+      const remainingMatch = cmd.match(/--remaining\s+"([^"]*)"/) || cmd.match(/--remaining\s+'([^']*)'/) || cmd.match(/--remaining\s+(\S+)/);
+      const hasComplete = /--complete\b/.test(cmd);
+      const hasIncomplete = /--incomplete\b/.test(cmd);
+      if (taskMatch && doneMatch) {
+        return {
+          task: taskMatch[1],
+          done: doneMatch[1],
+          remaining: remainingMatch ? remainingMatch[1] : 'none',
+          complete: hasComplete && !hasIncomplete,
+          hasExplicitFlag: hasComplete || hasIncomplete
         };
       }
     }
@@ -1247,38 +1712,13 @@ Please revise your approach.`;
 
     try {
       const args = JSON.parse(toolCall.function.arguments);
-
-      // Normalize the arguments for comparison
-      if (toolName === 'shell') {
-        // Normalize cmd to string format for consistent comparison
-        const cmd = Array.isArray(args.cmd)
-          ? args.cmd.join(' ')
-          : String(args.cmd || '');
-        return `shell:${cmd}`;
-      }
-
-      // Fallback for unknown tool names: use stable JSON stringify
-      const sortedArgs = this.stableStringify(args);
-      return `${toolName}:${sortedArgs}`;
+      const cmd = Array.isArray(args.cmd)
+        ? args.cmd.join(' ')
+        : String(args.cmd || '');
+      return `${toolName}:${cmd}`;
     } catch {
-      // If we can't parse arguments, use raw arguments string
       return `${toolName}:${toolCall.function.arguments}`;
     }
-  }
-
-  /**
-   * Stable JSON stringify that sorts object keys recursively
-   */
-  private stableStringify(obj: any): string {
-    return JSON.stringify(obj, (key, value) => {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        return Object.keys(value).sort().reduce((sorted: any, k) => {
-          sorted[k] = value[k];
-          return sorted;
-        }, {});
-      }
-      return value;
-    });
   }
 
 }

@@ -756,6 +756,91 @@ document.addEventListener('DOMContentLoaded', initApp);`,
       { type: 'file_matches', path: '/sitemap.xml', pattern: 'index\\.html', description: 'Sitemap lists index.html' },
     ],
   },
+
+  // ─── Delegate — Sub-Agent Delegation (5 tests) ──────────────────────
+  {
+    id: 'delegate-parallel-pages',
+    name: 'Delegate two pages matching existing homepage',
+    category: 'delegate',
+    prompt: "The project has a homepage at /index.html. Create two additional pages that match its style: /about.html with an 'Our Story' h1 and a team section, and /contact.html with a contact form (name, email, message fields). Use delegate task to create both pages in parallel.",
+    setupFiles: {
+      '/.PROMPT.md': defaultPromptMd,
+      '/index.html': `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Home</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: 'Georgia', serif; color: #2d3436; background: #fafafa; }\n    nav { background: #2d3436; padding: 1rem 2rem; display: flex; gap: 1.5rem; }\n    nav a { color: #dfe6e9; text-decoration: none; font-size: 0.95rem; }\n    nav a:hover { color: #74b9ff; }\n    .hero { padding: 4rem 2rem; text-align: center; background: linear-gradient(135deg, #dfe6e9, #b2bec3); }\n    .hero h1 { font-size: 2.5rem; margin-bottom: 1rem; }\n    .hero p { font-size: 1.1rem; color: #636e72; max-width: 600px; margin: 0 auto; }\n  </style>\n</head>\n<body>\n  <nav>\n    <a href="/index.html">Home</a>\n    <a href="/about.html">About</a>\n    <a href="/contact.html">Contact</a>\n  </nav>\n  <section class="hero">\n    <h1>Welcome Home</h1>\n    <p>A simple site with consistent styling across all pages.</p>\n  </section>\n</body>\n</html>`,
+    },
+    timeout: 120000,
+    assertions: [
+      { type: 'file_exists', path: '/about.html', description: 'About page created' },
+      { type: 'file_matches', path: '/about.html', pattern: 'Our Story', description: 'About has heading' },
+      { type: 'file_exists', path: '/contact.html', description: 'Contact page created' },
+      { type: 'file_matches', path: '/contact.html', pattern: 'form', description: 'Contact has form' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'delegate.*task', description: 'Used delegate task' },
+    ],
+  },
+  {
+    id: 'delegate-explore-then-edit',
+    name: 'Explore colors then create design tokens',
+    category: 'delegate',
+    prompt: "Step 1: Use delegate explore to find all color values (hex codes like #xxx) used across all project files.\nStep 2: After the explore result comes back, use that information to create /design-tokens.css with CSS custom properties (--primary, --secondary, --bg, --text) based on the colors found.\nStep 3: Update styles.css to import and use those CSS variables instead of hardcoded hex values.\nYou must do steps 2 and 3 yourself after the explore delegate returns — the explore agent only reads files, it cannot edit them.",
+    setupFiles: standardSetup,
+    timeout: 120000,
+    assertions: [
+      { type: 'file_exists', path: '/design-tokens.css', description: 'Design tokens file created' },
+      { type: 'file_matches', path: '/design-tokens.css', pattern: '--primary', description: 'Has primary variable' },
+      { type: 'file_matches', path: '/styles.css', pattern: 'var\\(--', description: 'styles.css uses CSS variables' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'delegate.*explore', description: 'Used delegate explore' },
+    ],
+  },
+  {
+    id: 'delegate-plan-then-implement',
+    name: 'Plan gallery then implement it',
+    category: 'delegate',
+    prompt: "Step 1: Use delegate plan to analyze the current project and recommend how to add a responsive image gallery section.\nStep 2: After the plan result comes back, implement the gallery yourself in index.html — add at least 4 placeholder images in a CSS grid that adapts to screen size with a @media query.\nThe plan agent only analyzes — you must write the code yourself in step 2.",
+    setupFiles: standardSetup,
+    timeout: 120000,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'gallery|grid', description: 'Has gallery section' },
+      { type: 'file_matches', path: '/index.html', pattern: 'img|image', description: 'Has images' },
+      { type: 'file_matches_any', paths: ['/index.html', '/styles.css'], pattern: '@media|grid|flex', description: 'Has responsive layout' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'delegate.*plan', description: 'Used delegate plan' },
+    ],
+  },
+  {
+    id: 'delegate-parallel-independent-edits',
+    name: 'Three delegate tasks to different files',
+    category: 'delegate',
+    prompt: "Use a single delegate task command with three prompts to make independent changes in parallel:\n  delegate task \"In /index.html, add a dark mode toggle button inside the nav element\" \"In /styles.css, add a .card class with padding: 1rem, box-shadow: 0 2px 8px rgba(0,0,0,.1), border-radius: 8px, and a :hover state that lifts it up\" \"Create /footer.html with copyright '2024 MyBrand', three social media links, and a newsletter signup form\"",
+    setupFiles: standardSetup,
+    timeout: 120000,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'dark.*mode|theme.*toggle|toggle.*dark', description: 'Has dark mode toggle' },
+      { type: 'file_matches', path: '/styles.css', pattern: '\\.card', description: 'Has .card class' },
+      { type: 'file_matches', path: '/styles.css', pattern: 'box-shadow', description: 'Card has box-shadow' },
+      { type: 'file_exists', path: '/footer.html', description: 'Footer partial created' },
+      { type: 'file_matches', path: '/footer.html', pattern: 'MyBrand|2024', description: 'Footer has copyright' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'delegate.*task', description: 'Used delegate task' },
+    ],
+  },
+  {
+    id: 'delegate-multi-page-consistent-update',
+    name: 'Delegate task per page for consistent nav',
+    category: 'delegate',
+    prompt: "The project has three HTML pages. Use a single delegate task command with three prompts to add the same navigation bar to each page in parallel:\n  delegate task \"Add a nav bar with logo 'SiteKit' and links to index.html, about.html, contact.html at the top of /index.html body\" \"Add a nav bar with logo 'SiteKit' and links to index.html, about.html, contact.html at the top of /about.html body\" \"Add a nav bar with logo 'SiteKit' and links to index.html, about.html, contact.html at the top of /contact.html body\"",
+    setupFiles: {
+      '/.PROMPT.md': defaultPromptMd,
+      '/index.html': `<!DOCTYPE html><html><head><title>Home</title></head><body><main><h1>Home Page</h1><p>Welcome to our site.</p></main></body></html>`,
+      '/about.html': `<!DOCTYPE html><html><head><title>About</title></head><body><main><h1>About Us</h1><p>Learn more about us.</p></main></body></html>`,
+      '/contact.html': `<!DOCTYPE html><html><head><title>Contact</title></head><body><main><h1>Contact</h1><p>Get in touch.</p></main></body></html>`,
+    },
+    timeout: 120000,
+    assertions: [
+      { type: 'file_matches', path: '/index.html', pattern: 'SiteKit', description: 'Homepage has logo' },
+      { type: 'file_matches', path: '/about.html', pattern: 'SiteKit', description: 'About has logo' },
+      { type: 'file_matches', path: '/contact.html', pattern: 'SiteKit', description: 'Contact has logo' },
+      { type: 'file_matches', path: '/index.html', pattern: 'about\\.html', description: 'Homepage links to about' },
+      { type: 'file_matches', path: '/index.html', pattern: 'contact\\.html', description: 'Homepage links to contact' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'delegate', description: 'Used delegate command' },
+    ],
+  },
 ];
 
 // ─── Test Tracks ─────────────────────────────────────────────────────
@@ -783,5 +868,11 @@ export const testTracks: TestTrack[] = [
     name: 'Multi',
     description: 'Multi-step: combined read, edit, and verify',
     scenarioIds: testScenarios.filter(s => s.category === 'multi-tool').map(s => s.id),
+  },
+  {
+    id: 'delegate',
+    name: 'Delegate',
+    description: 'Delegate: sub-agent exploration, planning, and parallel task execution',
+    scenarioIds: testScenarios.filter(s => s.category === 'delegate').map(s => s.id),
   },
 ];

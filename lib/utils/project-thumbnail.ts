@@ -12,7 +12,7 @@ export async function captureProjectScreenshot(projectId: string): Promise<strin
   await vfs.init();
 
   const project = await vfs.getProject(projectId);
-  const server = new VirtualServer(vfs, projectId, undefined, undefined, undefined, project?.settings?.runtime);
+  const server = new VirtualServer(vfs, projectId, { runtime: project?.settings?.runtime });
   let compiled;
   try {
     compiled = await server.compileProject();

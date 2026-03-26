@@ -294,7 +294,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
         // (e.g. user publishes without opening the preview first)
         toast.info('Compiling project bundles...');
         const { VirtualServer } = await import('@/lib/preview/virtual-server');
-        const vs = new VirtualServer(vfs as any, deployment.projectId, undefined, undefined, undefined, runtime);
+        const vs = new VirtualServer(vfs as any, deployment.projectId, { runtime });
         await vs.compileProject();
         vs.cleanupBlobUrls();
 

@@ -1820,7 +1820,7 @@ export class VirtualFileSystem {
 
       // Create VirtualServer instance and compile the project
       const { VirtualServer } = await import('@/lib/preview/virtual-server');
-      const server = new VirtualServer(this, projectId, undefined, undefined, undefined, project?.settings?.runtime);
+      const server = new VirtualServer(this, projectId, { runtime: project?.settings?.runtime });
       const compiledProject = await server.compileProject();
       
       // Add compiled files to ZIP, filtering out template-related files

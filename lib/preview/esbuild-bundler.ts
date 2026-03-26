@@ -339,12 +339,36 @@ function createVuePlugin(
 
           // Compile <script setup> or <script>
           let scriptCode = '';
-          if (descriptor.descriptor.scriptSetup || descriptor.descriptor.script) {
+          const scriptBlock = descriptor.descriptor.scriptSetup || descriptor.descriptor.script;
+          if (scriptBlock) {
             const compiled = compiler.compileScript(descriptor.descriptor, {
               id,
               inlineTemplate: true,
             });
             scriptCode = compiled.content;
+
+            // Strip TypeScript if <script setup lang="ts"> or <script lang="ts">.
+            // The CDN Vue compiler-sfc may leave type annotations in the output
+            // (e.g. defineProps<{...}>(), defineEmits<{...}>()) — esbuild chokes
+            // on these when loader is 'js'. Use esbuild transform to strip them.
+            if (scriptBlock.lang === 'ts') {
+              const esbuild = await ensureEsbuild();
+              const transformed = await esbuild.transform(scriptCode, {
+                loader: 'ts',
+                target: 'es2020',
+              });
+              scriptCode = transformed.code;
+            }
+          } else if (descriptor.descriptor.template) {
+            // Template-only SFC (no <script> block) — compile template into
+            // a render function and export it as the default component.
+            const templateResult = compiler.compileTemplate({
+              source: descriptor.descriptor.template.content,
+              filename: args.path,
+              id,
+              compilerOptions: { mode: 'module' },
+            });
+            scriptCode = templateResult.code + '\nexport default { render }';
           }
 
           // Handle <style> blocks — inject as a <style> tag at runtime

@@ -152,9 +152,7 @@ export function buildCodexRequestBody(opts: {
   tools?: CodexTool[];
   instructions: string;
 }): Record<string, unknown> {
-  // Use package normalizeModel only for models it knows about.
-  // For newer models (e.g. gpt-5.3-codex) not yet in the package's MODEL_MAP,
-  // pass through as-is to avoid mangling.
+  // Pass through models unknown to the package's MODEL_MAP
   const knownMapping = getNormalizedModel(opts.model);
   const modelId = knownMapping || opts.model;
   const reasoning = getReasoningConfig(opts.model);
@@ -371,8 +369,9 @@ export async function handleCodexGeneration(opts: {
   model: string;
   tools?: ChatCompletionsTool[];
   accessToken: string;
+  signal?: AbortSignal;
 }): Promise<Response> {
-  const { messages, model, tools, accessToken } = opts;
+  const { messages, model, tools, accessToken, signal } = opts;
 
   // 1. Extract account ID from JWT
   let accountId: string;
@@ -410,8 +409,12 @@ export async function handleCodexGeneration(opts: {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      ...(signal && { signal }),
     });
   } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return new Response(null, { status: 499 });
+    }
     logger.error('[Codex] Network error:', err);
     return new Response(
       JSON.stringify({ error: 'Failed to reach Codex backend. Check your network connection.' }),

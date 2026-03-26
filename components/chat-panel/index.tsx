@@ -113,12 +113,14 @@ interface Turn {
   usage?: any;
   iteration?: number;
   checkpointId?: string;
+  taskStartTime?: number;
 }
 
-function classifyShellCommand(cmd: string | string[] | undefined): 'shell' | 'write' | 'status' {
+function classifyShellCommand(cmd: string | string[] | undefined): 'shell' | 'write' | 'status' | 'delegate' {
   if (!cmd) return 'shell';
   const s = (Array.isArray(cmd) ? cmd.join(' ') : String(cmd)).trimStart();
 
+  if (/^delegate\b/.test(s)) return 'delegate';
   if (/^status\b/.test(s)) return 'status';
   if (/^build\b/.test(s)) return 'status';
 
@@ -137,6 +139,7 @@ const toolIcons: Record<string, React.ReactNode> = {
   shell: <ChevronRight className="h-3 w-3 text-blue-500" />,
   write: <FileCode className="h-3 w-3 text-orange-500" />,
   status: <CheckCircle className="h-3 w-3 text-orange-500" />,
+  delegate: <Bot className="h-3 w-3 text-purple-500" />,
 };
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -283,45 +286,77 @@ export function ChatPanel({
   }, []);
 
   // Track state for incremental processing
-  const lastProcessedIndexRef = useRef(0);
+  // Use event ID instead of array index to survive front-pruning when MAX_DEBUG_EVENTS is exceeded.
+  const lastProcessedEventIdRef = useRef<string | null>(null);
   const lastEventVersionsRef = useRef<Map<string, number>>(new Map());
   const turnsStateRef = useRef<{
     result: Turn[];
     currentTurn: Turn;
     currentIterationTools: ToolCall[];
     itemIdCounter: number;
+    taskStartTime: number;
+    prevTaskCumulativeTokens: number;
+    prevTaskCumulativeCost: number;
   }>({
     result: [],
     currentTurn: { id: `turn-${Date.now()}`, items: [] },
     currentIterationTools: [],
     itemIdCounter: 0,
+    taskStartTime: 0,
+    prevTaskCumulativeTokens: 0,
+    prevTaskCumulativeCost: 0,
   });
 
   // Transform events into turns with chronologically ordered items (incremental)
   const turns = useMemo(() => {
-    const state = turnsStateRef.current;
-    const newEventsCount = events.length - lastProcessedIndexRef.current;
+    let state = turnsStateRef.current;
 
     // If events array was cleared/reset (new conversation), reset state
-    if (events.length === 0 || lastProcessedIndexRef.current > events.length) {
-      lastProcessedIndexRef.current = 0;
+    if (events.length === 0) {
+      lastProcessedEventIdRef.current = null;
       lastEventVersionsRef.current = new Map();
-      turnsStateRef.current = {
+      state = {
         result: [],
         currentTurn: { id: `turn-${Date.now()}`, items: [] },
         currentIterationTools: [],
         itemIdCounter: 0,
+        taskStartTime: 0,
+        prevTaskCumulativeTokens: 0,
+        prevTaskCumulativeCost: 0,
       };
+      turnsStateRef.current = state;
       return [];
     }
 
-    // Check for coalesced streaming events that were updated since last processing.
-    // Coalescing can update events up to 4 positions back, so scan a lookback window.
-    // This handles the case where React batches a coalescing update with a subsequent
-    // new event — the coalesced event is no longer last, but still needs re-processing.
+    // Find start index (pruning-safe — handles front-pruned events)
+    let startIndex = 0;
+    if (lastProcessedEventIdRef.current) {
+      const idx = events.findIndex(e => e.id === lastProcessedEventIdRef.current);
+      if (idx !== -1) {
+        startIndex = idx + 1; // Process events after the last processed one
+      } else {
+        // Last processed event was pruned — reset and reprocess all events
+        lastEventVersionsRef.current = new Map();
+        state = {
+          result: [],
+          currentTurn: { id: `turn-${Date.now()}`, items: [] },
+          currentIterationTools: [],
+          itemIdCounter: 0,
+          taskStartTime: 0,
+          prevTaskCumulativeTokens: 0,
+          prevTaskCumulativeCost: 0,
+        };
+        turnsStateRef.current = state;
+        // startIndex stays 0 — process everything
+      }
+    }
+
+    const newEventsCount = events.length - startIndex;
+
+    // Re-process coalesced events in lookback window (up to 4 back)
     const coalescedEvents: typeof events = [];
-    const lookbackStart = Math.max(0, lastProcessedIndexRef.current - 4);
-    for (let i = lookbackStart; i < lastProcessedIndexRef.current; i++) {
+    const lookbackStart = Math.max(0, startIndex - 4);
+    for (let i = lookbackStart; i < startIndex; i++) {
       const evt = events[i];
       if (evt.event === 'assistant_delta' || evt.event === 'tool_param_delta' || evt.event === 'reasoning_delta') {
         const storedVersion = lastEventVersionsRef.current.get(evt.id);
@@ -340,7 +375,7 @@ export function ChatPanel({
     // Determine which events to process: coalesced updates first, then new events
     const eventsToProcess = [
       ...coalescedEvents,
-      ...events.slice(lastProcessedIndexRef.current),
+      ...events.slice(startIndex),
     ];
 
     for (const event of eventsToProcess) {
@@ -366,8 +401,6 @@ export function ChatPanel({
           // The coalesced event contains ALL text accumulated so far, so we REPLACE (not append)
           const reasoningDeltaItems = event.data?.all || [event.data];
 
-          // Concatenate all text fields from the coalesced deltas
-          // This gives us the complete reasoning content from this coalesced event
           const allReasoningText = reasoningDeltaItems.map((d: any) => d?.text || '').join('');
 
           // Skip whitespace-only reasoning (often happens between tool calls)
@@ -378,8 +411,7 @@ export function ChatPanel({
             break;
           }
 
-          // Find the reasoning item that corresponds to THIS event (by matching eventId)
-          // This ensures multiple reasoning sessions (separated by tool calls) each get their own item
+          // Find reasoning item for this event (multiple sessions get separate items)
           let matchingReasoningItem = state.currentTurn.items.find(
             item => item.type === 'reasoning' && item.eventId === event.id
           ) as TurnItem | undefined;
@@ -470,6 +502,15 @@ export function ChatPanel({
           }
           break;
 
+        case 'tool_healed':
+          // Bare delegate call was rewritten to shell — update the UI badge
+          const healedTool = state.currentIterationTools[event.data?.toolIndex];
+          if (healedTool) {
+            healedTool.name = event.data.name || 'shell';
+            if (event.data.parameters) healedTool.parameters = event.data.parameters;
+          }
+          break;
+
         case 'tool_result':
           // Update tool result
           const toolResult = state.currentIterationTools[event.data?.toolIndex];
@@ -514,14 +555,11 @@ export function ChatPanel({
           // When coalesced, data.all contains array of {text} objects (snapshots removed for memory efficiency)
           const deltaItems = event.data?.all || [event.data];
 
-          // Find the text item that corresponds to THIS event (by matching eventId)
-          // This ensures multiple text blocks (separated by tool calls) each get their own item
+          // Find text item for this event (multiple blocks get separate items)
           let matchingTextItem = state.currentTurn.items.find(
             item => item.type === 'text' && item.eventId === event.id
           ) as TurnItem | undefined;
 
-          // Concatenate all text fields from the coalesced deltas
-          // This gives us the complete content from this coalesced event
           const allText = deltaItems.map((d: any) => d?.text || '').join('');
 
           if (allText) {
@@ -584,6 +622,25 @@ export function ChatPanel({
             // Check if this is a synthetic error message (auto-injected by orchestrator)
             const isSyntheticError = message.ui_metadata?.isSyntheticError === true;
 
+            // Genuine user messages start a new turn (separates from previous task's checkpoint)
+            if (!isSyntheticError && state.currentTurn.items.length > 0) {
+              state.result.push(state.currentTurn);
+              state.currentTurn = {
+                id: `turn-${Date.now()}-${state.result.length}`,
+                items: [],
+              };
+            }
+
+            // Snapshot cumulative usage baseline for per-task deltas
+            if (!isSyntheticError) {
+              state.taskStartTime = event.timestamp;
+              const lastUsageTurn = [...state.result].reverse().find(t => t.usage);
+              if (lastUsageTurn?.usage) {
+                state.prevTaskCumulativeTokens = lastUsageTurn.usage.totalUsage?.totalTokens || lastUsageTurn.usage.usage?.totalTokens || 0;
+                state.prevTaskCumulativeCost = lastUsageTurn.usage.totalCost ?? 0;
+              }
+            }
+
             // Add project context as a separate collapsible item (collapsed by default)
             const projectContext = message.ui_metadata?.projectContext;
             if (projectContext && !isSyntheticError) {
@@ -630,7 +687,13 @@ export function ChatPanel({
           break;
 
         case 'usage':
-          state.currentTurn.usage = event.data;
+          state.currentTurn.usage = {
+            ...event.data,
+            timestamp: event.timestamp,
+            taskTokenOffset: state.prevTaskCumulativeTokens,
+            taskCostOffset: state.prevTaskCumulativeCost,
+          };
+          state.currentTurn.taskStartTime = state.taskStartTime;
           // Remove thinking indicator when usage arrives (marks end of LLM response)
           state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
@@ -654,6 +717,42 @@ export function ChatPanel({
           state.currentIterationTools = [];
           break;
 
+        case 'delegate_progress': {
+          // Sub-agent events — update the parent delegate tool's result in real-time
+          const { event: innerEvent, data: innerData, agentIndex, parentToolIndex: pti } = event.data || {};
+          const label = `subagent ${agentIndex || 1}`;
+
+          // Find the delegate tool badge — match by parentToolIndex if available, else first executing delegate
+          let delegateTool: typeof state.currentIterationTools[0] | undefined;
+          if (typeof pti === 'number') {
+            delegateTool = state.currentIterationTools[pti];
+          }
+          if (!delegateTool || classifyShellCommand(delegateTool.parameters?.cmd) !== 'delegate') {
+            delegateTool = state.currentIterationTools.find(
+              t => t.status === 'executing' && classifyShellCommand(t.parameters?.cmd) === 'delegate'
+            );
+          }
+          if (!delegateTool) break;
+
+          if (innerEvent === 'agent_start') {
+            delegateTool.result = `[${label}] starting...`;
+          } else if (innerEvent === 'agent_done') {
+            const elapsed = innerData?.elapsed || '?';
+            delegateTool.result = `[${label}] done (${elapsed}s)`;
+          } else if (innerEvent === 'tool_status' && innerData?.status === 'executing') {
+            let cmd = '';
+            try {
+              const args = JSON.parse(innerData.args || '{}');
+              cmd = args?.cmd || '';
+            } catch {
+              cmd = innerData.args || '';
+            }
+            const cmdPreview = cmd.length > 100 ? cmd.slice(0, 100) + '...' : cmd;
+            delegateTool.result = `[${label}] ${cmdPreview}`;
+          }
+          break;
+        }
+
         case 'stopped':
           // Remove thinking indicator when generation is stopped
           state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
@@ -661,9 +760,9 @@ export function ChatPanel({
       }
     }
 
-    // Update last processed index (only when there are new events, not for coalesced-only updates)
+    // Update last processed event ID (only when there are new events, not for coalesced-only updates)
     if (newEventsCount > 0) {
-      lastProcessedIndexRef.current = events.length;
+      lastProcessedEventIdRef.current = events[events.length - 1].id;
     }
 
     // Return combined result (completed turns + current turn if it has items)
@@ -857,16 +956,52 @@ export function ChatPanel({
             No messages yet. Start a conversation to see it here.
           </div>
         ) : (
-          turns.map((turn) => (
-            <TurnDisplay
-              key={turn.id}
-              turn={turn}
-              onRestore={onRestore}
-              onRetry={onRetry}
-              expandedItems={expandedItems}
-              onToggleExpanded={toggleExpanded}
-            />
-          ))
+          (() => {
+            // Per-task usage collation: show accumulated usage on the last turn of each task.
+            // Task boundaries: turns containing a non-synthetic user message.
+            const isTaskStart = (t: Turn) => t.items.some(i => i.type === 'user');
+
+            // Build a map: turnIndex → collated usage data for display.
+            // For each task group, the last turn before the next task (or end) gets the usage.
+            const usageMap = new Map<number, { usage: Turn['usage']; startTime?: number }>();
+            let taskLastUsage: Turn['usage'] = undefined;
+            let taskStartTime: number | undefined;
+
+            for (let i = 0; i < turns.length; i++) {
+              if (i > 0 && isTaskStart(turns[i])) {
+                // Task boundary — assign accumulated usage to the last turn of the previous task
+                if (taskLastUsage) {
+                  usageMap.set(i - 1, { usage: taskLastUsage, startTime: taskStartTime });
+                }
+                taskLastUsage = undefined;
+                taskStartTime = undefined;
+              }
+              if (turns[i].usage) {
+                taskLastUsage = turns[i].usage;
+                taskStartTime = turns[i].taskStartTime;
+              }
+            }
+            // Final task group — assign to last turn
+            if (taskLastUsage) {
+              usageMap.set(turns.length - 1, { usage: taskLastUsage, startTime: taskStartTime });
+            }
+
+            return turns.map((turn, idx) => {
+              const collated = usageMap.get(idx);
+              return (
+                <TurnDisplay
+                  key={turn.id}
+                  turn={turn}
+                  collatedUsage={collated?.usage}
+                  collatedTaskStartTime={collated?.startTime}
+                  onRestore={onRestore}
+                  onRetry={onRetry}
+                  expandedItems={expandedItems}
+                  onToggleExpanded={toggleExpanded}
+                />
+              );
+            });
+          })()
         )}
       </div>
 
@@ -1015,13 +1150,15 @@ export function ChatPanel({
 
 interface TurnDisplayProps {
   turn: Turn;
+  collatedUsage?: Turn['usage'];
+  collatedTaskStartTime?: number;
   onRestore?: (checkpointId: string) => void;
   onRetry?: (checkpointId: string) => void;
   expandedItems: Set<string>;
   onToggleExpanded: (itemId: string) => void;
 }
 
-function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded }: TurnDisplayProps) {
+function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, onRetry, expandedItems, onToggleExpanded }: TurnDisplayProps) {
   return (
     <div className="space-y-2" {...(turn.checkpointId ? { 'data-checkpoint-id': turn.checkpointId } : {})}>
       {/* Render items in chronological order */}
@@ -1172,17 +1309,28 @@ function TurnDisplay({ turn, onRestore, onRetry, expandedItems, onToggleExpanded
         }
       })}
 
-      {/* Usage info and checkpoint actions */}
-      {(turn.usage || turn.checkpointId) && (
+      {/* Usage info and checkpoint actions — shown on last turn only */}
+      {(collatedUsage || turn.checkpointId) && (
         <div className="flex items-center justify-between gap-2">
-          {/* Usage info */}
-          {turn.usage && (
-            <div className="text-xs text-muted-foreground">
-              Tokens: {(turn.usage.usage?.totalTokens || turn.usage.totalTokens)?.toLocaleString() || 'N/A'}
-              {(turn.usage.totalCost !== undefined || turn.usage.cost !== undefined) &&
-                ` • Cost: $${((turn.usage.totalCost ?? turn.usage.cost) || 0).toFixed(4)}`}
-            </div>
-          )}
+          {/* Collated usage info (per-task) */}
+          {collatedUsage && (() => {
+            const cumulativeTokens = (collatedUsage.totalUsage?.totalTokens || collatedUsage.usage?.totalTokens || collatedUsage.totalTokens) || 0;
+            const cumulativeCost = collatedUsage.totalCost ?? collatedUsage.cost ?? 0;
+            const taskTokens = cumulativeTokens - (collatedUsage.taskTokenOffset || 0);
+            const taskCost = cumulativeCost - (collatedUsage.taskCostOffset || 0);
+            const startTime = collatedTaskStartTime || turn.taskStartTime;
+            const durationMs = startTime && collatedUsage.timestamp
+              ? collatedUsage.timestamp - startTime
+              : 0;
+            const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
+            return (
+              <div className="text-xs text-muted-foreground">
+                Tokens: {taskTokens.toLocaleString()}
+                {taskCost > 0 && ` • Cost: $${taskCost.toFixed(4)}`}
+                {durationSec > 0 && ` • ${durationSec < 60 ? `${durationSec}s` : `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`}`}
+              </div>
+            );
+          })()}
 
           {/* Checkpoint actions */}
           {turn.checkpointId && (

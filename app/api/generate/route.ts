@@ -237,6 +237,7 @@ Habits:
         model: model || 'gpt-5.3-codex',
         tools: validTools?.length > 0 ? validTools : undefined,
         accessToken: apiKey,
+        signal: request.signal,
       });
     }
 
@@ -369,7 +370,8 @@ Habits:
       const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify(geminiBody)
+        body: JSON.stringify(geminiBody),
+        signal: request.signal,
       });
 
       if (!response.ok) {
@@ -511,7 +513,8 @@ Habits:
     const response = await fetch(apiEndpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: request.signal,
     });
 
     if (!response.ok) {
@@ -623,7 +626,8 @@ You can make multiple tool calls in a single response. Always include the tool_c
         const fallbackResponse = await fetch(apiEndpoint, {
           method: 'POST',
           headers,
-          body: JSON.stringify(fallbackBody)
+          body: JSON.stringify(fallbackBody),
+          signal: request.signal,
         });
 
         if (!fallbackResponse.ok) {
@@ -687,6 +691,10 @@ You can make multiple tool calls in a single response. Always include the tool_c
       headers: responseHeaders,
     });
   } catch (error) {
+    // Client disconnected — abort is expected, no error response needed
+    if (error instanceof Error && error.name === 'AbortError') {
+      return new Response(null, { status: 499 });
+    }
     const message = error instanceof Error ? error.message : 'Unknown error';
     const isNetwork = /fetch failed|Failed to fetch|NetworkError/i.test(message);
     const friendly = isNetwork

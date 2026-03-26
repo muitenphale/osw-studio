@@ -1,5 +1,5 @@
 import { VirtualFileSystem } from './index';
-import { waitForCompilation, drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
+import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
 
 type ShellResult = {
   stdout: string;
@@ -373,7 +373,6 @@ function ssFindSelectorMatch(content: string, selector: string): { index: number
   addVariant(selector.replace(/^\s+/, '').replace(/\s+$/, ''));
 
   for (const variant of variants) {
-    if (!variant) continue;
     const index = content.indexOf(variant);
     if (index !== -1) {
       return { index, normalizedSelector: variant };
@@ -384,15 +383,11 @@ function ssFindSelectorMatch(content: string, selector: string): { index: number
 }
 
 /**
- * Auto-detect entity type from selector pattern.
+ * Auto-detect whether the selector targets an HTML element (tag-matched)
+ * or a bracket-matched entity (function, class, CSS rule, etc.).
  */
-function ssAutoDetectEntityType(selector: string): string {
-  if (selector.startsWith('<') && selector.includes('>')) return 'html_element';
-  if (selector.includes('function ') || selector.includes(' = (') || selector.includes(' => {')) return 'function';
-  if (/^[.#@]/.test(selector) || /^\w+\s*\{/.test(selector)) return 'css_rule';
-  if (selector.includes('class ')) return 'class';
-  if (selector.includes('interface ') || selector.includes('type ')) return 'bracket_matched';
-  return 'bracket_matched';
+function ssIsHtmlEntity(selector: string): boolean {
+  return selector.startsWith('<') && selector.includes('>');
 }
 
 /**
@@ -402,11 +397,11 @@ function ssDetectEntityBoundary(
   content: string,
   selectorIndex: number,
   selector: string,
-  entityType: string
+  isHtml: boolean
 ): { start: number; end: number } | null {
   if (selectorIndex < 0 || selectorIndex >= content.length) return null;
 
-  if (entityType === 'html_element') {
+  if (isHtml) {
     return ssDetectHtmlElementBoundary(content, selectorIndex, selector);
   }
   return ssDetectBracketBoundary(content, selectorIndex);
@@ -449,7 +444,8 @@ function ssDetectHtmlElementBoundary(
   }
 
   // Track depth for nested same-name tags
-  const openRe = new RegExp(`<${tagName}(?:\\s[^>]*)?>`, 'gi');
+  // Use quote-aware regex to handle > inside attribute values like <div title="a > b">
+  const openRe = new RegExp(`<${tagName}(?:\\s(?:[^>"']*|"[^"]*"|'[^']*')*)?>`, 'gi');
   const closeRe = new RegExp(`</${tagName}>`, 'gi');
 
   // Collect all open and close positions after selectorIndex
@@ -475,7 +471,7 @@ function ssDetectHtmlElementBoundary(
     if (ev.type === 'open') {
       depth++;
     } else {
-      depth--;
+      if (depth > 0) depth--;
       if (depth === 0) {
         return { start, end: ev.pos + ev.len };
       }
@@ -493,8 +489,6 @@ function ssDetectBracketBoundary(
   content: string,
   selectorIndex: number
 ): { start: number; end: number } | null {
-  if (selectorIndex < 0 || selectorIndex >= content.length) return null;
-
   // Find the opening bracket
   const openPos = content.indexOf('{', selectorIndex);
   if (openPos === -1) return null;
@@ -582,6 +576,8 @@ function ssDetectBracketBoundary(
  * Map a normalized (whitespace-collapsed) search string back to the original content.
  * Returns the start/end positions in the original content.
  */
+const WS_RE = /\s/;
+
 function ssMapNormalizedToOriginal(content: string, normalizedSearch: string): { start: number; end: number } | null {
   // Build a mapping from normalized positions to original positions
   // Strategy: walk both the original content and the normalized search simultaneously
@@ -598,9 +594,9 @@ function ssMapNormalizedToOriginal(content: string, normalizedSearch: string): {
       // In normalized form, whitespace runs collapse to a single space
       if (normalizedSearch[si] === ' ') {
         // The original must have at least one whitespace character here
-        if (!/\s/.test(content[oi])) { matched = false; break; }
+        if (!WS_RE.test(content[oi])) { matched = false; break; }
         // Skip all whitespace in original
-        while (oi < contentLen && /\s/.test(content[oi])) oi++;
+        while (oi < contentLen && WS_RE.test(content[oi])) oi++;
         si++;
       } else {
         if (content[oi] !== normalizedSearch[si]) { matched = false; break; }
@@ -2318,7 +2314,7 @@ Only localhost URLs are supported (fetches compiled HTML from preview engine).`,
           // Dynamic import VirtualServer to avoid adding to cli-shell's initial bundle
           const { VirtualServer } = await import('@/lib/preview/virtual-server');
           const project = await vfs.getProject(projectId);
-          const server = new VirtualServer(vfs, projectId, undefined, undefined, undefined, project?.settings?.runtime);
+          const server = new VirtualServer(vfs, projectId, { runtime: project?.settings?.runtime });
           const compiled = await server.getCompiledFile(resolvedPath);
 
           if (!compiled) {
@@ -2388,13 +2384,24 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
         };
       }
       case 'build': {
-        // Build pseudo-command — waits for any pending compilation and reports errors
-        await waitForCompilation(2000);
-        const compileErrors = drainCompileErrors();
-        if (compileErrors.length === 0) {
-          return { stdout: 'Build successful — 0 errors', stderr: '', exitCode: 0 };
+        // Build command — triggers its own compilation for reliable results.
+        // Previously piggybacked on the preview's debounced compile, causing race
+        // conditions when the AI writes multiple files before calling build.
+        try {
+          const { VirtualServer } = await import('@/lib/preview/virtual-server');
+          const buildProject = await vfs.getProject(projectId);
+          const server = new VirtualServer(vfs, projectId, { runtime: buildProject?.settings?.runtime });
+          await server.compileProject();
+          server.cleanupBlobUrls();
+
+          const compileErrors = drainCompileErrors();
+          if (compileErrors.length === 0) {
+            return { stdout: 'Build successful — 0 errors', stderr: '', exitCode: 0 };
+          }
+          return { stdout: '', stderr: formatCompileErrors(compileErrors), exitCode: 1 };
+        } catch (err: any) {
+          return { stdout: '', stderr: `Build failed: ${err.message}`, exitCode: 1 };
         }
-        return { stdout: '', stderr: formatCompileErrors(compileErrors), exitCode: 1 };
       }
       case 'status': {
         // Status pseudo-command
@@ -2510,8 +2517,8 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
               const preview = ssSearch.length > 200 ? ssSearch.substring(0, 200) + '...' : ssSearch;
               return { stdout: '', stderr: `ss --entity: selector not found in ${ssPath}\n\nSearched for:\n${preview}`, exitCode: 1 };
             }
-            const entityType = ssAutoDetectEntityType(selectorMatch.normalizedSelector);
-            const boundary = ssDetectEntityBoundary(ssContent, selectorMatch.index, selectorMatch.normalizedSelector, entityType);
+            const isHtml = ssIsHtmlEntity(selectorMatch.normalizedSelector);
+            const boundary = ssDetectEntityBoundary(ssContent, selectorMatch.index, selectorMatch.normalizedSelector, isHtml);
             if (!boundary) {
               return { stdout: '', stderr: `ss --entity: could not detect entity boundary for selector in ${ssPath}`, exitCode: 1 };
             }
@@ -2542,7 +2549,11 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
               return { stdout: '', stderr: `ss -r: regex did not match in ${ssPath}\n\nPattern:\n${preview}`, exitCode: 1 };
             }
             // Expand $0, $1, $2, ... backreferences in replacement (single-pass to avoid $1 clobbering $10)
-            const expandedReplace = ssReplace.replace(/\$(\d+)/g, (_, idx) => m[Number(idx)] || '');
+            // Use $$ to produce a literal $ (e.g. "$$10" → "$10")
+            const expandedReplace = ssReplace
+              .replace(/\$\$/g, '\x00DOLLAR\x00')
+              .replace(/\$(\d+)/g, (_, idx) => m[Number(idx)] || '')
+              .replace(/\x00DOLLAR\x00/g, '$');
             ssResult = ssContent.substring(0, m.index) + expandedReplace + ssContent.substring(m.index + m[0].length);
             break;
           }

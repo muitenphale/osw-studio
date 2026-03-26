@@ -244,6 +244,7 @@ export default function TestGenerationPage() {
 
       let exitReason: string | undefined;
       let nudgeCount = 0;
+      let delegateStartTime = 0;
 
       const orchestrator = new MultiAgentOrchestrator(
         projectId,
@@ -283,10 +284,11 @@ export default function TestGenerationPage() {
                   const parsed = JSON.parse(data.args);
                   if (toolName === 'shell') argSnippet = parsed.cmd || parsed.command || '';
                 } catch {}
-                const isStatusCmd = argSnippet.trimStart().startsWith('status ');
-                if (!isStatusCmd && argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
+                const isVerboseCmd = argSnippet.trimStart().startsWith('status ') || argSnippet.trimStart().startsWith('delegate ');
+                if (!isVerboseCmd && argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
               }
               toolDetails.push({ name: toolName, status: 'success', args: argSnippet });
+              delegateStartTime = 0; // Reset for each new top-level tool call
               appendOutput(scenarioId, `\n[tool] ${toolName}${argSnippet ? ` — ${argSnippet}` : ' ...'}\n`);
             } else if (data?.status === 'completed') {
               appendOutput(scenarioId, `[tool] ${toolName} done\n`);
@@ -294,6 +296,41 @@ export default function TestGenerationPage() {
               const last = [...toolDetails].reverse().find(d => d.name === toolName);
               if (last) last.status = 'failed';
               appendOutput(scenarioId, `[tool] ${toolName} failed\n`);
+            }
+          }
+
+          if (message === 'delegate_progress') {
+            const data = step as Record<string, unknown>;
+            const innerEvent = data?.event as string;
+            const agentIndex = data?.agentIndex as number || 1;
+            const innerData = data?.data as Record<string, unknown>;
+            const promptLabel = String(data?.delegatePrompt || '');
+
+            // Track relative time from first subagent event
+            if (!delegateStartTime) delegateStartTime = Date.now();
+            const t = ((Date.now() - delegateStartTime) / 1000).toFixed(1);
+            const label = `subagent ${agentIndex} +${t}s`;
+
+            if (innerEvent === 'agent_start') {
+              const preview = promptLabel.length > 80 ? promptLabel.substring(0, 77) + '...' : promptLabel;
+              appendOutput(scenarioId, `  [${label}] started — "${preview}"\n`);
+            } else if (innerEvent === 'agent_done') {
+              const elapsed = innerData?.elapsed || '?';
+              const bodyPreview = String(innerData?.bodyPreview || '(no output)');
+              const preview = bodyPreview.length > 100 ? bodyPreview.substring(0, 97) + '...' : bodyPreview;
+              appendOutput(scenarioId, `  [${label}] done (${elapsed}s) — ${preview}\n`);
+            } else if (innerEvent === 'tool_status' && innerData?.status === 'executing') {
+              let cmd = '';
+              try {
+                const parsed = JSON.parse(String(innerData.args || '{}'));
+                cmd = parsed?.cmd || '';
+              } catch { cmd = String(innerData.args || ''); }
+              const cmdPreview = cmd.length > 100 ? cmd.substring(0, 97) + '...' : cmd;
+              appendOutput(scenarioId, `  [${label}] ${cmdPreview}\n`);
+            } else if (innerEvent === 'tool_status' && innerData?.status === 'completed') {
+              appendOutput(scenarioId, `  [${label}] tool done\n`);
+            } else if (innerEvent === 'tool_status' && innerData?.status === 'failed') {
+              appendOutput(scenarioId, `  [${label}] tool failed\n`);
             }
           }
 
@@ -342,8 +379,8 @@ export default function TestGenerationPage() {
                   argSnippet = parsed.cmd || parsed.command || '';
                 }
               } catch {}
-              const isStatusCmd = argSnippet.trimStart().startsWith('status ');
-              if (!isStatusCmd && argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
+              const isVerboseCmd = argSnippet.trimStart().startsWith('status ') || argSnippet.trimStart().startsWith('delegate ');
+              if (!isVerboseCmd && argSnippet.length > 80) argSnippet = argSnippet.substring(0, 77) + '...';
 
               const succeeded = toolResultMap.has(tc.id) ? toolResultMap.get(tc.id)! : true;
               conversationToolDetails.push({

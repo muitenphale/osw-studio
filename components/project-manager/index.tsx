@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Project, CustomTemplate, ProjectRuntime } from '@/lib/vfs/types';
 import { getProjectRuntimes } from '@/lib/runtimes/registry';
@@ -107,7 +107,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   };
 
   // Built-in templates filtered by the selected runtime
-  const filteredBuiltInTemplates = getBuiltInTemplatesForRuntime(newProjectRuntime);
+  const filteredBuiltInTemplates = useMemo(() => getBuiltInTemplatesForRuntime(newProjectRuntime), [newProjectRuntime]);
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
@@ -383,7 +383,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     }
   };
 
-  const deleteProject = async (project: Project) => {
+  const deleteProject = useCallback(async (project: Project) => {
     if (!confirm(`Are you sure you want to delete "${project.name}"? This cannot be undone.`)) {
       return;
     }
@@ -397,9 +397,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       logger.error('Failed to delete project:', error);
       toast.error('Failed to delete project');
     }
-  };
+  }, [reloadProjects]);
 
-  const duplicateProject = async (project: Project) => {
+  const duplicateProject = useCallback(async (project: Project) => {
     try {
       const newProject = await vfs.duplicateProject(project.id);
       toast.success('Project duplicated successfully');
@@ -409,15 +409,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       logger.error('Failed to duplicate project:', error);
       toast.error('Failed to duplicate project');
     }
-  };
+  }, [reloadProjects, onProjectSelect]);
 
-  const exportProject = async (project: Project) => {
+  const exportProject = useCallback(async (project: Project) => {
     try {
       const data = await vfs.exportProject(project.id);
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      
+
       const a = document.createElement('a');
       a.href = url;
       a.download = `${project.name.replace(/\s+/g, '-')}-export.json`;
@@ -425,19 +425,19 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
+
       toast.success('Project exported');
     } catch (error) {
       logger.error('Failed to export project:', error);
       toast.error('Failed to export project');
     }
-  };
+  }, []);
 
-  const exportProjectAsZip = async (project: Project) => {
+  const exportProjectAsZip = useCallback(async (project: Project) => {
     try {
       const blob = await vfs.exportProjectAsZip(project.id);
       const url = URL.createObjectURL(blob);
-      
+
       const a = document.createElement('a');
       a.href = url;
       a.download = `${project.name.replace(/\s+/g, '-')}.zip`;
@@ -445,13 +445,13 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
+
       toast.success('Project exported as ZIP');
     } catch (error) {
       logger.error('Failed to export project as ZIP:', error);
       toast.error('Failed to export project as ZIP');
     }
-  };
+  }, []);
 
   const importProject = async () => {
     const input = document.createElement('input');
@@ -496,6 +496,13 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         return sorted;
     }
   };
+
+  const handleProjectUpdate = useCallback(async (updatedProject: Project) => {
+    await vfs.updateProject(updatedProject);
+    setProjects(prev => prev.map(p =>
+      p.id === updatedProject.id ? updatedProject : p
+    ));
+  }, []);
 
   const filteredProjects = sortProjects(
     projects.filter(project =>
@@ -649,15 +656,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                           onPreview={setPreviewProject}
                           onExportAsTemplate={setTemplateExportProject}
                           onBackend={setBackendProject}
-                          onUpdate={async (updatedProject) => {
-                            // Update IndexedDB to persist changes
-                            await vfs.updateProject(updatedProject);
-
-                            // Update React state
-                            setProjects(projects.map(p =>
-                              p.id === updatedProject.id ? updatedProject : p
-                            ));
-                          }}
+                          onUpdate={handleProjectUpdate}
                           viewMode={viewMode}
                           forceMenuOpen={tourActionProjectId === project.id}
                           highlightExport={tourRunning && tourStep === 'project-controls' && tourActionProjectId === project.id}

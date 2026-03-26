@@ -189,7 +189,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const saveDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Maximum debug events to keep in memory to prevent unbounded growth
-  const MAX_DEBUG_EVENTS = 500;
+  const MAX_DEBUG_EVENTS = 2000;
 
   // Debounced save function to persist events array to IndexedDB
   const debouncedSaveEvents = useCallback((events: DebugEvent[]) => {
