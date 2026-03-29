@@ -205,13 +205,17 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
         }
       } else if (providerConfig.supportsModelDiscovery) {
         // Try to discover models (we know API key exists at this point)
-        const modelIds = await getAvailableModels(apiKey || undefined, currentProvider);
-        loadedModels = modelIds.map(id => ({
-          id,
-          name: id.split('/').pop() || id,
-          contextLength: 32000,
-          supportsFunctions: true
-        }));
+        const modelEntries = await getAvailableModels(apiKey || undefined, currentProvider);
+        loadedModels = modelEntries.map(entry => {
+          const id = typeof entry === 'string' ? entry : entry.id;
+          const contextLength = typeof entry === 'object' && entry.contextLength ? entry.contextLength : 32000;
+          return {
+            id,
+            name: id.split('/').pop() || id,
+            contextLength,
+            supportsFunctions: true
+          };
+        });
       } else if (providerConfig.models) {
         // Use hardcoded models
         loadedModels = providerConfig.models;

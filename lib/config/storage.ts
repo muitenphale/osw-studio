@@ -56,6 +56,10 @@ export interface AppSettings {
   modelCache?: Partial<Record<ProviderId, ModelCacheEntry>>;
   modelPricing?: Partial<Record<ProviderId, Record<string, ProviderPricingEntry>>>;
   reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
+  /** Per-provider auto-compaction toggle. Default: true (enabled). */
+  compactionEnabled?: Partial<Record<ProviderId, boolean>>;
+  /** Per-provider compaction limit override (tokens). Empty = automatic. */
+  compactionLimits?: Partial<Record<ProviderId, number>>;
   codexAuth?: CodexAuthData;
   hfAuth?: HFAuthData;
   telemetryOptIn?: boolean;
@@ -426,6 +430,45 @@ class ConfigManager {
     const providerKeys = settings.providerKeys || {};
     delete providerKeys['huggingface'];
     this.setSetting('providerKeys', providerKeys);
+  }
+
+  getModelContextLengthFromCache(provider: ProviderId, modelId: string): number | undefined {
+    const cache = this.getCachedModels(provider);
+    if (!cache?.models) return undefined;
+    const model = cache.models.find(m => m.id === modelId);
+    return model?.contextLength;
+  }
+
+  isCompactionEnabled(provider: ProviderId): boolean {
+    const settings = this.getSettings();
+    return settings.compactionEnabled?.[provider] ?? true; // default: enabled
+  }
+
+  setCompactionEnabled(provider: ProviderId, enabled: boolean): void {
+    const settings = this.getSettings();
+    const map = { ...settings.compactionEnabled };
+    if (enabled) {
+      delete map[provider]; // default is true, so remove to save space
+    } else {
+      map[provider] = false;
+    }
+    this.setSetting('compactionEnabled', map);
+  }
+
+  getCompactionLimit(provider: ProviderId): number | undefined {
+    const settings = this.getSettings();
+    return settings.compactionLimits?.[provider];
+  }
+
+  setCompactionLimit(provider: ProviderId, limit: number | undefined): void {
+    const settings = this.getSettings();
+    const limits = { ...settings.compactionLimits };
+    if (limit === undefined) {
+      delete limits[provider];
+    } else {
+      limits[provider] = limit;
+    }
+    this.setSetting('compactionLimits', limits);
   }
 
   // Reasoning toggle management

@@ -6,6 +6,16 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.48.0 - Auto-Compaction (2026-03-30)
+
+Long AI coding sessions no longer silently fail when the conversation gets too large. The AI now automatically summarizes older context when approaching the model's limit, keeping recent work intact while freeing up space to continue.
+
+- **Automatic Context Compaction** - When the conversation approaches your model's context limit, older turns are summarized into a compact recap while recent tool calls and results are kept verbatim. The AI continues working with full awareness of what was accomplished. A dashed divider line appears in the chat showing the compression (e.g. "Context compacted — 15K → ~7K tokens") — you can still scroll up to see everything from before
+- **Works With Any Model** - The compaction limit is automatically detected from the model's context window (via provider registry or the models API). You can also set a custom limit per provider in Settings, or disable auto-compaction entirely
+- **Codex Vision Fix** - Screenshots and images sent through Codex (ChatGPT subscription) were silently discarded. The AI now sees your images when using Codex, matching the behavior of other providers
+
+---
+
 ## v1.47.0 - Sub-Agent Delegation (2026-03-27)
 
 The AI can now delegate sub-tasks to specialized agents that work independently and return a summary — keeping the main conversation focused while exploring or editing in parallel.

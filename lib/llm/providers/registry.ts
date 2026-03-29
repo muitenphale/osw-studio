@@ -481,3 +481,14 @@ export function modelSupportsVision(providerId: ProviderId, modelId: string): bo
 
   return false;
 }
+
+/**
+ * Get the context length for a specific model from the provider registry.
+ * Returns undefined if the model isn't in the registry (dynamically discovered).
+ */
+export function getModelContextLength(providerId: ProviderId, modelId: string): number | undefined {
+  const provider = providers[providerId];
+  if (!provider?.models) return undefined;
+  const model = provider.models.find(m => m.id === modelId);
+  return model?.contextLength;
+}

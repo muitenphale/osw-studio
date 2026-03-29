@@ -841,6 +841,50 @@ document.addEventListener('DOMContentLoaded', initApp);`,
       { type: 'tool_args_match', toolName: 'shell', pattern: 'delegate', description: 'Used delegate command' },
     ],
   },
+  // ─── Compaction — Context Continuity (2 tests) ────────────────────────
+  // These tests generate enough context to trigger compaction (set a low
+  // compaction limit like 32K-64K in provider settings to reliably trigger).
+  // They verify the model completes the full task despite context resets.
+  {
+    id: 'compaction-multipage-site',
+    name: 'Build 8-page site through compaction',
+    category: 'compaction',
+    prompt: "Create a complete website for 'Nimbus Analytics' — a cloud data company. Create exactly 8 HTML pages, each with full content (multiple sections, paragraphs, lists). Required pages: /index.html (hero, features grid, testimonials), /about.html (company story, team bios for 6 people, timeline), /services.html (6 service cards with descriptions), /pricing.html (3-tier pricing table), /blog.html (4 article previews with excerpts), /careers.html (company culture section, 4 job listings), /contact.html (contact form, office locations), /faq.html (10+ Q&A items). Also create /styles.css shared across all pages. Every page must link to all other pages in the nav.",
+    setupFiles: { '/.PROMPT.md': defaultPromptMd },
+    timeout: 300000,
+    assertions: [
+      { type: 'file_exists', path: '/index.html', description: 'Homepage created' },
+      { type: 'file_exists', path: '/about.html', description: 'About page created' },
+      { type: 'file_exists', path: '/services.html', description: 'Services page created' },
+      { type: 'file_exists', path: '/pricing.html', description: 'Pricing page created' },
+      { type: 'file_exists', path: '/blog.html', description: 'Blog page created' },
+      { type: 'file_exists', path: '/careers.html', description: 'Careers page created' },
+      { type: 'file_exists', path: '/contact.html', description: 'Contact page created' },
+      { type: 'file_exists', path: '/faq.html', description: 'FAQ page created' },
+      { type: 'file_exists', path: '/styles.css', description: 'Shared stylesheet created' },
+      { type: 'file_matches', path: '/faq.html', pattern: 'faq\\.html|contact\\.html', description: 'Late page has nav links (context survived compaction)' },
+      { type: 'file_matches', path: '/careers.html', pattern: 'Nimbus', description: 'Brand name preserved through compaction' },
+    ],
+  },
+  {
+    id: 'compaction-iterative-expansion',
+    name: 'Iteratively expand project through compaction',
+    category: 'compaction',
+    prompt: "Build a documentation site step by step. Step 1: Create /index.html as a docs landing page for 'Forge CLI' with a sidebar nav listing 5 sections. Step 2: Create /getting-started.html with installation instructions for macOS, Linux, and Windows (full commands and explanations for each OS). Step 3: Create /commands.html documenting 8 CLI commands (forge init, forge build, forge deploy, forge test, forge lint, forge serve, forge config, forge plugin) — each with synopsis, description, flags table, and 2 examples. Step 4: Create /configuration.html explaining the forge.config.json schema with 10+ fields documented. Step 5: Create /plugins.html with a plugin API reference and 3 example plugins with full code. Step 6: Create /styles.css used by all pages. Every page must have consistent nav linking to all other pages and use the shared stylesheet.",
+    setupFiles: { '/.PROMPT.md': defaultPromptMd },
+    timeout: 300000,
+    assertions: [
+      { type: 'file_exists', path: '/index.html', description: 'Landing page created' },
+      { type: 'file_exists', path: '/getting-started.html', description: 'Getting started created' },
+      { type: 'file_exists', path: '/commands.html', description: 'Commands reference created' },
+      { type: 'file_exists', path: '/configuration.html', description: 'Configuration docs created' },
+      { type: 'file_exists', path: '/plugins.html', description: 'Plugins page created' },
+      { type: 'file_exists', path: '/styles.css', description: 'Shared stylesheet created' },
+      { type: 'file_matches', path: '/commands.html', pattern: 'forge deploy', description: 'Commands page has deploy docs' },
+      { type: 'file_matches', path: '/plugins.html', pattern: 'plugins\\.html|commands\\.html', description: 'Last page has nav links (context survived compaction)' },
+      { type: 'file_matches', path: '/configuration.html', pattern: 'Forge|forge', description: 'Brand name preserved through compaction' },
+    ],
+  },
 ];
 
 // ─── Test Tracks ─────────────────────────────────────────────────────
@@ -874,5 +918,11 @@ export const testTracks: TestTrack[] = [
     name: 'Delegate',
     description: 'Delegate: sub-agent exploration, planning, and parallel task execution',
     scenarioIds: testScenarios.filter(s => s.category === 'delegate').map(s => s.id),
+  },
+  {
+    id: 'compaction',
+    name: 'Compaction',
+    description: 'Compaction: context continuity through automatic conversation summarization',
+    scenarioIds: testScenarios.filter(s => s.category === 'compaction').map(s => s.id),
   },
 ];

@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.48.0 - 2026-03-30
+
+Automatic conversation compaction for long-running agentic sessions, Codex vision support, and provider test harness improvements.
+
+### Conversation Compaction
+
+Long-running agentic sessions accumulate unbounded conversation history — every message, tool call, and tool result is sent to the LLM on each turn. Sessions regularly exceed 200K tokens, which many models don't support. The orchestrator now automatically compacts the conversation when it approaches the model's context limit.
+
+- **Auto-compaction**: After each orchestrator iteration, if the API-reported `promptTokens` exceeds 80% of the compaction limit, the older portion of the conversation is sent for summarization. The summary replaces the older messages while recent turns are kept verbatim. The model continues working with full awareness of what was accomplished
+- **Turn-boundary splitting**: Messages are grouped into turns (assistant message + its tool results) before splitting. The most recent ~20% of turns by token budget are preserved verbatim; older turns are summarized. This ensures tool results are never orphaned from their parent assistant message
+- **Message flattening for summarization**: Tool-role messages and tool call arguments are converted to plain text before the summarization request. This prevents models from hallucinating tool calls when they see tool patterns in the history without tool definitions. Large file contents in tool arguments are truncated to 500 chars
+- **Proportional summary cap**: Summary output is capped at 10% of the compaction limit (max 16K tokens), preventing oversized summaries that leave no headroom for continued work
+- **Compaction limit resolution**: Priority chain — user override (per-provider setting) → provider registry `contextLength` → models API `contextLength` (for dynamically discovered models like OpenRouter) → 128K fallback
+- **Settings**: "Auto-compact" toggle (default: on) and "Compaction limit (tokens)" field in provider settings. When disabled, no compaction occurs regardless of conversation size
+- **Chat divider**: A dashed line with pre/post token counts appears in the chat panel at each compaction point (e.g. "Context compacted — 15K → ~7K tokens"). All pre-compaction messages remain visible above the divider for inspection
+- **Fresh context on compaction**: System prompt is re-gathered from current VFS state (file tree, `.PROMPT.md`, server context) on each compaction, ensuring the model sees the latest project structure
+- **Sub-agent exemption**: Only the parent orchestrator compacts. Sub-agents (`explore`, `task`, `plan`) are exempt — their iteration caps keep conversations short
+- **Reasoning detail stripping**: `reasoning_details` (potentially large encrypted blobs from thinking models) are stripped from the summarization request to avoid wasting tokens
+- **Cost tracking continuity**: Compaction LLM call costs are accumulated into `totalUsage` and `totalCost`. Loop detection state is reset after compaction (stale after context change). Iteration counter is not reset (prevents runaway sessions)
+
+### Models API Enrichment
+
+- **Context length passthrough**: The `/api/models` endpoint now returns `{ id, contextLength }` objects for OpenRouter models (previously returned bare ID strings). The model selector caches this metadata, enabling automatic compaction limit resolution for dynamically discovered models without hardcoded registry entries
+
+### Codex Vision Support
+
+- **Image inputs passed through to Responses API**: The Codex adapter (`codex-adapter.ts`) converted all user message content to text-only via `getTextFromContent()`, silently discarding `image_url` blocks. Users sending screenshots or images through Codex (ChatGPT subscription) received responses as if no image was attached. Fix: added `contentToCodexContent()` that maps Chat Completions `image_url` blocks to the Responses API `input_image` format (`{ type: 'input_image', image_url: '<url>' }`), preserving multimodal content alongside text
+
+### Benchmark
+
+- **Compaction test scenarios**: Two benchmark scenarios (`compaction-multipage-site`, `compaction-iterative-expansion`) that generate enough context to trigger compaction at reasonable limits. Assertions verify files created after compaction maintain brand names and navigation links from before compaction — proving context continuity through summarization
+
+
 ## v1.47.0 - 2026-03-27
 
 Sub-agent delegation via the `delegate` shell command, Vue SFC compilation fixes, build command reliability, stop propagation, and project manager performance.

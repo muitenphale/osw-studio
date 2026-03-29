@@ -6,7 +6,7 @@
  * orchestrator, and UI remain unchanged.
  */
 
-import { LLMMessage, ContentBlock, TextContentBlock } from './types';
+import { LLMMessage, ContentBlock, TextContentBlock, ImageContentBlock } from './types';
 import { logger } from '@/lib/utils';
 
 // --- Package imports (cherry-picked utilities) ---
@@ -57,6 +57,25 @@ function getTextFromContent(content: string | ContentBlock[]): string {
 }
 
 /**
+ * Convert Chat Completions content blocks to Responses API content items.
+ * Maps `text` → `input_text` and `image_url` → `input_image`.
+ */
+function contentToCodexContent(content: string | ContentBlock[]): unknown[] {
+  if (typeof content === 'string') {
+    return [{ type: 'input_text', text: content }];
+  }
+  return content.map(block => {
+    if (block.type === 'text') {
+      return { type: 'input_text', text: block.text };
+    }
+    if (block.type === 'image_url') {
+      return { type: 'input_image', image_url: (block as ImageContentBlock).image_url.url };
+    }
+    return { type: 'input_text', text: '' };
+  });
+}
+
+/**
  * Convert Chat Completions messages to Responses API `input` array.
  * System messages are extracted separately as `instructions`.
  */
@@ -74,11 +93,10 @@ export function messagesToCodexInput(
     }
 
     if (msg.role === 'user') {
-      const text = getTextFromContent(msg.content);
       input.push({
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text }],
+        content: contentToCodexContent(msg.content),
       });
       continue;
     }

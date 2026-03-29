@@ -29,7 +29,9 @@ export async function validateApiKey(apiKey: string, provider: ProviderId): Prom
   }
 }
 
-export async function getAvailableModels(apiKey?: string, provider?: ProviderId): Promise<string[]> {
+export type ModelEntry = string | { id: string; contextLength?: number };
+
+export async function getAvailableModels(apiKey?: string, provider?: ProviderId): Promise<ModelEntry[]> {
   const currentProvider = provider || configManager.getSelectedProvider() || 'openrouter';
   const providerConfig = getProvider(currentProvider);
   const key = apiKey || configManager.getProviderApiKey(currentProvider);

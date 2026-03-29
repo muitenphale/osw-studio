@@ -9,7 +9,7 @@ import { vfs } from '@/lib/vfs';
 import { checkpointManager, Checkpoint } from '@/lib/vfs/checkpoint';
 import { saveManager } from '@/lib/vfs/save-manager';
 import { configManager } from '@/lib/config/storage';
-import { getProvider } from '@/lib/llm/providers/registry';
+import { getProvider, getModelContextLength } from '@/lib/llm/providers/registry';
 import { CostCalculator } from './cost-calculator';
 import { ToolCall, UsageInfo, ContentBlock } from './types';
 import { logger } from '@/lib/utils';
@@ -18,7 +18,7 @@ import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } f
 import { fetchAvailableModels } from './models-api';
 import { parseStreamingResponse, buildFileTree, ReasoningDetail } from './streaming-parser';
 import { drainRuntimeErrors, formatRuntimeErrors, resetRuntimeErrors } from '@/lib/preview/runtime-errors';
-import { buildShellSystemPrompt, buildProjectContext } from './system-prompt';
+import { buildShellSystemPrompt, buildProjectContext, COMPACTION_PROMPT } from './system-prompt';
 import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
 import { track } from '@/lib/telemetry';
@@ -110,6 +110,7 @@ export interface AgentMessage {
     isSyntheticError?: boolean;  // True if this is an auto-injected error message (e.g., malformed tool call correction)
     projectContext?: string;  // Project context injected into first user message (for collapsible UI display)
     displayContent?: string | ContentBlock[];  // Clean user prompt for UI (without injected context/hints)
+    isCompactSummary?: boolean;  // True if this message is a compaction summary
   };
 }
 
@@ -177,6 +178,13 @@ export class MultiAgentOrchestrator {
   private totalMalformedToolCalls = 0; // Track total malformed calls in session (doesn't reset)
   private readonly maxMalformedRetries = 2; // Max consecutive retries before allowing through
   private readonly malformedThresholdForReminder = 3; // After this many total failures, add persistent reminder
+  private compactionCount = 0;
+  private lastKnownPromptTokens = 0;
+
+  private static readonly AUTO_COMPACT_THRESHOLD = 0.80; // Compact at 80% of limit
+  private static readonly RECENT_KEEP_RATIO = 0.20; // Keep 20% of recent messages verbatim
+  private static readonly SUMMARY_TOKEN_RATIO = 0.10; // Cap summary at 10% of limit
+  private static readonly DEFAULT_COMPACTION_LIMIT = 128000;
   constructor(
     projectId: string,
     agentType: AgentType = 'orchestrator',
@@ -646,6 +654,21 @@ export class MultiAgentOrchestrator {
       // Add tool results
       for (const result of toolResults) {
         this.addMessage(conversationId, result);
+      }
+
+      // Check compaction threshold (parent orchestrator only).
+      // Placed after assistant message + tool results are added so the full
+      // conversation state is captured in the compaction summary.
+      if (this.rootAgent.type === 'orchestrator' && this.lastKnownPromptTokens > 0) {
+        const { provider } = this.getProviderConfig();
+        if (configManager.isCompactionEnabled(provider)) {
+          const compactionLimit = this.resolveCompactionLimit();
+          const threshold = compactionLimit * MultiAgentOrchestrator.AUTO_COMPACT_THRESHOLD;
+          if (this.lastKnownPromptTokens >= threshold) {
+            logger.info(`[Compaction] Triggering compaction (promptTokens=${this.lastKnownPromptTokens}, threshold=${threshold})`);
+            await this.compactConversation(conversationId);
+          }
+        }
       }
 
       // Check status result immediately after tool execution
@@ -1469,6 +1492,266 @@ Please revise your approach.`;
   }
 
   /**
+   * Resolve the effective compaction limit for the current model.
+   * Priority: user override > registry contextLength > 128K fallback.
+   */
+  private resolveCompactionLimit(): number {
+    const { provider, model } = this.getProviderConfig();
+
+    // 1. User override
+    const userLimit = configManager.getCompactionLimit(provider);
+    if (userLimit) return userLimit;
+
+    // 2. Registry lookup (hardcoded models)
+    const registryLimit = getModelContextLength(provider, model);
+    if (registryLimit) return registryLimit;
+
+    // 3. Cached model metadata (dynamically discovered models)
+    const cachedLimit = configManager.getModelContextLengthFromCache(provider, model);
+    if (cachedLimit) return cachedLimit;
+
+    // 4. Fallback
+    return MultiAgentOrchestrator.DEFAULT_COMPACTION_LIMIT;
+  }
+
+  /**
+   * Estimate token count of a message (content + tool call arguments).
+   */
+  private static estimateMessageTokens(msg: AgentMessage): number {
+    const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content).length;
+    const argsLen = msg.tool_calls?.reduce((s, tc) => s + (tc.function?.arguments?.length ?? 0), 0) ?? 0;
+    return Math.round((contentLen + argsLen) / 3.5);
+  }
+
+  /**
+   * Compact the conversation by summarizing older messages and keeping recent ones.
+   *
+   * Strategy:
+   *  - System prompt: kept as-is (re-gathered fresh from VFS)
+   *  - Older ~80% of non-system messages: sent for summarization
+   *  - Recent ~20% of non-system messages: kept verbatim
+   *  - Summary output capped at ~10% of compaction limit
+   */
+  private async compactConversation(conversationId: string): Promise<void> {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation) return;
+
+    const preCompactTokens = this.lastKnownPromptTokens;
+    const compactionLimit = this.resolveCompactionLimit();
+
+    logger.info(`[Compaction] Starting compaction #${this.compactionCount + 1} (promptTokens=${preCompactTokens}, limit=${compactionLimit})`);
+
+    // 1. Separate system messages from conversation messages
+    const systemMessages = conversation.messages.filter(m => m.role === 'system');
+    const nonSystemMessages = conversation.messages.filter(m => m.role !== 'system');
+
+    if (nonSystemMessages.length < 3) {
+      logger.info('[Compaction] Too few non-system messages to compact, skipping');
+      return;
+    }
+
+    // 2. Group non-system messages into "turns" (assistant + its tool results).
+    // A turn is: one assistant message (possibly with tool_calls) + all following
+    // tool-role messages that belong to it. User messages are standalone turns.
+    // This ensures we never orphan a tool result from its assistant message.
+    interface Turn { messages: AgentMessage[]; tokens: number; }
+    const turns: Turn[] = [];
+    let currentTurn: Turn | null = null;
+
+    for (const msg of nonSystemMessages) {
+      if (msg.role === 'tool') {
+        // Tool results attach to the current turn (started by assistant)
+        if (currentTurn) {
+          const t = MultiAgentOrchestrator.estimateMessageTokens(msg);
+          currentTurn.messages.push(msg);
+          currentTurn.tokens += t;
+        }
+      } else {
+        // assistant or user — starts a new turn
+        if (currentTurn) turns.push(currentTurn);
+        const t = MultiAgentOrchestrator.estimateMessageTokens(msg);
+        currentTurn = { messages: [msg], tokens: t };
+      }
+    }
+    if (currentTurn) turns.push(currentTurn);
+
+    if (turns.length < 2) {
+      logger.info('[Compaction] Too few turns to compact, skipping');
+      return;
+    }
+
+    // Walk backwards from the end, keeping whole turns within the recent budget.
+    // Always keep at least 1 turn.
+    const recentTokenBudget = Math.round(compactionLimit * MultiAgentOrchestrator.RECENT_KEEP_RATIO);
+    let recentTokens = 0;
+    let recentTurnCount = 0;
+
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (recentTurnCount >= 1 && recentTokens + turns[i].tokens > recentTokenBudget) {
+        break;
+      }
+      recentTokens += turns[i].tokens;
+      recentTurnCount++;
+    }
+
+    const splitTurnIndex = turns.length - recentTurnCount;
+
+    if (splitTurnIndex <= 0) {
+      logger.info('[Compaction] All turns fit in recent budget, skipping compaction');
+      return;
+    }
+
+    const olderMessages = turns.slice(0, splitTurnIndex).flatMap(t => t.messages);
+    const recentMessages = turns.slice(splitTurnIndex).flatMap(t => t.messages);
+
+    logger.info(`[Compaction] Splitting: ${olderMessages.length} older msgs to summarize, ${recentMessages.length} recent msgs to keep (~${recentTokens} tokens)`);
+
+    // 3. Convert older messages to plain text for summarization.
+    // Models hallucinate tool calls when they see tool_calls/tool messages in history,
+    // even without tool definitions. Flatten everything to user/assistant text.
+    const flattenedMessages: AgentMessage[] = [];
+    for (const msg of olderMessages) {
+      if (msg.role === 'assistant') {
+        // Merge tool call info into text content
+        let text = typeof msg.content === 'string' ? msg.content : '';
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            const args = tc.function?.arguments || '';
+            // Truncate very large tool args (file contents) to save tokens
+            const truncatedArgs = args.length > 500 ? args.slice(0, 500) + '...[truncated]' : args;
+            text += `\n[Called ${tc.function?.name}(${truncatedArgs})]`;
+          }
+        }
+        if (text.trim()) {
+          flattenedMessages.push({ role: 'assistant', content: text.trim() });
+        }
+      } else if (msg.role === 'tool') {
+        // Convert tool result to user message (tools role confuses models without tool defs)
+        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        const truncated = content.length > 500 ? content.slice(0, 500) + '...[truncated]' : content;
+        if (truncated.trim()) {
+          flattenedMessages.push({ role: 'user', content: `[Tool result: ${truncated.trim()}]` });
+        }
+      } else {
+        flattenedMessages.push(msg);
+      }
+    }
+
+    // Merge consecutive same-role messages (some APIs reject adjacent same-role)
+    const mergedMessages: AgentMessage[] = [];
+    for (const msg of flattenedMessages) {
+      const last = mergedMessages[mergedMessages.length - 1];
+      if (last && last.role === msg.role && typeof last.content === 'string' && typeof msg.content === 'string') {
+        last.content += '\n' + msg.content;
+      } else {
+        mergedMessages.push({ ...msg });
+      }
+    }
+
+    const compactionMessages: AgentMessage[] = [
+      ...systemMessages,
+      ...mergedMessages,
+      { role: 'user', content: COMPACTION_PROMPT }
+    ];
+
+    const { provider, apiKey, model } = this.getProviderConfig();
+    const summaryMaxTokens = Math.min(16384, Math.max(256, Math.round(compactionLimit * MultiAgentOrchestrator.SUMMARY_TOKEN_RATIO)));
+
+    const requestBody = {
+      messages: compactionMessages.map(({ ui_metadata, reasoning_details, ...rest }) => rest),
+      apiKey,
+      model,
+      provider,
+      stream: true,
+      max_tokens: summaryMaxTokens,
+    };
+
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: this.abortController.signal,
+    });
+
+    if (!response.ok || !response.body) {
+      logger.error(`[Compaction] Compaction request failed: ${response.status}`);
+      return; // Fail silently — continue with uncompacted context
+    }
+
+    const result = await parseStreamingResponse(response, {
+      provider,
+      model,
+    });
+
+    const summary = result.content || '';
+    if (!summary) {
+      logger.error('[Compaction] Compaction returned empty summary');
+      return;
+    }
+
+    // Track compaction cost
+    if (result.usage) {
+      const cost = CostCalculator.calculateCost(result.usage, provider, model, true);
+      this.totalUsage.promptTokens += result.usage.promptTokens;
+      this.totalUsage.completionTokens += result.usage.completionTokens;
+      this.totalUsage.totalTokens += result.usage.totalTokens;
+      this.totalCost += cost;
+    }
+
+    // 4. Re-gather fresh system prompt from current VFS state
+    const serverContext = vfs.getServerContextMetadata();
+    const systemPrompt = await buildShellSystemPrompt(this.chatMode, serverContext, this.projectId, this.rootAgent.type);
+
+    let fileTreeStr = '';
+    try {
+      const files = await vfs.listDirectory(this.projectId, '/');
+      if (files.length > 0) {
+        fileTreeStr = buildFileTree(files);
+      }
+    } catch {
+      // Ignore
+    }
+    const projectContext = await buildProjectContext(fileTreeStr, serverContext);
+
+    // 5. Replace conversation messages:
+    //    [fresh system prompt] + [project context as user msg] + [summary as assistant] + [recent messages]
+    const summaryContent = `Here is a summary of the conversation so far:\n\n${summary}`;
+
+    conversation.messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: projectContext
+        ? `${projectContext}\n\nThe earlier conversation was compacted into the summary below.`
+        : 'The earlier conversation was compacted into the summary below.' },
+      { role: 'assistant', content: summaryContent, ui_metadata: { isCompactSummary: true } },
+      ...recentMessages,
+    ];
+
+    // 6. Update state
+    this.compactionCount++;
+    this.lastKnownPromptTokens = 0; // Will be updated by next API response
+
+    // Reset loop detection (stale after context change)
+    this.lastToolCallSignature = null;
+    this.duplicateToolCallCount = 0;
+    this.recentToolSignatures = [];
+    this.nudgeCount = 0;
+
+    // 7. Estimate post-compact tokens
+    const postCompactEstimate = Math.round(
+      conversation.messages.reduce((sum, m) => sum + MultiAgentOrchestrator.estimateMessageTokens(m), 0)
+    );
+
+    logger.info(`[Compaction] Complete: ~${preCompactTokens} → ~${postCompactEstimate} tokens (compaction #${this.compactionCount}, ${conversation.messages.length} msgs)`);
+
+    // 8. Emit compaction event for UI
+    this.onProgress?.('compaction', {
+      preCompactTokens,
+      postCompactEstimate,
+      compactionNumber: this.compactionCount,
+    });
+  }
+
+  /**
    * Get provider configuration
    */
   private getProviderConfig() {
@@ -1624,6 +1907,9 @@ Please revise your approach.`;
       }
 
       this.onProgress?.('usage', { usage, totalCost: this.totalCost, totalUsage: { ...this.totalUsage } });
+
+      // Track prompt tokens for compaction threshold check
+      this.lastKnownPromptTokens = usage.promptTokens;
     }
 
     return result;

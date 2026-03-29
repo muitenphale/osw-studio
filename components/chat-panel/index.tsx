@@ -100,7 +100,7 @@ interface ToolCall {
 
 interface TurnItem {
   id: string;
-  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error' | 'project_context';
+  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error' | 'project_context' | 'compaction';
   timestamp: number;
   data: any;
   eventId?: string;  // Links item to its source debug event (for coalesced updates)
@@ -133,6 +133,12 @@ function classifyShellCommand(cmd: string | string[] | undefined): 'shell' | 'wr
   if (/^echo\b.*>>?\s*\//.test(s)) return 'write';
 
   return 'shell';
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`;
+  return String(tokens);
 }
 
 const toolIcons: Record<string, React.ReactNode> = {
@@ -717,6 +723,16 @@ export function ChatPanel({
           state.currentIterationTools = [];
           break;
 
+        case 'compaction': {
+          state.currentTurn.items.push({
+            id: `compaction-${event.id}`,
+            type: 'compaction',
+            timestamp: event.timestamp,
+            data: event.data,
+          });
+          break;
+        }
+
         case 'delegate_progress': {
           // Sub-agent events — update the parent delegate tool's result in real-time
           const { event: innerEvent, data: innerData, agentIndex, parentToolIndex: pti } = event.data || {};
@@ -1255,6 +1271,17 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
                     </pre>
                   </div>
                 )}
+              </div>
+            );
+
+          case 'compaction':
+            return (
+              <div key={item.id} className="flex items-center gap-2 py-2 my-1">
+                <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  Context compacted — {formatTokenCount(item.data?.preCompactTokens ?? 0)} → ~{formatTokenCount(item.data?.postCompactEstimate ?? 0)} tokens
+                </span>
+                <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
               </div>
             );
 

@@ -52,6 +52,13 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
     }
     return false;
   });
+  const [compactionEnabled, setCompactionEnabled] = useState<boolean>(() => {
+    return configManager.isCompactionEnabled(configManager.getSelectedProvider());
+  });
+  const [compactionLimit, setCompactionLimit] = useState<string>(() => {
+    const savedLimit = configManager.getCompactionLimit(configManager.getSelectedProvider());
+    return savedLimit ? String(savedLimit) : '';
+  });
 
   // Check if Codex is available (blocked on HF Spaces — HttpOnly cookies don't work)
   useEffect(() => {
@@ -73,6 +80,11 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
       const stored = localStorage.getItem(`osw-studio-use-separate-chat-model-${selectedProvider}`);
       setUseSeparateChatModel(stored === 'true');
     }
+
+    // Load compaction settings for this provider
+    setCompactionEnabled(configManager.isCompactionEnabled(selectedProvider));
+    const savedLimit = configManager.getCompactionLimit(selectedProvider);
+    setCompactionLimit(savedLimit ? String(savedLimit) : '');
   }, [selectedProvider]);
 
   // Persist separate chat model setting
@@ -451,6 +463,51 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
             />
           </div>
         </>
+      )}
+
+      {/* Auto-Compaction */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Auto-compact</div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Summarize conversation history when approaching the context limit
+          </p>
+        </div>
+        <Switch
+          id="compaction-enabled"
+          checked={compactionEnabled}
+          onCheckedChange={(checked) => {
+            setCompactionEnabled(checked);
+            configManager.setCompactionEnabled(selectedProvider, checked);
+          }}
+        />
+      </div>
+
+      {compactionEnabled && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">
+            Compaction limit (tokens)
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Leave empty for automatic detection (model default or 128K fallback).
+          </p>
+          <input
+            type="number"
+            value={compactionLimit}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCompactionLimit(val);
+              const num = parseInt(val, 10);
+              configManager.setCompactionLimit(
+                selectedProvider,
+                isNaN(num) || num <= 0 ? undefined : num
+              );
+            }}
+            placeholder="e.g. 128000"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            min={1}
+          />
+        </div>
       )}
 
       </div>{/* end scrollable content */}

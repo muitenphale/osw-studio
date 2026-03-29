@@ -1,6 +1,26 @@
 import { skillsService } from '@/lib/vfs/skills';
 import type { AgentType } from './agent';
 
+/**
+ * Prompt appended as a user message when requesting conversation compaction.
+ * Instructs the model to produce a structured summary for context continuation.
+ */
+export const COMPACTION_PROMPT = `You have been working on a coding task but have not yet completed it.
+The conversation history is approaching the context limit and needs to be summarized.
+
+Write a continuation summary that will allow you to resume work efficiently.
+The conversation history will be replaced with this summary. Include:
+
+1. **Current task**: What the user asked for and the overall goal
+2. **What was accomplished**: Files created/modified, key decisions made, approaches taken
+3. **Current state**: Where you left off, what's working, what's not
+4. **What remains**: Next steps, unresolved issues, pending work
+5. **Key context**: Important file paths, error messages, or technical details needed to continue
+
+Be structured and concise. Focus on actionable information needed to continue the work.
+Do not include pleasantries or meta-commentary about the summarization process.
+Respond in plain text only. Do not call any tools or functions.`;
+
 // Server context metadata type (matches VFS.getServerContextMetadata())
 export interface ServerContextMetadata {
   projectId: string;

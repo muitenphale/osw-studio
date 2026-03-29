@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ models: [] });
     }
 
-    let models: string[] = [];
+    let models: Array<string | { id: string; contextLength: number }> = [];
 
     try {
       switch (provider) {
@@ -36,14 +36,17 @@ export async function POST(request: NextRequest) {
           if (orResponse.ok) {
             const orData = await orResponse.json();
             models = orData.data
-              ?.filter((model: { id: string }) => 
-                model.id.includes('deepseek') || 
-                model.id.includes('qwen') || 
+              ?.filter((model: { id: string }) =>
+                model.id.includes('deepseek') ||
+                model.id.includes('qwen') ||
                 model.id.includes('claude') ||
                 model.id.includes('gpt') ||
                 model.id.includes('llama')
               )
-              ?.map((model: { id: string }) => model.id) || [];
+              ?.map((model: { id: string; context_length: number }) => ({
+                id: model.id,
+                contextLength: model.context_length,
+              })) || [];
           }
           break;
 
