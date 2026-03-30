@@ -9,12 +9,16 @@
 import { LLMMessage, ContentBlock, TextContentBlock, ImageContentBlock } from './types';
 import { logger } from '@/lib/utils';
 
-// --- Package imports (cherry-picked utilities) ---
-import { decodeJWT } from '@spmurrayzzz/opencode-openai-codex-auth/dist/lib/auth/auth.js';
-import { createCodexHeaders, handleErrorResponse } from '@spmurrayzzz/opencode-openai-codex-auth/dist/lib/request/fetch-helpers.js';
-import { getReasoningConfig } from '@spmurrayzzz/opencode-openai-codex-auth/dist/lib/request/request-transformer.js';
-import { getNormalizedModel } from '@spmurrayzzz/opencode-openai-codex-auth/dist/lib/request/helpers/model-map.js';
-import { CODEX_BASE_URL, JWT_CLAIM_PATH } from '@spmurrayzzz/opencode-openai-codex-auth/dist/lib/constants.js';
+// --- Vendored Codex utilities (avoids bundling the full package with fs/path side effects) ---
+import {
+  decodeJWT,
+  createCodexHeaders,
+  handleErrorResponse,
+  getReasoningConfig,
+  getNormalizedModel,
+  CODEX_BASE_URL,
+  JWT_CLAIM_PATH,
+} from './codex-utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -203,7 +207,8 @@ export function getCodexAccountId(accessToken: string): string {
   if (!decoded) {
     throw new Error('Failed to decode Codex access token');
   }
-  const accountId = decoded?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
+  const claims = decoded?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;
+  const accountId = claims?.chatgpt_account_id as string | undefined;
   if (!accountId) {
     throw new Error('Failed to extract chatgpt_account_id from token');
   }

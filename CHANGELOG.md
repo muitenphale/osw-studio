@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.48.1 - 2026-03-30
+
+- **Vendor Codex utilities**: Replaced `@spmurrayzzz/opencode-openai-codex-auth` package dependency with vendored `codex-utils.ts` containing only the 5 functions we use (`decodeJWT`, `createCodexHeaders`, `handleErrorResponse`, `getReasoningConfig`, `getNormalizedModel`). The package's module graph pulled in `fs`, `path`, `fileURLToPath`, and prompt-caching logic that baked absolute local paths (`file:///Users/otto/Desktop/...`) into the Next.js standalone build — breaking HuggingFace deployments where those paths don't exist
+
 ## v1.48.0 - 2026-03-30
 
 Automatic conversation compaction for long-running agentic sessions, Codex vision support, and provider test harness improvements.
