@@ -15,6 +15,7 @@ type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'deployments' | 
 interface PageWrapperProps {
   view: View;
   settingsTab?: 'model' | 'application';
+  autoCreateProject?: boolean;
 }
 
 const VIEW_ROUTES: Record<string, string> = {
@@ -27,7 +28,7 @@ const VIEW_ROUTES: Record<string, string> = {
   settings: '/admin/settings',
 };
 
-function PageWrapperInner({ view, settingsTab }: PageWrapperProps) {
+function PageWrapperInner({ view, settingsTab, autoCreateProject }: PageWrapperProps) {
   const router = useRouter();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showAboutModal, setShowAboutModal] = useState(false);
@@ -48,6 +49,7 @@ function PageWrapperInner({ view, settingsTab }: PageWrapperProps) {
       onProjectSelect={setSelectedProject}
       settingsTab={settingsTab}
       onNavigate={handleNavigate}
+      autoCreateProject={autoCreateProject}
     />
   );
 
@@ -71,10 +73,10 @@ function PageWrapperInner({ view, settingsTab }: PageWrapperProps) {
   );
 }
 
-export function PageWrapper({ view, settingsTab }: PageWrapperProps) {
+export function PageWrapper({ view, settingsTab, autoCreateProject }: PageWrapperProps) {
   return (
     <GuidedTourProvider>
-      <PageWrapperInner view={view} settingsTab={settingsTab} />
+      <PageWrapperInner view={view} settingsTab={settingsTab} autoCreateProject={autoCreateProject} />
     </GuidedTourProvider>
   );
 }

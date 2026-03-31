@@ -317,6 +317,11 @@ Build command (run after writing files):
 Returns "Build successful — 0 errors" or lists compilation errors.
 Run build after writing a batch of files to verify they compile. Do not inspect bundle.js or grep compiled output — use build instead.
 
+Runtime command (change project runtime):
+  shell({ cmd: "runtime react" })
+Valid runtimes: static, handlebars, react, preact, svelte, vue, python, lua.
+Changes the project runtime and updates .PROMPT.md if it hasn't been customized.
+
 Status command (always run before finishing):
   shell({ cmd: "status --task 'the original request' --done 'work completed' --remaining 'none' --complete" })
 End with --complete when done, or --incomplete if more work remains.

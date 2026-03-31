@@ -64,7 +64,7 @@ export class ToolRegistry {
         name: 'shell',
         description: `Run shell commands in the virtual file system.
 
-Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, ss, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status, delegate.
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, ss, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status, delegate, runtime.
 Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), chaining (&&, ||, ;), and brace expansion ({a,b,c}) are supported.
 Run scripts: python <file>, lua <file>. Show output in preview: preview <path>.
 
@@ -243,7 +243,7 @@ One command at a time as a single string.`,
     if (!tool) {
       // Auto-route known shell commands called as standalone tools
       // LLMs sometimes call "cat", "curl", "grep" etc. as tool names instead of using shell
-      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview', 'build', 'status', 'delegate'];
+      const shellCommands = ['ls', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc', 'curl', 'sqlite3', 'python', 'python3', 'lua', 'preview', 'build', 'status', 'delegate', 'runtime'];
 
       // Map common "read file" tool names to cat
       const readAliases: Record<string, string> = {

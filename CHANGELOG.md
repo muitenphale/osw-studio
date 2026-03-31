@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.49.0 - 2026-03-31
+
+### `runtime` Shell Command
+
+- **Runtime switching from AI**: New `runtime <name>` shell command lets the AI change the project's runtime programmatically. Validates against the 8 supported runtimes (`static`, `handlebars`, `react`, `preact`, `svelte`, `vue`, `python`, `lua`). Updates `project.settings.runtime` via VFS and replaces `.PROMPT.md` with the new runtime's domain prompt if the current one is a default (leaves custom prompts untouched). Registered in the system prompt, tool registry, tool analytics whitelist, and known shell commands list
+
+### AI Project Setup
+
+- **AI-bootstrapped projects**: New "AI Project Setup" template available in the create project dialog. Instead of manually choosing a runtime and template, the user describes what they want and the AI handles everything — picks the best runtime via the `runtime` command, writes a tailored `.PROMPT.md` with project-specific instructions, creates the folder structure, and proceeds to build. The setup-phase `.PROMPT.md` includes a concise runtime guide and a draft-then-finalize workflow for the project prompt
+- **Template UI**: "AI Project Setup" appears as the first option in the template dropdown for all runtimes. An "AI Project Setup" link in the template label row provides a shortcut. Selected template description shown in a bordered box below the dropdown
+
+### Fixes
+
+- **Fix dashboard "New Project" button**: Clicking "New Project" on the dashboard navigated to the projects page but didn't open the create dialog — both "New Project" and "Projects" buttons triggered the same action. Now passes an `autoCreate` flag through the component chain so the create dialog opens automatically on arrival
+
 ## v1.48.1 - 2026-03-30
 
 - **Vendor Codex utilities**: Replaced `@spmurrayzzz/opencode-openai-codex-auth` package dependency with vendored `codex-utils.ts` containing only the 5 functions we use (`decodeJWT`, `createCodexHeaders`, `handleErrorResponse`, `getReasoningConfig`, `getNormalizedModel`). The package's module graph pulled in `fs`, `path`, `fileURLToPath`, and prompt-caching logic that baked absolute local paths (`file:///Users/otto/Desktop/...`) into the Next.js standalone build — breaking HuggingFace deployments where those paths don't exist

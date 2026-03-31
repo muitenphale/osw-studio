@@ -229,6 +229,13 @@ function QuickActionsBar({
   const projectsListHref = isServerMode ? '/admin/projects' : '#';
   const docsHref = isServerMode ? '/admin/docs' : '#';
 
+  const handleNewProjectClick = (e: React.MouseEvent) => {
+    if (!isServerMode && onNavigate) {
+      e.preventDefault();
+      onNavigate('projects:create');
+    }
+  };
+
   const handleProjectsClick = (e: React.MouseEvent) => {
     if (!isServerMode && onNavigate) {
       e.preventDefault();
@@ -247,7 +254,7 @@ function QuickActionsBar({
     <div className="bg-card rounded-xl border border-zinc-800 p-4 mb-6">
       <div className="flex flex-wrap gap-2">
         <Button variant="default" size="sm" asChild className="gap-1.5">
-          <Link href={projectsHref} onClick={handleProjectsClick}>
+          <Link href={projectsHref} onClick={handleNewProjectClick}>
             <Plus className="w-4 h-4" />
             New Project
           </Link>

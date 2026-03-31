@@ -25,6 +25,7 @@ function StudioInner() {
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [currentView, setCurrentView] = useState<'dashboard' | 'projects' | 'deployments' | 'templates' | 'skills' | 'docs' | 'settings'>('dashboard');
+  const [autoCreateProject, setAutoCreateProject] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showTelemetryDisclosure, setShowTelemetryDisclosure] = useState(false);
   const { state, setActiveProjectId, start: startTour } = useGuidedTour();
@@ -167,7 +168,13 @@ function StudioInner() {
   }, [isTourRunning, stepId, selectedProject, state.projectList, state.tourDemoProjectId]);
 
   const handleNavigate = useCallback((view: string) => {
-    setCurrentView(view as typeof currentView);
+    if (view === 'projects:create') {
+      setCurrentView('projects');
+      setAutoCreateProject(true);
+    } else {
+      setCurrentView(view as typeof currentView);
+      setAutoCreateProject(false);
+    }
   }, []);
 
   const handleStartTour = useCallback(() => {
@@ -202,9 +209,10 @@ function StudioInner() {
         }}
         onNavigate={handleNavigate}
         onStartTour={handleStartTour}
+        autoCreateProject={autoCreateProject}
       />
     );
-  }, [selectedProject, currentView, handleNavigate, handleStartTour]);
+  }, [selectedProject, currentView, handleNavigate, handleStartTour, autoCreateProject]);
 
   return (
     <>

@@ -1178,7 +1178,7 @@ export class MultiAgentOrchestrator {
           'ls', 'tree', 'cat', 'head', 'tail', 'rg', 'grep', 'find',
           'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc',
           'sort', 'uniq', 'tr', 'curl', 'sqlite3', 'python', 'python3',
-          'lua', 'preview', 'build', 'status', 'delegate'
+          'lua', 'preview', 'build', 'status', 'delegate', 'runtime'
         ]);
         let errorMsg: string;
         if (toolId === 'ss') {

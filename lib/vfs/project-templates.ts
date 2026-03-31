@@ -15,6 +15,7 @@ export interface ProjectTemplate {
 
 // Re-export all templates and utilities from the modular structure
 export {
+  AI_SETUP_PROJECT_TEMPLATE,
   DEMO_PROJECT_TEMPLATE,
   BAREBONES_PROJECT_TEMPLATE,
   HANDLEBARS_STARTER_PROJECT_TEMPLATE,

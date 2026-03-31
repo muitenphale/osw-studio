@@ -17,6 +17,7 @@ interface ContentAreaProps {
   settingsTab?: 'model' | 'application';
   onNavigate?: (view: string) => void;
   onStartTour?: () => void;
+  autoCreateProject?: boolean;
 }
 
 export function ContentArea({
@@ -25,6 +26,7 @@ export function ContentArea({
   settingsTab,
   onNavigate,
   onStartTour,
+  autoCreateProject,
 }: ContentAreaProps) {
   // Handler to select a project by ID (for dashboard recent projects click)
   const handleProjectSelectById = async (projectId: string) => {
@@ -52,7 +54,7 @@ export function ContentArea({
         />
       );
     case 'projects':
-      return <ProjectsView onProjectSelect={onProjectSelect} />;
+      return <ProjectsView onProjectSelect={onProjectSelect} autoCreate={autoCreateProject} />;
     case 'deployments':
       return <DeploymentsView onProjectSelect={onProjectSelect} />;
     case 'templates':

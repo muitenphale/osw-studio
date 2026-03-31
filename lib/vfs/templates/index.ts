@@ -1,5 +1,6 @@
 export { DEMO_PROJECT_TEMPLATE } from './demo';
 export { BAREBONES_PROJECT_TEMPLATE } from './barebones';
+export { AI_SETUP_PROJECT_TEMPLATE } from './ai-setup';
 export { HANDLEBARS_STARTER_PROJECT_TEMPLATE } from './handlebars-starter';
 export { CONTACT_LANDING_PROJECT_TEMPLATE } from './contact-landing';
 export { BLOG_PROJECT_TEMPLATE } from './blog';

@@ -37,6 +37,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import {
+  AI_SETUP_PROJECT_TEMPLATE,
   BAREBONES_PROJECT_TEMPLATE,
   HANDLEBARS_STARTER_PROJECT_TEMPLATE,
   DEMO_PROJECT_TEMPLATE,
@@ -78,12 +79,13 @@ interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
   hideHeader?: boolean; // Hide header when used in PageLayout
   hideFooter?: boolean; // Hide footer when used in PageLayout
+  autoCreate?: boolean; // Auto-open create dialog when navigating from dashboard
 }
 
 type SortOption = 'updated' | 'created' | 'name';
 type ViewMode = 'grid' | 'list';
 
-export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false }: ProjectManagerProps) {
+export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false, autoCreate = false }: ProjectManagerProps) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +96,13 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [newProjectTemplate, setNewProjectTemplate] = useState<string>('blank');
   const [newProjectRuntime, setNewProjectRuntime] = useState<ProjectRuntime>('static');
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
+
+  // Auto-open create dialog when navigated from dashboard "New Project"
+  useEffect(() => {
+    if (autoCreate) {
+      setCreateDialogOpen(true);
+    }
+  }, [autoCreate]);
 
   // Helper to get template name from ID for display
   const getTemplateDisplayName = (templateId: string): string => {
@@ -315,6 +324,12 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       } else {
         // Built-in template
         switch (newProjectTemplate) {
+          case 'ai-setup':
+            // AI Setup always starts as static — the AI changes it via `runtime` command
+            finalProject.settings = { ...finalProject.settings, runtime: 'static' };
+            await vfs.updateProject(finalProject);
+            await createProjectFromTemplate(vfs, finalProject.id, AI_SETUP_PROJECT_TEMPLATE);
+            break;
           case 'handlebars-starter':
             await createProjectFromTemplate(vfs, finalProject.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
             break;
@@ -774,17 +789,41 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
               <p className="text-xs text-muted-foreground mt-1.5">You can change this later in project settings.</p>
             </div>
             <div>
-              <Label htmlFor="template">Template</Label>
+              <div className="flex justify-between items-center">
+                <Label htmlFor="template">Template</Label>
+                {newProjectTemplate !== 'ai-setup' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewProjectRuntime('static');
+                      setNewProjectTemplate('ai-setup');
+                    }}
+                    className="text-xs text-primary underline"
+                  >
+                    AI Project Setup
+                  </button>
+                )}
+              </div>
               <Select
                 value={newProjectTemplate}
-                onValueChange={setNewProjectTemplate}
+                onValueChange={(value) => {
+                  setNewProjectTemplate(value);
+                  // If user manually selects a different template, exit AI Setup
+                  // (runtime stays as-is since user may have changed it)
+                }}
               >
                 <SelectTrigger id="template" className="mt-2 w-full">
                   <div className="truncate flex-1 text-left">
-                    {getTemplateDisplayName(newProjectTemplate)}
+                    {newProjectTemplate === 'ai-setup' ? 'AI Project Setup' : getTemplateDisplayName(newProjectTemplate)}
                   </div>
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ai-setup">
+                    <div className="flex flex-col gap-0.5">
+                      <div className="font-medium">AI Project Setup</div>
+                      <div className="text-xs text-muted-foreground">AI configures runtime and structure</div>
+                    </div>
+                  </SelectItem>
                   {filteredBuiltInTemplates.length > 0 && (
                     <SelectGroup>
                       {filteredBuiltInTemplates.map(template => (
@@ -815,6 +854,20 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                   })()}
                 </SelectContent>
               </Select>
+              {(() => {
+                const allTemplates = [
+                  ...BUILT_IN_TEMPLATES,
+                  ...customTemplates.map(t => ({ ...t, isBuiltIn: false as const }))
+                ];
+                const selected = allTemplates.find(
+                  t => t.id === newProjectTemplate || `custom:${t.id}` === newProjectTemplate
+                );
+                return selected?.description ? (
+                  <div className="mt-1.5 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">{selected.description}</p>
+                  </div>
+                ) : null;
+              })()}
             </div>
             <div>
               <div className="flex justify-between items-center">

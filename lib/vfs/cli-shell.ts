@@ -2403,6 +2403,50 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
           return { stdout: '', stderr: `Build failed: ${err.message}`, exitCode: 1 };
         }
       }
+      case 'runtime': {
+        // Runtime command — change the project's runtime
+        // Usage: runtime static|handlebars|react|preact|svelte|vue|python|lua
+        const VALID_RUNTIMES = ['static', 'handlebars', 'react', 'preact', 'svelte', 'vue', 'python', 'lua'];
+        const requested = args[0]?.toLowerCase();
+        if (!requested || !VALID_RUNTIMES.includes(requested)) {
+          return {
+            stdout: '',
+            stderr: `Usage: runtime <name>\nValid runtimes: ${VALID_RUNTIMES.join(', ')}`,
+            exitCode: 1
+          };
+        }
+        try {
+          const proj = await vfs.getProject(projectId);
+          if (!proj) {
+            return { stdout: '', stderr: 'Project not found', exitCode: 1 };
+          }
+          const currentRuntime = proj.settings?.runtime || 'static';
+          if (currentRuntime === requested) {
+            return { stdout: `Runtime already set to ${requested}`, stderr: '', exitCode: 0 };
+          }
+          const runtime = requested as import('@/lib/vfs/types').ProjectRuntime;
+          proj.settings = { ...proj.settings, runtime };
+          await vfs.updateProject(proj);
+
+          // Update .PROMPT.md to match the new runtime's domain prompt
+          const { getDomainPrompt, isDefaultDomainPrompt } = await import('@/lib/llm/prompts');
+          const newPrompt = getDomainPrompt(runtime);
+          try {
+            const existing = await vfs.readFile(projectId, '/.PROMPT.md');
+            if (isDefaultDomainPrompt(typeof existing.content === 'string' ? existing.content : '')) {
+              await vfs.updateFile(projectId, '/.PROMPT.md', newPrompt);
+            }
+            // If custom, leave it alone — the AI is managing .PROMPT.md
+          } catch {
+            // .PROMPT.md doesn't exist — create it
+            await vfs.createFile(projectId, '/.PROMPT.md', newPrompt);
+          }
+
+          return { stdout: `Runtime changed to ${requested}`, stderr: '', exitCode: 0 };
+        } catch (err: any) {
+          return { stdout: '', stderr: `Failed to change runtime: ${err.message}`, exitCode: 1 };
+        }
+      }
       case 'status': {
         // Status pseudo-command
         // Usage: status --task "..." --done "..." --remaining "..." --complete
