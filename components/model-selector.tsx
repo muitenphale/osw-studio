@@ -329,7 +329,11 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
       configManager.setProviderModel(currentProvider, modelId);
     }
     onChange?.(modelId);
-    track('model_selected', { provider: currentProvider, model: modelId });
+    track('model_selected', {
+      provider: currentProvider,
+      model: modelId,
+      previous_model: selectedModel !== modelId ? selectedModel : undefined,
+    });
     if (mode === 'popover') {
       setOpen(false);
       setSearchQuery('');

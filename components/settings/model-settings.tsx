@@ -97,7 +97,7 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
   const handleProviderChange = (provider: ProviderId) => {
     setSelectedProvider(provider);
     configManager.setSelectedProvider(provider);
-    track('provider_selected', { provider });
+    track('provider_selected', { provider, has_api_key: !!configManager.getProviderApiKey(provider) });
   };
 
   const handleApiKeyChange = (key: string) => {

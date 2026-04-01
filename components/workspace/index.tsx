@@ -982,7 +982,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
     setGenerating(true);
     window.dispatchEvent(new CustomEvent('generationStateChanged', { detail: { generating: true } }));
-    track('task_started', { provider: currentProvider, model: modelToUse });
+    const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    track('task_started', { provider: currentProvider, model: modelToUse, task_id: taskId });
     const taskStartTime = Date.now();
     const messageContent = focusContext
       ? `${formatFocusContextBlock(focusContext)}\n\n${trimmedPrompt}`
@@ -1046,14 +1047,22 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           provider: currentProvider,
           model: modelToUse,
           duration_ms: Date.now() - taskStartTime,
+          task_id: taskId,
+          tool_count: result.toolCount ?? 0,
+          turn_count: result.turnCount ?? 0,
+          api_error_count: result.apiErrorCount ?? 0,
         });
         toast.success('Task completed');
       } else {
         track('task_fail', {
           provider: currentProvider,
           model: modelToUse,
-          reason: 'error',
+          reason: 'api_error',
           duration_ms: Date.now() - taskStartTime,
+          task_id: taskId,
+          tool_count: result.toolCount ?? 0,
+          turn_count: result.turnCount ?? 0,
+          api_error_count: result.apiErrorCount ?? 0,
         });
         toast.error(result.summary || 'Generation failed', {
           duration: 5000,
@@ -1072,8 +1081,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       track('task_fail', {
         provider: currentProvider,
         model: modelToUse,
-        reason: 'error',
+        reason: 'api_error',
         duration_ms: Date.now() - taskStartTime,
+        task_id: taskId,
       });
 
       // Emit error event to clear thinking indicator in chat panel

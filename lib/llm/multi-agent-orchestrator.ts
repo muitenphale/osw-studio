@@ -141,6 +141,12 @@ export interface MultiAgentResult {
   totalCost: number;
   totalUsage: UsageInfo;
   checkpointId?: string;
+  /** Telemetry: number of tool calls executed */
+  toolCount?: number;
+  /** Telemetry: number of LLM turns (iterations) completed */
+  turnCount?: number;
+  /** Telemetry: number of API errors encountered (including retried ones) */
+  apiErrorCount?: number;
 }
 
 /**
@@ -180,7 +186,10 @@ export class MultiAgentOrchestrator {
   private readonly malformedThresholdForReminder = 3; // After this many total failures, add persistent reminder
   private compactionCount = 0;
   private lastKnownPromptTokens = 0;
-  private pauseResolve: (() => void) | null = null; // Resolves when user clicks Continue after an error pause
+  private pauseResolve: (() => void) | null = null;
+  private toolCallCount = 0; // Telemetry: total tool calls executed
+  private turnCount = 0; // Telemetry: total LLM turns completed
+  private apiErrorCount = 0; // Telemetry: total API errors encountered
 
   private static readonly AUTO_COMPACT_THRESHOLD = 0.80; // Compact at 80% of limit
   private static readonly RECENT_KEEP_RATIO = 0.20; // Keep 20% of recent messages verbatim
@@ -416,7 +425,10 @@ export class MultiAgentOrchestrator {
         summary: 'Task completed',
         conversation: Array.from(this.conversations.values()),
         totalCost: this.totalCost,
-        totalUsage: this.totalUsage
+        totalUsage: this.totalUsage,
+        toolCount: this.toolCallCount,
+        turnCount: this.turnCount,
+        apiErrorCount: this.apiErrorCount,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -436,7 +448,10 @@ export class MultiAgentOrchestrator {
         summary: `Error: ${errorMessage}`,
         conversation: Array.from(this.conversations.values()),
         totalCost: this.totalCost,
-        totalUsage: this.totalUsage
+        totalUsage: this.totalUsage,
+        toolCount: this.toolCallCount,
+        turnCount: this.turnCount,
+        apiErrorCount: this.apiErrorCount,
       };
     }
   }
@@ -1350,6 +1365,7 @@ Please revise your approach.`;
           ...(isError && { error: result })
         });
 
+        this.toolCallCount++;
         track('tool_call', extractToolAnalytics(toolCall.function.name, toolCall.function.arguments, !isError));
 
         this.onProgress?.('tool_result', {
@@ -1373,6 +1389,7 @@ Please revise your approach.`;
           error: errorMessage
         });
 
+        this.toolCallCount++;
         track('tool_call', extractToolAnalytics(toolCall.function.name, toolCall.function.arguments, false));
       }
     }
@@ -1455,7 +1472,7 @@ Please revise your approach.`;
       else if (status >= 500 || status === 529) errorType = 'server';
       else if (status === 400) errorType = 'invalid_request';
 
-      track('api_error', { provider, model, error_type: errorType, status_code: status });
+      this.apiErrorCount++;
 
       let errorMessage = `API call failed: ${response.statusText}`;
       try {
@@ -1466,6 +1483,29 @@ Please revise your approach.`;
             : (errorData.error.message || JSON.stringify(errorData.error));
         }
       } catch {}
+
+      // Classify error for telemetry (privacy-safe enum, no response text)
+      const lowerMsg = errorMessage.toLowerCase();
+      let errorCategory = 'unknown';
+      if (status === 402 || (status === 429 && (lowerMsg.includes('credit') || lowerMsg.includes('usage') || lowerMsg.includes('limit') || lowerMsg.includes('exceeded') || lowerMsg.includes('quota')))) {
+        errorCategory = 'credit_exhausted';
+      } else if (status === 429) {
+        errorCategory = 'rate_limited';
+      } else if ((status === 400 || status === 404) && (lowerMsg.includes('not found') || lowerMsg.includes('does not exist') || lowerMsg.includes('invalid model'))) {
+        errorCategory = 'model_not_found';
+      } else if (status === 400 && (lowerMsg.includes('too long') || lowerMsg.includes('too many tokens') || lowerMsg.includes('too large') || lowerMsg.includes('context length'))) {
+        errorCategory = 'context_too_long';
+      } else if (status === 400 && (lowerMsg.includes('tool') || lowerMsg.includes('function call'))) {
+        errorCategory = 'tool_not_supported';
+      } else if (status === 401 || status === 403) {
+        errorCategory = 'auth_expired';
+      } else if (status >= 500 || status === 529) {
+        errorCategory = 'server_error';
+      } else if (status === 400) {
+        errorCategory = 'invalid_request';
+      }
+
+      track('api_error', { provider, model, error_type: errorType, error_category: errorCategory, status_code: status });
 
       // Emit error_paused event and wait for user to continue or stop
       logger.warn(`[MultiAgentOrchestrator] API error (${status}): ${errorMessage}`);
@@ -1492,6 +1532,7 @@ Please revise your approach.`;
       return this.streamLLMResponse(messages, agent);
     }
 
+    this.turnCount++;
     return this.parseStreamingResponseWithTracking(response, provider, model);
   }
 

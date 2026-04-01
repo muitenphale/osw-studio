@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.50.1 - 2026-04-02
+
+### Telemetry Improvements
+
+- **Task ID linking**: Each task now gets a random UUID (`task_id`) passed through `task_started`, `task_complete`, `task_fail`, and `api_error` events. Enables tracing the full lifecycle of a single task including how many API errors occur before completion or failure
+- **Error category classification**: `api_error` events now include an `error_category` enum: `credit_exhausted`, `rate_limited`, `model_not_found`, `context_too_long`, `tool_not_supported`, `auth_expired`, `server_error`, `invalid_request`, `unknown`. Classified from status code and response keywords without leaking error body text
+- **Task fail reasons**: `task_fail` reason changed from generic `'error'` to `'api_error'` for provider failures. `'stopped'` already existed for user cancellation
+- **Task complexity metrics**: `task_complete` and `task_fail` events now include `tool_count`, `turn_count`, and `api_error_count` — tracked by the orchestrator throughout the task lifecycle
+- **Provider selection context**: `provider_selected` now includes `has_api_key` (boolean). `model_selected` now includes `previous_model` when the selection changes
+
 ## v1.50.0 - 2026-04-01
 
 Error recovery, provider error handling overhaul, and default model change.
