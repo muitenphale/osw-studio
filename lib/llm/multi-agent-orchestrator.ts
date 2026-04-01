@@ -180,6 +180,7 @@ export class MultiAgentOrchestrator {
   private readonly malformedThresholdForReminder = 3; // After this many total failures, add persistent reminder
   private compactionCount = 0;
   private lastKnownPromptTokens = 0;
+  private pauseResolve: (() => void) | null = null; // Resolves when user clicks Continue after an error pause
 
   private static readonly AUTO_COMPACT_THRESHOLD = 0.80; // Compact at 80% of limit
   private static readonly RECENT_KEEP_RATIO = 0.20; // Keep 20% of recent messages verbatim
@@ -208,11 +209,29 @@ export class MultiAgentOrchestrator {
   }
 
   /**
+   * Resume execution after an error pause.
+   * Called when the user clicks "Continue" after fixing the issue.
+   */
+  continue(): void {
+    if (this.pauseResolve) {
+      // Create a fresh AbortController since the old one may have been aborted
+      this.abortController = new AbortController();
+      this.pauseResolve();
+      this.pauseResolve = null;
+    }
+  }
+
+  /**
    * Stop execution
    */
   stop(): void {
     this.stopped = true;
     this.abortController.abort();
+    // Also resolve any pending pause so the loop can exit
+    if (this.pauseResolve) {
+      this.pauseResolve();
+      this.pauseResolve = null;
+    }
     // Propagate stop to all running sub-orchestrators
     for (const sub of this.activeSubOrchestrators) {
       sub.stop();
@@ -1433,7 +1452,7 @@ Please revise your approach.`;
       let errorType = 'unknown';
       if (status === 429) errorType = 'rate_limit';
       else if (status === 401 || status === 403) errorType = 'auth';
-      else if (status >= 500) errorType = 'server';
+      else if (status >= 500 || status === 529) errorType = 'server';
       else if (status === 400) errorType = 'invalid_request';
 
       track('api_error', { provider, model, error_type: errorType, status_code: status });
@@ -1447,7 +1466,30 @@ Please revise your approach.`;
             : (errorData.error.message || JSON.stringify(errorData.error));
         }
       } catch {}
-      throw new Error(errorMessage);
+
+      // Emit error_paused event and wait for user to continue or stop
+      logger.warn(`[MultiAgentOrchestrator] API error (${status}): ${errorMessage}`);
+      this.onProgress?.('error_paused', {
+        message: errorMessage,
+        status,
+        errorType,
+        provider,
+        model,
+      });
+
+      // Wait for user to click Continue or Stop
+      await new Promise<void>(resolve => {
+        this.pauseResolve = resolve;
+      });
+
+      // After resume: if user clicked Stop, let the loop's stop check handle it.
+      // If user clicked Continue, retry the LLM call by returning a sentinel.
+      if (this.stopped) {
+        throw new Error('Stopped by user');
+      }
+
+      // Retry: recursive call to streamLLMResponse with the same messages
+      return this.streamLLMResponse(messages, agent);
     }
 
     return this.parseStreamingResponseWithTracking(response, provider, model);
@@ -1774,21 +1816,20 @@ Please revise your approach.`;
   /**
    * Handle retry notifications
    */
-  private handleRetry(attempt: number, delay: number) {
-    const message = `Rate limited. Retry attempt ${attempt} in ${delay/1000}s...`;
+  private handleRetry(attempt: number, delay: number, status?: number) {
+    const reason = status === 429 ? 'Rate limited' : `Server error (${status || 'unknown'})`;
+    const message = `${reason}. Retry attempt ${attempt} in ${delay/1000}s...`;
     logger.warn(message);
 
-    // Emit retry event for debug panel
     this.onProgress?.('retry', {
       attempt,
       delay,
-      reason: 'Rate limited',
+      reason,
       message
     });
 
     toast.info(message, {
       duration: delay > 2000 ? delay - 500 : 2000,
-      description: 'Waiting for rate limit to reset'
     });
   }
 
@@ -1838,12 +1879,15 @@ Please revise your approach.`;
     url: string,
     options: RequestInit,
     maxRetries: number = 3,
-    onRetry?: (attempt: number, delay: number) => void
+    onRetry?: (attempt: number, delay: number, status: number) => void
   ): Promise<Response> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const response = await fetch(url, { ...options, signal: this.abortController.signal });
 
-      if (response.status !== 429) {
+      // Retry on rate limits (429), transient server errors (502, 504), and Anthropic overloaded (529)
+      // Note: 503 is NOT retried — OpenRouter uses it for "no provider available" which is not transient
+      const retryableStatus = response.status === 429 || response.status === 502 || response.status === 504 || response.status === 529;
+      if (!retryableStatus) {
         return response;
       }
 
@@ -1855,7 +1899,7 @@ Please revise your approach.`;
       const parsed = retryAfter ? parseInt(retryAfter) : NaN;
       const delay = !isNaN(parsed) ? parsed * 1000 : Math.pow(2, attempt) * 1000;
 
-      onRetry?.(attempt + 1, delay);
+      onRetry?.(attempt + 1, delay, response.status);
       await sleep(delay);
     }
 

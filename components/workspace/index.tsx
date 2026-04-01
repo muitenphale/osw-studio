@@ -1104,6 +1104,13 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     }
   }, [currentOrchestrator]);
 
+  const handleContinue = useCallback(() => {
+    if (currentOrchestrator) {
+      currentOrchestrator.continue();
+      toast.info('Resuming task...');
+    }
+  }, [currentOrchestrator]);
+
   const handleSendRuntimeErrors = useCallback(() => {
     const errors = drainRuntimeErrors();
     if (errors.length === 0) return;
@@ -1509,6 +1516,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   generating={generating}
                   onGenerate={handleGenerate}
                   onStop={handleStop}
+                  onContinue={handleContinue}
                   focusContext={focusContext}
                   setFocusContext={setFocusContext}
                   focusPreviewSnippet={focusPreviewSnippet}
@@ -1680,6 +1688,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 generating={generating}
                 onGenerate={handleGenerate}
                 onStop={handleStop}
+                onContinue={handleContinue}
                 focusContext={focusContext}
                 setFocusContext={setFocusContext}
                 focusPreviewSnippet={focusPreviewSnippet}

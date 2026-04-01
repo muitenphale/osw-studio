@@ -6,6 +6,26 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.50.0 - Error Recovery (2026-04-01)
+
+API errors no longer kill your task. Rate limits, expired keys, and server errors now pause the task instead of ending it.
+
+- **Continue After Errors** - When an API call fails mid-task, the chat shows the error with a Continue link. Fix the issue (wait for rate limits, add credits, update your key in Settings) and click Continue to pick up where you left off. No progress is lost. If it fails again, it pauses again — you can keep retrying
+- **Better Error Messages** - Every provider now gets clear, actionable error messages instead of raw API errors. Auth failures tell you to check your key or reconnect. Credit exhaustion links to your provider's billing page. Model not found suggests switching in Settings. Tool support errors recommend MiniMax M2.7
+- **Smarter Retries** - Server errors (502, 504) and Anthropic overloaded (529) are now automatically retried with backoff, in addition to rate limits (429)
+- **MiniMax M2.7 Default** - OpenRouter default model changed to MiniMax M2.7
+
+---
+
+## v1.49.0 - AI Project Setup (2026-03-31)
+
+New way to start a project: describe what you want and the AI handles the setup.
+
+- **AI Project Setup** - New template option in the create project dialog. Instead of picking a runtime and template manually, describe your project and the AI chooses the best runtime, creates the file structure, and writes tailored project instructions. Available via the "AI Project Setup" link next to the Template selector, or as the first option in the template dropdown
+- **`runtime` Command** - The AI can now switch the project's runtime (Static, React, Svelte, Vue, Python, Lua, etc.) on the fly. This powers the AI Project Setup flow but is also available in any project
+
+---
+
 ## v1.48.0 - Auto-Compaction (2026-03-30)
 
 Long AI coding sessions no longer silently fail when the conversation gets too large. The AI now automatically summarizes older context when approaching the model's limit, keeping recent work intact while freeing up space to continue.

@@ -568,21 +568,63 @@ Habits:
         if (rateLimitReset) rateLimitHeaders['X-RateLimit-Reset'] = rateLimitReset;
         if (rateLimitRemaining) rateLimitHeaders['X-RateLimit-Remaining'] = rateLimitRemaining;
       }
-      // HuggingFace credit exhaustion
-      if (selectedProvider === 'huggingface' && (
-        cleanError.includes('exceeded your monthly included credits') ||
-        cleanError.includes('reached the free monthly usage limit') ||
-        cleanError.includes('rate limit') ||
-        response.status === 402 ||
-        (response.status === 429 && cleanError.includes('limit'))
-      )) {
+      // --- Provider-specific error handling ---
+      const lowerError = cleanError.toLowerCase();
+
+      // Auth errors — actionable message for all providers
+      if (response.status === 401 || response.status === 403) {
+        const providerName = providerConfig.name;
+        const authHint = providerConfig.usesOAuth
+          ? `Try reconnecting your ${providerName} account in Settings.`
+          : `Check your ${providerName} API key in Settings.`;
         return NextResponse.json(
-          { error: 'HuggingFace free credits exhausted. You get $0.10/month in free inference. Upgrade at huggingface.co/pricing or wait for your credits to reset.' },
+          { error: `${providerName} authentication failed. ${authHint}` },
+          { status: response.status }
+        );
+      }
+
+      // Credit/quota exhaustion (402, or 429 with usage-related keywords)
+      if (response.status === 402 || (response.status === 429 && (
+        lowerError.includes('credit') || lowerError.includes('usage') || lowerError.includes('limit') ||
+        lowerError.includes('exceeded') || lowerError.includes('quota') || lowerError.includes('billing')
+      ))) {
+        if (selectedProvider === 'huggingface') {
+          return NextResponse.json(
+            { error: 'HuggingFace free usage limit reached. You get $0.10/month in free inference. Upgrade at huggingface.co/pricing or wait for your credits to reset.' },
+            { status: 429 }
+          );
+        }
+        if (selectedProvider === 'openrouter') {
+          return NextResponse.json(
+            { error: 'OpenRouter credit limit reached. Add credits at openrouter.ai/credits or switch to a provider with your own API key.' },
+            { status: 429 }
+          );
+        }
+        return NextResponse.json(
+          { error: `${providerConfig.name} usage limit reached. Check your billing or plan at your provider's dashboard.` },
           { status: 429 }
         );
       }
 
-      if (providerConfig.isLocal && cleanError.includes('does not support tools') && tools && tools.length > 0) {
+      // Model not found / removed (400 or 404)
+      if ((response.status === 400 || response.status === 404) && (
+        lowerError.includes('not found') || lowerError.includes('does not exist') ||
+        lowerError.includes('no such model') || lowerError.includes('invalid model')
+      )) {
+        return NextResponse.json(
+          { error: `Model not available on ${providerConfig.name}. It may have been removed or renamed. Try selecting a different model in Settings.` },
+          { status: 400 }
+        );
+      }
+
+      // Tool/function calling not supported (400)
+      if (response.status === 400 && (
+        lowerError.includes('does not support tools') ||
+        (lowerError.includes('tool') && lowerError.includes('not supported')) ||
+        (lowerError.includes('function call') && lowerError.includes('not supported'))
+      )) {
+        // Local providers: fall back to JSON-based tool calling
+        if (providerConfig.isLocal && tools && tools.length > 0) {
         const fallbackSystemPrompt = systemPrompt + `
 
 IMPORTANT: This model doesn't support native function calling, so you must use JSON format for tool calls.
@@ -651,6 +693,28 @@ You can make multiple tool calls in a single response. Always include the tool_c
         return new Response(fallbackResponse.body, {
           headers: fallbackHeaders,
         });
+        }
+        // Non-local providers: actionable error message
+        return NextResponse.json(
+          { error: `This model does not support tool/function calling. Try a different model or switch to OpenRouter with MiniMax M2.7.` },
+          { status: 400 }
+        );
+      }
+
+      // Anthropic overloaded (529) — transient, will be retried by orchestrator
+      if (response.status === 529) {
+        return NextResponse.json(
+          { error: `${providerConfig.name} is temporarily overloaded. The request will be retried automatically.` },
+          { status: 529 }
+        );
+      }
+
+      // OpenRouter 503 — no provider available for this model/routing config
+      if (selectedProvider === 'openrouter' && response.status === 503) {
+        return NextResponse.json(
+          { error: `No provider currently available for this model on OpenRouter. The model may be temporarily down. Try a different model or wait a few minutes.` },
+          { status: 503 }
+        );
       }
 
       return NextResponse.json(

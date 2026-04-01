@@ -1,12 +1,24 @@
 'use client';
 
-import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { PageWrapper } from '@/components/page-wrapper';
 
 function ProjectsPageInner() {
   const searchParams = useSearchParams();
-  const autoCreate = searchParams.get('action') === 'create';
+  const router = useRouter();
+  const consumed = useRef(false);
+
+  const autoCreate = !consumed.current && searchParams.get('action') === 'create';
+
+  // Clear the ?action=create param after consuming it so it doesn't re-trigger
+  useEffect(() => {
+    if (autoCreate && !consumed.current) {
+      consumed.current = true;
+      router.replace('/admin/projects', { scroll: false });
+    }
+  }, [autoCreate, router]);
+
   return <PageWrapper view="projects" autoCreateProject={autoCreate} />;
 }
 

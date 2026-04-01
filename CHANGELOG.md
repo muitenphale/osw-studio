@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.50.0 - 2026-04-01
+
+Error recovery, provider error handling overhaul, and default model change.
+
+### Error Recovery
+
+- **Task pause on API errors**: When an API call fails mid-task, the orchestrator pauses instead of killing the task. The chat shows "Task paused" with the error message and **Continue** / **Cancel** links. The user can fix the issue (wait for rate limits, add credits, fix API key) and click Continue to retry from where the task left off. Multiple consecutive errors each pause independently — the user can keep retrying. When re-opening a project where the last event was an error pause, it renders as a regular "Error" since there's no active task to continue
+- **Recursive retry on continue**: Clicking Continue retries the same LLM call with the existing conversation state. If the retry also fails, it pauses again. The Stop button works at any point during a pause — resolves the pending promise and exits the loop cleanly. A fresh AbortController is created on each continue to avoid stale abort signals
+
+### Provider Error Handling
+
+- **Retry on transient server errors**: `fetchWithRetry` now retries 502, 504 (transient server errors) and 529 (Anthropic overloaded) in addition to 429 rate limits. 503 is not retried — OpenRouter uses it for "no provider available" which is a routing issue, not transient. Same exponential backoff (1s, 2s, 4s) with Retry-After header support. Retry toast now shows the actual error type ("Server error (502)" vs "Rate limited")
+- **Auth errors across all providers**: 401/403 responses now show actionable messages for all providers — OAuth providers prompt reconnecting, API key providers prompt checking the key in Settings. Previously only showed generic "API error: Unauthorized"
+- **Credit/quota exhaustion across providers**: Detected via status 402 or 429 with usage-related keywords. HuggingFace shows pricing info, OpenRouter shows credits link, others get generic billing guidance. Previously only HuggingFace had custom handling
+- **Model not found**: 400/404 with "not found"/"does not exist" keywords now shows "Model not available — try selecting a different model" across all providers
+- **Tool support missing**: 400 with tool-related errors shows actionable message suggesting MiniMax M2.7. Local providers still fall back to JSON-based tool calling
+- **Anthropic 529 overloaded**: Specific message ("temporarily overloaded, will be retried automatically") and added to retry loop
+- **OpenRouter 503**: Specific message ("no provider currently available for this model") instead of generic server error
+
+### Default Model Update
+
+- **MiniMax M2.7 as default**: OpenRouter default model changed from `deepseek/deepseek-chat` to `minimax/minimax-m2.7`. MiniMax direct provider default updated from `MiniMax-M2.5` to `MiniMax-M2.7`
+
+### Fixes
+
+- **Fix "New Project" dialog re-opening**: The `?action=create` URL parameter is now consumed and cleared via `router.replace()` after opening the create dialog, preventing it from re-triggering on subsequent navigations to the projects page
+
 ## v1.49.0 - 2026-03-31
 
 ### `runtime` Shell Command

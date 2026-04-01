@@ -383,7 +383,7 @@ export function getAllProviders(): ProviderConfig[] {
 export function getDefaultModel(provider: ProviderId): string {
   switch (provider) {
     case 'openrouter':
-      return 'deepseek/deepseek-chat';
+      return 'minimax/minimax-m2.7';
     case 'openai':
       return 'gpt-4o-mini';
     case 'openai-codex':
@@ -407,9 +407,9 @@ export function getDefaultModel(provider: ProviderId): string {
     case 'zhipu':
       return 'glm-5';
     case 'minimax':
-      return 'MiniMax-M2.5';
+      return 'MiniMax-M2.7';
     default:
-      return 'deepseek/deepseek-chat';
+      return 'minimax/minimax-m2.7';
   }
 }
 

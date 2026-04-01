@@ -63,6 +63,7 @@ interface ChatPanelProps {
   generating: boolean;
   onGenerate: (images?: PendingImage[]) => void;
   onStop: () => void;
+  onContinue?: () => void;
   // Focus context
   focusContext: FocusTarget | null;
   setFocusContext: (context: FocusTarget | null) => void;
@@ -100,7 +101,7 @@ interface ToolCall {
 
 interface TurnItem {
   id: string;
-  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'user' | 'synthetic_error' | 'project_context' | 'compaction';
+  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'error_paused' | 'user' | 'synthetic_error' | 'project_context' | 'compaction';
   timestamp: number;
   data: any;
   eventId?: string;  // Links item to its source debug event (for coalesced updates)
@@ -164,6 +165,7 @@ export function ChatPanel({
   generating,
   onGenerate,
   onStop,
+  onContinue,
   focusContext,
   setFocusContext,
   focusPreviewSnippet,
@@ -692,6 +694,17 @@ export function ChatPanel({
           state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           break;
 
+        case 'error_paused':
+          state.currentTurn.items.push({
+            id: `item-${state.itemIdCounter++}`,
+            type: 'error_paused',
+            timestamp: event.timestamp,
+            data: event.data
+          });
+          // Remove thinking indicator when error pause arrives
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
+          break;
+
         case 'usage':
           state.currentTurn.usage = {
             ...event.data,
@@ -1012,6 +1025,9 @@ export function ChatPanel({
                   collatedTaskStartTime={collated?.startTime}
                   onRestore={onRestore}
                   onRetry={onRetry}
+                  onContinue={onContinue}
+                  onCancel={onStop}
+                  generating={generating}
                   expandedItems={expandedItems}
                   onToggleExpanded={toggleExpanded}
                 />
@@ -1170,11 +1186,14 @@ interface TurnDisplayProps {
   collatedTaskStartTime?: number;
   onRestore?: (checkpointId: string) => void;
   onRetry?: (checkpointId: string) => void;
+  onContinue?: () => void;
+  onCancel?: () => void;
+  generating?: boolean;
   expandedItems: Set<string>;
   onToggleExpanded: (itemId: string) => void;
 }
 
-function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, onRetry, expandedItems, onToggleExpanded }: TurnDisplayProps) {
+function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, onRetry, onContinue, onCancel, generating, expandedItems, onToggleExpanded }: TurnDisplayProps) {
   return (
     <div className="space-y-2" {...(turn.checkpointId ? { 'data-checkpoint-id': turn.checkpointId } : {})}>
       {/* Render items in chronological order */}
@@ -1325,6 +1344,33 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
                           {item.data.stack}
                         </pre>
                       </details>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+
+          case 'error_paused':
+            return (
+              <div key={item.id} className="text-sm bg-destructive/10 border border-destructive/20 px-3 py-2 rounded">
+                <div className="flex items-start gap-2">
+                  <XCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="font-semibold text-destructive mb-1">{generating ? 'Task paused' : 'Error'}</div>
+                    <div className="text-destructive/90 whitespace-pre-wrap font-mono text-xs">
+                      {item.data?.message || 'An API error occurred.'}
+                    </div>
+                    {generating && (
+                      <div className="mt-2 flex gap-3">
+                        {onContinue && (
+                          <button onClick={onContinue} className="text-xs underline text-primary hover:text-primary/80">
+                            Continue
+                          </button>
+                        )}
+                        <button onClick={onCancel} className="text-xs underline text-muted-foreground hover:text-foreground/80">
+                          Cancel
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
