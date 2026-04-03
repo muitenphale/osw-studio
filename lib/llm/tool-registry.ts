@@ -154,7 +154,7 @@ One command at a time as a single string.`,
 
               const segResult = await executeShellSegment(
                 projectId, segments[i].args, context,
-                i === 0 ? heredocStdin : undefined
+                i === segments.length - 1 ? heredocStdin : undefined
               );
               if (segResult) outputs.push(segResult);
             }

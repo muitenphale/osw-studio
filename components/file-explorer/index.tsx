@@ -14,7 +14,6 @@ import {
   Upload,
   Image,
   Video,
-  X,
   Eye,
   EyeOff,
   Server,
@@ -23,6 +22,7 @@ import {
   ScrollText,
   Play,
 } from 'lucide-react';
+import { PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -686,63 +686,44 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
           }
         }}
       />
-      <div className="p-3 border-b bg-muted/70 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FolderTree 
-            className="h-4 w-4 md:hidden" 
-            style={{ color: 'var(--button-files-active)' }} 
-          />
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Hide file explorer"
-              className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
+      <PanelHeader
+        icon={FolderTree}
+        title="File Explorer"
+        color="var(--button-files-active)"
+        onClose={onClose}
+        panelKey="files"
+        actions={
+          <>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5"
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload files"
             >
-              <FolderTree 
-                className="h-4 w-4 transition-opacity group-hover:opacity-0" 
-                style={{ color: 'var(--button-files-active)' }} 
-              />
-              <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          ) : (
-            <FolderTree 
-              className="hidden h-4 w-4 md:inline-flex" 
-              style={{ color: 'var(--button-files-active)' }} 
-            />
-          )}
-          <h3 className="text-sm font-medium">File Explorer</h3>
-        </div>
-        <div className="flex gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-5 w-5"
-            onClick={() => fileInputRef.current?.click()}
-            title="Upload files"
-          >
-            <Upload className="h-3 w-3" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-5 w-5"
-            onClick={() => handleCreateFile('/')}
-            title="New file"
-          >
-            <File className="h-3 w-3" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-5 w-5"
-            onClick={() => handleCreateDirectory('/')}
-            title="New folder"
-          >
-            <Folder className="h-3 w-3" />
-          </Button>
-        </div>
-      </div>
+              <Upload className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5"
+              onClick={() => handleCreateFile('/')}
+              title="New file"
+            >
+              <File className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5"
+              onClick={() => handleCreateDirectory('/')}
+              title="New folder"
+            >
+              <Folder className="h-3 w-3" />
+            </Button>
+          </>
+        }
+      />
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div 

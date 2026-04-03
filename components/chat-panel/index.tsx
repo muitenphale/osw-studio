@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, DragEvent, Clipboard
 import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X, Brain, Image as ImageIcon } from 'lucide-react';
 import { DebugEvent } from '@/components/debug-panel';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
+import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -936,47 +937,26 @@ export function ChatPanel({
   ) : null;
 
   return (
-    <div className="h-full flex flex-col bg-card border border-border rounded-lg overflow-hidden" data-tour-id="assistant-panel">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border bg-muted/30 shrink-0">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 md:hidden" style={{ color: 'var(--button-assistant-active)' }} />
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Hide chat panel"
-              className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
-            >
-              <MessageSquare
-                className="h-4 w-4 transition-opacity group-hover:opacity-0"
-                style={{ color: 'var(--button-assistant-active)' }}
-              />
-              <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          ) : (
-            <MessageSquare
-              className="hidden h-4 w-4 md:inline-flex"
-              style={{ color: 'var(--button-assistant-active)' }}
-            />
-          )}
-          <span className="font-semibold text-sm">Chat</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {onClearChat && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClearChat}
-              className="h-7 px-2 hover:bg-muted"
-              title="Clear chat"
-              data-tour-id="clear-chat-button"
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          )}
-        </div>
-      </div>
+    <PanelContainer dataTourId="assistant-panel">
+      <PanelHeader
+        icon={MessageSquare}
+        title="Chat"
+        color="var(--button-assistant-active)"
+        onClose={onClose}
+        panelKey="chat"
+        actions={onClearChat && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClearChat}
+            className="h-5 w-5"
+            title="Clear chat"
+            data-tour-id="clear-chat-button"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
+      />
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -1176,7 +1156,7 @@ export function ChatPanel({
           </div>
         </div>
       </div>
-    </div>
+    </PanelContainer>
   );
 }
 
@@ -1453,32 +1433,32 @@ function ToolDisplay({ itemId, tool, isExpanded, onToggle }: ToolDisplayProps) {
     <div
       className={`bg-muted/30 rounded-md transition-all ${
         tool.status === 'executing' ? 'ring-2 ring-blue-500/20 animate-pulse' : ''
-      } ${isExpanded ? 'p-2' : 'p-1.5'}`}
+      } p-1.5`}
     >
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 w-full text-left hover:bg-muted/50 rounded px-1"
+        className="flex items-center gap-2 w-full text-left hover:bg-muted/50 rounded px-1 overflow-hidden"
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {toolIcons[category] || <ChevronRight className="h-3 w-3" />}
           <span className="text-xs font-mono">{category}</span>
         </div>
 
         {/* Tool-specific preview */}
         {tool.name === 'shell' && tool.parameters?.cmd && (
-          <code className="text-xs text-muted-foreground">
+          <code className="text-xs text-muted-foreground truncate min-w-0">
             {Array.isArray(tool.parameters.cmd)
-              ? tool.parameters.cmd.slice(1).join(' ').substring(0, 50)
-              : String(tool.parameters.cmd).substring(0, 50)}
+              ? tool.parameters.cmd.slice(1).join(' ')
+              : String(tool.parameters.cmd)}
           </code>
         )}
         {(tool.parameters?.path || tool.parameters?.file_path) && (
-          <code className="text-xs text-muted-foreground">
+          <code className="text-xs text-muted-foreground truncate min-w-0">
             {tool.parameters.path || tool.parameters.file_path}
           </code>
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto shrink-0">
           {statusIcons[tool.status || 'completed']}
         </div>
       </button>
@@ -1577,7 +1557,7 @@ function ReasoningDisplay({ itemId, content, isComplete, isExpanded, onToggle }:
   const isStreaming = !isComplete;
 
   return (
-    <div className="bg-violet-500/10 rounded-md transition-all p-1.5 border border-violet-500/20">
+    <div className="bg-violet-500/10 rounded-md transition-all p-1.5">
       <button
         onClick={onToggle}
         className="flex items-center gap-2 w-full text-left hover:bg-violet-500/20 rounded px-1"

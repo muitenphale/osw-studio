@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon, Sparkles } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
@@ -45,6 +45,8 @@ import { ChatPanel } from '@/components/chat-panel';
 import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
 import { ProjectSettingsModal } from '@/components/project-backend';
+import { SkillsPanel } from '@/components/workspace/skills-panel';
+import { PanelDragProvider } from '@/components/ui/panel';
 import { ConsolePanel } from '@/components/console';
 import { getRuntimeConfig } from '@/lib/runtimes/registry';
 import { drainRuntimeErrors, peekRuntimeErrors, formatRuntimeErrors } from '@/lib/preview/runtime-errors';
@@ -137,15 +139,261 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   // Console panel — visible by default for terminal-mode runtimes (Python, Lua), togglable for all
   const isTerminalRuntime = getRuntimeConfig(project.settings?.runtime || 'handlebars').previewMode === 'terminal';
 
-  const [showChat, setShowChat] = useState(true);    // Column 1: Chat v2 (event-driven)
-  const [showFiles, setShowFiles] = useState(true);      // Column 2: File explorer
-  const [showEditor, setShowEditor] = useState(false);   // Column 3: Monaco editor
-  const [showPreview, setShowPreview] = useState(!isTerminalRuntime);  // Column 4: Hidden for terminal runtimes, auto-shown on server-ready
-  const [showCheckpoints, setShowCheckpoints] = useState(false); // Column 5: Checkpoint history
-  const [showDebugPanel, setShowDebugPanel] = useState(false); // Column 6: Debug events
-  const [showProjectSettingsModal, setShowProjectSettingsModal] = useState(false); // Project settings modal
+  // Load persisted panel visibility from localStorage, with runtime-aware defaults
+  const savedPanels = useMemo(() => {
+    try {
+      const stored = localStorage.getItem('osw-workspace-panels');
+      return stored ? JSON.parse(stored) : null;
+    } catch { return null; }
+  }, []);
 
-  const [showConsole, setShowConsole] = useState(isTerminalRuntime);
+  const [showChat, setShowChat] = useState(savedPanels?.chat ?? true);
+  const [showFiles, setShowFiles] = useState(savedPanels?.files ?? true);
+  const [showEditor, setShowEditor] = useState(savedPanels?.editor ?? false);
+  const [showPreview, setShowPreview] = useState(savedPanels?.preview ?? !isTerminalRuntime);
+  const [showCheckpoints, setShowCheckpoints] = useState(savedPanels?.checkpoints ?? false);
+  const [showDebugPanel, setShowDebugPanel] = useState(savedPanels?.debug ?? false);
+  const [showProjectSettingsModal, setShowProjectSettingsModal] = useState(false);
+  const [showSkillsPanel, setShowSkillsPanel] = useState(savedPanels?.skills ?? false);
+
+  const [showConsole, setShowConsole] = useState(savedPanels?.console ?? isTerminalRuntime);
+
+  // Persist panel visibility when it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('osw-workspace-panels', JSON.stringify({
+        chat: showChat, files: showFiles, editor: showEditor, preview: showPreview,
+        checkpoints: showCheckpoints, debug: showDebugPanel, skills: showSkillsPanel,
+        console: showConsole,
+      }));
+    } catch { /* localStorage full or unavailable */ }
+  }, [showChat, showFiles, showEditor, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel, showConsole]);
+  // Ref to imperatively reset panel sizes after reorder
+  const panelGroupRef = useRef<import('react-resizable-panels').ImperativePanelGroupHandle | null>(null);
+
+  // Panel ordering — persisted to localStorage, controls left-to-right rendering
+  const DEFAULT_PANEL_ORDER = ['chat', 'files', 'editor', 'console', 'preview', 'checkpoints', 'debug', 'skills'];
+  const [panelOrder, setPanelOrder] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('osw-workspace-panel-order');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Merge: keep stored order but ensure all panels are present
+        const all = new Set(DEFAULT_PANEL_ORDER);
+        const ordered = parsed.filter((k: string) => all.has(k));
+        for (const k of DEFAULT_PANEL_ORDER) {
+          if (!ordered.includes(k)) ordered.push(k);
+        }
+        return ordered;
+      }
+    } catch {}
+    return DEFAULT_PANEL_ORDER;
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('osw-workspace-panel-order', JSON.stringify(panelOrder)); } catch {}
+  }, [panelOrder]);
+
+  // Drag-to-reorder state
+  const [draggingPanel, setDraggingPanel] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | null>(null); // index in visible panels where the drop zone is highlighted
+
+  const handlePanelDragStart = useCallback((panelKey: string) => {
+    // Capture the dragged panel's center X for "stay put" distance comparison
+    const container = panelContainerRef.current;
+    if (container) {
+      const panelEl = container.querySelector(`[data-panel-id="${panelKey}"]`);
+      if (panelEl) {
+        const rect = panelEl.getBoundingClientRect();
+        draggedPanelCenter.current = rect.left + rect.width / 2;
+      }
+    }
+    document.body.style.cursor = 'grabbing';
+    setDraggingPanel(panelKey);
+  }, []);
+
+  const handlePanelDragEnd = useCallback(() => {
+    if (draggingPanel && dropTarget !== null) {
+      setPanelOrder(prev => {
+        const newOrder = prev.filter(k => k !== draggingPanel);
+        const visibleKeys = prev.filter(k => {
+          if (k === 'chat') return showChat;
+          if (k === 'files') return showFiles;
+          if (k === 'editor') return showEditor;
+          if (k === 'console') return showConsole;
+          if (k === 'preview') return showPreview;
+          if (k === 'checkpoints') return showCheckpoints;
+          if (k === 'debug') return showDebugPanel;
+          if (k === 'skills') return showSkillsPanel;
+          return false;
+        });
+        const targetKey = visibleKeys[dropTarget];
+        if (targetKey) {
+          const insertIdx = newOrder.indexOf(targetKey);
+          newOrder.splice(insertIdx, 0, draggingPanel);
+        } else {
+          newOrder.push(draggingPanel);
+        }
+        return newOrder;
+      });
+      // Clear saved slot sizes and reset layout to equal distribution
+      try { localStorage.removeItem('react-resizable-panels:workspace-slots'); } catch {}
+      // Use imperative API to set sizes — avoids remounting which breaks resize handles
+      const count = visiblePanelCount;
+      requestAnimationFrame(() => {
+        if (panelGroupRef.current && count > 0) {
+          const base = Math.floor(100 / count);
+          const sizes = Array(count).fill(base);
+          sizes[count - 1] = 100 - base * (count - 1);
+          panelGroupRef.current.setLayout(sizes);
+        }
+      });
+    }
+    setDraggingPanel(null);
+    setDropTarget(null);
+    draggedPanelCenter.current = null;
+    document.body.style.cursor = '';
+  }, [draggingPanel, dropTarget, showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
+
+  // Document-level mouseup listener — ends drag whether inside or outside the container.
+  // If mouseUp is inside the container, the container's own onMouseUp handles it (with drop logic).
+  // If mouseUp is outside, this fires and cancels the drag.
+  useEffect(() => {
+    if (!draggingPanel) return;
+    const handleDocumentMouseUp = () => {
+      // Only cancel if still dragging — the container's onMouseUp may have already handled it
+      setDraggingPanel(prev => {
+        if (prev) {
+          setDropTarget(null);
+          draggedPanelCenter.current = null;
+          document.body.style.cursor = '';
+        }
+        return null;
+      });
+    };
+    document.addEventListener('mouseup', handleDocumentMouseUp);
+    return () => document.removeEventListener('mouseup', handleDocumentMouseUp);
+  }, [draggingPanel]);
+
+  // During drag: track mouse X and find closest drop zone
+  const panelContainerRef = useRef<HTMLDivElement>(null);
+  const dropZonePositions = useRef<Map<number, number>>(new Map()); // position index → X center
+  const draggedPanelCenter = useRef<number | null>(null); // X center of the panel being dragged
+
+  const registerDropZone = useCallback((position: number, el: HTMLDivElement | null) => {
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      dropZonePositions.current.set(position, rect.left + rect.width / 2);
+    } else {
+      dropZonePositions.current.delete(position);
+    }
+  }, []);
+
+  const handleDragMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!draggingPanel) return;
+    const positions = dropZonePositions.current;
+    if (positions.size === 0) return;
+
+    // Check distance to each drop zone
+    let closest: number | null = null;
+    let closestDist = Infinity;
+    for (const [pos, x] of positions) {
+      const dist = Math.abs(e.clientX - x);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = pos;
+      }
+    }
+
+    // If the mouse is closer to the dragged panel's own center, stay put (no move)
+    if (draggedPanelCenter.current !== null) {
+      const distToSelf = Math.abs(e.clientX - draggedPanelCenter.current);
+      if (distToSelf <= closestDist) {
+        setDropTarget(null);
+        return;
+      }
+    }
+
+    setDropTarget(closest);
+  }, [draggingPanel]);
+
+  // Panel toggle with max 3 visible constraint.
+  // When opening a panel would exceed 3, close the rightmost visible panel.
+  const MAX_VISIBLE_PANELS = 3;
+
+  // Panel definitions ordered by current panelOrder (for rightmost-close logic)
+  const panelDefsMap: Record<string, { get: boolean; set: (v: boolean) => void }> = useMemo(() => ({
+    chat: { get: showChat, set: setShowChat },
+    files: { get: showFiles, set: setShowFiles },
+    editor: { get: showEditor, set: setShowEditor },
+    console: { get: showConsole, set: setShowConsole },
+    preview: { get: showPreview, set: setShowPreview },
+    checkpoints: { get: showCheckpoints, set: setShowCheckpoints },
+    debug: { get: showDebugPanel, set: setShowDebugPanel },
+    skills: { get: showSkillsPanel, set: setShowSkillsPanel },
+  }), [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
+
+  const panelDefs = useMemo(() =>
+    panelOrder.map(key => ({ key, ...panelDefsMap[key] })).filter(p => p.get !== undefined),
+    [panelOrder, panelDefsMap]
+  );
+
+  const togglePanel = useCallback((key: string) => {
+    setPanelReplacePreview(null);
+    const panel = panelDefs.find(p => p.key === key);
+    if (!panel) return;
+
+    if (panel.get) {
+      // Closing — always allowed
+      panel.set(false);
+      return;
+    }
+
+    // Opening — check if we'd exceed the limit
+    const visibleCount = panelDefs.filter(p => p.get).length;
+    if (visibleCount >= MAX_VISIBLE_PANELS) {
+      // Close the rightmost visible panel and insert the new panel at its position
+      for (let i = panelDefs.length - 1; i >= 0; i--) {
+        if (panelDefs[i].get && panelDefs[i].key !== key) {
+          const closedKey = panelDefs[i].key;
+          panelDefs[i].set(false);
+          // Move the new panel to the closed panel's position in the order
+          setPanelOrder(prev => {
+            const newOrder = prev.filter(k => k !== key);
+            const insertIdx = newOrder.indexOf(closedKey);
+            if (insertIdx >= 0) {
+              newOrder.splice(insertIdx, 0, key);
+            } else {
+              newOrder.push(key);
+            }
+            return newOrder;
+          });
+          break;
+        }
+      }
+    }
+    panel.set(true);
+  }, [panelDefs]);
+
+  // Track which panel would be replaced when hovering a sidebar button
+  const [panelReplacePreview, setPanelReplacePreview] = useState<string | null>(null);
+
+  const handleSidebarHover = useCallback((key: string | null) => {
+    if (!key) { setPanelReplacePreview(null); return; }
+    const panel = panelDefs.find(p => p.key === key);
+    if (!panel || panel.get) { setPanelReplacePreview(null); return; } // already open or not found
+    const visibleCount = panelDefs.filter(p => p.get).length;
+    if (visibleCount < MAX_VISIBLE_PANELS) { setPanelReplacePreview(null); return; } // no replacement needed
+    // Find the rightmost visible panel that would be closed
+    for (let i = panelDefs.length - 1; i >= 0; i--) {
+      if (panelDefs[i].get && panelDefs[i].key !== key) {
+        setPanelReplacePreview(panelDefs[i].key);
+        return;
+      }
+    }
+    setPanelReplacePreview(null);
+  }, [panelDefs]);
+
   const [hasUnreadConsole, setHasUnreadConsole] = useState(false);
   const consoleBufferRef = useRef<{ level: string; text: string }[]>([]);
   const showConsoleRef = useRef(showConsole);
@@ -267,26 +515,10 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setPersistedOrchestrator(null);
   }, [project.id]);
   
-  const getDefaultSizes = () => {
-    const visiblePanels = [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel].filter(Boolean).length;
-
-    // Each visible panel gets an equal share by default, with minor adjustments
-    // for better aesthetics. The sizes for visible panels must sum to 100%.
-    if (visiblePanels >= 6) {
-      return { chat: 16, files: 12, editor: 18, terminal: 18, preview: 18, checkpoints: 9, debug: 9 };
-    } else if (visiblePanels === 5) {
-      return { chat: 20, files: 15, editor: 25, terminal: 20, preview: 20, checkpoints: 20, debug: 20 };
-    } else if (visiblePanels === 4) {
-      return { chat: 25, files: 15, editor: 35, terminal: 25, preview: 25, checkpoints: 25, debug: 25 };
-    } else if (visiblePanels === 3) {
-      return { chat: 34, files: 33, editor: 33, terminal: 34, preview: 33, checkpoints: 33, debug: 34 };
-    } else if (visiblePanels === 2) {
-      return { chat: 50, files: 50, editor: 50, terminal: 50, preview: 50, checkpoints: 50, debug: 50 };
-    }
-    return { chat: 100, files: 100, editor: 100, terminal: 100, preview: 100, checkpoints: 100, debug: 100 };
-  };
-  
-  const defaultSizes = getDefaultSizes();
+  const visiblePanelCount = [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel].filter(Boolean).length;
+  const baseSize = visiblePanelCount > 0 ? Math.floor(100 / visiblePanelCount) : 100;
+  // Last panel absorbs remainder so sizes sum to exactly 100 (avoids layout normalization warnings)
+  const lastPanelSize = visiblePanelCount > 0 ? 100 - baseSize * (visiblePanelCount - 1) : 100;
 
   const getModelDisplayName = (modelId: string) => {
     if (!modelId) return 'Select Model';
@@ -369,7 +601,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   // Listen for showPreview event (dispatched by AI preview command)
   useEffect(() => {
-    const handler = () => setShowPreview(true);
+    const handler = () => togglePanel('preview');
     window.addEventListener('showPreview', handler);
     return () => window.removeEventListener('showPreview', handler);
   }, []);
@@ -708,7 +940,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     } else {
       // Desktop behavior remains the same
       if (!showEditor) {
-        setShowEditor(true);
+        togglePanel('editor');
         setTimeout(() => {
           openFileInEditor(file);
         }, 0);
@@ -1287,7 +1519,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     backgroundColor: showChat ? 'var(--button-assistant-active)' : undefined,
                     color: showChat ? 'white' : undefined
                   }}
-                  onClick={() => setShowChat(!showChat)}
+                  onClick={() => togglePanel('chat')}
+                  onMouseEnter={() => handleSidebarHover('chat')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                 </button>
@@ -1320,7 +1554,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     backgroundColor: showFiles ? 'var(--button-files-active)' : undefined,
                     color: showFiles ? 'white' : undefined
                   }}
-                  onClick={() => setShowFiles(!showFiles)}
+                  onClick={() => togglePanel('files')}
+                  onMouseEnter={() => handleSidebarHover('files')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <FolderTree className="h-3.5 w-3.5" />
                 </button>
@@ -1353,7 +1589,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     backgroundColor: showEditor ? 'var(--button-editor-active)' : undefined,
                     color: showEditor ? 'white' : undefined
                   }}
-                  onClick={() => setShowEditor(!showEditor)}
+                  onClick={() => togglePanel('editor')}
+                  onMouseEnter={() => handleSidebarHover('editor')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <Code2 className="h-3.5 w-3.5" />
                 </button>
@@ -1386,7 +1624,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     backgroundColor: showPreview ? 'var(--button-preview-active)' : undefined,
                     color: showPreview ? 'white' : undefined
                   }}
-                  onClick={() => setShowPreview(!showPreview)}
+                  onClick={() => togglePanel('preview')}
+                  onMouseEnter={() => handleSidebarHover('preview')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <Eye className="h-3.5 w-3.5" />
                 </button>
@@ -1419,7 +1659,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     backgroundColor: showConsole ? 'var(--button-terminal-active, #22c55e)' : undefined,
                     color: showConsole ? 'white' : undefined
                   }}
-                  onClick={() => setShowConsole(!showConsole)}
+                  onClick={() => togglePanel('console')}
+                  onMouseEnter={() => handleSidebarHover('console')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <TerminalIcon className="h-3.5 w-3.5" />
                   {hasUnreadConsole && !showConsole && (
@@ -1455,7 +1697,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     backgroundColor: showCheckpoints ? 'var(--button-checkpoint-active)' : undefined,
                     color: showCheckpoints ? 'white' : undefined
                   }}
-                  onClick={() => setShowCheckpoints(!showCheckpoints)}
+                  onClick={() => togglePanel('checkpoints')}
+                  onMouseEnter={() => handleSidebarHover('checkpoints')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <History className="h-3.5 w-3.5" />
                 </button>
@@ -1487,7 +1731,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   style={{
                     color: showDebugPanel ? 'var(--background)' : undefined
                   }}
-                  onClick={() => setShowDebugPanel(!showDebugPanel)}
+                  onClick={() => togglePanel('debug')}
+                  onMouseEnter={() => handleSidebarHover('debug')}
+                  onMouseLeave={() => handleSidebarHover(null)}
                 >
                   <Bug className="h-3.5 w-3.5" />
                 </button>
@@ -1504,19 +1750,58 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
               </TooltipContent>
             </Tooltip>
 
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
+                    showSkillsPanel
+                      ? 'shadow-sm'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  style={{
+                    backgroundColor: showSkillsPanel ? 'var(--button-skills-active, #a855f7)' : undefined,
+                    color: showSkillsPanel ? 'white' : undefined
+                  }}
+                  onClick={() => togglePanel('skills')}
+                  onMouseEnter={() => handleSidebarHover('skills')}
+                  onMouseLeave={() => handleSidebarHover(null)}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="border-0"
+                style={{
+                  backgroundColor: 'var(--button-skills-active, #a855f7)',
+                  color: 'white'
+                }}
+                arrowStyle={{
+                  backgroundColor: 'var(--button-skills-active, #a855f7)',
+                  fill: 'var(--button-skills-active, #a855f7)'
+                }}
+              >
+                <p>Skills</p>
+              </TooltipContent>
+            </Tooltip>
+
           </div>
           
-          {/* Main content area */}
-          <div className="flex-1 p-2 overflow-hidden" data-tour-id="workspace-panels">
-          <ResizablePanelGroup direction="horizontal" autoSaveId="workspace-layout">
-            {/* Column 1: Chat Panel */}
-            {showChat && (
-              <ResizablePanel
-                id="chat"
-                order={1}
-                defaultSize={defaultSizes.chat}
-                minSize={15}
-              >
+          {/* Main content area — slot-based layout (max 3 panels) */}
+          <div
+            ref={panelContainerRef}
+            className="flex-1 p-2 overflow-hidden"
+            data-tour-id="workspace-panels"
+            onMouseMove={draggingPanel ? handleDragMouseMove : undefined}
+            onMouseUp={draggingPanel ? handlePanelDragEnd : undefined}
+          >
+          <PanelDragProvider value={{ onDragStart: handlePanelDragStart, draggingPanel }}>
+          <ResizablePanelGroup ref={panelGroupRef} direction="horizontal" autoSaveId="workspace-slots">
+            {(() => {
+              // Build ordered list of visible panels using panelOrder
+              const panelMap: Record<string, { minSize: number; content: React.ReactNode }> = {};
+
+              if (showChat) panelMap['chat'] = { minSize: 15, content: (
                 <ChatPanel
                   events={debugEvents}
                   onRestore={handleRestoreCheckpoint}
@@ -1544,66 +1829,32 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onSendRuntimeErrors={handleSendRuntimeErrors}
                   onClearRuntimeErrors={handleClearRuntimeErrors}
                 />
-              </ResizablePanel>
-            )}
-            {showChat && (showFiles || showEditor || showConsole || showPreview || showCheckpoints || showDebugPanel) && (
-              <ResizableHandle withHandle />
-            )}
+              )};
 
-            {/* Column 2: File Explorer */}
-            {showFiles && (
-              <ResizablePanel
-                id="files"
-                order={2}
-                defaultSize={defaultSizes.files}
-                minSize={14}
-              >
+              if (showFiles) panelMap['files'] = { minSize: 14, content: (
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-files-rgb), 0.01), rgba(var(--panel-files-rgb), 0.01)), var(--card)`, minWidth: '240px' }}>
-                      <FileExplorer
-                        projectId={project.id}
-                        onFileSelect={handleFileSelect}
-                        onClose={() => setShowFiles(false)}
-                        entryPoint={entryPoint}
-                        onSetEntryPoint={handleSetEntryPoint}
-                        onAddPromptFile={handleAddPromptFile}
-                      />
-                    </div>
-                </ResizablePanel>
-            )}
-            {showFiles && (showEditor || showConsole || showPreview || showCheckpoints || showDebugPanel) && (
-              <ResizableHandle withHandle />
-            )}
+                  <FileExplorer
+                    projectId={project.id}
+                    onFileSelect={handleFileSelect}
+                    onClose={() => setShowFiles(false)}
+                    entryPoint={entryPoint}
+                    onSetEntryPoint={handleSetEntryPoint}
+                    onAddPromptFile={handleAddPromptFile}
+                  />
+                </div>
+              )};
 
-            {/* Column 3: Code Editor */}
-            {showEditor && (
-              <ResizablePanel
-                id="editor"
-                order={3}
-                defaultSize={defaultSizes.editor}
-                minSize={20}
-              >
+              if (showEditor) panelMap['editor'] = { minSize: 20, content: (
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)`, minWidth: '240px' }}>
-                      <MultiTabEditor
-                        projectId={project.id}
-                        runtime={project.settings?.runtime}
+                  <MultiTabEditor
+                    projectId={project.id}
+                    runtime={project.settings?.runtime}
+                    onClose={() => setShowEditor(false)}
+                  />
+                </div>
+              )};
 
-                        onClose={() => setShowEditor(false)}
-                      />
-                    </div>
-                </ResizablePanel>
-            )}
-            {showEditor && (showConsole || showPreview || showCheckpoints || showDebugPanel) && (
-              <ResizableHandle withHandle />
-            )}
-
-            {/* Column 3.5: Console */}
-            {showConsole && (
-              <ResizablePanel
-                id="console"
-                order={4}
-                defaultSize={defaultSizes.terminal}
-                minSize={15}
-              >
+              if (showConsole) panelMap['console'] = { minSize: 15, content: (
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ minWidth: '240px' }}>
                   <ConsolePanel
                     projectId={project.id}
@@ -1613,47 +1864,26 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     onClose={() => setShowConsole(false)}
                   />
                 </div>
-              </ResizablePanel>
-            )}
-            {showConsole && (showPreview || showCheckpoints || showDebugPanel) && (
-              <ResizableHandle withHandle />
-            )}
+              )};
 
-            {/* Column 5: Preview */}
-            {showPreview && (
-              <ResizablePanel
-                id="preview"
-                order={5}
-                defaultSize={defaultSizes.preview}
-                minSize={20}
-              >
+              if (showPreview) panelMap['preview'] = { minSize: 20, content: (
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-preview-rgb), 0.01), rgba(var(--panel-preview-rgb), 0.01)), var(--card)`, minWidth: '240px' }}>
-                      <MultipagePreview
-                        ref={previewRef}
-                        projectId={project.id}
-                        refreshTrigger={refreshTrigger}
-                        onFocusSelection={handleFocusSelection}
-                        hasFocusTarget={Boolean(focusContext)}
-                        onClose={handleClosePreview}
-                        deploymentId={selectedDeploymentId}
-                        onCaptureScreenshot={handleCaptureScreenshot}
-                        entryPoint={entryPoint}
-                        runtime={project.settings?.runtime}
-                      />
-                    </div>
-                </ResizablePanel>
-            )}
+                  <MultipagePreview
+                    ref={previewRef}
+                    projectId={project.id}
+                    refreshTrigger={refreshTrigger}
+                    onFocusSelection={handleFocusSelection}
+                    hasFocusTarget={Boolean(focusContext)}
+                    onClose={handleClosePreview}
+                    deploymentId={selectedDeploymentId}
+                    onCaptureScreenshot={handleCaptureScreenshot}
+                    entryPoint={entryPoint}
+                    runtime={project.settings?.runtime}
+                  />
+                </div>
+              )};
 
-            {showPreview && (showCheckpoints || showDebugPanel) && <ResizableHandle withHandle />}
-
-            {/* Column 6: Checkpoint Panel */}
-            {showCheckpoints && (
-              <ResizablePanel
-                id="checkpoints"
-                order={6}
-                defaultSize={defaultSizes.checkpoints}
-                minSize={12}
-              >
+              if (showCheckpoints) panelMap['checkpoints'] = { minSize: 12, content: (
                 <CheckpointPanel
                   projectId={project.id}
                   events={debugEvents}
@@ -1663,24 +1893,96 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onClose={() => setShowCheckpoints(false)}
                   refreshKey={checkpointRefreshKey}
                 />
-              </ResizablePanel>
-            )}
+              )};
 
-            {showCheckpoints && showDebugPanel && <ResizableHandle withHandle />}
-
-            {/* Column 7: Debug Panel */}
-            {showDebugPanel && (
-              <ResizablePanel
-                id="debug"
-                order={7}
-                defaultSize={defaultSizes.debug}
-                minSize={15}
-              >
+              if (showDebugPanel) panelMap['debug'] = { minSize: 15, content: (
                 <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} projectId={project.id} />
-              </ResizablePanel>
-            )}
+              )};
+
+              if (showSkillsPanel) panelMap['skills'] = { minSize: 10, content: (
+                <SkillsPanel onClose={() => setShowSkillsPanel(false)} />
+              )};
+
+              // Order visible panels by panelOrder
+              const visiblePanels = panelOrder
+                .filter(key => key in panelMap)
+                .map(key => ({ key, ...panelMap[key] }));
+
+              // Render panels with either resize handles (normal) or drop zones (during drag)
+              const elements: React.ReactNode[] = [];
+              const isDragging = !!draggingPanel;
+
+              // Helper: render a drop zone that matches resize handle dimensions (w-2 mx-1)
+              const dropZone = (position: number) => (
+                <div
+                  key={`drop-${position}`}
+                  ref={(el) => registerDropZone(position, el)}
+                  className={`w-2 mx-1 shrink-0 rounded-[3px] border border-dashed transition-all duration-200 animate-in fade-in ${
+                    dropTarget === position
+                      ? 'bg-primary/40 border-primary/60'
+                      : 'bg-muted/50 border-border'
+                  }`}
+                />
+              );
+
+              const dragIdx = isDragging ? visiblePanels.findIndex(p => p.key === draggingPanel) : -1;
+
+              visiblePanels.forEach((panel, idx) => {
+                // Left edge drop zone (before first panel)
+                if (isDragging && idx === 0 && dragIdx !== 0) {
+                  elements.push(dropZone(0));
+                }
+
+                if (idx > 0) {
+                  if (isDragging) {
+                    const isDroppable = !(idx === dragIdx || idx === dragIdx + 1);
+                    // Always render the ResizableHandle (keeps library state intact)
+                    // but hide it visually and overlay a drop zone or spacer
+                    elements.push(
+                      <ResizableHandle key={`handle-${idx}`} withHandle className="!w-0 !mx-0 !overflow-hidden !p-0 opacity-0 pointer-events-none" />
+                    );
+                    if (isDroppable) {
+                      elements.push(dropZone(idx));
+                    } else {
+                      elements.push(<div key={`spacer-${idx}`} className="w-2 mx-1 shrink-0" />);
+                    }
+                  } else {
+                    elements.push(<ResizableHandle key={`handle-${idx}`} withHandle />);
+                  }
+                }
+
+                elements.push(
+                  <ResizablePanel
+                    key={panel.key}
+                    id={`slot-${idx}`}
+                    order={idx + 1}
+                    defaultSize={idx === visiblePanels.length - 1 ? lastPanelSize : baseSize}
+                    minSize={panel.minSize}
+                  >
+                    <div
+                      className={`h-full ${isDragging && panel.key === draggingPanel
+                        ? `rounded-lg border border-dashed transition-colors ${dropTarget === null ? 'border-primary' : 'border-muted-foreground/30'}`
+                        : panelReplacePreview === panel.key
+                          ? 'rounded-lg border border-dashed border-primary transition-colors'
+                          : ''}`}
+                      data-panel-id={panel.key}
+                    >
+                      {panel.content}
+                    </div>
+                  </ResizablePanel>
+                );
+              });
+
+              // Right edge drop zone
+              if (isDragging && dragIdx !== visiblePanels.length - 1) {
+                elements.push(dropZone(visiblePanels.length));
+              }
+
+              return elements;
+            })()}
 
           </ResizablePanelGroup>
+          </PanelDragProvider>
           </div>
         </div>
 
@@ -1860,6 +2162,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         enabled={backendEnabled}
         onToggleEnabled={handleBackendToggle}
       />
+
     </TooltipProvider>
   );
 }

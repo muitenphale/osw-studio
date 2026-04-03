@@ -5,6 +5,7 @@ import MonacoEditor, { useMonaco } from '@monaco-editor/react';
 import { VirtualFile, ProjectRuntime } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { X, Code2, Save, FileCode, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import { cn, logger } from '@/lib/utils';
 import { useTheme } from 'next-themes';
@@ -279,34 +280,13 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-3 border-b bg-muted/70 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Code2 
-            className="h-4 w-4 md:hidden" 
-            style={{ color: 'var(--button-editor-active)' }} 
-          />
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Hide code editor"
-              className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
-            >
-              <Code2 
-                className="h-4 w-4 transition-opacity group-hover:opacity-0" 
-                style={{ color: 'var(--button-editor-active)' }} 
-              />
-              <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          ) : (
-            <Code2 
-              className="hidden h-4 w-4 md:inline-flex" 
-              style={{ color: 'var(--button-editor-active)' }} 
-            />
-          )}
-          <h3 className="text-sm font-medium">Code Editor</h3>
-        </div>
-        {activeFile?.modified && getFileType(activeFile.file.path).type === 'text' && (
+      <PanelHeader
+        icon={Code2}
+        title="Code Editor"
+        color="var(--button-editor-active)"
+        onClose={onClose}
+        panelKey="editor"
+        actions={activeFile?.modified && getFileType(activeFile.file.path).type === 'text' && (
           <Button
             size="sm"
             variant="ghost"
@@ -317,7 +297,7 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
             <span className="text-xs">Save</span>
           </Button>
         )}
-      </div>
+      />
       
       {openFiles.size === 0 ? (
         <div className="flex-1 flex items-center justify-center text-muted-foreground">

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Terminal as TerminalIcon, Play, Square, Trash2, X } from 'lucide-react';
+import { Terminal as TerminalIcon, Play, Square, Trash2 } from 'lucide-react';
+import { PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import { scriptRunner } from '@/lib/scripting/script-runner';
 import { vfsShell } from '@/lib/vfs/cli-shell';
@@ -767,88 +768,66 @@ export function ConsolePanel({ projectId, runtime, onClose, bufferedMessages, on
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="p-3 border-b bg-muted/70 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <TerminalIcon
-            className="h-4 w-4 md:hidden"
-            style={{ color: 'var(--button-terminal-active, #22c55e)' }}
-          />
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Hide console"
-              className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
+      <PanelHeader
+        icon={TerminalIcon}
+        title="Console"
+        color="var(--button-terminal-active, #22c55e)"
+        onClose={onClose}
+        panelKey="console"
+        actions={
+          <>
+            {hasExecutableFiles && (
+              isRunning ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-5 px-2 gap-1.5 text-destructive hover:text-destructive"
+                  onClick={stopScript}
+                >
+                  <Square className="h-3 w-3" />
+                  <span className="text-xs">Stop</span>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-5 px-2 gap-1.5"
+                  onClick={handleRun}
+                  disabled={!selectedEntryPoint && !defaultEntryPoint}
+                >
+                  <Play className="h-3 w-3" />
+                  <span className="text-xs">Run</span>
+                </Button>
+              )
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-5 px-2 gap-1.5"
+              onClick={clearConsole}
             >
-              <TerminalIcon
-                className="h-4 w-4 transition-opacity group-hover:opacity-0"
-                style={{ color: 'var(--button-terminal-active, #22c55e)' }}
-              />
-              <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          ) : (
-            <TerminalIcon
-              className="hidden h-4 w-4 md:inline-flex"
-              style={{ color: 'var(--button-terminal-active, #22c55e)' }}
-            />
-          )}
-          <h3 className="text-sm font-medium">Console</h3>
-
-          {/* File dropdown (when executable files exist) */}
-          {hasExecutableFiles && (
-            <select
-              value={selectedEntryPoint}
-              onChange={(e) => setSelectedEntryPoint(e.target.value)}
-              className="text-xs bg-background border border-border rounded px-1.5 py-0.5 max-w-[140px] ml-1"
-            >
-              {executableFiles.map(f => (
-                <option key={f} value={f}>{f}</option>
-              ))}
-              {/* If selected entry point is not in the list, still show it */}
-              {selectedEntryPoint && !executableFiles.includes(selectedEntryPoint) && (
-                <option value={selectedEntryPoint}>{selectedEntryPoint}</option>
-              )}
-            </select>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1">
-          {hasExecutableFiles && (
-            isRunning ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-5 px-2 gap-1.5 text-destructive hover:text-destructive"
-                onClick={stopScript}
-              >
-                <Square className="h-3 w-3" />
-                <span className="text-xs">Stop</span>
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-5 px-2 gap-1.5"
-                onClick={handleRun}
-                disabled={!selectedEntryPoint && !defaultEntryPoint}
-              >
-                <Play className="h-3 w-3" />
-                <span className="text-xs">Run</span>
-              </Button>
-            )
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-5 px-2 gap-1.5"
-            onClick={clearConsole}
+              <Trash2 className="h-3 w-3" />
+              <span className="text-xs">Clear</span>
+            </Button>
+          </>
+        }
+      >
+        {/* File dropdown (when executable files exist) */}
+        {hasExecutableFiles && (
+          <select
+            value={selectedEntryPoint}
+            onChange={(e) => setSelectedEntryPoint(e.target.value)}
+            className="text-xs bg-background border border-border rounded px-1.5 py-0.5 max-w-[140px] ml-1"
           >
-            <Trash2 className="h-3 w-3" />
-            <span className="text-xs">Clear</span>
-          </Button>
-        </div>
-      </div>
+            {executableFiles.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+            {selectedEntryPoint && !executableFiles.includes(selectedEntryPoint) && (
+              <option value={selectedEntryPoint}>{selectedEntryPoint}</option>
+            )}
+          </select>
+        )}
+      </PanelHeader>
 
       {/* Terminal area */}
       <div className="flex-1 overflow-hidden p-1" style={{ backgroundColor: '#1a1a2e' }}>

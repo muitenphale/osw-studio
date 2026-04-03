@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.51.0 - 2026-04-03
+
+### Skills Panel
+
+- **Workspace skills panel**: New resizable panel in the workspace for toggling skills on/off without leaving the editor. Toggled from the left sidebar (purple Sparkles icon). Shows global enable/disable toggle, built-in skills section, and custom skills section — each with individual switches. Toggling a skill immediately reloads transient VFS files so the AI sees the change on the next message
+
+### Panel System Overhaul
+
+- **Shared panel components**: Extracted `PanelContainer` and `PanelHeader` into `components/ui/panel.tsx`. All 8 panels (Chat, File Explorer, Editor, Console, Preview, Checkpoints, Debug, Skills) now use the shared header component with consistent icon, title, actions, and X close button. Eliminates ~20 lines of duplicated header markup per panel
+- **Max 3 panels visible**: Opening a 4th panel automatically closes the rightmost visible panel. Keeps the workspace usable instead of cramming 4+ panels into a narrow viewport. The `togglePanel()` function handles the constraint for all panel sources (sidebar buttons, programmatic opens like file click → editor)
+- **Slot-based layout**: Panels are assigned to slots (`slot-0`, `slot-1`, `slot-2`) instead of panel-specific IDs. When a panel swaps for another, the new panel inherits the slot's width instead of resetting to its default size. Slot widths persist across swaps via `autoSaveId`
+- **Drag-to-reorder panels**: Each panel header has a grip handle for reordering. During drag, dashed drop zones appear between panels and at the edges — the closest zone highlights as the mouse moves (lazy matching, no precision required). The dragged panel gets an orange dashed border that fades when hovering a drop zone. If the mouse stays near the panel's original position, it stays put. Mouse can leave the container freely — only releasing outside cancels. Panel order persists to `localStorage`. Resize handles stay enabled (hidden with CSS, not `disabled` prop) during drag to avoid breaking the library's internal state
+- **Replace preview on sidebar hover**: When 3 panels are open and a sidebar button is hovered, the rightmost panel that would be replaced gets an orange dashed border — making it clear which panel will close before clicking
+- **Panel state persistence**: Which panels are open/closed and their order are saved to `localStorage` and restored on next visit. Runtime-aware defaults preserved as fallback (preview on for visual runtimes, console on for terminal runtimes)
+- **Unified close button**: All panels have an X button on the right side of the header (same size as the panel icon). Replaced the previous hover-to-X icon transition pattern
+- **Checkpoint panel restyled**: Updated from gradient backgrounds, smaller text, and plain X button to the standard `bg-card` container with `PanelHeader`
+- **Debug panel icon colored**: Bug icon now uses `text-foreground` to match its sidebar button styling
+- **Checkpoint tooltip removed**: Removed orange tooltip on checkpoint description hover
+- **Tool call preview truncation**: Shell command previews in the chat panel now truncate with ellipsis on a single line instead of wrapping to multiple lines. Uses CSS `truncate` instead of `substring(0, 50)` so the preview fills available width
+- **Fix heredoc stdin in chained commands**: `mkdir -p /dir && cat > /file << 'EOF'` failed with "cat: missing file path" because heredoc stdin was passed to the first segment (`mkdir`) instead of the last (`cat`). Fixed by routing stdin to the last segment in `&&`/`||`/`;` chains. This was a significant source of shell failures — every `mkdir && cat > file` pattern was broken
+
 ## v1.50.1 - 2026-04-02
 
 ### Telemetry Improvements

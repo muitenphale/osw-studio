@@ -22,8 +22,8 @@ import {
   Crosshair,
   Camera,
   Loader2,
-  X
 } from 'lucide-react';
+import { PanelHeader } from '@/components/ui/panel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn, logger } from '@/lib/utils';
 import { captureIframeScreenshot } from '@/lib/utils/screenshot';
@@ -142,32 +142,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   const compileGeneration = useRef(0);
 
   const Header = () => (
-    <div className="p-3 border-b bg-muted/70 flex items-center gap-2">
-      <Eye 
-        className="h-4 w-4 md:hidden" 
-        style={{ color: 'var(--button-preview-active)' }} 
-      />
-      {onClose ? (
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Hide preview"
-          className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
-        >
-          <Eye 
-            className="h-4 w-4 transition-opacity group-hover:opacity-0" 
-            style={{ color: 'var(--button-preview-active)' }} 
-          />
-          <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-        </button>
-      ) : (
-        <Eye 
-          className="hidden h-4 w-4 md:inline-flex" 
-          style={{ color: 'var(--button-preview-active)' }} 
-        />
-      )}
-      <h3 className="text-sm font-medium">Live Preview</h3>
-    </div>
+    <PanelHeader icon={Eye} title="Live Preview" color="var(--button-preview-active)" onClose={onClose} panelKey="preview" />
   );
 
   useEffect(() => {

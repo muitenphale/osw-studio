@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, Bug, X, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Bug, Trash2 } from 'lucide-react';
+import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import { MemoryMonitor } from './memory-monitor';
 
 export interface DebugEvent {
@@ -106,53 +107,40 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
   }, {} as Record<string, number>);
 
   return (
-    <div className="h-full flex flex-col bg-card border border-border rounded-lg overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border bg-muted/30 shrink-0">
-        <div className="flex items-center gap-2">
-          <Bug className="h-4 w-4 md:hidden" />
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Hide debug panel"
-              className="relative hidden h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-destructive md:flex group"
+    <PanelContainer>
+      <PanelHeader
+        icon={Bug}
+        title="Debug Events"
+        onClose={onClose}
+        panelKey="debug"
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleClear}
+              className="h-5 w-5"
+              title="Clear all events"
             >
-              <Bug
-                className="h-4 w-4 transition-opacity group-hover:opacity-0"
-              />
-              <X className="absolute h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          ) : (
-            <Bug className="hidden h-4 w-4 md:inline-flex" />
-          )}
-          <span className="font-semibold text-sm">Debug Events</span>
-          <span className="text-xs text-muted-foreground">
-            ({filteredEvents.length}/{events.length})
-          </span>
-          <MemoryMonitor />
-        </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleClear}
-            className="h-7 px-2 hover:bg-muted"
-            title="Clear all events"
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleExport}
-            className="h-7 px-2 text-xs hover:bg-muted"
-            title="Export to JSON"
-          >
-            Export
-          </Button>
-        </div>
-      </div>
+              <Trash2 className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleExport}
+              className="h-5 px-1.5 text-xs"
+              title="Export to JSON"
+            >
+              Export
+            </Button>
+          </>
+        }
+      >
+        <span className="text-xs text-muted-foreground">
+          ({filteredEvents.length}/{events.length})
+        </span>
+        <MemoryMonitor />
+      </PanelHeader>
 
       {/* Event Counts */}
       <div className="p-2 border-b border-border bg-muted/20 text-xs">
@@ -211,7 +199,7 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
         <div ref={eventsEndRef} />
       </div>
 
-    </div>
+    </PanelContainer>
   );
 }
 

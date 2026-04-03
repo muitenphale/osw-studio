@@ -3,15 +3,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { History, RotateCcw, ArrowRight, X, Inbox } from 'lucide-react';
+import { History, RotateCcw, ArrowRight, Inbox } from 'lucide-react';
+import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import { checkpointManager, CheckpointMetadata } from '@/lib/vfs/checkpoint';
 import { formatDistanceToNow } from 'date-fns';
 import { DebugEvent } from '@/components/debug-panel';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 
 interface CheckpointPanelProps {
   projectId: string;
@@ -61,33 +57,12 @@ export function CheckpointPanel({
   }, [projectId, events.length, refreshKey]);
 
   return (
-    <div
-      className="h-full border border-border rounded-lg shadow-sm overflow-hidden flex flex-col"
-      style={{
-        background: `linear-gradient(0deg, rgba(var(--panel-checkpoint-rgb), 0.01), rgba(var(--panel-checkpoint-rgb), 0.01)), var(--card)`,
-        minWidth: '240px'
-      }}
-    >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0"
-        style={{
-          background: `linear-gradient(0deg, rgba(var(--panel-checkpoint-rgb), 0.03), rgba(var(--panel-checkpoint-rgb), 0.05))`
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <History className="h-3.5 w-3.5" style={{ color: 'var(--button-checkpoint-active)' }} />
-          <span className="text-xs font-medium">Checkpoints</span>
-          {checkpoints.length > 0 && (
-            <span className="text-[10px] text-muted-foreground">({checkpoints.length})</span>
-          )}
-        </div>
-        {onClose && (
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onClose}>
-            <X className="h-3.5 w-3.5" />
-          </Button>
+    <PanelContainer>
+      <PanelHeader icon={History} title="Checkpoints" color="var(--button-checkpoint-active)" onClose={onClose} panelKey="checkpoints">
+        {checkpoints.length > 0 && (
+          <span className="text-xs text-muted-foreground">({checkpoints.length})</span>
         )}
-      </div>
+      </PanelHeader>
 
       {/* Checkpoint list */}
       <div className="flex-1 overflow-y-auto">
@@ -125,16 +100,9 @@ export function CheckpointPanel({
                   </div>
 
                   {/* Description */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="text-[11px] text-foreground/80 truncate leading-snug mb-1.5">
-                        {cp.description}
-                      </p>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-[300px]">
-                      <p className="text-xs">{cp.description}</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <p className="text-[11px] text-foreground/80 truncate leading-snug mb-1.5">
+                    {cp.description}
+                  </p>
 
                   {/* Actions */}
                   <div className="flex items-center gap-1">
@@ -165,6 +133,6 @@ export function CheckpointPanel({
           </div>
         )}
       </div>
-    </div>
+    </PanelContainer>
   );
 }

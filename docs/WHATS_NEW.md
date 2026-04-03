@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.51.0 - Panel Overhaul (2026-04-03)
+
+The workspace panel system has been rebuilt. Panels are now capped at 3 visible, can be rearranged by dragging, and remember their layout between sessions.
+
+- **Skills Panel** - New panel for toggling AI skills on/off without leaving the workspace. Open it from the sidebar (Sparkles icon) to enable or disable built-in and custom skills — changes take effect on the next AI message
+- **Max 3 Panels** - Opening a 4th panel replaces the rightmost one. When hovering a sidebar button that would trigger a replacement, the panel about to close gets a highlighted border so you know what's changing before you click
+- **Drag to Reorder** - Grab the grip handle in any panel header to rearrange. Drop zones appear between panels as you drag. Your panel order is saved and restored between sessions
+- **Layout Persistence** - Which panels are open, their order, and their widths are all saved. Re-opening a project shows the same workspace layout you left
+- **Consistent Headers** - All 8 panels now share the same header component with a unified look: colored icon, title, action buttons, close button
+- **Heredoc Fix** - Commands like `mkdir -p /dir && cat > /file << 'EOF'` no longer fail. Previously the file content was routed to `mkdir` instead of `cat`, breaking every chained file creation
+
+---
+
 ## v1.50.0 - Error Recovery (2026-04-01)
 
 API errors no longer kill your task. Rate limits, expired keys, and server errors now pause the task instead of ending it.
