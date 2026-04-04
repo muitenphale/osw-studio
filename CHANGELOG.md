@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.52.0 - 2026-04-04
+
+### Misc
+
+- **Desktop app**: OSW Studio is now available as a desktop application (Electron) for macOS, Windows, and Linux. The desktop app runs the full Next.js server locally with SQLite support (Server Mode). GitHub Actions CI builds installers for all platforms on `desktop-v*` tags. Auth bypass for desktop via `OSW_DESKTOP` env var — local single-user app doesn't need login
+- **Security**: Resolved all npm audit vulnerabilities (22 → 0). Updated handlebars, next, js-yaml, mdast-util-to-hast, minimatch, picomatch, and removed leftover development dependencies
+
 ## v1.51.0 - 2026-04-03
 
 ### Skills Panel

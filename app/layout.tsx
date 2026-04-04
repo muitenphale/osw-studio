@@ -18,11 +18,11 @@ const ptSans = PT_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Open Source Web Studio | Agentic AI Development 🎨",
+  title: "OSW Studio",
   description:
     "Open Source Web Studio is an AI-powered development environment that enables autonomous multi-file development through intelligent tool usage. Build complete applications with natural language.",
   openGraph: {
-    title: "Open Source Web Studio | Agentic AI Development 🎨",
+    title: "Open Source Web Studio | Agentic AI Development",
     description:
       "Open Source Web Studio is an AI-powered development environment that enables autonomous multi-file development through intelligent tool usage. Build complete applications with natural language.",
     url: "https://huggingface.co/spaces/otst/osw-studio",
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "OSW-Studio | Agentic AI Development 🎨",
+    title: "OSW Studio | Agentic AI Development",
     description:
       "OSW-Studio is an AI-powered development environment that enables autonomous multi-file development through intelligent tool usage. Build complete applications with natural language.",
     images: ["https://huggingface.co/spaces/otst/osw-studio/resolve/main/banner.png"],

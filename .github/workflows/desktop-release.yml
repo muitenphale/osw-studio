@@ -1,0 +1,287 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+            artifact: '*.dmg'
+          - os: ubuntu-latest
+            platform: linux
+            artifact: '*.AppImage'
+          - os: windows-latest
+            platform: win
+            artifact: '*.exe'
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#desktop-v}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js standalone (Server Mode)
+        env:
+          NEXT_PUBLIC_SERVER_MODE: 'true'
+        run: npm run build
+
+      - name: Setup desktop project
+        run: |
+          mkdir -p desktop-build/app
+          cp -r .next/standalone/* desktop-build/app/
+          cp -r .next/static desktop-build/app/.next/static
+          cp -r public desktop-build/app/public
+          rm -rf desktop-build/app/public/sites desktop-build/app/public/deployments
+          cp -r docs desktop-build/app/docs 2>/dev/null || true
+
+      - name: Install Electron dependencies
+        working-directory: desktop-build
+        run: |
+          cat > package.json << 'EOF'
+          {
+            "name": "osw-studio-desktop",
+            "version": "${{ steps.version.outputs.version }}",
+            "private": true,
+            "main": "app/main.js",
+            "dependencies": {
+              "electron-updater": "^6.3.0",
+              "get-port-please": "^3.1.0"
+            },
+            "devDependencies": {
+              "electron": "^34.0.0",
+              "electron-builder": "^25.0.0",
+              "@electron/rebuild": "^3.7.0",
+              "tsup": "^8.0.0"
+            }
+          }
+          EOF
+          npm install
+
+      - name: Copy Electron main process and config
+        run: |
+          # Copy the electron source from the repo's desktop reference
+          # The main.ts is compiled by tsup in CI
+          mkdir -p desktop-build/electron
+          cat > desktop-build/electron/main.ts << 'MAINEOF'
+          import { app, BrowserWindow, shell } from 'electron';
+          import { autoUpdater } from 'electron-updater';
+          import * as path from 'path';
+          import * as fs from 'fs';
+          import * as http from 'http';
+          import * as crypto from 'crypto';
+
+          let mainWindow: BrowserWindow | null = null;
+          let serverPort: number | null = null;
+
+          async function startNextServer(): Promise<number> {
+            const { getPort } = await import('get-port-please');
+            const port = await getPort({ portRange: [30011, 50000] });
+            process.env.PORT = String(port);
+            process.env.HOSTNAME = 'localhost';
+            process.env.NEXT_PUBLIC_APP_URL = `http://localhost:${port}`;
+            process.env.OSW_DESKTOP = 'true';
+            const dataDir = path.join(app.getPath('userData'), 'data');
+            fs.mkdirSync(dataDir, { recursive: true });
+            process.env.OSW_DATA_DIR = dataDir;
+            const deploymentsDir = path.join(app.getPath('userData'), 'deployments');
+            fs.mkdirSync(deploymentsDir, { recursive: true });
+            process.env.OSW_DEPLOYMENTS_DIR = deploymentsDir;
+            // Generate and persist security secrets
+            const secretsFile = path.join(app.getPath('userData'), '.secrets.json');
+            let secrets: { sessionSecret: string; encryptionKey: string };
+            try {
+              secrets = JSON.parse(fs.readFileSync(secretsFile, 'utf-8'));
+            } catch {
+              secrets = {
+                sessionSecret: crypto.randomBytes(32).toString('hex'),
+                encryptionKey: crypto.randomBytes(32).toString('base64'),
+              };
+              fs.writeFileSync(secretsFile, JSON.stringify(secrets), { mode: 0o600 });
+            }
+            process.env.SESSION_SECRET = secrets.sessionSecret;
+            process.env.SECRETS_ENCRYPTION_KEY = secrets.encryptionKey;
+            const appDir = path.join(app.getAppPath(), 'app');
+            const { startServer } = require('next/dist/server/lib/start-server');
+            await startServer({
+              dir: appDir, isDev: false, hostname: 'localhost', port,
+              customServer: true, allowRetry: false, keepAliveTimeout: 5000, minimalMode: true,
+            });
+            return port;
+          }
+
+          async function waitForServer(url: string, maxRetries = 30): Promise<boolean> {
+            for (let i = 0; i < maxRetries; i++) {
+              const ok = await new Promise<boolean>((resolve) => {
+                const req = http.get(url, (res) => { res.resume(); resolve(true); });
+                req.on('error', () => resolve(false));
+                req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+              });
+              if (ok) return true;
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            return false;
+          }
+
+          async function createWindow(port: number) {
+            mainWindow = new BrowserWindow({
+              width: 1400, height: 900, minWidth: 800, minHeight: 600,
+              title: 'OSW Studio',
+              webPreferences: { nodeIntegration: false, contextIsolation: true },
+            });
+            const serverUrl = `http://localhost:${port}`;
+            const ready = await waitForServer(serverUrl);
+            if (ready) {
+              mainWindow.loadURL(serverUrl);
+            } else {
+              mainWindow.loadURL('data:text/html,<h1>Failed to start server</h1>');
+            }
+            mainWindow.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
+              if (url.startsWith('http://localhost')) return { action: 'allow' as const };
+              shell.openExternal(url);
+              return { action: 'deny' as const };
+            });
+            mainWindow.on('closed', () => { mainWindow = null; });
+          }
+
+          app.whenReady().then(async () => {
+            try {
+              serverPort = await startNextServer();
+              await createWindow(serverPort);
+              autoUpdater.checkForUpdatesAndNotify();
+            } catch (error) {
+              console.error('Failed to start:', error);
+              app.quit();
+            }
+          });
+          app.on('window-all-closed', () => app.quit());
+          app.on('activate', () => { if (!mainWindow && serverPort) createWindow(serverPort); });
+          MAINEOF
+
+          # tsup config
+          cat > desktop-build/tsup.config.ts << 'TSUPEOF'
+          import { defineConfig } from 'tsup';
+          export default defineConfig({
+            entry: ['electron/main.ts'],
+            outDir: 'app',
+            format: ['cjs'],
+            target: 'node20',
+            platform: 'node',
+            clean: false,
+            external: ['electron', 'electron-updater', /^next\//],
+            noExternal: ['get-port-please'],
+          });
+          TSUPEOF
+
+      - name: Compile Electron main process
+        working-directory: desktop-build
+        run: npx tsup
+
+      - name: Copy runtime deps to app
+        working-directory: desktop-build
+        run: |
+          cp -r node_modules/electron-updater app/node_modules/electron-updater 2>/dev/null || true
+          cp -r node_modules/get-port-please app/node_modules/get-port-please 2>/dev/null || true
+
+      - name: Generate icons
+        run: |
+          mkdir -p desktop-build/electron/icons
+          npm install --no-save sharp 2>/dev/null
+          node -e "
+            const sharp = require('sharp');
+            const fs = require('fs');
+            const svg = fs.readFileSync('public/osw-studio-logo.svg');
+            sharp(svg).resize(1024, 1024).png().toFile('desktop-build/electron/icons/icon-1024.png')
+              .then(() => sharp(svg).resize(256, 256).png().toFile('desktop-build/electron/icons/icon.png'))
+              .then(() => console.log('PNGs generated'));
+          "
+          if [ "${{ matrix.platform }}" = "mac" ]; then
+            mkdir -p /tmp/icon.iconset
+            for size in 16 32 64 128 256 512; do
+              sips -z $size $size desktop-build/electron/icons/icon-1024.png --out /tmp/icon.iconset/icon_${size}x${size}.png 2>/dev/null
+              double=$((size * 2))
+              sips -z $double $double desktop-build/electron/icons/icon-1024.png --out /tmp/icon.iconset/icon_${size}x${size}@2x.png 2>/dev/null
+            done
+            cp desktop-build/electron/icons/icon-1024.png /tmp/icon.iconset/icon_512x512@2x.png
+            iconutil -c icns /tmp/icon.iconset -o desktop-build/electron/icons/icon.icns
+            rm -rf /tmp/icon.iconset
+          fi
+          rm -f desktop-build/electron/icons/icon-1024.png
+
+      - name: Create electron-builder config
+        working-directory: desktop-build
+        run: |
+          cat > electron-builder.yml << 'EOF'
+          appId: com.oswstudio.app
+          productName: OSW Studio
+          copyright: Copyright © 2026 OSW Studio
+
+          directories:
+            output: dist
+            app: app
+
+          extraMetadata:
+            main: main.js
+
+          asar: true
+          asarUnpack:
+            - "node_modules/better-sqlite3/**"
+            - "**/*.node"
+
+          files:
+            - "**/*"
+            - "!**/.env"
+
+          mac:
+            target:
+              - target: dmg
+                arch:
+                  - universal
+            icon: electron/icons/icon.icns
+            category: public.app-category.developer-tools
+            darkModeSupport: true
+
+          win:
+            target:
+              - nsis
+            icon: electron/icons/icon.png
+
+          nsis:
+            oneClick: false
+            allowToChangeInstallationDirectory: true
+
+          linux:
+            target:
+              - AppImage
+              - deb
+            icon: electron/icons/icon.png
+            category: Development
+
+          publish:
+            provider: github
+            owner: o-stahl
+            repo: osw-studio
+          EOF
+
+      - name: Build installer
+        working-directory: desktop-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --${{ matrix.platform }} --publish always

@@ -6,6 +6,14 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.52.0 - Desktop App (2026-04-04)
+
+OSW Studio is now available as a desktop application for macOS, Windows, and Linux.
+
+- **Desktop App** - Download and run OSW Studio locally as a native desktop application. The desktop version runs the full server with SQLite support, so you get publishing, sync, and all Server Mode features without needing to set up a server. Available from [GitHub Releases](https://github.com/o-stahl/osw-studio/releases)
+
+---
+
 ## v1.51.0 - Panel Overhaul (2026-04-03)
 
 The workspace panel system has been rebuilt. Panels are now capped at 3 visible, can be rearranged by dragging, and remember their layout between sessions.

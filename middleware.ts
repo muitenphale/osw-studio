@@ -32,6 +32,11 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/', request.url));
     }
 
+    // Desktop app: skip auth (local single-user, no remote access)
+    if (process.env.OSW_DESKTOP === 'true') {
+      return NextResponse.next();
+    }
+
     // Allow access to login page
     if (pathname === '/admin/login') {
       return NextResponse.next();
