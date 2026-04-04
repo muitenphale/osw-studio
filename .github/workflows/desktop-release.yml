@@ -200,8 +200,8 @@ jobs:
             target: 'node20',
             platform: 'node',
             clean: false,
-            external: ['electron', 'electron-updater', /^next\//],
-            noExternal: ['get-port-please'],
+            external: ['electron', /^next\//],
+            noExternal: ['get-port-please', 'electron-updater'],
           });
           TSUPEOF
 
@@ -209,12 +209,7 @@ jobs:
         working-directory: desktop-build
         run: npx tsup
 
-      - name: Copy runtime deps to app
-        shell: bash
-        working-directory: desktop-build
-        run: |
-          cp -r node_modules/electron-updater app/node_modules/electron-updater 2>/dev/null || true
-          cp -r node_modules/get-port-please app/node_modules/get-port-please 2>/dev/null || true
+      # electron-updater and get-port-please are bundled into main.js by tsup (noExternal)
 
       - name: Generate icons
         shell: bash
