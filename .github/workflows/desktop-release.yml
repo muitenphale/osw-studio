@@ -9,6 +9,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -47,7 +48,8 @@ jobs:
         run: |
           mkdir -p desktop-build/app
           cp -r .next/standalone/* desktop-build/app/
-          cp -r .next/static desktop-build/app/.next/static
+          mkdir -p desktop-build/app/.next/static
+          cp -r .next/static/* desktop-build/app/.next/static/
           cp -r public desktop-build/app/public
           rm -rf desktop-build/app/public/sites desktop-build/app/public/deployments
           cp -r docs desktop-build/app/docs 2>/dev/null || true
