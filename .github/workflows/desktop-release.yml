@@ -256,6 +256,9 @@ jobs:
 
           extraMetadata:
             main: main.js
+            author:
+              name: OSW Studio
+              email: otst@oswstudio.com
 
           asar: true
           asarUnpack:
