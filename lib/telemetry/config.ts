@@ -16,12 +16,15 @@ export const MAX_RETRIES = 3;
 export const RETRY_BASE_MS = 1_000;
 export const HEARTBEAT_INTERVAL_MS = 300_000;
 
-export function detectDeploymentType(): 'hf_space' | 'server' | 'browser' {
+export function detectDeploymentType(): 'hf_space' | 'desktop' | 'server' | 'browser' {
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     if (hostname.includes('hf.space') || hostname.includes('huggingface.co')) {
       return 'hf_space';
     }
+  }
+  if (process.env.NEXT_PUBLIC_DESKTOP === 'true') {
+    return 'desktop';
   }
   if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
     return 'server';
@@ -33,4 +36,13 @@ import pkg from '@/package.json';
 
 export function getAppVersion(): string {
   return pkg.version;
+}
+
+export function detectOsPlatform(): string {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('win')) return 'windows';
+  if (ua.includes('mac')) return 'macos';
+  if (ua.includes('linux')) return 'linux';
+  return 'unknown';
 }

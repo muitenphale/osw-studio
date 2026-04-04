@@ -46,6 +46,7 @@ jobs:
       - name: Build Next.js standalone (Server Mode)
         env:
           NEXT_PUBLIC_SERVER_MODE: 'true'
+          NEXT_PUBLIC_DESKTOP: 'true'
         run: npm run build
 
       - name: Setup desktop project

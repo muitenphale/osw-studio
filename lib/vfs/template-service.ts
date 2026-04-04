@@ -158,6 +158,89 @@ export class TemplateService {
   }
 
   /**
+   * Save a project as a custom template directly to IndexedDB (no file download)
+   */
+  async saveProjectAsTemplate(
+    vfs: any,
+    projectId: string,
+    metadata: TemplateMetadata
+  ): Promise<CustomTemplate> {
+    try {
+      logger.info('[TemplateService] Saving project as template', { projectId, name: metadata.name });
+
+      this.validateMetadata(metadata);
+
+      const project = await vfs.getProject(projectId);
+      const runtime = project?.settings?.runtime;
+
+      const items = await vfs.getAllFilesAndDirectories(projectId);
+      const files = items.filter((item: any) => item.type !== 'directory');
+      const directories = items
+        .filter((item: any) => item.type === 'directory')
+        .map((item: any) => item.path);
+
+      let backendFeatures: BackendFeatures | undefined;
+      try {
+        const adapter = vfs.getStorageAdapter();
+        const edgeFunctions = adapter.listEdgeFunctions ? await adapter.listEdgeFunctions(projectId) : [];
+        const serverFunctions = adapter.listServerFunctions ? await adapter.listServerFunctions(projectId) : [];
+        const secrets = adapter.listSecrets ? await adapter.listSecrets(projectId) : [];
+
+        if (edgeFunctions.length > 0 || serverFunctions.length > 0 || secrets.length > 0) {
+          backendFeatures = {
+            edgeFunctions: edgeFunctions.length > 0 ? edgeFunctions.map((fn: EdgeFunction) => ({
+              name: fn.name, method: fn.method, code: fn.code,
+              description: fn.description, enabled: fn.enabled, timeoutMs: fn.timeoutMs,
+            })) : undefined,
+            serverFunctions: serverFunctions.length > 0 ? serverFunctions.map((fn: ServerFunction) => ({
+              name: fn.name, code: fn.code, description: fn.description, enabled: fn.enabled,
+            })) : undefined,
+            secrets: secrets.length > 0 ? secrets.map((s: Secret) => ({
+              name: s.name, description: s.description,
+            })) : undefined,
+          };
+        }
+      } catch {
+        logger.warn('[TemplateService] Could not extract backend features from project stores');
+      }
+
+      const template: CustomTemplate = {
+        id: uuidv4(),
+        name: metadata.name,
+        description: metadata.description,
+        version: metadata.version || '1.0.0',
+        files: files.map((file: any) => ({ path: file.path, content: file.content })),
+        directories,
+        assets: [],
+        metadata: {
+          author: metadata.author,
+          authorUrl: metadata.authorUrl,
+          license: metadata.license,
+          licenseLabel: metadata.licenseLabel,
+          licenseDescription: metadata.licenseDescription,
+          tags: metadata.tags || [],
+          thumbnail: metadata.thumbnail,
+          previewImages: metadata.previewImages || [],
+          downloadUrl: metadata.downloadUrl,
+        },
+        runtime,
+        importedAt: new Date(),
+        backendFeatures,
+      };
+
+      await this.init();
+      await this.getAdapter().saveCustomTemplate(template);
+
+      logger.info('[TemplateService] Template saved successfully', { id: template.id, name: template.name });
+
+      return template;
+    } catch (error) {
+      logger.error('[TemplateService] Failed to save template:', error);
+      throw new Error(`Failed to save template: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Import a template file (.oswt)
    */
   async importTemplateFile(file: File): Promise<CustomTemplate> {

@@ -157,6 +157,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [showSkillsPanel, setShowSkillsPanel] = useState(savedPanels?.skills ?? false);
 
   const [showConsole, setShowConsole] = useState(savedPanels?.console ?? isTerminalRuntime);
+  const [fullscreenPreview, setFullscreenPreview] = useState(false);
 
   // Persist panel visibility when it changes
   useEffect(() => {
@@ -1490,6 +1491,26 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     </div>
   );
 
+  if (fullscreenPreview) {
+    return (
+      <div className="h-[100dvh] flex flex-col bg-background">
+        <MultipagePreview
+          ref={previewRef}
+          projectId={project.id}
+          refreshTrigger={refreshTrigger}
+          onFocusSelection={handleFocusSelection}
+          hasFocusTarget={Boolean(focusContext)}
+          onClose={() => setFullscreenPreview(false)}
+          deploymentId={selectedDeploymentId}
+          onCaptureScreenshot={handleCaptureScreenshot}
+          entryPoint={entryPoint}
+          runtime={project.settings?.runtime}
+          isFullscreen
+        />
+      </div>
+    );
+  }
+
   return (
     <TooltipProvider>
       <div className="h-[100dvh] flex flex-col">
@@ -1879,6 +1900,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     onCaptureScreenshot={handleCaptureScreenshot}
                     entryPoint={entryPoint}
                     runtime={project.settings?.runtime}
+                    onFullscreen={() => setFullscreenPreview(true)}
                   />
                 </div>
               )};

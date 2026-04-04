@@ -378,7 +378,7 @@ export const ProjectCard = React.memo(function ProjectCard({
                     onExportAsTemplate(project);
                   }}>
                     <FileBox className="mr-2 h-4 w-4" />
-                    Export as Template
+                    Create a Template
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />

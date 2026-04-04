@@ -6,6 +6,17 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.53.0 - Full Size Preview & Template Improvements (2026-04-04)
+
+Preview the site you're building without any workspace chrome getting in the way, and save project templates directly to your instance.
+
+- **Full Size Preview** - New Maximize button next to the device size icons (mobile/tablet/desktop) in the preview toolbar. Hides the header, sidebar, and all other panels — the preview fills the entire screen edge-to-edge. Click the Minimize button in the same spot to return to the normal workspace
+- **Create Templates from Projects** - "Export as Template" is now "Create a Template". Instead of downloading an `.oswt` file, templates are saved directly to your instance's template library. Export or download them later from the Templates page
+- **Preview Device Size Remembered** - Your mobile/tablet/desktop selection is now saved and restored when you reopen the preview panel or refresh the page
+- **Desktop App Fix** - Fixed a crash on launch caused by a missing module in the packaged Electron app
+
+---
+
 ## v1.52.0 - Desktop App (2026-04-04)
 
 OSW Studio is now available as a desktop application for macOS, Windows, and Linux.

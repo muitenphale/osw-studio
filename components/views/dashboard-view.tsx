@@ -682,7 +682,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
   const [browserData, setBrowserData] = useState<BrowserDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -701,7 +701,6 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
         const result = await fetchBrowserModeData();
         setBrowserData(result);
       }
-      setLastUpdated(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -769,11 +768,6 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-xl font-semibold text-zinc-100">Dashboard</h1>
-            {lastUpdated && (
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Updated {lastUpdated.toLocaleTimeString()}
-              </p>
-            )}
           </div>
         </div>
 
@@ -810,11 +804,6 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-xl font-semibold text-zinc-100">Dashboard</h1>
-            {lastUpdated && (
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Updated {lastUpdated.toLocaleTimeString()}
-              </p>
-            )}
           </div>
         </div>
 
@@ -833,7 +822,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
         </div>
 
         {/* Row 2: Recent Projects (no Deployments in browser mode) */}
-        <div className="mb-4">
+        <div className="mb-4 lg:w-1/2">
           <RecentProjectsCard
             projects={browserData.recentProjects}
             onNavigate={onNavigate}

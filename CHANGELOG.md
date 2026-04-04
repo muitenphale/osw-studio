@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.53.0 - 2026-04-04
+
+### Preview
+
+- **Full size preview mode**: New Maximize button in the preview panel's device-size toolbar (next to mobile/tablet/desktop). Hides the workspace header, sidebar, panel header, and all other panels — the preview fills the entire viewport edge-to-edge (no padding, rounded corners, or shadow). Minimize button in the same toolbar position exits back to the normal workspace layout. All panel state is preserved across transitions
+
+### Templates
+
+- **Create template from project saves to instance**: "Export as Template" renamed to "Create a Template" in the project card menu. Instead of downloading an `.oswt` file, the template is saved directly to the instance's template storage (IndexedDB). Users can then export/download templates from the Templates page
+
+### Fixes
+
+- **Dashboard timestamp removed**: Removed "Updated {time}" text below the Dashboard heading
+- **Dashboard recent projects card width**: Recent Projects card in browser mode now takes 50% width on desktop instead of stretching to 100%
+- **Preview device size persisted**: The selected device size (mobile/tablet/desktop) in the preview panel is now saved to `localStorage` and restored when the panel is reopened or the page is refreshed
+- **New project modal persisting after navigation**: Fixed the "New Project" dialog staying open when navigating back from the workspace to the projects page. The `autoCreateProject` flag (set by dashboard's "New Project" button) was not cleared when entering the workspace, so returning would re-trigger the dialog. Now reset on project select
+- **Desktop app crash on launch**: Fixed `Cannot find module 'electron-updater'` error in packaged Electron app. Moved `electron-updater` from `external` to `noExternal` in tsup config so it's bundled into `main.js` instead of relying on runtime module resolution inside the asar
+
 ## v1.52.0 - 2026-04-04
 
 ### Misc

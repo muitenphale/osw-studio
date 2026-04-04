@@ -206,6 +206,7 @@ function StudioInner() {
         view={currentView}
         onProjectSelect={(project) => {
           setSelectedProject(project);
+          setAutoCreateProject(false);
         }}
         onNavigate={handleNavigate}
         onStartTour={handleStartTour}

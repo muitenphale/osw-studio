@@ -11,6 +11,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   detectDeploymentType,
   getAppVersion,
+  detectOsPlatform,
 } from './config';
 import { configManager } from '@/lib/config/storage';
 
@@ -39,6 +40,7 @@ export class TelemetryTracker {
   private flushing = false;
   private visitorId = 'unknown';
   private deploymentType = 'browser';
+  private osPlatform = 'unknown';
   private appVersion = 'unknown';
 
   init(): void {
@@ -50,6 +52,7 @@ export class TelemetryTracker {
       this.optedIn = configManager.getSettings().telemetryOptIn !== false;
       this.visitorId = getOrCreateVisitorId();
       this.deploymentType = detectDeploymentType();
+      this.osPlatform = detectOsPlatform();
       this.appVersion = getAppVersion();
       this.sessionStartTime = Date.now();
       this.initialized = true;
@@ -81,6 +84,7 @@ export class TelemetryTracker {
         fields: {
           vid: this.visitorId,
           deployment_type: this.deploymentType,
+          os_platform: this.osPlatform,
           app_version: this.appVersion,
           ...(properties ?? {}),
         },

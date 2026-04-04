@@ -22,6 +22,8 @@ import {
   Crosshair,
   Camera,
   Loader2,
+  Maximize,
+  Minimize,
 } from 'lucide-react';
 import { PanelHeader } from '@/components/ui/panel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -44,6 +46,8 @@ interface MultipagePreviewProps {
   onCaptureScreenshot?: (screenshot: string) => void;
   entryPoint?: string;
   runtime?: ProjectRuntime;
+  onFullscreen?: () => void;
+  isFullscreen?: boolean;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -64,13 +68,25 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   deploymentId,
   onCaptureScreenshot,
   entryPoint,
-  runtime
+  runtime,
+  onFullscreen,
+  isFullscreen = false
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deviceSize, setDeviceSize] = useState<DeviceSize>('tablet');
+  const [deviceSize, setDeviceSize] = useState<DeviceSize>(() => {
+    try {
+      const stored = localStorage.getItem('osw-preview-device-size');
+      if (stored && stored in DEVICE_SIZES) return stored as DeviceSize;
+    } catch {}
+    return 'tablet';
+  });
+  const handleSetDeviceSize = useCallback((size: DeviceSize) => {
+    setDeviceSize(size);
+    try { localStorage.setItem('osw-preview-device-size', size); } catch {}
+  }, []);
   const [navigationHistory, setNavigationHistory] = useState<string[]>(['/']);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [iframeReady, setIframeReady] = useState(false);
@@ -142,7 +158,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   const compileGeneration = useRef(0);
 
   const Header = () => (
-    <PanelHeader icon={Eye} title="Live Preview" color="var(--button-preview-active)" onClose={onClose} panelKey="preview" />
+    isFullscreen ? null : <PanelHeader icon={Eye} title="Live Preview" color="var(--button-preview-active)" onClose={onClose} panelKey="preview" />
   );
 
   useEffect(() => {
@@ -1011,7 +1027,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
               backgroundColor: deviceSize === 'mobile' ? 'var(--button-preview-active)' : undefined,
               color: deviceSize === 'mobile' ? 'white' : undefined
             }}
-            onClick={() => setDeviceSize('mobile')}
+            onClick={() => handleSetDeviceSize('mobile')}
           >
             <Smartphone className="h-3 w-3" />
           </Button>
@@ -1023,7 +1039,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
               backgroundColor: deviceSize === 'tablet' ? 'var(--button-preview-active)' : undefined,
               color: deviceSize === 'tablet' ? 'white' : undefined
             }}
-            onClick={() => setDeviceSize('tablet')}
+            onClick={() => handleSetDeviceSize('tablet')}
           >
             <Tablet className="h-3 w-3" />
           </Button>
@@ -1035,19 +1051,41 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
               backgroundColor: deviceSize === 'desktop' ? 'var(--button-preview-active)' : undefined,
               color: deviceSize === 'desktop' ? 'white' : undefined
             }}
-            onClick={() => setDeviceSize('desktop')}
+            onClick={() => handleSetDeviceSize('desktop')}
           >
             <Monitor className="h-3 w-3" />
           </Button>
+          {isFullscreen ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 rounded-sm"
+              onClick={onClose}
+              title="Exit full size preview"
+            >
+              <Minimize className="h-3 w-3" />
+            </Button>
+          ) : onFullscreen ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 rounded-sm"
+              onClick={onFullscreen}
+              title="Full size preview"
+            >
+              <Maximize className="h-3 w-3" />
+            </Button>
+          ) : null}
         </div>
       </div>
 
       {/* Preview Frame */}
-      <div className="flex-1 bg-muted/20 dark:bg-muted/10 p-4 overflow-auto min-h-0">
-        <div 
+      <div className={cn("flex-1 bg-muted/20 dark:bg-muted/10 overflow-auto min-h-0", !isFullscreen && "p-4")}>
+        <div
           className={cn(
-            "bg-white mx-auto shadow-2xl transition-all duration-300",
-            deviceSize !== 'responsive' && "rounded-lg"
+            "bg-white mx-auto transition-all duration-300",
+            !isFullscreen && "shadow-2xl",
+            !isFullscreen && deviceSize !== 'responsive' && "rounded-lg"
           )}
           style={{
             width: DEVICE_SIZES[deviceSize].width || '100%',
@@ -1056,7 +1094,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
             maxWidth: DEVICE_SIZES[deviceSize].maxWidth || '100%'
           }}
         >
-          <iframe 
+          <iframe
             ref={(el) => {
               iframeRef.current = el;
               if (el && !iframeReady) {
@@ -1068,7 +1106,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
                 setIframeReady(false);
               }
             }}
-            className="w-full h-full rounded-lg"
+            className={cn("w-full h-full", !isFullscreen && "rounded-lg")}
             sandbox="allow-scripts allow-same-origin allow-forms"
             title="Preview"
           />

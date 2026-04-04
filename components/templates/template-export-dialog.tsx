@@ -86,24 +86,14 @@ export function TemplateExportDialog({
         tags
       };
 
-      // Export template
-      const blob = await templateService.exportProjectAsTemplate(
+      // Save template to instance
+      await templateService.saveProjectAsTemplate(
         vfs,
         project.id,
         exportMetadata
       );
 
-      // Download file
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${metadata.name.replace(/\s+/g, '-').toLowerCase()}.oswt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      toast.success('Template exported successfully!');
+      toast.success('Template created! You can find it on the Templates page.');
       onOpenChange(false);
 
       // Reset form
@@ -147,9 +137,9 @@ export function TemplateExportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Export as Template</DialogTitle>
+          <DialogTitle>Create a Template</DialogTitle>
           <DialogDescription>
-            Create a reusable template from this project
+            Save this project as a reusable template
           </DialogDescription>
         </DialogHeader>
 
@@ -331,7 +321,7 @@ export function TemplateExportDialog({
             Cancel
           </Button>
           <Button onClick={handleExport} disabled={exporting}>
-            {exporting ? 'Exporting...' : 'Export Template'}
+            {exporting ? 'Creating...' : 'Create Template'}
           </Button>
         </DialogFooter>
       </DialogContent>
