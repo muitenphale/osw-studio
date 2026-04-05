@@ -8,8 +8,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { verifySession } from '@/lib/auth/session';
-import { cookies } from 'next/headers';
+import { getSession } from '@/lib/auth/session';
 import { getCoreDatabase } from '@/lib/vfs/adapters/sqlite-connection';
 import { getRequestStats, cleanupOldLogs } from '@/lib/logging/request-logger';
 import { promises as fs } from 'fs';
@@ -145,14 +144,7 @@ async function countDeploymentDatabases(): Promise<number> {
 export async function GET() {
   try {
     // Verify admin authentication
-    const cookieStore = await cookies();
-    const token = cookieStore.get('osw_session')?.value;
-
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const session = await verifySession(token);
+    const session = await getSession();
     if (!session || !session.isAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

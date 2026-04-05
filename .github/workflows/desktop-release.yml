@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p desktop-build/app
-          cp -r .next/standalone/* desktop-build/app/
+          cp -r .next/standalone/. desktop-build/app/
           mkdir -p desktop-build/app/.next/static
           cp -r .next/static/* desktop-build/app/.next/static/
           cp -r public desktop-build/app/public
@@ -133,12 +133,12 @@ jobs:
             }
             process.env.SESSION_SECRET = secrets.sessionSecret;
             process.env.SECRETS_ENCRYPTION_KEY = secrets.encryptionKey;
-            const appDir = path.join(app.getAppPath(), 'app');
-            const { startServer } = require('next/dist/server/lib/start-server');
-            await startServer({
-              dir: appDir, isDev: false, hostname: 'localhost', port,
-              customServer: true, allowRetry: false, keepAliveTimeout: 5000, minimalMode: true,
-            });
+            // Use the standalone server.js which has __NEXT_PRIVATE_STANDALONE_CONFIG baked in
+            // In packaged app, getAppPath() points to Resources/app which contains server.js directly
+            // (electron-builder's directories.app: app flattens the app/ directory)
+            const appDir = app.getAppPath();
+            process.chdir(appDir);
+            require(path.join(appDir, 'server.js'));
             return port;
           }
 
@@ -256,14 +256,13 @@ jobs:
               name: OSW Studio
               email: otst@oswstudio.com
 
-          asar: true
-          asarUnpack:
-            - "node_modules/better-sqlite3/**"
-            - "**/*.node"
+          asar: false
 
           files:
             - "**/*"
             - "!**/.env"
+            - "!node_modules/@img/sharp-*/**"
+            - "!node_modules/sharp/**"
 
           mac:
             target:
@@ -273,6 +272,7 @@ jobs:
             icon: electron/icons/icon.icns
             category: public.app-category.developer-tools
             darkModeSupport: true
+            x64ArchFiles: "**/*.node"
 
           win:
             target:

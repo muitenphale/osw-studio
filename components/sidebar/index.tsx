@@ -141,6 +141,7 @@ function SidebarContent({
   const [logoHover, setLogoHover] = useState(false);
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+  const isDesktop = process.env.NEXT_PUBLIC_DESKTOP === 'true';
 
   // Track if we're on mobile (client-side only)
   const [isMobile, setIsMobile] = useState(false);
@@ -573,7 +574,7 @@ function SidebarContent({
       {/* System Actions (Server Mode only) */}
       {isServerMode && (
         <div className="border-t p-2 space-y-1">
-          {SYSTEM_ACTIONS.map((item) => {
+          {SYSTEM_ACTIONS.filter(item => !(isDesktop && item.id === 'logout')).map((item) => {
             const Icon = item.icon;
             const isLogout = item.id === 'logout';
             const isSync = item.id === 'sync';

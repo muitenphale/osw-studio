@@ -13,6 +13,9 @@ export async function middleware(request: NextRequest) {
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
   const { pathname } = request.nextUrl;
 
+  // Desktop app: skip all auth (local single-user, no remote access)
+  const isDesktop = process.env.OSW_DESKTOP === 'true';
+
   // Block admin API routes in Browser mode
   if (pathname.startsWith('/api/admin')) {
     if (!isServerMode) {
@@ -21,7 +24,7 @@ export async function middleware(request: NextRequest) {
         { status: 404 }
       );
     }
-    // API routes handle their own auth - allow through
+    // Desktop app or API routes handle their own auth - allow through
     return NextResponse.next();
   }
 
@@ -32,8 +35,8 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/', request.url));
     }
 
-    // Desktop app: skip auth (local single-user, no remote access)
-    if (process.env.OSW_DESKTOP === 'true') {
+    // Desktop app: skip auth
+    if (isDesktop) {
       return NextResponse.next();
     }
 

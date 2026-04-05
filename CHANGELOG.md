@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.53.1 - 2026-04-05
+
+### Desktop
+
+- **Desktop CI overhaul**: Rewrote the Electron packaging pipeline. Standalone `.next/` directory was missing due to `cp -r *` not copying dotfiles — switched to `cp -r ./.` syntax. Replaced direct `startServer` API call (which required webpack at runtime) with `require('server.js')` which has the standalone config baked in. Disabled asar packaging to avoid `chdir` failures inside the archive. Excluded sharp from the bundle to fix universal (x64+arm64) build conflicts
+- **Desktop auth bypass**: Admin API routes (`/api/admin/*`) were still checking for session tokens despite `OSW_DESKTOP=true`. Added desktop bypass to `getSession()` in `lib/auth/session.ts` — returns a synthetic admin session when running as desktop app. Covers all routes that use `requireAuth()` or `getSession()`
+- **Hide logout in desktop mode**: Logout button in the sidebar is now hidden when `NEXT_PUBLIC_DESKTOP=true` since the desktop app has no authentication
+
 ## v1.53.0 - 2026-04-04
 
 ### Preview
