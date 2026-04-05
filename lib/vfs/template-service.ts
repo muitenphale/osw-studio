@@ -231,6 +231,9 @@ export class TemplateService {
       await this.init();
       await this.getAdapter().saveCustomTemplate(template);
 
+      // Background sync to server
+      import('./auto-sync').then(({ autoSyncTemplate }) => autoSyncTemplate(template)).catch(() => {});
+
       logger.info('[TemplateService] Template saved successfully', { id: template.id, name: template.name });
 
       return template;
@@ -301,6 +304,9 @@ export class TemplateService {
       await this.init();
       await this.getAdapter().saveCustomTemplate(template);
 
+      // Background sync to server
+      import('./auto-sync').then(({ autoSyncTemplate }) => autoSyncTemplate(template)).catch(() => {});
+
       logger.info('[TemplateService] Template imported successfully', {
         id: template.id,
         name: template.name
@@ -334,6 +340,10 @@ export class TemplateService {
     try {
       await this.init();
       await this.getAdapter().deleteCustomTemplate(id);
+
+      // Background sync to server
+      import('./auto-sync').then(({ autoDeleteTemplate }) => autoDeleteTemplate(id)).catch(() => {});
+
       logger.info('[TemplateService] Template deleted', { id });
     } catch (error) {
       logger.error('[TemplateService] Failed to delete template:', error);

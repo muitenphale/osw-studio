@@ -901,16 +901,38 @@ export class VirtualFileSystem {
   }
 
   /**
-   * Clear any pending sync timeout for a project
-   * Called when leaving a project to prevent stale timeout references
+   * Flush any pending sync for a project immediately (don't wait for debounce).
+   * Called when leaving a project to ensure sync completes.
    */
-  clearSyncTimeout(projectId: string): void {
+  async flushSyncTimeout(projectId: string): Promise<void> {
     const timeout = this.syncTimeouts.get(projectId);
     if (timeout) {
       clearTimeout(timeout);
       this.syncTimeouts.delete(projectId);
-      logger.debug(`[VFS] Cleared sync timeout for project ${projectId}`);
+      try {
+        const { autoSyncProject } = await import('./auto-sync');
+        await autoSyncProject(projectId);
+      } catch (error) {
+        logger.error(`[VFS] Flush sync failed for project ${projectId}:`, error);
+      }
     }
+  }
+
+  /**
+   * Flush all pending sync timeouts immediately.
+   * Called on beforeunload — best-effort only, as the browser may kill async
+   * operations before they complete. Primary sync guarantee is flushSyncTimeout()
+   * on workspace exit, which runs before navigation.
+   */
+  flushAllSyncTimeouts(): void {
+    if (this.syncTimeouts.size === 0) return;
+    for (const [projectId, timeout] of this.syncTimeouts) {
+      clearTimeout(timeout);
+      import('./auto-sync').then(({ autoSyncProject }) => {
+        autoSyncProject(projectId);
+      }).catch(() => {});
+    }
+    this.syncTimeouts.clear();
   }
 
   async createFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {

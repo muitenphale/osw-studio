@@ -70,7 +70,7 @@ export async function verifySession(token: string): Promise<SessionData | null> 
 export async function getSession(): Promise<SessionData | null> {
   // Desktop app: always authenticated as local admin
   if (process.env.OSW_DESKTOP === 'true') {
-    return { userId: 'desktop', email: 'desktop@localhost', isAdmin: true, exp: Infinity };
+    return { userId: 'desktop', email: 'desktop@localhost', isAdmin: true, exp: 253402300799 };
   }
 
   const cookieStore = await cookies();

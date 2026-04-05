@@ -205,6 +205,9 @@ class SkillsService {
       this.customSkills.set(id, skill);
       this.saveCustomSkills();
 
+      // Background sync to server
+      import('../auto-sync').then(({ autoSyncSkill }) => autoSyncSkill(skill)).catch(() => {});
+
       logger.info(`[SkillsService] Created skill: ${id}`);
       return skill;
     } catch (error) {
@@ -250,6 +253,9 @@ class SkillsService {
       this.customSkills.set(id, updatedSkill);
       this.saveCustomSkills();
 
+      // Background sync to server
+      import('../auto-sync').then(({ autoSyncSkill }) => autoSyncSkill(updatedSkill)).catch(() => {});
+
       logger.info(`[SkillsService] Updated skill: ${id}`);
       return updatedSkill;
     } catch (error) {
@@ -277,6 +283,9 @@ class SkillsService {
 
     this.customSkills.delete(id);
     this.saveCustomSkills();
+
+    // Background sync to server
+    import('../auto-sync').then(({ autoDeleteSkill }) => autoDeleteSkill(id)).catch(() => {});
 
     logger.info(`[SkillsService] Deleted skill: ${id}`);
   }

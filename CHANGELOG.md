@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.54.0 - 2026-04-05
+
+### Improved Server Mode Auto-Sync
+
+- **Background sync for projects**: Project saves now automatically push to SQLite in the background (Server Mode only). The existing 2-second debounced `triggerAutoSync` on save is now silent — no toast notifications for routine syncs. Failed syncs retry up to 3 times with backoff (5s, 10s, 15s) before marking the project as error state
+- **Background sync for skills**: Custom skill create, update, and delete operations now auto-push to the server in the background via fire-and-forget calls. Built-in skills are excluded
+- **Background sync for templates**: Template save (from project), import (`.oswt` file), and delete operations now auto-push to the server in the background
+- **Flush on workspace exit**: Leaving the workspace now flushes any pending debounced sync immediately instead of cancelling it. Previously, a save followed by a quick exit would silently drop the sync
+- **Flush on tab/window close**: A `beforeunload` handler fires all pending sync timeouts as best-effort before the page unloads
+
+### Skills
+
+- **Skills panel moved up in sidebar**: Skills button now appears above Console in the workspace sidebar, and `DEFAULT_PANEL_ORDER` updated to match
+- **Create skill from workspace**: New "+" button in the skills panel header opens a dialog with the skill editor. Created skills are immediately enabled and visible to the AI on the next message
+
 ## v1.53.1 - 2026-04-05
 
 ### Desktop

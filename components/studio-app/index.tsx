@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Project } from '@/lib/vfs/types';
+import { vfs } from '@/lib/vfs';
 import { Workspace } from '@/components/workspace';
 import { GuidedTourProvider, useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
@@ -51,6 +52,14 @@ function StudioInner() {
     if (!localStorage.getItem('osw-telemetry-disclosed')) {
       setShowTelemetryDisclosure(true);
     }
+  }, []);
+
+  // Flush pending syncs on tab/window close
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
+    const handler = () => vfs.flushAllSyncTimeouts();
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
   // Track pageview on view changes

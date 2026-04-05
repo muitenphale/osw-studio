@@ -764,13 +764,6 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
 
     return (
       <div className="h-full overflow-y-auto p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-xl font-semibold text-zinc-100">Dashboard</h1>
-          </div>
-        </div>
-
         {/* Quick Actions */}
         <QuickActionsBar onStartTour={handleStartTour} />
 
@@ -800,13 +793,6 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
 
     return (
       <div className="h-full overflow-y-auto p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-xl font-semibold text-zinc-100">Dashboard</h1>
-          </div>
-        </div>
-
         {/* Quick Actions */}
         <QuickActionsBar onStartTour={handleStartTour} onNavigate={onNavigate} />
 

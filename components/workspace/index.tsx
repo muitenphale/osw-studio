@@ -173,7 +173,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const panelGroupRef = useRef<import('react-resizable-panels').ImperativePanelGroupHandle | null>(null);
 
   // Panel ordering — persisted to localStorage, controls left-to-right rendering
-  const DEFAULT_PANEL_ORDER = ['chat', 'files', 'editor', 'console', 'preview', 'checkpoints', 'debug', 'skills'];
+  const DEFAULT_PANEL_ORDER = ['chat', 'files', 'editor', 'skills', 'console', 'preview', 'checkpoints', 'debug'];
   const [panelOrder, setPanelOrder] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem('osw-workspace-panel-order');
@@ -879,8 +879,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         saveDebounceTimer.current = null;
       }
 
-      // Clear VFS sync timeout for this project
-      vfs.clearSyncTimeout(projectId);
+      // Flush any pending sync for this project before leaving
+      vfs.flushSyncTimeout(projectId);
 
       // Unmount backend context when leaving workspace
       vfs.unmountBackendContext();
@@ -1671,6 +1671,41 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
+                    showSkillsPanel
+                      ? 'shadow-sm'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  style={{
+                    backgroundColor: showSkillsPanel ? 'var(--button-skills-active, #a855f7)' : undefined,
+                    color: showSkillsPanel ? 'white' : undefined
+                  }}
+                  onClick={() => togglePanel('skills')}
+                  onMouseEnter={() => handleSidebarHover('skills')}
+                  onMouseLeave={() => handleSidebarHover(null)}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="border-0"
+                style={{
+                  backgroundColor: 'var(--button-skills-active, #a855f7)',
+                  color: 'white'
+                }}
+                arrowStyle={{
+                  backgroundColor: 'var(--button-skills-active, #a855f7)',
+                  fill: 'var(--button-skills-active, #a855f7)'
+                }}
+              >
+                <p>Skills</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
                   className={`relative h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
                     showConsole
                       ? 'shadow-sm'
@@ -1768,41 +1803,6 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 }}
               >
                 <p>Debug Events</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className={`h-5 w-5 px-1 rounded-sm flex items-center justify-center transition-all ${
-                    showSkillsPanel
-                      ? 'shadow-sm'
-                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
-                  }`}
-                  style={{
-                    backgroundColor: showSkillsPanel ? 'var(--button-skills-active, #a855f7)' : undefined,
-                    color: showSkillsPanel ? 'white' : undefined
-                  }}
-                  onClick={() => togglePanel('skills')}
-                  onMouseEnter={() => handleSidebarHover('skills')}
-                  onMouseLeave={() => handleSidebarHover(null)}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent
-                side="right"
-                className="border-0"
-                style={{
-                  backgroundColor: 'var(--button-skills-active, #a855f7)',
-                  color: 'white'
-                }}
-                arrowStyle={{
-                  backgroundColor: 'var(--button-skills-active, #a855f7)',
-                  fill: 'var(--button-skills-active, #a855f7)'
-                }}
-              >
-                <p>Skills</p>
               </TooltipContent>
             </Tooltip>
 

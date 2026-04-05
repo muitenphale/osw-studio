@@ -100,10 +100,13 @@ export function calculateSyncStatus(
   };
 }
 
+const syncRetries = new Map<string, number>();
+const MAX_RETRIES = 3;
+
 /**
- * Auto-sync a project to the server (non-blocking)
+ * Auto-sync a project to the server (non-blocking, silent by default)
  */
-export async function autoSyncProject(projectId: string): Promise<void> {
+export async function autoSyncProject(projectId: string, silent = true): Promise<void> {
   // Only sync in Server Mode
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
     return;
@@ -146,34 +149,41 @@ export async function autoSyncProject(projectId: string): Promise<void> {
     project.syncStatus = 'synced';
     await vfs.updateProject(project, { preserveUpdatedAt: true });
 
+    syncRetries.delete(projectId);
     logger.debug(`[AutoSync] Project ${projectId} synced successfully`);
 
-    // Show subtle success notification
-    toast.success('Project synced ✓', {
-      duration: 2000,
-      position: 'bottom-right'
-    });
+    if (!silent) {
+      toast.success('Project synced', {
+        duration: 2000,
+        position: 'bottom-right'
+      });
+    }
   } catch (error) {
     logger.error(`[AutoSync] Failed to sync project ${projectId}:`, error);
 
-    // Update sync status to error (preserve updatedAt)
-    try {
-      const project = await vfs.getProject(projectId);
-      if (project) {
-        project.syncStatus = 'error';
-        await vfs.updateProject(project, { preserveUpdatedAt: true });
+    const retries = syncRetries.get(projectId) ?? 0;
+    if (retries < MAX_RETRIES) {
+      syncRetries.set(projectId, retries + 1);
+      logger.warn(`[AutoSync] Will retry ${projectId} (${retries + 1}/${MAX_RETRIES})`);
+      setTimeout(() => autoSyncProject(projectId), (retries + 1) * 5000);
+    } else {
+      syncRetries.delete(projectId);
+      try {
+        const project = await vfs.getProject(projectId);
+        if (project) {
+          project.syncStatus = 'error';
+          await vfs.updateProject(project, { preserveUpdatedAt: true });
+        }
+      } catch (updateError) {
+        logger.error(`[AutoSync] Failed to update project status:`, updateError);
       }
-    } catch (updateError) {
-      logger.error(`[AutoSync] Failed to update project status:`, updateError);
-    }
 
-    // Only show error if it's not a "server not enabled" error
-    const errorMessage = error instanceof Error ? error.message : '';
-    if (!errorMessage.includes('Server mode not enabled')) {
-      toast.error('Sync failed - will retry', {
-        duration: 4000,
-        position: 'bottom-right'
-      });
+      if (!silent) {
+        toast.error('Sync failed', {
+          duration: 4000,
+          position: 'bottom-right'
+        });
+      }
     }
   }
 }
@@ -431,5 +441,62 @@ export async function autoPullAllProjects(): Promise<{
   } catch (error) {
     logger.error('[AutoSync] Failed to auto-pull projects:', error);
     return { pulled, skipped, errors };
+  }
+}
+
+/**
+ * Auto-sync a skill to the server (non-blocking)
+ */
+export async function autoSyncSkill(skill: import('./skills/types').Skill): Promise<void> {
+  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
+  if (skill.isBuiltIn) return;
+  try {
+    const { getSyncManager } = await import('./sync-manager');
+    const syncManager = getSyncManager();
+    await syncManager.pushSkill(skill);
+    logger.debug(`[AutoSync] Skill ${skill.id} synced`);
+  } catch (error) {
+    logger.error(`[AutoSync] Failed to sync skill ${skill.id}:`, error);
+  }
+}
+
+/**
+ * Auto-delete a skill from the server (non-blocking)
+ */
+export async function autoDeleteSkill(skillId: string): Promise<void> {
+  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
+  try {
+    await fetch(`/api/sync/skills/${skillId}`, { method: 'DELETE' });
+    logger.debug(`[AutoSync] Skill ${skillId} deleted from server`);
+  } catch (error) {
+    logger.error(`[AutoSync] Failed to delete skill ${skillId} from server:`, error);
+  }
+}
+
+/**
+ * Auto-sync a template to the server (non-blocking)
+ */
+export async function autoSyncTemplate(template: import('./types').CustomTemplate): Promise<void> {
+  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
+  try {
+    const { getSyncManager } = await import('./sync-manager');
+    const syncManager = getSyncManager();
+    await syncManager.pushTemplate(template);
+    logger.debug(`[AutoSync] Template ${template.id} synced`);
+  } catch (error) {
+    logger.error(`[AutoSync] Failed to sync template ${template.id}:`, error);
+  }
+}
+
+/**
+ * Auto-delete a template from the server (non-blocking)
+ */
+export async function autoDeleteTemplate(templateId: string): Promise<void> {
+  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
+  try {
+    await fetch(`/api/sync/templates/${templateId}`, { method: 'DELETE' });
+    logger.debug(`[AutoSync] Template ${templateId} deleted from server`);
+  } catch (error) {
+    logger.error(`[AutoSync] Failed to delete template ${templateId} from server:`, error);
   }
 }

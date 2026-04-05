@@ -6,6 +6,17 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.54.0 - Improved Background Sync & Skills (2026-04-05)
+
+Changes you make are now automatically saved to the server in the background — no more manual sync dialog for day-to-day use.
+
+- **Automatic Background Sync** - In Server Mode, project saves now silently push to SQLite in the background. Custom skills and templates sync automatically on create, update, or delete. Failed syncs retry up to 3 times with backoff. Leaving the workspace or closing the tab flushes any pending sync so nothing is lost
+- **Create Skills from Workspace** - New "+" button in the Skills panel header lets you create custom skills without leaving the workspace. The skill is immediately available to the AI on the next message
+- **Skills Panel Moved Up** - The Skills button in the workspace sidebar now appears above Console for easier access
+- **Desktop Auth Fix** - Admin API routes now properly bypass authentication in the desktop app. Previously, deployment pages and the dashboard would fail with unauthorized errors
+
+---
+
 ## v1.53.0 - Full Size Preview & Template Improvements (2026-04-04)
 
 Preview the site you're building without any workspace chrome getting in the way, and save project templates directly to your instance.

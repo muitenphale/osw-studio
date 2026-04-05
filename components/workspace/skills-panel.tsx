@@ -6,8 +6,14 @@ import { skillsService } from '@/lib/vfs/skills';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
-import { Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Sparkles, Plus } from 'lucide-react';
 import { PanelContainer, PanelHeader } from '@/components/ui/panel';
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/dialog';
+import { SkillEditor } from '@/components/skills/SkillEditor';
 
 interface SkillsPanelProps {
   onClose?: () => void;
@@ -18,6 +24,7 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
   const [globalEnabled, setGlobalEnabled] = useState(true);
   const [enabledSkills, setEnabledSkills] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const loadState = useCallback(async () => {
     try {
@@ -70,7 +77,24 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
 
   return (
     <PanelContainer>
-      <PanelHeader icon={Sparkles} title="Skills" color="var(--button-skills-active, #a855f7)" onClose={onClose} panelKey="skills" />
+      <PanelHeader
+        icon={Sparkles}
+        title="Skills"
+        color="var(--button-skills-active, #a855f7)"
+        onClose={onClose}
+        panelKey="skills"
+        actions={
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-5 w-5"
+            onClick={() => setCreateDialogOpen(true)}
+            title="Create new skill"
+          >
+            <Plus className="h-3 w-3" />
+          </Button>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {/* Global toggle */}
@@ -140,6 +164,21 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
           </>
         )}
       </div>
+
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <SkillEditor
+            skill={null}
+            mode="create"
+            onSave={async () => {
+              setCreateDialogOpen(false);
+              await loadState();
+              await vfs.reloadTransientSkills();
+            }}
+            onCancel={() => setCreateDialogOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </PanelContainer>
   );
 }
