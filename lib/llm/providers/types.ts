@@ -15,7 +15,8 @@ export type ProviderId =
   | 'sambanova'
   | 'zhipu'
   | 'minimax'
-  | 'llamacpp';
+  | 'llamacpp'
+  | 'meshllm';
 
 export interface ProviderModel {
   id: string;

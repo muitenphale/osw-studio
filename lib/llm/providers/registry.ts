@@ -332,6 +332,17 @@ export const providers: Record<ProviderId, ProviderConfig> = {
     supportsStreaming: true,
     isLocal: true
   },
+  meshllm: {
+    id: 'meshllm',
+    name: 'mesh-llm',
+    description: 'Distributed p2p inference — free open models via shared compute',
+    apiKeyRequired: false,
+    baseUrl: 'http://localhost:9337/v1',
+    supportsModelDiscovery: true,
+    supportsFunctions: true,
+    supportsStreaming: true,
+    isLocal: true
+  },
   sambanova: {
     id: 'sambanova',
     name: 'SambaNova',

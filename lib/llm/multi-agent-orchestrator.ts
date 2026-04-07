@@ -96,6 +96,54 @@ const MALFORMED_TOOL_CALL_PERSISTENT_REMINDER = `
 EVERY time you want to use a tool, you MUST invoke it via function calling.
 DO NOT write shell{"cmd":...} as text - INVOKE the tools directly.`;
 
+/**
+ * Extract shell commands from text when the model doesn't support native tool calling.
+ * Patterns: ```bash blocks, Gemini tool_code blocks, shell{} JSON syntax.
+ */
+function extractToolCallsFromText(content: string): import('./types').ToolCall[] | undefined {
+  if (!content) return undefined;
+
+  const commands: string[] = [];
+  let match;
+
+  // Pattern 1: ```bash/shell/sh code blocks
+  const bashBlockRe = /```(?:bash|shell|sh)\s*\n([\s\S]*?)\n```/g;
+  while ((match = bashBlockRe.exec(content)) !== null) {
+    const block = match[1].trim();
+    if (block) commands.push(block);
+  }
+
+  // Pattern 2: ```tool_code blocks (Gemini-style) — extract the command string
+  // e.g. ```tool_code\nprint(shell.run_command("status --task ..."))\n```
+  const toolCodeRe = /```tool_code\s*\n([\s\S]*?)\n```/g;
+  while ((match = toolCodeRe.exec(content)) !== null) {
+    const block = match[1].trim();
+    // Extract command from shell.run_command("...") or print(shell.run_command("..."))
+    const runCmdMatch = block.match(/shell\.run_command\(["']([\s\S]*?)["']\)/);
+    if (runCmdMatch) {
+      // Unescape \" sequences
+      commands.push(runCmdMatch[1].replace(/\\"/g, '"'));
+    }
+  }
+
+  // Pattern 3: shell{"cmd": "..."} or shell({"cmd": "..."})
+  const shellJsonRe = /shell\s*\(?\s*\{\s*["']?cmd["']?\s*:\s*["']([\s\S]*?)["']\s*\}\s*\)?/g;
+  while ((match = shellJsonRe.exec(content)) !== null) {
+    if (match[1].trim()) commands.push(match[1].trim());
+  }
+
+  if (commands.length === 0) return undefined;
+
+  return commands.map((cmd, i) => ({
+    id: `text-tool-${Date.now()}-${i}`,
+    type: 'function' as const,
+    function: {
+      name: 'shell',
+      arguments: JSON.stringify({ cmd }),
+    },
+  }));
+}
+
 export interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | ContentBlock[];  // String or array of content blocks (for multimodal)
@@ -190,6 +238,18 @@ export class MultiAgentOrchestrator {
   private toolCallCount = 0; // Telemetry: total tool calls executed
   private turnCount = 0; // Telemetry: total LLM turns completed
   private apiErrorCount = 0; // Telemetry: total API errors encountered
+
+  /** Check if the current model supports native tool/function calling */
+  private checkModelSupportsTools(): boolean {
+    const { provider, model } = this.getProviderConfig();
+    const cached = configManager.getCachedModels(provider);
+    if (cached?.models?.length) {
+      const entry = (cached.models as import('@/lib/llm/providers/types').ProviderModel[])
+        .find(m => m.id === model);
+      if (entry && entry.supportsFunctions === false) return false;
+    }
+    return true;
+  }
 
   private static readonly AUTO_COMPACT_THRESHOLD = 0.80; // Compact at 80% of limit
   private static readonly RECENT_KEEP_RATIO = 0.20; // Keep 20% of recent messages verbatim
@@ -316,7 +376,8 @@ export class MultiAgentOrchestrator {
       const serverContext = vfs.getServerContextMetadata();
 
       // Build system prompt (behavioral instructions only — skills/tree go in user message)
-      const systemPrompt = await buildShellSystemPrompt(this.chatMode, serverContext, this.projectId, this.rootAgent.type);
+      const modelSupportsTools = this.checkModelSupportsTools();
+      const systemPrompt = await buildShellSystemPrompt(this.chatMode, serverContext, this.projectId, this.rootAgent.type, modelSupportsTools);
 
       // Get current conversation
       const conversation = this.conversations.get(this.currentConversationId);
@@ -522,8 +583,18 @@ export class MultiAgentOrchestrator {
         }
       }
 
+      // For models without native tool support: extract tool calls from text
+      if (!response.toolsSent && response.content && (!response.toolCalls || response.toolCalls.length === 0)) {
+        const extracted = extractToolCallsFromText(response.content);
+        if (extracted && extracted.length > 0) {
+          logger.info(`[MultiAgentOrchestrator] Extracted ${extracted.length} tool call(s) from text (model has no native tool support)`);
+          response.toolCalls = extracted;
+        }
+      }
+
       // Check for malformed tool calls (model wrote tool syntax as text instead of invoking)
-      if (response.content && (!response.toolCalls || response.toolCalls.length === 0)) {
+      // Only applies when tools WERE sent — if tools weren't sent, text extraction above handles it
+      if (response.toolsSent && response.content && (!response.toolCalls || response.toolCalls.length === 0)) {
         if (detectMalformedToolCalls(response.content)) {
           this.malformedToolCallRetries++;
           this.totalMalformedToolCalls++;
@@ -1403,7 +1474,7 @@ Please revise your approach.`;
   private async streamLLMResponse(
     messages: AgentMessage[],
     agent: Agent
-  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; reasoningDetails?: ReasoningDetail[] }> {
+  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; reasoningDetails?: ReasoningDetail[]; toolsSent?: boolean }> {
     let { provider, apiKey, model } = this.getProviderConfig();
 
     // Refresh Codex OAuth token if needed before making the API call
@@ -1419,6 +1490,8 @@ Please revise your approach.`;
     const apiUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/api/generate`
       : '/api/generate';
+
+    const modelSupportsTools = this.checkModelSupportsTools();
 
     // Strip ui_metadata from messages
     let sanitizedMessages = messages.map(msg => {
@@ -1447,9 +1520,9 @@ Please revise your approach.`;
       apiKey,
       model,
       provider,
-      tools,
+      ...(modelSupportsTools ? { tools } : {}),
       max_tokens: 16384,
-      ...(tools && tools.length > 0 && { tool_choice: 'auto' }),
+      ...(modelSupportsTools && tools && tools.length > 0 && { tool_choice: 'auto' }),
       ...(reasoningEnabled && { reasoning: { enabled: true } })
     };
 
@@ -1528,12 +1601,34 @@ Please revise your approach.`;
         throw new Error('Stopped by user');
       }
 
-      // Retry: recursive call to streamLLMResponse with the same messages
+      // Inject error context so the model sees different input on retry
+      const isJsonParseError = lowerMsg.includes('parse') && lowerMsg.includes('json');
+      const errorFeedback = isJsonParseError
+        ? `⚠️ TOOL CALL FAILED — your tool call arguments could not be parsed as valid JSON.
+
+Error: ${errorMessage}
+
+The heredoc syntax (ss ... << 'EOF') contains single quotes and newlines that break JSON serialization.
+You MUST use a different approach:
+- Use sed -i for simple replacements: sed -i 's/old text/new text/g' /file
+- Use ss with short inline content (no heredocs with single quotes)
+- Break large edits into multiple small sed commands
+DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
+        : `⚠️ Your previous response caused an API error: ${errorMessage}\n\nPlease try a different approach.`;
+
+      messages.push({
+        role: 'user',
+        content: errorFeedback,
+        ui_metadata: { isSyntheticError: true }
+      });
+
+      // Retry with the error context now in the conversation
       return this.streamLLMResponse(messages, agent);
     }
 
     this.turnCount++;
-    return this.parseStreamingResponseWithTracking(response, provider, model);
+    const result = await this.parseStreamingResponseWithTracking(response, provider, model);
+    return { ...result, toolsSent: modelSupportsTools };
   }
 
   /**
@@ -1841,7 +1936,8 @@ Please revise your approach.`;
     const provider = configManager.getSelectedProvider();
     const providerConfig = getProvider(provider);
     const apiKey = configManager.getProviderApiKey(provider);
-    const model = this.model || configManager.getProviderModel(provider) || undefined;
+    // Prefer live config over this.model (which can go stale on provider switch)
+    const model = configManager.getProviderModel(provider) || this.model || undefined;
 
     if (providerConfig.apiKeyRequired && !apiKey && !providerConfig.usesOAuth) {
       throw new Error(`API key not configured for provider: ${provider}`);

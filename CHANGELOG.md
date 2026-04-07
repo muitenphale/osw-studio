@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.55.0 - 2026-04-07
+
+### Model Compatibility
+
+- **Removed tools filter from OpenRouter model listing**: Models without native tool/function calling support (e.g., Gemma 3n, OLMo, Liquid) are no longer hidden from the model selector. All text-output models on OpenRouter now appear (~350 vs ~250 previously)
+- **Non-tool-calling model support**: Models that don't support native function calling now work via text-based command extraction. The system prompt instructs these models to write commands in bash code blocks instead of invoking tools. The orchestrator parses ```bash blocks, Gemini-style `tool_code` blocks, and `shell{...}` JSON syntax from text responses and converts them to synthetic tool calls
+- **Skip tools param for non-tool models**: `tools` and `tool_choice` are omitted from the API request when the model's `supportsFunctions` is false, preventing OpenRouter "No endpoints found that support tool use" errors
+- **Malformed tool call detection scoped**: The "CRITICAL ERROR: You wrote a tool call as TEXT" correction now only fires when tools were actually sent in the request. Models without tool support are no longer scolded for writing commands as text
+- **Model capability badges**: Selected model details now show badges for Tools, Vision, Reasoning, or "No native tools" so users can see what the model supports at a glance
+
+### Providers
+
+- **mesh-llm provider**: New provider for distributed p2p inference via the [mesh-llm](https://github.com/michaelneale/mesh-llm) network. Free open model inference from shared compute — no API key needed. Run `mesh-llm --auto` locally to join the public mesh, then select "mesh-llm" in OSW Studio settings. Models are auto-discovered from the mesh. Works on desktop and self-hosted deployments (requires mesh-llm running on the same machine)
+
+### Bug Fixes
+
+- **Stale model on provider switch**: The orchestrator cached the model name at construction time (`this.model`), so switching providers mid-session (e.g. mesh-llm → OpenRouter) would keep sending the old model ID, causing instant "not a valid model ID" errors on every Continue. `getProviderConfig()` now prefers the user's current config selection over the cached value
+- **Blind retry on Continue after API error**: Clicking Continue after an `error_paused` API error retried with identical messages, causing the model to produce the same broken output in a loop. The retry now injects a synthetic error message into the conversation so the model sees different input. For JSON parse errors (e.g. heredoc syntax breaking tool call serialization), the guidance specifically steers the model away from the problematic pattern
+- **Preview toolbar flicker during typing and generation**: The crosshair and camera icons in the preview panel flickered on every keystroke and generation progress event. Caused by inline arrow functions (`onFullscreen`, `onClose`) defeating `React.memo` on `MultipagePreview`. Extracted to stable `useCallback` handlers
+
 ## v1.54.0 - 2026-04-05
 
 ### Improved Server Mode Auto-Sync

@@ -52,9 +52,8 @@ export async function fetchAvailableModels(): Promise<OpenRouterModel[]> {
     
     const data: ModelsResponse = await response.json();
     
-    const filteredModels = data.data.filter(model => 
-      model.architecture.output_modalities.includes('text') &&
-      model.supported_parameters.includes('tools')
+    const filteredModels = data.data.filter(model =>
+      model.architecture.output_modalities.includes('text')
     );
     
     return filteredModels.sort((a, b) => {

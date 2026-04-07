@@ -600,6 +600,14 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setShowPreview(false);
   }, []);
 
+  const handleEnterFullscreen = useCallback(() => {
+    setFullscreenPreview(true);
+  }, []);
+
+  const handleExitFullscreen = useCallback(() => {
+    setFullscreenPreview(false);
+  }, []);
+
   // Listen for showPreview event (dispatched by AI preview command)
   useEffect(() => {
     const handler = () => togglePanel('preview');
@@ -1500,7 +1508,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           refreshTrigger={refreshTrigger}
           onFocusSelection={handleFocusSelection}
           hasFocusTarget={Boolean(focusContext)}
-          onClose={() => setFullscreenPreview(false)}
+          onClose={handleExitFullscreen}
           deploymentId={selectedDeploymentId}
           onCaptureScreenshot={handleCaptureScreenshot}
           entryPoint={entryPoint}
@@ -1900,7 +1908,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     onCaptureScreenshot={handleCaptureScreenshot}
                     entryPoint={entryPoint}
                     runtime={project.settings?.runtime}
-                    onFullscreen={() => setFullscreenPreview(true)}
+                    onFullscreen={handleEnterFullscreen}
                   />
                 </div>
               )};

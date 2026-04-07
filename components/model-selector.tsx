@@ -452,6 +452,9 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
               {model.id.split('/')[0]}
             </Badge>
           )}
+          {model.supportsFunctions === false && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground/50">No tools</Badge>
+          )}
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span>Context: {Math.round(model.contextLength / 1000)}K</span>
@@ -490,6 +493,20 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
             `Input: ${formatModelPrice(selectedModelData.pricing.input)}/K • Output: ${formatModelPrice(selectedModelData.pricing.output)}/K`
         ) : (
           'Pricing varies by provider'
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1 my-1">
+        {selectedModelData.supportsFunctions && (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0">Tools</Badge>
+        )}
+        {selectedModelData.supportsVision && (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0">Vision</Badge>
+        )}
+        {selectedModelData.supportsReasoning && (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0">Reasoning</Badge>
+        )}
+        {!selectedModelData.supportsFunctions && (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground/60">No native tools</Badge>
         )}
       </div>
       {selectedModelData.description && (

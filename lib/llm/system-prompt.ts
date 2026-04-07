@@ -32,25 +32,42 @@ export interface ServerContextMetadata {
   scheduledFunctionCount: number;
 }
 
-export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string, agentType?: AgentType): Promise<string> {
+export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string, agentType?: AgentType, modelSupportsTools = true): Promise<string> {
   if (agentType === 'explore') return buildExplorePrompt(serverContext, projectId);
   if (agentType === 'plan') return buildPlanPrompt(serverContext, projectId);
   if (agentType === 'task') return buildTaskAgentPrompt(serverContext, projectId);
   if (chatMode) {
     return buildChatModePrompt(serverContext, projectId);
   }
-  return await buildCodeModePrompt(serverContext, projectId);
+  return await buildCodeModePrompt(serverContext, projectId, modelSupportsTools);
 }
 
 /**
  * Shared preamble for both chat and code modes.
  * Contains: role, tool calling, file reading preferences, command list.
  */
-function buildSharedPreamble(isReadOnly: boolean, hasServerContext: boolean): string {
+function buildSharedPreamble(isReadOnly: boolean, hasServerContext: boolean, modelSupportsTools = true): string {
   let prompt = `You are an AI assistant helping users with coding projects in a sandboxed virtual file system.
+`;
 
+  if (modelSupportsTools) {
+    prompt += `
 Invoke tools via function calling — never output tool syntax as text.
-The shell tool accepts a 'cmd' string parameter: "ls -la /"
+The shell tool accepts a 'cmd' string parameter: "ls -la /"`;
+  } else {
+    prompt += `To execute commands, write them in a \`\`\`bash code block — one block per command:
+
+\`\`\`bash
+cat > /file << 'EOF'
+content
+EOF
+\`\`\`
+
+The shell accepts these commands and will execute each code block automatically.
+Do NOT write multiple commands in one block — use separate blocks for each command.`;
+  }
+
+  prompt += `
 
 Prefer targeted reads over cat to save tokens:
   rg -C 5 'pattern' /  — search with context (best)
@@ -301,29 +318,37 @@ Focus on exploration, analysis, and planning.`;
   return prompt;
 }
 
-async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string): Promise<string> {
-  let prompt = buildSharedPreamble(false, !!serverContext);
+async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string, modelSupportsTools = true): Promise<string> {
+  let prompt = buildSharedPreamble(false, !!serverContext, modelSupportsTools);
 
-  prompt += `
+  if (modelSupportsTools) {
+    prompt += `
 
 You have exactly ONE tool: shell. Do not call any other tool.
-ss, sed, cat, and all other commands are shell commands — always call them via the shell tool.
+ss, sed, cat, and all other commands are shell commands — always call them via the shell tool.`;
+  } else {
+    prompt += `
+
+All commands (ss, sed, cat, mkdir, etc.) are executed via bash code blocks.`;
+  }
+
+  prompt += `
 
 ${SS_EDITING_DOCS}
 Do not use cat > to edit existing files — use ss instead.
 
 Build command (run after writing files):
-  shell({ cmd: "build" })
+  ${modelSupportsTools ? 'shell({ cmd: "build" })' : '```bash\nbuild\n```'}
 Returns "Build successful — 0 errors" or lists compilation errors.
 Run build after writing a batch of files to verify they compile. Do not inspect bundle.js or grep compiled output — use build instead.
 
 Runtime command (change project runtime):
-  shell({ cmd: "runtime react" })
+  ${modelSupportsTools ? 'shell({ cmd: "runtime react" })' : '```bash\nruntime react\n```'}
 Valid runtimes: static, handlebars, react, preact, svelte, vue, python, lua.
 Changes the project runtime and updates .PROMPT.md if it hasn't been customized.
 
 Status command (always run before finishing):
-  shell({ cmd: "status --task 'the original request' --done 'work completed' --remaining 'none' --complete" })
+  ${modelSupportsTools ? 'shell({ cmd: "status --task \'the original request\' --done \'work completed\' --remaining \'none\' --complete" })' : '```bash\nstatus --task \'the original request\' --done \'work completed\' --remaining \'none\' --complete\n```'}
 End with --complete when done, or --incomplete if more work remains.
 
 All paths are relative to the project root (/).
@@ -334,9 +359,9 @@ After writing code, run build to check for errors, then run status when done.
 Do not run diagnostic loops (repeated curl/grep/rg/wc) to verify visual output — you cannot assess rendering from raw HTML.
 
 Delegate to keep your context focused — sub-agents explore or edit independently and return a summary:
-  shell({ cmd: "delegate explore 'What colors are used?' 'What fonts?' 'What layout patterns?'" })
-  shell({ cmd: "delegate task 'Add nav to index.html' 'Add nav to about.html' 'Add nav to contact.html'" })
-  shell({ cmd: "delegate plan 'How should we add a blog section?'" })
+  ${modelSupportsTools ? 'shell({ cmd: "delegate explore \'What colors are used?\' \'What fonts?\' \'What layout patterns?\'" })' : '```bash\ndelegate explore \'What colors are used?\' \'What fonts?\' \'What layout patterns?\'\n```'}
+  ${modelSupportsTools ? 'shell({ cmd: "delegate task \'Add nav to index.html\' \'Add nav to about.html\' \'Add nav to contact.html\'" })' : '```bash\ndelegate task \'Add nav to index.html\' \'Add nav to about.html\' \'Add nav to contact.html\'\n```'}
+  ${modelSupportsTools ? 'shell({ cmd: "delegate plan \'How should we add a blog section?\'" })' : '```bash\ndelegate plan \'How should we add a blog section?\'\n```'}
 Always use ONE delegate call with multiple quoted prompts — never make separate delegate calls. Each starts fresh, so never delegate tasks that depend on each other's output. Build foundational work (e.g. a primary page) yourself first, then delegate independent follow-up work. For quick lookups (1-2 files), just use cat/rg directly.`;
 
   prompt += await buildDynamicContent(projectId, serverContext);

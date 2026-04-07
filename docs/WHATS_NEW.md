@@ -6,6 +6,17 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.55.0 - More Models & mesh-llm (2026-04-07)
+
+All OpenRouter models are now available, even those without native tool support. Plus a new local inference provider.
+
+- **Use Any Model** - Models without native tool/function calling (Gemma 3n, OLMo, Liquid, etc.) now work. The AI writes commands in bash code blocks instead, and OSW Studio extracts and executes them automatically. The model list shows a "No tools" badge so you know what to expect
+- **Model Capability Badges** - The model selector now shows Tools, Vision, Reasoning, and "No native tools" badges so you can see what each model supports at a glance
+- **mesh-llm Provider** - New provider for free open model inference via the [mesh-llm](https://github.com/michaelneale/mesh-llm) peer-to-peer network. Run `mesh-llm --auto` locally, then select "mesh-llm" in Settings. Models are auto-discovered from the mesh
+- **Better Error Recovery** - Clicking Continue after an API error no longer loops on the same failure. The AI now gets feedback about what went wrong and adjusts its approach
+
+---
+
 ## v1.54.0 - Improved Background Sync & Skills (2026-04-05)
 
 Changes you make are now automatically saved to the server in the background — no more manual sync dialog for day-to-day use.

@@ -104,6 +104,7 @@ export async function POST(request: NextRequest) {
 
         case 'lmstudio':
         case 'llamacpp':
+        case 'meshllm':
           try {
             const lmResponse = await fetch(`${providerConfig.baseUrl}/models`);
             if (lmResponse.ok) {
