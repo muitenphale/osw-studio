@@ -49,7 +49,7 @@ export async function GET(
     const staticFilePath = path.join(
       process.cwd(),
       'public',
-      'sites',
+      'deployments',
       id,
       requestedPath
     );

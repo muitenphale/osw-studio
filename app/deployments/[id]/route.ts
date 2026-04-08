@@ -22,7 +22,7 @@ export async function GET(
     const indexPath = path.join(
       process.cwd(),
       'public',
-      'sites',
+      'deployments',
       id,
       'index.html'
     );
