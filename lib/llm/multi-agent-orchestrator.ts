@@ -159,6 +159,8 @@ export interface AgentMessage {
     projectContext?: string;  // Project context injected into first user message (for collapsible UI display)
     displayContent?: string | ContentBlock[];  // Clean user prompt for UI (without injected context/hints)
     isCompactSummary?: boolean;  // True if this message is a compaction summary
+    focusContext?: { domPath: string; snippet: string };  // Focus context from crosshair tool
+    semanticBlocks?: Array<{ name: string; domPath: string; position: string; description: string }>;  // Placed semantic blocks
   };
 }
 
@@ -346,6 +348,9 @@ export class MultiAgentOrchestrator {
     userPrompt: string,
     options?: {
       images?: Array<{ data: string; mediaType: string }>;
+      focusContext?: { domPath: string; snippet: string };
+      semanticBlocks?: Array<{ name: string; domPath: string; position: string; description: string }>;
+      displayPrompt?: string;  // Clean user prompt for UI display (without prepended context)
     }
   ): Promise<MultiAgentResult> {
     logger.info('[MultiAgentOrchestrator] Starting execution', { agent: this.rootAgent.type });
@@ -447,6 +452,9 @@ export class MultiAgentOrchestrator {
       let userContent: string | ContentBlock[];
       let displayContent: string | ContentBlock[];
 
+      // Use clean display prompt (without prepended context) when available
+      const cleanPrompt = options?.displayPrompt ?? userPrompt;
+
       if (options?.images && options.images.length > 0) {
         // Build multimodal content with text and images
         const imageBlocks: ContentBlock[] = [];
@@ -459,10 +467,10 @@ export class MultiAgentOrchestrator {
           });
         }
         userContent = [{ type: 'text' as const, text: messagePrefix + userPrompt }, ...imageBlocks];
-        displayContent = [{ type: 'text' as const, text: userPrompt }, ...imageBlocks];
+        displayContent = [{ type: 'text' as const, text: cleanPrompt }, ...imageBlocks];
       } else {
         userContent = messagePrefix + userPrompt;
-        displayContent = userPrompt;
+        displayContent = cleanPrompt;
       }
 
       // Add user prompt — full content for LLM, display content + context metadata for UI
@@ -471,7 +479,9 @@ export class MultiAgentOrchestrator {
         content: userContent,
         ui_metadata: {
           displayContent,
-          ...(projectContext ? { projectContext } : {})
+          ...(projectContext ? { projectContext } : {}),
+          ...(options?.focusContext ? { focusContext: options.focusContext } : {}),
+          ...(options?.semanticBlocks?.length ? { semanticBlocks: options.semanticBlocks } : {}),
         }
       });
 

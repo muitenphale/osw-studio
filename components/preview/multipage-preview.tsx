@@ -24,16 +24,23 @@ import {
   Loader2,
   Maximize,
   Minimize,
+  LayoutGrid,
 } from 'lucide-react';
 import { PanelHeader } from '@/components/ui/panel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn, logger } from '@/lib/utils';
 import { captureIframeScreenshot } from '@/lib/utils/screenshot';
 import type { ProjectRuntime } from '@/lib/vfs/types';
+import type { PlacementResult, PlacementBlockInfo } from '@/lib/preview/types';
 import { pushRuntimeError, clearRuntimeErrors } from '@/lib/preview/runtime-errors';
+import { PalettePanel } from '@/components/semantic-blocks/palette-panel';
+import type { SemanticBlock } from '@/lib/semantic-blocks/types';
 
 export interface MultipagePreviewHandle {
   captureScreenshot: (waitForContent?: boolean) => Promise<string | null>;
+  startBlockDrag: (block: PlacementBlockInfo) => void;
+  getActivePath: () => string;
+  removePlaceholder: (placementId: string) => void;
 }
 
 interface MultipagePreviewProps {
@@ -48,6 +55,9 @@ interface MultipagePreviewProps {
   runtime?: ProjectRuntime;
   onFullscreen?: () => void;
   isFullscreen?: boolean;
+  placementActive?: boolean;
+  onPlacementToggle?: () => void;
+  onPlacementComplete?: (payload: PlacementResult) => void;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -58,6 +68,286 @@ const DEVICE_SIZES: Record<DeviceSize, { width?: string; height?: string; maxHei
   desktop: { width: '100%', height: '100%', maxHeight: '900px', maxWidth: '1440px' },
   responsive: { width: '100%', height: '100%' }
 };
+
+function generatePlacementScript(): string {
+  return `<script>(function() {
+    var state = {
+      active: false,
+      block: null,
+      indicator: null,
+      currentTarget: null,
+      currentPosition: 'after',
+      lastX: 0,
+      lastY: 0,
+      scrollRaf: null,
+      scrollSpeed: 0
+    };
+
+    function createIndicator() {
+      if (state.indicator) return state.indicator;
+      var el = document.createElement('div');
+      el.setAttribute('data-semantic-indicator', 'true');
+      el.style.cssText = 'position:fixed;height:0;border:2px solid rgba(99,102,241,0.95);border-radius:12px;box-shadow:0 0 0 4px rgba(99,102,241,0.32);pointer-events:none;transition:top 0.15s ease-out,left 0.15s ease-out,width 0.15s ease-out,opacity 0.15s;opacity:0;z-index:2147483646;box-sizing:border-box;';
+      document.body.appendChild(el);
+      state.indicator = el;
+      return el;
+    }
+
+    function removeIndicator() {
+      if (state.indicator) {
+        state.indicator.style.opacity = '0';
+      }
+    }
+
+    function isPlaceholderOrIndicator(el) {
+      if (!el || !el.getAttribute) return false;
+      return el.getAttribute('data-semantic-placeholder') === 'true' ||
+             el.getAttribute('data-semantic-indicator') === 'true';
+    }
+
+    function getInsertPosition(el, x, y) {
+      var rect = el.getBoundingClientRect();
+      var style = window.getComputedStyle(el.parentNode || el);
+      var isHorizontal = style.display === 'flex' && (style.flexDirection === 'row' || style.flexDirection === 'row-reverse');
+
+      if (isHorizontal) {
+        return (x - rect.left) < (rect.width / 2) ? 'before' : 'after';
+      }
+      return (y - rect.top) < (rect.height / 2) ? 'before' : 'after';
+    }
+
+    function findDropTarget(x, y) {
+      var el = document.elementFromPoint(x, y);
+      if (!el || el === document.documentElement || el === document.body) {
+        var children = document.body.children;
+        for (var i = children.length - 1; i >= 0; i--) {
+          if (!isPlaceholderOrIndicator(children[i]) && children[i].tagName !== 'SCRIPT') {
+            return children[i];
+          }
+        }
+        return null;
+      }
+      while (el && (isPlaceholderOrIndicator(el) || el.tagName === 'SCRIPT')) {
+        el = el.parentElement;
+      }
+      if (el && el !== document.body && el !== document.documentElement) {
+        var pos = window.getComputedStyle(el).position;
+        if (pos === 'absolute' || pos === 'fixed') {
+          el = el.parentElement;
+        }
+      }
+      return el && el !== document.body && el !== document.documentElement ? el : null;
+    }
+
+    function buildDomPath(el) {
+      var parts = [];
+      while (el && el !== document.body && el !== document.documentElement) {
+        var tag = el.tagName.toLowerCase();
+        if (el.id) {
+          parts.unshift(tag + '#' + el.id);
+          break;
+        }
+        var parent = el.parentElement;
+        if (parent) {
+          var siblings = Array.prototype.filter.call(parent.children, function(c) {
+            return c.tagName === el.tagName && !isPlaceholderOrIndicator(c);
+          });
+          if (siblings.length > 1) {
+            var idx = siblings.indexOf(el) + 1;
+            tag += ':nth-of-type(' + idx + ')';
+          }
+        }
+        parts.unshift(tag);
+        el = parent;
+      }
+      return 'body > ' + parts.join(' > ');
+    }
+
+    function showIndicator(target, position) {
+      var indicator = createIndicator();
+      var rect = target.getBoundingClientRect();
+      var y = position === 'before' ? rect.top : rect.bottom;
+      indicator.style.top = y + 'px';
+      indicator.style.left = rect.left + 'px';
+      indicator.style.width = rect.width + 'px';
+      indicator.offsetHeight;
+      indicator.style.opacity = '1';
+      state.currentTarget = target;
+      state.currentPosition = position;
+    }
+
+    function startAutoScroll() {
+      if (state.scrollRaf) return;
+      function tick() {
+        if (state.scrollSpeed !== 0) {
+          window.scrollBy(0, state.scrollSpeed);
+        }
+        state.scrollRaf = requestAnimationFrame(tick);
+      }
+      state.scrollRaf = requestAnimationFrame(tick);
+    }
+
+    function stopAutoScroll() {
+      if (state.scrollRaf) {
+        cancelAnimationFrame(state.scrollRaf);
+        state.scrollRaf = null;
+      }
+      state.scrollSpeed = 0;
+    }
+
+    function updateAutoScroll(y) {
+      var vh = window.innerHeight;
+      var edgeZone = vh * 0.08;
+      var maxSpeed = 12;
+      if (y < edgeZone) {
+        // Top edge — scroll up, faster closer to edge
+        state.scrollSpeed = -maxSpeed * (1 - y / edgeZone);
+        startAutoScroll();
+      } else if (y > vh - edgeZone) {
+        // Bottom edge — scroll down
+        state.scrollSpeed = maxSpeed * (1 - (vh - y) / edgeZone);
+        startAutoScroll();
+      } else {
+        state.scrollSpeed = 0;
+      }
+    }
+
+    function handleHover(x, y) {
+      if (!state.active) return;
+      state.lastX = x;
+      state.lastY = y;
+      updateAutoScroll(y);
+      var target = findDropTarget(x, y);
+      if (!target) {
+        removeIndicator();
+        state.currentTarget = null;
+        return;
+      }
+      var position = getInsertPosition(target, x, y);
+      if (target === state.currentTarget && position === state.currentPosition) return;
+      showIndicator(target, position);
+    }
+
+    function buildHtmlContext(target, position, blockName) {
+      // Get the parent element that contains the insertion point
+      var parent = target.parentNode;
+      if (!parent || parent === document.body || parent === document.documentElement) {
+        parent = target; // use target itself if parent is body
+      }
+      // Clone the parent to insert a marker comment without modifying the real DOM
+      var clone = parent.cloneNode(true);
+      // Find the corresponding target in the clone
+      var children = Array.prototype.slice.call(parent.children);
+      var cloneChildren = Array.prototype.slice.call(clone.children);
+      var targetIndex = -1;
+      for (var i = 0; i < children.length; i++) {
+        if (children[i] === target) { targetIndex = i; break; }
+      }
+      if (targetIndex >= 0 && targetIndex < cloneChildren.length) {
+        var marker = document.createComment(' INSERT ' + blockName + ' HERE ');
+        if (position === 'before') {
+          clone.insertBefore(marker, cloneChildren[targetIndex]);
+        } else {
+          clone.insertBefore(marker, cloneChildren[targetIndex].nextSibling);
+        }
+      }
+      // Remove any semantic placeholders/indicators from the clone
+      var placeholders = clone.querySelectorAll('[data-semantic-placeholder],[data-semantic-indicator]');
+      for (var j = placeholders.length - 1; j >= 0; j--) {
+        placeholders[j].parentNode.removeChild(placeholders[j]);
+      }
+      // Remove script tags from clone
+      var scripts = clone.querySelectorAll('script');
+      for (var k = scripts.length - 1; k >= 0; k--) {
+        scripts[k].parentNode.removeChild(scripts[k]);
+      }
+      return clone.outerHTML;
+    }
+
+    function handleDrop() {
+      stopAutoScroll();
+      if (!state.active || !state.currentTarget || !state.block) return;
+      var domPath = buildDomPath(state.currentTarget);
+      var position = state.currentPosition;
+
+      // Capture HTML context BEFORE inserting placeholder
+      var htmlContext = buildHtmlContext(state.currentTarget, position, state.block.name);
+
+      removeIndicator();
+      var wrapper = document.createElement('div');
+      var placementId = 'sb-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+
+      wrapper.innerHTML = state.block.wireframeHtml;
+      var placeholder = wrapper.firstChild;
+      if (placeholder) {
+        // Tag with placementId so it can be removed later
+        if (placeholder.setAttribute) placeholder.setAttribute('data-placement-id', placementId);
+        if (position === 'before') {
+          state.currentTarget.parentNode.insertBefore(placeholder, state.currentTarget);
+        } else {
+          state.currentTarget.parentNode.insertBefore(placeholder, state.currentTarget.nextSibling);
+        }
+      }
+
+      window.parent.postMessage({
+        type: 'placement-complete',
+        payload: {
+          blockId: state.block.id,
+          placementId: placementId,
+          domPath: domPath,
+          position: position,
+          htmlContext: htmlContext
+        }
+      }, '*');
+
+      state.currentTarget = null;
+      state.currentPosition = 'after';
+    }
+
+    function activate(block) {
+      state.active = true;
+      state.block = block;
+      document.body.style.cursor = 'crosshair';
+    }
+
+    function deactivate(cancelled) {
+      stopAutoScroll();
+      state.active = false;
+      state.block = null;
+      state.currentTarget = null;
+      removeIndicator();
+      document.body.style.cursor = '';
+      if (cancelled) {
+        window.parent.postMessage({ type: 'placement-cancelled' }, '*');
+      }
+    }
+
+    document.addEventListener('click', function() {
+      window.parent.postMessage({ type: 'iframe-click' }, '*');
+    });
+
+    window.addEventListener('message', function(event) {
+      var data = event.data;
+      if (!data || typeof data !== 'object') return;
+
+      if (data.type === 'placement-start') {
+        activate(data.block);
+      } else if (data.type === 'placement-hover') {
+        handleHover(data.x, data.y);
+      } else if (data.type === 'placement-drop') {
+        handleDrop();
+      } else if (data.type === 'placement-cancel') {
+        deactivate(true);
+      } else if (data.type === 'placement-remove') {
+        var pid = data.placementId;
+        if (typeof pid === 'string' && /^sb-\d+-[a-z0-9]+$/.test(pid)) {
+          var el = document.querySelector('[data-placement-id="' + pid + '"]');
+          if (el && el.parentNode) el.parentNode.removeChild(el);
+        }
+      }
+    });
+  })();<\/script>`;
+}
 
 const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePreviewProps>(({
   projectId,
@@ -70,7 +360,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   entryPoint,
   runtime,
   onFullscreen,
-  isFullscreen = false
+  isFullscreen = false,
+  placementActive,
+  onPlacementToggle,
+  onPlacementComplete
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -91,7 +384,14 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   const [historyIndex, setHistoryIndex] = useState(0);
   const [iframeReady, setIframeReady] = useState(false);
   const [selectorActive, setSelectorActive] = useState(false);
+  const [draggingBlock, setDraggingBlock] = useState<PlacementBlockInfo | null>(null);
+  const [paletteVisible, setPaletteVisible] = useState(true);
+  const [localPaletteOpen, setLocalPaletteOpen] = useState(false);
+  const paletteStateRef = useRef({ localPaletteOpen: false, paletteVisible: true, draggingBlock: null as PlacementBlockInfo | null });
   const [isCapturing, setIsCapturing] = useState(false);
+  useEffect(() => {
+    paletteStateRef.current = { localPaletteOpen, paletteVisible, draggingBlock };
+  }, [localPaletteOpen, paletteVisible, draggingBlock]);
 
   const handleCaptureClick = useCallback(async () => {
     if (!iframeRef.current || !iframeReady || !onCaptureScreenshot) return;
@@ -117,12 +417,80 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     }
     return {};
   }, [selectorActive, hasFocusTarget]);
+
+  useEffect(() => {
+    if (placementActive) {
+      setPaletteVisible(true);
+    }
+  }, [placementActive]);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const serverRef = useRef<VirtualServer | null>(null);
   const compiledProjectRef = useRef<CompiledProject | null>(null);
   const activePathRef = useRef<string>('/');
   const pendingLoadPath = useRef<string | null>(null);
   const selectorActiveRef = useRef(false);
+
+  const postMessageToIframe = useCallback((message: PreviewHostMessage) => {
+    if (!iframeRef.current || !iframeRef.current.contentWindow) {
+      return;
+    }
+    try {
+      iframeRef.current.contentWindow.postMessage(message, '*');
+    } catch (err) {
+      logger.warn('Failed to communicate with preview iframe', err);
+    }
+  }, []);
+
+  const handlePlacementDragOver = useCallback((e: React.DragEvent) => {
+    if (!draggingBlock) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const iframeRect = iframe.getBoundingClientRect();
+    const computedStyle = window.getComputedStyle(iframe);
+    const transform = computedStyle.transform;
+    let scale = 1;
+    if (transform && transform !== 'none') {
+      const match = transform.match(/matrix\(([^,]+)/);
+      if (match) scale = parseFloat(match[1]) || 1;
+    }
+    const x = (e.clientX - iframeRect.left) / scale;
+    const y = (e.clientY - iframeRect.top) / scale;
+    postMessageToIframe({ type: 'placement-hover', x, y });
+  }, [draggingBlock, postMessageToIframe]);
+
+  const handlePlacementDrop = useCallback((e: React.DragEvent) => {
+    if (!draggingBlock) return;
+    e.preventDefault();
+    postMessageToIframe({ type: 'placement-drop' });
+    setDraggingBlock(null);
+    setPaletteVisible(true);
+  }, [draggingBlock, postMessageToIframe]);
+
+  const handlePlacementDragLeave = useCallback((e: React.DragEvent) => {
+    if (!draggingBlock) return;
+    const related = e.relatedTarget as Node | null;
+    const leaving = !related || !e.currentTarget.contains(related);
+    if (leaving) {
+      postMessageToIframe({ type: 'placement-cancel' });
+    }
+  }, [draggingBlock, postMessageToIframe]);
+
+  const startBlockDrag = useCallback((block: PlacementBlockInfo) => {
+    setDraggingBlock(block);
+    postMessageToIframe({ type: 'placement-start', block });
+  }, [postMessageToIframe]);
+
+  const handleBlockDragStart = useCallback((block: SemanticBlock) => {
+    // Defer state updates — synchronous re-render during dragstart
+    // repositions the drag source and browsers cancel the drag.
+    setTimeout(() => {
+      setPaletteVisible(false);
+      startBlockDrag({ id: block.id, name: block.name, wireframeHtml: block.wireframeHtml });
+    }, 0);
+  }, [startBlockDrag]);
 
   // Expose captureScreenshot method via ref
   useImperativeHandle(ref, () => ({
@@ -137,19 +505,13 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         waitForContent ?? false,
         1500
       );
-    }
-  }), [iframeReady]);
-
-  const postMessageToIframe = useCallback((message: PreviewHostMessage) => {
-    if (!iframeRef.current || !iframeRef.current.contentWindow) {
-      return;
-    }
-    try {
-      iframeRef.current.contentWindow.postMessage(message, '*');
-    } catch (err) {
-      logger.warn('Failed to communicate with preview iframe', err);
-    }
-  }, []);
+    },
+    startBlockDrag,
+    getActivePath: () => activePath || '/index.html',
+    removePlaceholder: (placementId: string) => {
+      postMessageToIframe({ type: 'placement-remove', placementId });
+    },
+  }), [iframeReady, startBlockDrag, activePath, postMessageToIframe]);
 
   const compilingRef = useRef(false);
   const pendingCompileOptionsRef = useRef<{ preserve: boolean; showLoading: boolean } | null>(null);
@@ -724,10 +1086,12 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       </script>
     `;
     
+    const placementScript = generatePlacementScript();
+    const injectedScripts = navigationScript + placementScript;
     if (processedHtml.includes('</body>')) {
-      processedHtml = processedHtml.replace('</body>', navigationScript + '</body>');
+      processedHtml = processedHtml.replace('</body>', injectedScripts + '</body>');
     } else {
-      processedHtml += navigationScript;
+      processedHtml += injectedScripts;
     }
 
     // Clear stale runtime errors before loading new content —
@@ -777,6 +1141,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<PreviewMessage>) => {
+      // Only handle messages from our own iframe
+      if (iframeRef.current && event.source !== iframeRef.current.contentWindow) {
+        return;
+      }
       const data = event.data;
       if (!data || typeof data !== 'object') {
         return;
@@ -805,6 +1173,28 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
       if (data.type === 'selector-cancelled') {
         setSelectorActive(false);
+        return;
+      }
+
+      if (data.type === 'placement-complete' && data.payload) {
+        setPaletteVisible(true);
+        onPlacementComplete?.(data.payload);
+        return;
+      }
+
+      if (data.type === 'placement-cancelled') {
+        setDraggingBlock(null);
+        setPaletteVisible(true);
+        return;
+      }
+
+      if (data.type === 'iframe-click') {
+        var ps = paletteStateRef.current;
+        if (ps.localPaletteOpen && ps.paletteVisible && !ps.draggingBlock) {
+          setLocalPaletteOpen(false);
+          setTimeout(() => onPlacementToggle?.(), 0);
+        }
+        return;
       }
     };
 
@@ -812,7 +1202,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [handleNavigation, onFocusSelection]);
+  }, [handleNavigation, onFocusSelection, onPlacementComplete]);
+
 
   useEffect(() => {
     return () => {
@@ -821,6 +1212,25 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (placementActive && selectorActive) {
+      setSelectorActive(false);
+    }
+  }, [placementActive, selectorActive]);
+
+  useEffect(() => {
+    if (!draggingBlock) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        postMessageToIframe({ type: 'placement-cancel' });
+        setDraggingBlock(null);
+        setPaletteVisible(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [draggingBlock, postMessageToIframe]);
 
   if (loading) {
     return (
@@ -897,13 +1307,34 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
             size="icon"
             variant="ghost"
             className="h-5 w-5"
-            onClick={() => setSelectorActive(prev => !prev)}
+            onClick={() => {
+              const next = !selectorActive;
+              setSelectorActive(next);
+              if (next && localPaletteOpen) {
+                setLocalPaletteOpen(false);
+                setTimeout(() => onPlacementToggle?.(), 0);
+              }
+            }}
             disabled={!iframeReady}
             style={crosshairButtonStyle}
             title={selectorActive ? 'Cancel element selection' : hasFocusTarget ? 'Replace focused element' : 'Select element'}
             data-tour-id="focus-crosshair-button"
           >
             <Crosshair className="h-3 w-3" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-5 w-5"
+            onClick={() => {
+              setLocalPaletteOpen(prev => !prev);
+              setTimeout(() => onPlacementToggle?.(), 0);
+            }}
+            disabled={!iframeReady}
+            title="Semantic blocks"
+            style={localPaletteOpen ? { backgroundColor: 'var(--button-preview-active)', color: 'white' } : {}}
+          >
+            <LayoutGrid className="h-3 w-3" />
           </Button>
           {onCaptureScreenshot && (
             <Button
@@ -977,13 +1408,34 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
             size="icon"
             variant="ghost"
             className="h-5 w-5"
-            onClick={() => setSelectorActive(prev => !prev)}
+            onClick={() => {
+              const next = !selectorActive;
+              setSelectorActive(next);
+              if (next && localPaletteOpen) {
+                setLocalPaletteOpen(false);
+                setTimeout(() => onPlacementToggle?.(), 0);
+              }
+            }}
             disabled={!iframeReady}
             style={crosshairButtonStyle}
             title={selectorActive ? 'Cancel element selection' : hasFocusTarget ? 'Replace focused element' : 'Select element'}
             data-tour-id="focus-crosshair-button"
           >
             <Crosshair className="h-3 w-3" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-5 w-5"
+            onClick={() => {
+              setLocalPaletteOpen(prev => !prev);
+              setTimeout(() => onPlacementToggle?.(), 0);
+            }}
+            disabled={!iframeReady}
+            title="Semantic blocks"
+            style={localPaletteOpen ? { backgroundColor: 'var(--button-preview-active)', color: 'white' } : {}}
+          >
+            <LayoutGrid className="h-3 w-3" />
           </Button>
           {onCaptureScreenshot && (
             <Button
@@ -1080,7 +1532,20 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       </div>
 
       {/* Preview Frame */}
-      <div className={cn("flex-1 bg-muted/20 dark:bg-muted/10 overflow-auto min-h-0", !isFullscreen && "p-4")}>
+      <div
+        className={cn("flex-1 bg-muted/20 dark:bg-muted/10 overflow-auto min-h-0 relative", !isFullscreen && "p-4")}
+        onClick={() => {
+          if (localPaletteOpen && paletteVisible && !draggingBlock) {
+            setLocalPaletteOpen(false);
+            setTimeout(() => onPlacementToggle?.(), 0);
+          }
+        }}
+      >
+        <PalettePanel
+          onDragStart={handleBlockDragStart}
+          onClose={() => { setLocalPaletteOpen(false); setTimeout(() => onPlacementToggle?.(), 0); }}
+          collapsed={!localPaletteOpen || !paletteVisible}
+        />
         <div
           className={cn(
             "bg-white mx-auto transition-all duration-300",
@@ -1091,8 +1556,12 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
             width: DEVICE_SIZES[deviceSize].width || '100%',
             height: DEVICE_SIZES[deviceSize].height || '100%',
             maxHeight: DEVICE_SIZES[deviceSize].maxHeight || '100%',
-            maxWidth: DEVICE_SIZES[deviceSize].maxWidth || '100%'
+            maxWidth: DEVICE_SIZES[deviceSize].maxWidth || '100%',
+            ...(draggingBlock ? { cursor: 'crosshair' } : {}),
           }}
+          onDragOver={handlePlacementDragOver}
+          onDrop={handlePlacementDrop}
+          onDragLeave={handlePlacementDragLeave}
         >
           <iframe
             ref={(el) => {
@@ -1109,6 +1578,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
             className={cn("w-full h-full", !isFullscreen && "rounded-lg")}
             sandbox="allow-scripts allow-same-origin allow-forms"
             title="Preview"
+            style={draggingBlock ? { pointerEvents: 'none' } : undefined}
           />
         </div>
       </div>

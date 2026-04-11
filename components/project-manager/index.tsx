@@ -8,6 +8,7 @@ import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ProjectCard } from './project-card';
@@ -531,7 +532,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <Spinner size={48} className="mx-auto text-primary" />
           <p className="mt-4">Loading projects...</p>
         </div>
       </div>

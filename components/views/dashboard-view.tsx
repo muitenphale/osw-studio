@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import Link from 'next/link';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
@@ -734,7 +735,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
+          <Spinner size={32} color="#f97316" className="mx-auto" />
           <p className="mt-3 text-sm text-zinc-400">Loading dashboard...</p>
         </div>
       </div>

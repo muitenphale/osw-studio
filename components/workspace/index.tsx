@@ -40,6 +40,9 @@ import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
 import { track } from '@/lib/telemetry';
 import { FocusContextPayload } from '@/lib/preview/types';
+import type { PlacedBlock } from '@/lib/semantic-blocks/types';
+import type { PlacementResult } from '@/lib/preview/types';
+import { getBlockById } from '@/lib/semantic-blocks/registry';
 import { DebugPanel, DebugEvent } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
 import { DeploymentSelector } from '@/components/workspace/deployment-selector';
@@ -70,6 +73,8 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
   const [entryPoint, setEntryPoint] = useState<string | undefined>(project.settings?.previewEntryPoint);
   const [focusContext, setFocusContext] = useState<FocusTarget | null>(null);
+  const [placedBlocks, setPlacedBlocks] = useState<PlacedBlock[]>([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [chatMode, setChatMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('osw-studio-chat-mode');
@@ -215,20 +220,27 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   const handlePanelDragEnd = useCallback(() => {
     if (draggingPanel && dropTarget !== null) {
+      // Capture current sizes keyed by panel identity before reordering
+      const visibleBefore = panelOrder.filter(k => {
+        if (k === 'chat') return showChat;
+        if (k === 'files') return showFiles;
+        if (k === 'editor') return showEditor;
+        if (k === 'console') return showConsole;
+        if (k === 'preview') return showPreview;
+        if (k === 'checkpoints') return showCheckpoints;
+        if (k === 'debug') return showDebugPanel;
+        if (k === 'skills') return showSkillsPanel;
+        return false;
+      });
+      const currentLayout = panelGroupRef.current?.getLayout() || [];
+      const sizeByKey: Record<string, number> = {};
+      visibleBefore.forEach((key, i) => {
+        if (i < currentLayout.length) sizeByKey[key] = currentLayout[i];
+      });
+
       setPanelOrder(prev => {
         const newOrder = prev.filter(k => k !== draggingPanel);
-        const visibleKeys = prev.filter(k => {
-          if (k === 'chat') return showChat;
-          if (k === 'files') return showFiles;
-          if (k === 'editor') return showEditor;
-          if (k === 'console') return showConsole;
-          if (k === 'preview') return showPreview;
-          if (k === 'checkpoints') return showCheckpoints;
-          if (k === 'debug') return showDebugPanel;
-          if (k === 'skills') return showSkillsPanel;
-          return false;
-        });
-        const targetKey = visibleKeys[dropTarget];
+        const targetKey = visibleBefore[dropTarget];
         if (targetKey) {
           const insertIdx = newOrder.indexOf(targetKey);
           newOrder.splice(insertIdx, 0, draggingPanel);
@@ -237,15 +249,24 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         }
         return newOrder;
       });
-      // Clear saved slot sizes and reset layout to equal distribution
-      try { localStorage.removeItem('react-resizable-panels:workspace-slots'); } catch {}
-      // Use imperative API to set sizes — avoids remounting which breaks resize handles
-      const count = visiblePanelCount;
+
+      // Restore sizes in the new order after React re-renders
       requestAnimationFrame(() => {
-        if (panelGroupRef.current && count > 0) {
-          const base = Math.floor(100 / count);
-          const sizes = Array(count).fill(base);
-          sizes[count - 1] = 100 - base * (count - 1);
+        if (panelGroupRef.current && visibleBefore.length > 0) {
+          // Compute new visible order
+          const newVisible = [...visibleBefore];
+          const dragIdx = newVisible.indexOf(draggingPanel);
+          if (dragIdx >= 0) newVisible.splice(dragIdx, 1);
+          const targetKey = visibleBefore[dropTarget];
+          const insertIdx = targetKey ? newVisible.indexOf(targetKey) : newVisible.length;
+          newVisible.splice(insertIdx >= 0 ? insertIdx : newVisible.length, 0, draggingPanel);
+
+          const sizes = newVisible.map(k => sizeByKey[k] || Math.floor(100 / newVisible.length));
+          // Normalize to exactly 100
+          const total = sizes.reduce((a, b) => a + b, 0);
+          if (total !== 100 && sizes.length > 0) {
+            sizes[sizes.length - 1] += 100 - total;
+          }
           panelGroupRef.current.setLayout(sizes);
         }
       });
@@ -254,7 +275,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     setDropTarget(null);
     draggedPanelCenter.current = null;
     document.body.style.cursor = '';
-  }, [draggingPanel, dropTarget, showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
+  }, [draggingPanel, dropTarget, panelOrder, showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
 
   // Document-level mouseup listener — ends drag whether inside or outside the container.
   // If mouseUp is inside the container, the container's own onMouseUp handles it (with drop logic).
@@ -341,6 +362,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
 
   const togglePanel = useCallback((key: string) => {
     setPanelReplacePreview(null);
+    setPanelInsertPreview(null);
     const panel = panelDefs.find(p => p.key === key);
     if (!panel) return;
 
@@ -372,20 +394,34 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           break;
         }
       }
+    } else {
+      // Room available — always open as the rightmost panel
+      setPanelOrder(prev => {
+        const newOrder = prev.filter(k => k !== key);
+        newOrder.push(key);
+        return newOrder;
+      });
     }
     panel.set(true);
   }, [panelDefs]);
 
   // Track which panel would be replaced when hovering a sidebar button
   const [panelReplacePreview, setPanelReplacePreview] = useState<string | null>(null);
+  const [panelInsertPreview, setPanelInsertPreview] = useState<number | null>(null); // index where new panel would appear
 
   const handleSidebarHover = useCallback((key: string | null) => {
-    if (!key) { setPanelReplacePreview(null); return; }
+    if (!key) { setPanelReplacePreview(null); setPanelInsertPreview(null); return; }
     const panel = panelDefs.find(p => p.key === key);
-    if (!panel || panel.get) { setPanelReplacePreview(null); return; } // already open or not found
+    if (!panel || panel.get) { setPanelReplacePreview(null); setPanelInsertPreview(null); return; } // already open or not found
     const visibleCount = panelDefs.filter(p => p.get).length;
-    if (visibleCount < MAX_VISIBLE_PANELS) { setPanelReplacePreview(null); return; } // no replacement needed
-    // Find the rightmost visible panel that would be closed
+    if (visibleCount < MAX_VISIBLE_PANELS) {
+      // New panels always open as the rightmost panel
+      setPanelInsertPreview(visibleCount);
+      setPanelReplacePreview(null);
+      return;
+    }
+    // At max panels — show which panel would be replaced
+    setPanelInsertPreview(null);
     for (let i = panelDefs.length - 1; i >= 0; i--) {
       if (panelDefs[i].get && panelDefs[i].key !== key) {
         setPanelReplacePreview(panelDefs[i].key);
@@ -393,7 +429,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       }
     }
     setPanelReplacePreview(null);
-  }, [panelDefs]);
+  }, [panelDefs, panelOrder]);
 
   const [hasUnreadConsole, setHasUnreadConsole] = useState(false);
   const consoleBufferRef = useRef<{ level: string; text: string }[]>([]);
@@ -574,6 +610,32 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     ].join('\n');
   }, [describeFocusTarget, truncateHtmlSnippet]);
 
+  const formatPlacedBlocksContext = useCallback((blocks: PlacedBlock[]) => {
+    if (blocks.length === 0) return '';
+    const lines = [
+      'Semantic blocks to implement:',
+      'The user has placed the following semantic blocks at specific positions in the preview. Implement each block at the position marked by the <!-- ??? INSERT ... HERE ??? --> comment in the HTML context below. The user chose this position intentionally — find a creative way to make the block work naturally at that exact location, adapting its layout and content to fit the surrounding context. Match the existing project\'s styling, colors, fonts, and conventions. Use placeholder/sample content where needed.',
+      '',
+    ];
+    blocks.forEach((placed, index) => {
+      const block = getBlockById(placed.blockId);
+      if (!block) return;
+      lines.push(`[${index + 1}] ${block.name} (page: ${placed.page})`);
+      lines.push(`    Description: ${block.description}`);
+      if (placed.htmlContext) {
+        const snippet = truncateHtmlSnippet(placed.htmlContext, 1200);
+        lines.push(`    Insert position in context:`);
+        lines.push('    ```html');
+        lines.push(`    ${snippet}`);
+        lines.push('    ```');
+      } else {
+        lines.push(`    Position: insert ${placed.position} ${placed.domPath}`);
+      }
+      lines.push('');
+    });
+    return lines.join('\n');
+  }, []);
+
   const handleFocusSelection = useCallback((selection: FocusContextPayload | null) => {
     if (!selection) {
       setFocusContext(null);
@@ -595,6 +657,32 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     });
     lastFocusSignatureRef.current = { signature, timestamp: now };
   }, [describeFocusTarget]);
+
+  const handlePlacementToggle = useCallback(() => {
+    setPaletteOpen(prev => !prev);
+  }, []);
+
+  const handlePlacementComplete = useCallback((payload: PlacementResult) => {
+    const currentPage = previewRef.current?.getActivePath?.() || '/';
+    setPlacedBlocks(prev => [...prev, {
+      blockId: payload.blockId,
+      placementId: payload.placementId,
+      domPath: payload.domPath,
+      position: payload.position,
+      page: currentPage,
+      htmlContext: payload.htmlContext,
+    }]);
+  }, []);
+
+  const handleRemovePlacedBlock = useCallback((placementId: string) => {
+    setPlacedBlocks(prev => prev.filter(b => b.placementId !== placementId));
+    previewRef.current?.removePlaceholder(placementId);
+  }, []);
+
+  const handleClearPlacedBlocks = useCallback(() => {
+    placedBlocks.forEach(b => previewRef.current?.removePlaceholder(b.placementId));
+    setPlacedBlocks([]);
+  }, [placedBlocks]);
 
   const handleClosePreview = useCallback(() => {
     setShowPreview(false);
@@ -1226,9 +1314,17 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
     const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     track('task_started', { provider: currentProvider, model: modelToUse, task_id: taskId });
     const taskStartTime = Date.now();
-    const messageContent = focusContext
-      ? `${formatFocusContextBlock(focusContext)}\n\n${trimmedPrompt}`
-      : trimmedPrompt;
+    let messageContent = trimmedPrompt;
+    const contextParts: string[] = [];
+    if (focusContext) {
+      contextParts.push(formatFocusContextBlock(focusContext));
+    }
+    if (placedBlocks.length > 0) {
+      contextParts.push(formatPlacedBlocksContext(placedBlocks));
+    }
+    if (contextParts.length > 0) {
+      messageContent = contextParts.join('\n\n') + '\n\n' + messageContent;
+    }
 
     // Note: User message will be added by orchestrator via conversation_message event
     // No need to manually add user_message event here to avoid duplication
@@ -1267,8 +1363,35 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         mediaType: img.mediaType
       }));
 
+      // Build context metadata for UI display (collapsed cards in user message)
+      const executeOptions: Parameters<typeof orchestrator.execute>[1] = {};
+      // Pass clean prompt for display (without prepended focus/semantic context)
+      if (focusContext || placedBlocks.length > 0) {
+        executeOptions.displayPrompt = trimmedPrompt;
+      }
+      if (imageData?.length) {
+        executeOptions.images = imageData;
+      }
+      if (focusContext) {
+        executeOptions.focusContext = {
+          domPath: focusContext.domPath,
+          snippet: truncateHtmlSnippet(focusContext.outerHTML, 240),
+        };
+      }
+      if (placedBlocks.length > 0) {
+        executeOptions.semanticBlocks = placedBlocks.map(pb => {
+          const block = getBlockById(pb.blockId);
+          return {
+            name: block?.name || pb.blockId,
+            domPath: pb.domPath,
+            position: pb.position,
+            description: block?.description || '',
+          };
+        });
+      }
+
       // Execute - orchestrator handles conversation history internally
-      const result = await orchestrator.execute(messageContent, imageData?.length ? { images: imageData } : undefined);
+      const result = await orchestrator.execute(messageContent, Object.keys(executeOptions).length > 0 ? executeOptions : undefined);
 
       logger.debug('[Workspace] Orchestrator result:', {
         success: result.success,
@@ -1314,6 +1437,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
       setPrompt('');
       if (focusContext) {
         setFocusContext(null);
+      }
+      if (placedBlocks.length > 0) {
+        setPlacedBlocks([]);
       }
     } catch (error) {
       logger.error('Generation error:', error);
@@ -1513,6 +1639,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
           onCaptureScreenshot={handleCaptureScreenshot}
           entryPoint={entryPoint}
           runtime={project.settings?.runtime}
+          placementActive={paletteOpen}
+          onPlacementToggle={handlePlacementToggle}
+          onPlacementComplete={handlePlacementComplete}
           isFullscreen
         />
       </div>
@@ -1857,6 +1986,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   runtimeErrors={runtimeErrors}
                   onSendRuntimeErrors={handleSendRuntimeErrors}
                   onClearRuntimeErrors={handleClearRuntimeErrors}
+                  placedBlocks={placedBlocks}
+                  onRemovePlacedBlock={handleRemovePlacedBlock}
+                  onClearPlacedBlocks={handleClearPlacedBlocks}
                 />
               )};
 
@@ -1908,6 +2040,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                     onCaptureScreenshot={handleCaptureScreenshot}
                     entryPoint={entryPoint}
                     runtime={project.settings?.runtime}
+                    placementActive={paletteOpen}
+                    onPlacementToggle={handlePlacementToggle}
+                    onPlacementComplete={handlePlacementComplete}
                     onFullscreen={handleEnterFullscreen}
                   />
                 </div>
@@ -1947,29 +2082,37 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 <div
                   key={`drop-${position}`}
                   ref={(el) => registerDropZone(position, el)}
-                  className={`w-2 mx-1 shrink-0 rounded-[3px] border border-dashed transition-all duration-200 animate-in fade-in ${
+                  className={`shrink-0 rounded-[3px] border border-dashed animate-expand-indicator ${
                     dropTarget === position
                       ? 'bg-primary/40 border-primary/60'
-                      : 'bg-muted/50 border-border'
+                      : 'bg-muted/50 border-muted-foreground'
                   }`}
                 />
               );
 
               const dragIdx = isDragging ? visiblePanels.findIndex(p => p.key === draggingPanel) : -1;
 
+              // Insert-position indicator (shown when hovering sidebar to add a panel when there's room)
+              const insertIndicator = (position: number) => (
+                <div
+                  key={`insert-${position}`}
+                  className="shrink-0 rounded-[3px] bg-primary/40 border border-dashed border-primary/60 animate-expand-indicator"
+                />
+              );
+
               visiblePanels.forEach((panel, idx) => {
                 // Left edge drop zone (before first panel)
                 if (isDragging && idx === 0 && dragIdx !== 0) {
                   elements.push(dropZone(0));
                 }
-
                 if (idx > 0) {
                   if (isDragging) {
                     const isDroppable = !(idx === dragIdx || idx === dragIdx + 1);
-                    // Always render the ResizableHandle (keeps library state intact)
-                    // but hide it visually and overlay a drop zone or spacer
+                    // Hide resize handle inside a collapsing wrapper (animates out as drop zone animates in)
                     elements.push(
-                      <ResizableHandle key={`handle-${idx}`} withHandle className="!w-0 !mx-0 !overflow-hidden !p-0 opacity-0 pointer-events-none" />
+                      <div key={`handle-wrap-${idx}`} className="animate-collapse-indicator shrink-0 overflow-hidden">
+                        <ResizableHandle key={`handle-${idx}`} withHandle className="pointer-events-none opacity-0" />
+                      </div>
                     );
                     if (isDroppable) {
                       elements.push(dropZone(idx));
@@ -1984,23 +2127,37 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 elements.push(
                   <ResizablePanel
                     key={panel.key}
-                    id={`slot-${idx}`}
+                    id={`panel-${panel.key}`}
                     order={idx + 1}
-                    defaultSize={idx === visiblePanels.length - 1 ? lastPanelSize : baseSize}
+                    defaultSize={baseSize}
                     minSize={panel.minSize}
                   >
                     <div
-                      className={`h-full ${isDragging && panel.key === draggingPanel
-                        ? `rounded-lg border border-dashed transition-colors ${dropTarget === null ? 'border-primary' : 'border-muted-foreground/30'}`
-                        : panelReplacePreview === panel.key
-                          ? 'rounded-lg border border-dashed border-primary transition-colors'
-                          : ''}`}
+                      className="h-full rounded-lg relative"
                       data-panel-id={panel.key}
                     >
+                      {/* Replace-preview / drag highlight overlay — renders on top of panel border */}
+                      {((isDragging && panel.key === draggingPanel) || panelReplacePreview === panel.key) && (
+                        <div
+                          className="absolute inset-0 rounded-lg pointer-events-none z-50"
+                          style={{
+                            border: `1px dashed ${
+                              (isDragging && panel.key === draggingPanel && dropTarget !== null)
+                                ? 'var(--color-muted-foreground)'
+                                : 'var(--color-primary)'
+                            }`,
+                          }}
+                        />
+                      )}
                       {panel.content}
                     </div>
                   </ResizablePanel>
                 );
+
+                // Insert preview after last panel
+                if (!isDragging && panelInsertPreview === idx + 1 && idx === visiblePanels.length - 1) {
+                  elements.push(insertIndicator(idx + 1));
+                }
               });
 
               // Right edge drop zone
@@ -2046,6 +2203,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                 runtimeErrors={runtimeErrors}
                 onSendRuntimeErrors={handleSendRuntimeErrors}
                 onClearRuntimeErrors={handleClearRuntimeErrors}
+                placedBlocks={placedBlocks}
+                onRemovePlacedBlock={handleRemovePlacedBlock}
+                onClearPlacedBlocks={handleClearPlacedBlocks}
               />
             )}
 
@@ -2085,6 +2245,9 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
                   onCaptureScreenshot={handleCaptureScreenshot}
                   entryPoint={entryPoint}
                   runtime={project.settings?.runtime}
+                  placementActive={paletteOpen}
+                  onPlacementToggle={handlePlacementToggle}
+                  onPlacementComplete={handlePlacementComplete}
                 />
               </div>
             )}

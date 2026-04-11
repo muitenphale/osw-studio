@@ -7,6 +7,7 @@ import { templateService } from '@/lib/vfs/template-service';
 import { createProjectFromTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
 import { BAREBONES_PROJECT_TEMPLATE, HANDLEBARS_STARTER_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { TemplateCard } from './template-card';
 import { logger } from '@/lib/utils';
@@ -311,7 +312,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <Spinner size={48} className="mx-auto text-primary" />
           <p className="mt-4">{creating ? 'Setting up your project...' : 'Loading templates...'}</p>
         </div>
       </div>

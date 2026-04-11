@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/components/ui/spinner';
 
 interface PublicDeploymentProps {
   projectId?: string;
@@ -41,7 +42,7 @@ export function PublicDeployment({ projectId }: PublicDeploymentProps) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100 mx-auto mb-4"></div>
+          <Spinner size={48} className="mx-auto mb-4 text-gray-900 dark:text-gray-100" />
           <p className="text-gray-600 dark:text-gray-400">Loading deployment...</p>
         </div>
       </div>

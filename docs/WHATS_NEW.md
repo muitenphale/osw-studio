@@ -6,6 +6,17 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.56.0 - Semantic Blocks (2026-04-12)
+
+Build pages visually by dragging blocks onto the live preview. Semantic blocks are implementation descriptions, not pre-built components. Place one where you want it, and the AI writes custom code that integrates with your existing project.
+
+- **Drag-and-Drop Blocks** - Open the Blocks palette from the preview toolbar and drag any block onto your live preview. The AI receives the block's specification along with the surrounding HTML context and generates an implementation that matches your project's style and structure
+- **36 Blocks Across 4 Categories** - Page Structure (Hero, Nav, Footer, Features Grid, Pricing, FAQ, Sidebar Nav, Tabs, and more), Media & Text (Text Block, Image, Video, Gallery, Timeline, Profile Card), Forms & Buttons (Contact Form, Login Form, File Upload, Search Bar, Dropdown Menu), Numbers & Charts (Table, Chart, Stats Counter, Metric Cards, Progress Bar)
+- **Unified Context Panel** - Focus context, placed blocks, and attached images are now combined under a single "Included in next message" panel above the chat input. Each section is independently collapsible
+- **Improved Workspace Panels** - Panel sizes now persist per panel across reorders and sessions. Drag-reordering preserves each panel's width. Sidebar hover previews use overlays instead of borders
+
+---
+
 ## v1.55.0 - More Models & mesh-llm (2026-04-07)
 
 All OpenRouter models are now available, even those without native tool support. Plus a new local inference provider.

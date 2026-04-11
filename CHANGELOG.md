@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.56.0 - 2026-04-12
+
+### Semantic Blocks
+
+- **Drag-and-drop semantic block placement**: Semantic blocks are implementation descriptions, not pre-built components. A new palette panel in the preview toolbar (36 blocks across 4 categories) lets users drag blocks directly onto the live preview at any DOM depth. The AI receives each block's specification along with the surrounding HTML context and writes code that integrates with the existing implementation. Blocks appear as wireframe placeholders in the preview and as context entries above the chat input
+- **36 blocks across 4 categories**: Page Structure (Hero, Header/Nav, Footer, Features Grid, Testimonials, Pricing, FAQ, CTA Banner, Sidebar Nav, Breadcrumbs, Tabs, Pagination), Media & Text (Text Block, Image, Video, Card, List, Accordion, Gallery, Timeline, Profile Card), Forms & Buttons (Button, Form, Contact Form, Search Bar, Modal, Login Form, File Upload, Notification, Dropdown Menu), Numbers & Charts (Table, Chart, Stats Counter, Progress Bar, Metric Cards, Data List)
+- **Unified context component**: Focus context, semantic blocks, and attached images are now combined under a single "Included in next message" panel above the prompt input, replacing three separate displays. Each section is independently collapsible with its own clear button. In sent messages, context appears as a collapsed "Context (focus, 2 blocks, 1 image)" line, expandable to show details
+
+### Workspace Panels
+
+- **Panel replace preview uses overlay**: Sidebar hover highlight now uses an absolute-positioned overlay instead of border, avoiding layout shift and working consistently across all panel types (including those with `overflow-hidden`)
+- **Insert position indicator**: Hovering a sidebar button for a closed panel now shows an animated indicator at the right edge showing where the panel will appear. New panels always open as the rightmost panel for predictable behavior
+- **Per-panel size persistence**: Panel IDs are now identity-based (`panel-chat`, `panel-preview`) instead of position-based (`slot-0`, `slot-1`). Sizes persist per panel across reorders, close/reopen cycles, and sessions
+- **Drag reorder preserves panel widths**: Reordering panels via drag now preserves each panel's width instead of resetting all to equal distribution
+
+### UI
+
+- **Rounded loading spinner**: Replaced 7 separate CSS border-based spinners with a unified SVG `Spinner` component (`components/ui/spinner.tsx`) using `stroke-linecap="round"` for smooth rounded line caps, consistent with the app's rounded design language
+
+### Bug Fixes
+
+- **Shell newlines inside quoted strings broke command parsing**: `splitNewlineCommands` split on newlines before checking if they were inside quoted strings, causing commands like `status --done "1. Did X\n2. Did Y"` to break — the `2.` was interpreted as a separate command. Fixed by buffering lines instead of pushing directly, so the next iteration's unbalanced quote check can accumulate them
+
+## v1.55.1 - 2026-04-08
+
+### Bug Fixes
+
+- **Deployment serving routes used stale path**: The route handlers serving published deployment files still referenced the old `public/sites/` directory instead of `public/deployments/`, causing 404s in standalone/production mode (e.g. Hetzner). Dev mode was unaffected because Next.js dynamically serves `public/` files
+
 ## v1.55.0 - 2026-04-07
 
 ### Model Compatibility

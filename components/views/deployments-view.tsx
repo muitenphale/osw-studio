@@ -13,6 +13,7 @@ import { TemplateExportDialog } from '../templates/template-export-dialog';
 import { ProjectSwapDialog } from '../project-swap-dialog';
 import { Globe, Plus, Search, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -553,7 +554,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+          <Spinner size={48} color="#f97316" className="mx-auto" />
           <p className="mt-4">Loading deployments...</p>
         </div>
       </div>

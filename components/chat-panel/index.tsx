@@ -13,18 +13,20 @@ import { ModelSettingsPanel } from '@/components/settings/model-settings';
 import { FocusContextPayload } from '@/lib/preview/types';
 import { PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { ContentBlock } from '@/lib/llm/types';
+import type { PlacedBlock } from '@/lib/semantic-blocks/types';
+import { MessageContext } from '@/components/message-context';
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
 // Helper to render user message content (string or ContentBlock[])
-function UserMessageContent({ content }: { content: string | ContentBlock[] }) {
+function UserMessageContent({ content, hideImages }: { content: string | ContentBlock[]; hideImages?: boolean }) {
   if (typeof content === 'string') {
     return <div className="whitespace-pre-wrap">{content}</div>;
   }
 
   // Separate text and image blocks
   const textBlocks = content.filter(b => b.type === 'text');
-  const imageBlocks = content.filter(b => b.type === 'image_url');
+  const imageBlocks = hideImages ? [] : content.filter(b => b.type === 'image_url');
 
   return (
     <div className="space-y-2">
@@ -35,7 +37,7 @@ function UserMessageContent({ content }: { content: string | ContentBlock[] }) {
         </div>
       ))}
 
-      {/* Render images in a flex container */}
+      {/* Render images in a flex container (when not handled by MessageContext) */}
       {imageBlocks.length > 0 && (
         <div className="flex flex-wrap gap-2 p-1 rounded-md bg-muted/50">
           {imageBlocks.map((block, index) => (
@@ -89,6 +91,10 @@ interface ChatPanelProps {
   runtimeErrors?: string[];
   onSendRuntimeErrors?: () => void;
   onClearRuntimeErrors?: () => void;
+  // Semantic blocks
+  placedBlocks?: PlacedBlock[];
+  onRemovePlacedBlock?: (placementId: string) => void;
+  onClearPlacedBlocks?: () => void;
 }
 
 interface ToolCall {
@@ -107,6 +113,8 @@ interface TurnItem {
   data: any;
   eventId?: string;  // Links item to its source debug event (for coalesced updates)
   complete?: boolean; // For reasoning items: true when reasoning is finished
+  focusContext?: { domPath: string; snippet: string };
+  semanticBlocks?: Array<{ name: string; domPath: string; position: string; description: string }>;
 }
 
 interface Turn {
@@ -183,6 +191,9 @@ export function ChatPanel({
   runtimeErrors = [],
   onSendRuntimeErrors,
   onClearRuntimeErrors,
+  placedBlocks,
+  onRemovePlacedBlock,
+  onClearPlacedBlocks,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -199,6 +210,7 @@ export function ChatPanel({
     e.preventDefault();
     setIsDragging(false);
 
+    if (e.dataTransfer.types.includes('application/semantic-block')) return;
     if (!supportsVision) return;
 
     const files = Array.from(e.dataTransfer.files).filter(f =>
@@ -226,6 +238,7 @@ export function ChatPanel({
   // Handle drag over
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    if (e.dataTransfer.types.includes('application/semantic-block')) return;
     if (supportsVision) {
       setIsDragging(true);
     }
@@ -668,7 +681,9 @@ export function ChatPanel({
               id: `item-${state.itemIdCounter++}`,
               type: isSyntheticError ? 'synthetic_error' : 'user',
               timestamp: event.timestamp,
-              data: displayContent
+              data: displayContent,
+              focusContext: message.ui_metadata?.focusContext,
+              semanticBlocks: message.ui_metadata?.semanticBlocks,
             });
           }
           // Skip system messages (don't display in chat UI)
@@ -856,42 +871,9 @@ export function ChatPanel({
     });
   };
 
-  // Focus context hint
+  // Focus context snippet for unified context component
   const trimmedSnippet = focusPreviewSnippet?.trim() ?? '';
-  const focusContextHint = focusContext ? (
-    <div
-      id="focus-context-hint"
-      className="rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-xs text-muted-foreground shadow-sm"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2 text-foreground">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-xs uppercase tracking-wide text-primary">context</span>
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">included in next message</span>
-        </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 px-2 text-xs"
-          onClick={() => setFocusContext(null)}
-          title="Clear focus context"
-        >
-          Clear
-        </Button>
-      </div>
-      <div className="mt-2 space-y-2">
-        {focusContext.domPath && (
-          <div className="text-[11px] font-mono text-muted-foreground/80 break-all leading-snug">
-            {focusContext.domPath}
-          </div>
-        )}
-        {trimmedSnippet && (
-          <pre className="max-h-24 overflow-auto rounded border border-border/50 bg-background/90 px-2 py-1 text-[11px] text-foreground leading-relaxed">
-            <code>{trimmedSnippet}</code>
-          </pre>
-        )}
-      </div>
-    </div>
-  ) : null;
+  const focusContextData = focusContext ? { domPath: focusContext.domPath, snippet: trimmedSnippet } : null;
 
   // Runtime error card
   const runtimeErrorHint = !generating && runtimeErrors.length > 0 ? (
@@ -1020,7 +1002,17 @@ export function ChatPanel({
       {/* Input */}
       <div className="p-3 space-y-2">
         {runtimeErrorHint}
-        {focusContextHint}
+        {/* Unified context component — focus, blocks, images */}
+        <MessageContext
+          focusContext={focusContextData}
+          semanticBlocks={placedBlocks}
+          images={pendingImages}
+          onClearFocus={() => setFocusContext(null)}
+          onRemoveBlock={onRemovePlacedBlock}
+          onClearBlocks={onClearPlacedBlocks}
+          onRemoveImage={removeImage}
+          onClearImages={() => setPendingImages([])}
+        />
         <div
           className={`bg-card border rounded-lg shadow-sm overflow-hidden transition-all ${
             isDragging ? 'border-primary border-2 bg-primary/5' : 'border-border'
@@ -1029,33 +1021,6 @@ export function ChatPanel({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
         >
-          {/* Image previews */}
-          {pendingImages.length > 0 && (
-            <div className="px-3 pt-2 flex flex-wrap gap-2">
-              {pendingImages.map((img) => (
-                <div
-                  key={img.id}
-                  className="relative group"
-                >
-                  <img
-                    src={img.preview}
-                    alt="Pending upload"
-                    className="h-12 w-12 object-cover rounded border border-border"
-                  />
-                  <button
-                    onClick={() => removeImage(img.id)}
-                    className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Remove image"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-              <span className="text-xs text-muted-foreground self-end pb-1">
-                {pendingImages.length} image{pendingImages.length !== 1 ? 's' : ''} attached
-              </span>
-            </div>
-          )}
 
           {/* Drop overlay */}
           {isDragging && supportsVision && (
@@ -1284,13 +1249,28 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
               </div>
             );
 
-          case 'user':
+          case 'user': {
+            // Extract image blocks from content if present (to show in unified context)
+            const contentData = item.data;
+            const userImageBlocks = Array.isArray(contentData)
+              ? contentData.filter((b: ContentBlock) => b.type === 'image_url')
+              : [];
+            const hasAnyContext = !!(item.focusContext || item.semanticBlocks || userImageBlocks.length > 0);
             return (
               <div key={item.id} className="text-sm text-foreground bg-primary/10 px-3 py-2 rounded border border-primary/20">
                 <div className="font-semibold text-primary mb-1 text-xs">User</div>
-                <UserMessageContent content={item.data} />
+                <UserMessageContent content={contentData} hideImages={hasAnyContext} />
+                {hasAnyContext && (
+                  <MessageContext
+                    focusContext={item.focusContext}
+                    semanticBlocks={item.semanticBlocks}
+                    imageBlocks={userImageBlocks.length > 0 ? userImageBlocks : undefined}
+                    readOnly
+                  />
+                )}
               </div>
             );
+          }
 
           case 'synthetic_error':
             // Auto-injected error message (e.g., malformed tool call correction)

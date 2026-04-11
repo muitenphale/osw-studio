@@ -683,16 +683,13 @@ function splitNewlineCommands(cmdStr: string): string[] {
       continue;
     }
 
-    // Regular line — treat as separate command
-    const trimmed = line.trim();
+    // Regular line — accumulate in current buffer
+    // (don't push directly — next iteration's unbalanced quote check needs to see it)
     if (current) {
       const prevTrimmed = current.trim();
       if (prevTrimmed && !prevTrimmed.startsWith('#')) commands.push(prevTrimmed);
-      current = '';
     }
-    if (trimmed && !trimmed.startsWith('#')) {
-      commands.push(trimmed);
-    }
+    current = line;
   }
 
   // Flush remaining

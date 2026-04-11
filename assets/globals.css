@@ -198,6 +198,45 @@
   @apply bg-sky-500/30;
 }
 
+/* Panel insert/drop zone width animation */
+@keyframes expand-indicator {
+  from {
+    width: 0;
+    margin-left: 0;
+    margin-right: 0;
+    opacity: 0;
+  }
+  to {
+    width: 0.5rem;
+    margin-left: 0.25rem;
+    margin-right: 0.25rem;
+    opacity: 1;
+  }
+}
+
+.animate-expand-indicator {
+  animation: expand-indicator 200ms ease-out forwards;
+}
+
+@keyframes collapse-indicator {
+  from {
+    width: 0.5rem;
+    margin-left: 0.25rem;
+    margin-right: 0.25rem;
+    opacity: 1;
+  }
+  to {
+    width: 0;
+    margin-left: 0;
+    margin-right: 0;
+    opacity: 0;
+  }
+}
+
+.animate-collapse-indicator {
+  animation: collapse-indicator 200ms ease-out forwards;
+}
+
 /* Animated ring effect for guided tour and focus targets */
 @keyframes pulse-opacity {
   0%, 100% {

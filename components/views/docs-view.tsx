@@ -6,6 +6,7 @@ import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { TableOfContents } from '@/components/table-of-contents';
 import { useTableOfContents } from '@/lib/hooks/use-table-of-contents';
 import { AlertCircle } from 'lucide-react';
+import { Spinner } from '@/components/ui/spinner';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
 
 function DocsViewContent() {
@@ -225,7 +226,7 @@ function DocsViewContent() {
           {loading && (
             <div className="flex items-center justify-center h-screen">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
+                <Spinner size={48} className="mx-auto text-primary" />
                 <p className="mt-4 text-muted-foreground">Loading documentation...</p>
               </div>
             </div>

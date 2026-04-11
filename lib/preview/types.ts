@@ -25,6 +25,20 @@ export interface FocusContextPayload {
   outerHTML: string;
 }
 
+export interface PlacementBlockInfo {
+  id: string;
+  name: string;
+  wireframeHtml: string;
+}
+
+export interface PlacementResult {
+  blockId: string;
+  placementId: string;
+  domPath: string;
+  position: 'before' | 'after';
+  htmlContext: string;
+}
+
 export type ConsoleLevel = 'log' | 'warn' | 'error' | 'info' | 'debug';
 
 export type PreviewMessage =
@@ -33,6 +47,15 @@ export type PreviewMessage =
   | { type: 'error'; error: string }
   | { type: 'selector-selection'; payload: FocusContextPayload }
   | { type: 'selector-cancelled' }
-  | { type: 'console'; level: ConsoleLevel; args: string[] };
+  | { type: 'console'; level: ConsoleLevel; args: string[] }
+  | { type: 'placement-complete'; payload: PlacementResult }
+  | { type: 'placement-cancelled' }
+  | { type: 'iframe-click' };
 
-export type PreviewHostMessage = { type: 'selector-toggle'; active: boolean };
+export type PreviewHostMessage =
+  | { type: 'selector-toggle'; active: boolean }
+  | { type: 'placement-start'; block: PlacementBlockInfo }
+  | { type: 'placement-hover'; x: number; y: number }
+  | { type: 'placement-drop' }
+  | { type: 'placement-cancel' }
+  | { type: 'placement-remove'; placementId: string };
