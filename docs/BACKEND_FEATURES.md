@@ -64,7 +64,7 @@ https://your-server.com/api/deployments/{deploymentId}/functions/{function-name}
 
 For example:
 ```
-https://oswstudio.com/api/deployments/abc123/functions/get-products
+https://your-instance.com/api/deployments/abc123/functions/get-products
 ```
 
 ### Calling Edge Functions from Published Sites
@@ -853,30 +853,30 @@ Each log entry shows:
 
 | Method | URL | Description |
 |--------|-----|-------------|
-| GET | `/api/admin/deployments/{deploymentId}/functions` | List edge functions |
-| POST | `/api/admin/deployments/{deploymentId}/functions` | Create edge function |
-| GET | `/api/admin/deployments/{deploymentId}/functions/{id}` | Get edge function |
-| PUT | `/api/admin/deployments/{deploymentId}/functions/{id}` | Update edge function |
-| DELETE | `/api/admin/deployments/{deploymentId}/functions/{id}` | Delete edge function |
-| GET | `/api/admin/deployments/{deploymentId}/server-functions` | List server functions |
-| POST | `/api/admin/deployments/{deploymentId}/server-functions` | Create server function |
-| GET | `/api/admin/deployments/{deploymentId}/server-functions/{id}` | Get server function |
-| PUT | `/api/admin/deployments/{deploymentId}/server-functions/{id}` | Update server function |
-| DELETE | `/api/admin/deployments/{deploymentId}/server-functions/{id}` | Delete server function |
-| GET | `/api/admin/deployments/{deploymentId}/scheduled-functions` | List scheduled functions |
-| POST | `/api/admin/deployments/{deploymentId}/scheduled-functions` | Create scheduled function |
-| GET | `/api/admin/deployments/{deploymentId}/scheduled-functions/{id}` | Get scheduled function |
-| PUT | `/api/admin/deployments/{deploymentId}/scheduled-functions/{id}` | Update scheduled function |
-| DELETE | `/api/admin/deployments/{deploymentId}/scheduled-functions/{id}` | Delete scheduled function |
-| GET | `/api/admin/deployments/{deploymentId}/secrets` | List secrets (metadata only) |
-| POST | `/api/admin/deployments/{deploymentId}/secrets` | Create secret |
-| GET | `/api/admin/deployments/{deploymentId}/secrets/{id}` | Get secret (metadata only) |
-| PUT | `/api/admin/deployments/{deploymentId}/secrets/{id}` | Update secret |
-| DELETE | `/api/admin/deployments/{deploymentId}/secrets/{id}` | Delete secret |
-| GET | `/api/admin/deployments/{deploymentId}/database/schema` | Get schema |
-| POST | `/api/admin/deployments/{deploymentId}/database/query` | Execute SQL |
-| GET | `/api/admin/deployments/{deploymentId}/database/logs` | Get logs |
-| DELETE | `/api/admin/deployments/{deploymentId}/database/logs` | Clear logs |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/functions` | List edge functions |
+| POST | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/functions` | Create edge function |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/functions/{id}` | Get edge function |
+| PUT | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/functions/{id}` | Update edge function |
+| DELETE | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/functions/{id}` | Delete edge function |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/server-functions` | List server functions |
+| POST | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/server-functions` | Create server function |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/server-functions/{id}` | Get server function |
+| PUT | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/server-functions/{id}` | Update server function |
+| DELETE | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/server-functions/{id}` | Delete server function |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/scheduled-functions` | List scheduled functions |
+| POST | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/scheduled-functions` | Create scheduled function |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/scheduled-functions/{id}` | Get scheduled function |
+| PUT | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/scheduled-functions/{id}` | Update scheduled function |
+| DELETE | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/scheduled-functions/{id}` | Delete scheduled function |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/secrets` | List secrets (metadata only) |
+| POST | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/secrets` | Create secret |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/secrets/{id}` | Get secret (metadata only) |
+| PUT | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/secrets/{id}` | Update secret |
+| DELETE | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/secrets/{id}` | Delete secret |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/database/schema` | Get schema |
+| POST | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/database/query` | Execute SQL |
+| GET | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/database/logs` | Get logs |
+| DELETE | `/api/w/{workspaceId}/admin/deployments/{deploymentId}/database/logs` | Clear logs |
 
 ---
 

@@ -6,6 +6,8 @@
 
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import { timingSafeEqual } from 'crypto';
+import type { NextRequest } from 'next/server';
 
 const SESSION_COOKIE_NAME = 'osw_session';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours
@@ -28,7 +30,7 @@ export interface SessionData {
 /**
  * Create a new session token
  */
-export async function createSession(userId: string, email: string, isAdmin = true): Promise<string> {
+export async function createSession(userId: string, email: string, isAdmin = false): Promise<string> {
   const secret = getSecretKey();
   const exp = Math.floor((Date.now() + SESSION_DURATION) / 1000);
 
@@ -80,7 +82,21 @@ export async function getSession(): Promise<SessionData | null> {
     return null;
   }
 
-  return verifySession(token);
+  const session = await verifySession(token);
+  if (!session) return null;
+
+  // Check user is still active (prevents deactivated users from continuing)
+  if (session.userId !== 'admin' && session.userId !== 'desktop' && session.userId !== 'instance-api') {
+    try {
+      const { getUserById } = await import('@/lib/auth/system-database');
+      const user = getUserById(session.userId);
+      if (!user) return null;
+    } catch {
+      // System database not available (browser mode) — skip check
+    }
+  }
+
+  return session;
 }
 
 /**
@@ -122,4 +138,29 @@ export async function requireAuth(): Promise<SessionData> {
     throw new Error('Unauthorized');
   }
   return session;
+}
+
+/**
+ * Verify instance API key for machine-to-machine auth.
+ * Returns a synthetic admin session if the key is valid.
+ */
+export function verifyInstanceApiKey(request: NextRequest): SessionData | null {
+  const apiKey = request.headers.get('x-instance-api-key');
+  const expectedKey = process.env.INSTANCE_API_KEY;
+
+  if (!apiKey || !expectedKey) return null;
+  try {
+    const a = Buffer.from(apiKey);
+    const b = Buffer.from(expectedKey);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  } catch {
+    return null;
+  }
+
+  return {
+    userId: 'instance-api',
+    email: 'api@instance',
+    isAdmin: true,
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  };
 }

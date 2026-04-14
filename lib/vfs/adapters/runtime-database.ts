@@ -1018,11 +1018,17 @@ export class RuntimeDatabase {
     'scheduled_functions',
   ];
 
+  private static readonly BLOCKED_PATTERNS = /^\s*(ATTACH|DETACH|PRAGMA|VACUUM)\b/i;
+
   executeRawSQL(sql: string, params?: unknown[]): {
     columns: string[];
     rows: unknown[][];
     rowsAffected: number;
   } {
+    if (RuntimeDatabase.BLOCKED_PATTERNS.test(sql)) {
+      throw new Error('Statement type not allowed');
+    }
+
     const trimmedSql = sql.trim().toLowerCase();
 
     const isSelect = trimmedSql.startsWith('select');
@@ -1058,7 +1064,9 @@ export class RuntimeDatabase {
       ORDER BY name
     `).all() as Array<{ name: string }>;
 
-    return tables.map(table => {
+    return tables.flatMap(table => {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table.name)) return [];
+
       const isSystemTable = RuntimeDatabase.SYSTEM_TABLES.includes(table.name);
 
       const columns = this.db.prepare(`PRAGMA table_info('${table.name}')`).all() as Array<{

@@ -7,7 +7,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { createServerAdapter } from '@/lib/vfs/adapters/server';
+import { createServerAdapter, getWorkspaceAdapter } from '@/lib/vfs/adapters/server';
 import { VirtualServer } from '@/lib/preview/virtual-server';
 import { VirtualFile, FileTreeNode, Deployment } from '@/lib/vfs/types';
 import { logger } from '@/lib/utils';
@@ -94,9 +94,9 @@ function createServerVfs(
  * Build a static deployment from a deployment entity
  * Uses VirtualServer to compile Handlebars templates (same as export)
  */
-export async function buildStaticDeployment(deploymentId: string): Promise<BuildResult> {
+export async function buildStaticDeployment(deploymentId: string, workspaceId?: string): Promise<BuildResult> {
   try {
-    const adapter = await createServerAdapter();
+    const adapter = workspaceId ? getWorkspaceAdapter(workspaceId) : await createServerAdapter();
     await adapter.init();
 
     // Get deployment
@@ -319,7 +319,7 @@ export async function buildStaticDeployment(deploymentId: string): Promise<Build
     filesWritten++;
 
     // Extract backend features from project → deployment runtime database
-    const extractionResult = await extractBackendFeatures(deployment.projectId, deploymentId);
+    const extractionResult = await extractBackendFeatures(deployment.projectId, deploymentId, workspaceId);
     if (extractionResult.errors.length > 0) {
       logger.warn('[Static Builder] Backend feature extraction warnings:', extractionResult.errors);
     }
@@ -329,7 +329,7 @@ export async function buildStaticDeployment(deploymentId: string): Promise<Build
     }
 
     // Update lastPublishedVersion after successful build
-    const adapter2 = await createServerAdapter();
+    const adapter2 = workspaceId ? getWorkspaceAdapter(workspaceId) : await createServerAdapter();
     await adapter2.init();
     if (adapter2.updateDeployment) {
       await adapter2.updateDeployment({

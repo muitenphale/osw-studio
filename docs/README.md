@@ -53,6 +53,7 @@ For support and self-hosters:
 - **[FAQ](?doc=faq)** - Common questions answered
 - **[Troubleshooting](?doc=troubleshooting)** - Fix common issues
 - **[Server Mode](?doc=server-mode)** - Self-hosting and deployment
+- **[Multitenancy](?doc=multitenancy)** - Workspaces, users, roles, quotas (Server Mode)
 - **[Deployment Publishing](?doc=site-publishing)** - Analytics, SEO, compliance (Server Mode)
 - **[Backend](?doc=backend-features)** - Database, API endpoints, secrets (Server Mode)
 
@@ -75,6 +76,8 @@ OSW Studio supports multiple project runtimes — pick the one that fits your ne
 ✅ **Single-file components** - Svelte `.svelte` and Vue `.vue` files compiled in-browser
 
 **Server Mode adds:**
+✅ **Workspaces** - Isolated environments for teams, clients, or projects
+✅ **Multi-user** - User accounts with shared workspace access
 ✅ **API endpoints** - REST APIs with database access via edge functions
 ✅ **Dynamic sites** - Store and retrieve data with SQLite databases
 
@@ -122,7 +125,7 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 - Dual modes (Chat/Code)
 - Templates & Skills systems
 - Browser mode (IndexedDB)
-- Optional Server mode
+- Optional Server mode with workspaces and multi-user support
 - Site publishing with SEO & analytics
 - Edge functions & database management
 - Cost tracking

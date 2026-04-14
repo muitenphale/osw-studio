@@ -85,9 +85,25 @@ function deserializeFileContent(file: VirtualFile & { _isBinaryBase64?: boolean 
  */
 export class SyncManager {
   private baseUrl: string;
+  workspaceId?: string;
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl;
+  }
+
+  /**
+   * Build an API URL, scoped to a workspace when workspaceId is set.
+   *
+   * With workspaceId:  /api/w/{workspaceId}{path}
+   * Without:          /api{path}
+   *
+   * @param path - must start with '/' (e.g. '/sync/projects')
+   */
+  private getApiUrl(path: string): string {
+    if (this.workspaceId) {
+      return `/api/w/${this.workspaceId}${path}`;
+    }
+    return `/api${path}`;
   }
 
   /**
@@ -95,7 +111,7 @@ export class SyncManager {
    */
   async pushProject(project: Project): Promise<ProjectSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/projects`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/projects')}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -129,7 +145,7 @@ export class SyncManager {
    */
   async pullProjects(): Promise<ProjectListSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/projects`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/projects')}`, {
         method: 'GET',
       });
 
@@ -161,7 +177,7 @@ export class SyncManager {
     try {
       const serializedFiles = files.map(serializeFileContent);
 
-      const response = await fetch(`${this.baseUrl}/api/sync/files`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/files')}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -196,7 +212,7 @@ export class SyncManager {
   async pullFiles(projectId: string): Promise<FilesListSyncResult> {
     try {
       const response = await fetch(
-        `${this.baseUrl}/api/sync/files?projectId=${encodeURIComponent(projectId)}`,
+        `${this.baseUrl}${this.getApiUrl('/sync/files')}?projectId=${encodeURIComponent(projectId)}`,
         {
           method: 'GET',
         }
@@ -296,7 +312,7 @@ export class SyncManager {
     try {
       const serializedFiles = files.map(serializeFileContent);
 
-      const response = await fetch(`${this.baseUrl}/api/sync/projects/${projectId}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -335,7 +351,7 @@ export class SyncManager {
     files?: VirtualFile[];
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/projects/${projectId}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}`, {
         method: 'GET',
       });
 
@@ -371,7 +387,7 @@ export class SyncManager {
     projects?: Array<{ id: string; updatedAt: string }>;
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/status`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/status')}`, {
         method: 'GET',
       });
 
@@ -405,7 +421,7 @@ export class SyncManager {
    */
   async pullSkills(): Promise<SkillsListSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/skills`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/skills')}`, {
         method: 'GET',
       });
 
@@ -435,7 +451,7 @@ export class SyncManager {
    */
   async pushSkills(skills: Skill[]): Promise<SkillsListSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/skills`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/skills')}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -471,7 +487,7 @@ export class SyncManager {
    */
   async pullSkill(id: string): Promise<SkillSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/skills/${encodeURIComponent(id)}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/skills/${encodeURIComponent(id)}`)}`, {
         method: 'GET',
       });
 
@@ -501,7 +517,7 @@ export class SyncManager {
    */
   async pushSkill(skill: Skill): Promise<SkillSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/skills/${encodeURIComponent(skill.id)}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/skills/${encodeURIComponent(skill.id)}`)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -536,7 +552,7 @@ export class SyncManager {
    */
   async deleteSkillFromServer(id: string): Promise<SyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/skills/${encodeURIComponent(id)}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/skills/${encodeURIComponent(id)}`)}`, {
         method: 'DELETE',
       });
 
@@ -566,7 +582,7 @@ export class SyncManager {
    */
   async pullTemplates(): Promise<TemplatesListSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/templates`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/templates')}`, {
         method: 'GET',
       });
 
@@ -596,7 +612,7 @@ export class SyncManager {
    */
   async pushTemplates(templates: CustomTemplate[]): Promise<TemplatesListSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/templates`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/templates')}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -632,7 +648,7 @@ export class SyncManager {
    */
   async pullTemplate(id: string): Promise<TemplateSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/templates/${encodeURIComponent(id)}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/templates/${encodeURIComponent(id)}`)}`, {
         method: 'GET',
       });
 
@@ -662,7 +678,7 @@ export class SyncManager {
    */
   async pushTemplate(template: CustomTemplate): Promise<TemplateSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/templates/${encodeURIComponent(template.id)}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/templates/${encodeURIComponent(template.id)}`)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -697,7 +713,7 @@ export class SyncManager {
    */
   async deleteTemplateFromServer(id: string): Promise<SyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/templates/${encodeURIComponent(id)}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/templates/${encodeURIComponent(id)}`)}`, {
         method: 'DELETE',
       });
 
@@ -736,7 +752,7 @@ export class SyncManager {
     }
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/backend-features/${projectId}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/backend-features/${projectId}`)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(features || {
@@ -764,7 +780,7 @@ export class SyncManager {
    */
   async pullBackendFeatures(projectId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/backend-features/${projectId}`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/backend-features/${projectId}`)}`, {
         method: 'GET',
       });
 
@@ -849,7 +865,7 @@ export class SyncManager {
     data?: EnhancedSyncStatusResponse;
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/sync/status`, {
+      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/status')}`, {
         method: 'GET',
       });
 
@@ -881,11 +897,19 @@ export class SyncManager {
 let syncManager: SyncManager | null = null;
 
 /**
- * Get or create SyncManager instance
+ * Get or create SyncManager instance.
+ *
+ * When workspaceId is provided the singleton's workspaceId is updated so all
+ * subsequent API calls are scoped to `/api/w/{workspaceId}/…`.  Pass
+ * `undefined` (or omit) to keep the current workspaceId unchanged, or pass
+ * `null` explicitly to clear it (reverts to unscoped `/api/…` paths).
  */
-export function getSyncManager(): SyncManager {
+export function getSyncManager(workspaceId?: string | null): SyncManager {
   if (!syncManager) {
     syncManager = new SyncManager();
+  }
+  if (workspaceId !== undefined) {
+    syncManager.workspaceId = workspaceId ?? undefined;
   }
   return syncManager;
 }

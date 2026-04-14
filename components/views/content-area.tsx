@@ -7,12 +7,15 @@ import { ProjectsView } from './projects-view';
 import { TemplatesView } from './templates-view';
 import { SkillsView } from './skills-view';
 import { DeploymentsView } from './deployments-view';
+import { UsersView } from './users-view';
+import { WorkspacesView } from './workspaces-view';
 import { SettingsView } from './settings-view';
 import { DocsView } from './docs-view';
 import { DashboardView } from './dashboard-view';
 
 interface ContentAreaProps {
   view: string;
+  workspaceId?: string;
   onProjectSelect: (project: Project) => void;
   settingsTab?: 'model' | 'application';
   onNavigate?: (view: string) => void;
@@ -22,6 +25,7 @@ interface ContentAreaProps {
 
 export function ContentArea({
   view,
+  workspaceId,
   onProjectSelect,
   settingsTab,
   onNavigate,
@@ -56,7 +60,11 @@ export function ContentArea({
     case 'projects':
       return <ProjectsView onProjectSelect={onProjectSelect} autoCreate={autoCreateProject} />;
     case 'deployments':
-      return <DeploymentsView onProjectSelect={onProjectSelect} />;
+      return <DeploymentsView onProjectSelect={onProjectSelect} workspaceId={workspaceId} />;
+    case 'users':
+      return <UsersView />;
+    case 'workspaces':
+      return <WorkspacesView />;
     case 'templates':
       return <TemplatesView onProjectSelect={(project) => handleProjectSelectById(project.id)} onNavigate={onNavigate} />;
     case 'skills':

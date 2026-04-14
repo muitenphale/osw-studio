@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 interface SqlEditorProps {
   deploymentId?: string;
   queryEndpoint?: string;
+  workspaceId?: string;
 }
 
 interface QueryResult {
@@ -24,7 +25,8 @@ interface QueryResult {
 const HISTORY_KEY = 'osw-sql-history';
 const MAX_HISTORY = 20;
 
-export function SqlEditor({ deploymentId, queryEndpoint }: SqlEditorProps) {
+export function SqlEditor({ deploymentId, queryEndpoint, workspaceId }: SqlEditorProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [sql, setSql] = useState('SELECT * FROM ');
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -62,7 +64,7 @@ export function SqlEditor({ deploymentId, queryEndpoint }: SqlEditorProps) {
     const startTime = Date.now();
 
     try {
-      const endpoint = queryEndpoint || `/api/admin/deployments/${deploymentId}/database/query`;
+      const endpoint = queryEndpoint || `${apiBase}/admin/deployments/${deploymentId}/database/query`;
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

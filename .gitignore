@@ -19,10 +19,12 @@ npm-shrinkwrap.json
 
 # testing
 /coverage
-/data/*.sqlite*
-/data/projects/
-/data/test
+
+# runtime data (SQLite databases, workspaces, deployments)
+/data
+/data/*
 /sites
+/sites/*
 /public/sites
 /public/sites/*
 /deployments

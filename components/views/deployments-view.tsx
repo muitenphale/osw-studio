@@ -24,9 +24,11 @@ type SortOption = 'updated' | 'created' | 'name' | 'published';
 
 interface DeploymentsViewProps {
   onProjectSelect: (project: Project) => void;
+  workspaceId?: string;
 }
 
-export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
+export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsViewProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,8 +66,8 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
       }
 
       const [deploymentsResponse, projectsResponse] = await Promise.all([
-        fetch('/api/deployments'),
-        fetch('/api/projects?fields=id,name'), // Only fetch id and name fields
+        fetch(`${apiBase}/deployments`),
+        fetch(`${apiBase}/projects?fields=id,name`), // Only fetch id and name fields
       ]);
 
       // Redirect to login if unauthorized
@@ -174,7 +176,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
 
       if (projectIdChanged) {
         // Non-server mode or first deploy: update directly
-        const deploymentResponse = await fetch(`/api/deployments/${selectedDeployment.id}`, {
+        const deploymentResponse = await fetch(`${apiBase}/deployments/${selectedDeployment.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: settings.projectId }),
@@ -189,7 +191,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
       // Save publishing settings (exclude projectId — handled above)
       const { projectId: _projectId, ...publishSettings } = settings;
 
-      const response = await fetch(`/api/deployments/${selectedDeployment.id}/settings`, {
+      const response = await fetch(`${apiBase}/deployments/${selectedDeployment.id}/settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -233,7 +235,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
     const { projectId: _projectId, ...publishSettings } = pendingSettings;
 
     try {
-      const response = await fetch(`/api/deployments/${deploymentId}/settings`, {
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(publishSettings),
@@ -338,7 +340,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
       toast.info('Building deployment...');
 
       // Call publish API to trigger build
-      const response = await fetch(`/api/deployments/${deploymentId}/publish`, {
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}/publish`, {
         method: 'POST',
       });
 
@@ -371,7 +373,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
 
   const handleDeploymentThumbnailChange = async (deploymentId: string, image: string | undefined) => {
     try {
-      const response = await fetch(`/api/deployments/${deploymentId}/thumbnail`, {
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}/thumbnail`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ previewImage: image ?? null }),
@@ -397,7 +399,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
     }
 
     try {
-      const response = await fetch(`/api/deployments/${deploymentId}`, {
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -428,7 +430,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
     if (!deployment) return;
 
     try {
-      const response = await fetch(`/api/deployments/${deploymentId}`, {
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -463,7 +465,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
     }
 
     try {
-      const response = await fetch(`/api/deployments/${deploymentId}`, {
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}`, {
         method: 'DELETE',
       });
 
@@ -481,7 +483,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
 
   const handleCreateDeployment = async (data: { projectId: string; name: string; slug?: string }) => {
     try {
-      const response = await fetch('/api/deployments', {
+      const response = await fetch(`${apiBase}/deployments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -687,6 +689,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
               setShowServerSettingsModal(false);
               setSelectedDeployment(null);
             }}
+            workspaceId={workspaceId}
           />
 
           <AnalyticsDashboard
@@ -729,6 +732,7 @@ export function DeploymentsView({ onProjectSelect }: DeploymentsViewProps) {
           newProjectId={swapDialogState.newProjectId}
           newProjectName={swapDialogState.newProjectName}
           onSwapComplete={handleSwapComplete}
+          workspaceId={workspaceId}
         />
       )}
     </>

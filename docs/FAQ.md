@@ -114,10 +114,9 @@ The application itself is **free and open source** (MIT license). However:
 
 ### Can I collaborate with others?
 
-**Not directly**, OSW Studio is single-user. However:
-- Export projects as .osws and share files
-- Use Server Mode with shared database (advanced)
-- Export ZIP and collaborate via git
+**Yes, in Server Mode.** Workspaces support multiple users. An agency can build a site and invite the client to make updates via the AI. See **[Multitenancy](?doc=multitenancy)**.
+
+In Browser Mode, you can share projects by exporting as .osws files or ZIP archives.
 
 ### How much does AI generation cost?
 
@@ -288,9 +287,9 @@ Most static hosts provide free SSL:
 ```bash
 NEXT_PUBLIC_SERVER_MODE=true
 SESSION_SECRET=...
-ADMIN_PASSWORD=...
 ```
 2. Run `npm install && npm start`
+3. Visit `/admin` and create your admin account on first visit
 
 **See**: [Server Mode Guide](?doc=server-mode) for complete setup
 

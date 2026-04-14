@@ -56,7 +56,7 @@ export function SyncTabs({
 
   // Helper functions for calculating item states
   const getSelectableItems = useCallback((items: SyncableItem[]) =>
-    items.filter(item => item.status !== 'synced' && item.status !== 'server-only'), []);
+    items.filter(item => item.status !== 'synced'), []);
 
   const getPushableItems = useCallback((items: SyncableItem[], selectedIds: Set<string>) =>
     items.filter(item => selectedIds.has(item.id) && ['local-newer', 'local-only', 'conflict'].includes(item.status)), []);

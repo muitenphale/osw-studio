@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getCoreDatabase } from '@/lib/vfs/adapters/sqlite-connection';
 import { getRequestStats, cleanupOldLogs } from '@/lib/logging/request-logger';
+import { getSystemDatabase } from '@/lib/auth/system-database';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -208,14 +209,28 @@ export async function GET() {
     // System info
     const memoryUsage = process.memoryUsage();
 
+    // Multi-tenant stats from system database
+    let userStats = { totalUsers: 0, activeUsers: 0, totalDeploymentRoutes: 0 };
+    try {
+      const sysDb = getSystemDatabase();
+      const total = sysDb.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+      const active = sysDb.prepare('SELECT COUNT(*) as count FROM users WHERE active = 1').get() as { count: number };
+      const routes = sysDb.prepare('SELECT COUNT(*) as count FROM deployment_routing').get() as { count: number };
+      userStats = { totalUsers: total.count, activeUsers: active.count, totalDeploymentRoutes: routes.count };
+    } catch {
+      // System database may not exist in browser mode or single-user setups
+    }
+
     return NextResponse.json({
       system: {
         version,
+        instanceId: process.env.INSTANCE_ID || null,
         nodeVersion: process.version,
         uptime: process.uptime(),
         memoryUsed: memoryUsage.heapUsed,
         memoryTotal: memoryUsage.heapTotal,
       },
+      users: userStats,
       content: {
         projects: projectCount,
         templates: templateCount,

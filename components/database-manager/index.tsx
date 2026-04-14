@@ -13,9 +13,10 @@ import { Database, Code2, Terminal, ScrollText, Wrench, Key, Clock } from 'lucid
 
 interface DatabaseManagerProps {
   deploymentId: string;
+  workspaceId?: string;
 }
 
-export function DatabaseManager({ deploymentId }: DatabaseManagerProps) {
+export function DatabaseManager({ deploymentId, workspaceId }: DatabaseManagerProps) {
   const [activeTab, setActiveTab] = useState('schema');
 
   return (
@@ -54,31 +55,31 @@ export function DatabaseManager({ deploymentId }: DatabaseManagerProps) {
 
         <div className="flex-1 overflow-hidden mt-4">
           <TabsContent value="schema" className="h-full m-0">
-            <SchemaViewer deploymentId={deploymentId} />
+            <SchemaViewer deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
 
           <TabsContent value="query" className="h-full m-0">
-            <SqlEditor deploymentId={deploymentId} />
+            <SqlEditor deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
 
           <TabsContent value="functions" className="h-full m-0">
-            <FunctionsManager deploymentId={deploymentId} />
+            <FunctionsManager deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
 
           <TabsContent value="helpers" className="h-full m-0">
-            <ServerFunctionsManager deploymentId={deploymentId} />
+            <ServerFunctionsManager deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
 
           <TabsContent value="secrets" className="h-full m-0">
-            <SecretsManager deploymentId={deploymentId} />
+            <SecretsManager deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
 
           <TabsContent value="schedules" className="h-full m-0">
-            <ScheduledFunctionsManager deploymentId={deploymentId} />
+            <ScheduledFunctionsManager deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
 
           <TabsContent value="logs" className="h-full m-0">
-            <LogsViewer deploymentId={deploymentId} />
+            <LogsViewer deploymentId={deploymentId} workspaceId={workspaceId} />
           </TabsContent>
         </div>
       </Tabs>

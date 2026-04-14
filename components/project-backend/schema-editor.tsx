@@ -11,6 +11,7 @@ interface SchemaEditorProps {
   projectId: string;
   enabled: boolean;
   onSchemaChange?: (schema: string) => void;
+  workspaceId?: string;
 }
 
 // Keep these exports — used by vfs/index.ts for transient file generation
@@ -32,11 +33,12 @@ export function setProjectSchema(projectId: string, schema: string): void {
  * Save schema to localStorage and apply DDL to the project database (Server Mode only).
  * Used by project-manager and template-manager during project creation.
  */
-export async function applyProjectDatabaseSchema(projectId: string, ddl: string): Promise<void> {
+export async function applyProjectDatabaseSchema(projectId: string, ddl: string, workspaceId?: string): Promise<void> {
   setProjectSchema(projectId, ddl);
   if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
     try {
-      const res = await fetch(`/api/projects/${projectId}/database/query`, {
+      const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
+      const res = await fetch(`${apiBase}/projects/${projectId}/database/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: ddl }),
@@ -52,15 +54,16 @@ export async function applyProjectDatabaseSchema(projectId: string, ddl: string)
 
 type SubTab = 'tables' | 'sql' | 'ddl';
 
-export function SchemaEditor({ projectId, enabled, onSchemaChange }: SchemaEditorProps) {
+export function SchemaEditor({ projectId, enabled, onSchemaChange, workspaceId }: SchemaEditorProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('tables');
   const [ddl, setDdl] = useState('');
   const [applying, setApplying] = useState(false);
   const [schemaKey, setSchemaKey] = useState(0);
   const autoAppliedRef = useRef<string | null>(null);
 
-  const schemaEndpoint = `/api/projects/${projectId}/database/schema`;
-  const queryEndpoint = `/api/projects/${projectId}/database/query`;
+  const schemaEndpoint = `${apiBase}/projects/${projectId}/database/schema`;
+  const queryEndpoint = `${apiBase}/projects/${projectId}/database/query`;
 
   // Auto-apply: if localStorage has schema DDL but the project database has no tables,
   // apply the DDL automatically. This self-heals when the initial application during

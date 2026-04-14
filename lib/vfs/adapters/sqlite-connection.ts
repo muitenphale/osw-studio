@@ -16,7 +16,7 @@ import path from 'path';
 import fs from 'fs';
 
 // Connection caches
-let coreDatabase: Database.Database | null = null;
+const coreDatabases = new Map<string, Database.Database>();
 const runtimeDatabases = new Map<string, Database.Database>();
 const analyticsDatabases = new Map<string, Database.Database>();
 const projectDatabases = new Map<string, Database.Database>();
@@ -221,22 +221,21 @@ function migrateDeploymentDatabase(deploymentDir: string, deploymentId?: string)
 }
 
 /**
- * Get the core database connection (singleton)
+ * Get the core database connection (cached per path)
  * Creates data/osws.sqlite if it doesn't exist
  */
-export function getCoreDatabase(): Database.Database {
-  if (coreDatabase) {
-    return coreDatabase;
-  }
-
+export function getCoreDatabase(customPath?: string): Database.Database {
   const dataDir = getDataDir();
-  ensureDir(dataDir);
+  const dbPath = customPath || path.join(dataDir, 'osws.sqlite');
 
-  const dbPath = path.join(dataDir, 'osws.sqlite');
-  coreDatabase = new Database(dbPath);
-  configureDatabase(coreDatabase);
+  const cached = coreDatabases.get(dbPath);
+  if (cached) return cached;
 
-  return coreDatabase;
+  ensureDir(path.dirname(dbPath));
+  const db = new Database(dbPath);
+  configureDatabase(db);
+  coreDatabases.set(dbPath, db);
+  return db;
 }
 
 /**
@@ -373,17 +372,13 @@ export function closeDeploymentDatabase(deploymentId: string): void {
 }
 
 /**
- * Close the core database connection
+ * Close all core database connections
  */
 export function closeCoreDatabase(): void {
-  if (coreDatabase) {
-    try {
-      coreDatabase.close();
-    } catch {
-      // Ignore errors on close
-    }
-    coreDatabase = null;
+  for (const [, db] of coreDatabases) {
+    try { db.close(); } catch {}
   }
+  coreDatabases.clear();
 }
 
 // ============================================
@@ -393,31 +388,30 @@ export function closeCoreDatabase(): void {
 /**
  * Get the file path for a project's database
  */
-export function getProjectDatabasePath(projectId: string): string {
+export function getProjectDatabasePath(projectId: string, baseDir?: string): string {
   validateIdFormat(projectId, 'project ID');
-  const dataDir = getDataDir();
+  const dataDir = baseDir || getDataDir();
   return path.join(dataDir, 'projects', projectId, 'database.sqlite');
 }
 
 /**
  * Check if a project database exists
  */
-export function projectDatabaseExists(projectId: string): boolean {
-  return fs.existsSync(getProjectDatabasePath(projectId));
+export function projectDatabaseExists(projectId: string, baseDir?: string): boolean {
+  return fs.existsSync(getProjectDatabasePath(projectId, baseDir));
 }
 
 /**
  * Get a project's database connection (cached)
  * Creates data/projects/{projectId}/database.sqlite if it doesn't exist
  */
-export function getProjectDatabaseConnection(projectId: string): Database.Database {
+export function getProjectDatabaseConnection(projectId: string, baseDir?: string): Database.Database {
   validateIdFormat(projectId, 'project ID');
-  const cached = projectDatabases.get(projectId);
-  if (cached) {
-    return cached;
-  }
+  const cacheKey = baseDir ? `${baseDir}:${projectId}` : projectId;
+  const cached = projectDatabases.get(cacheKey);
+  if (cached) return cached;
 
-  const dataDir = getDataDir();
+  const dataDir = baseDir || getDataDir();
   const projectDir = path.join(dataDir, 'projects', projectId);
   ensureDir(projectDir);
 
@@ -425,33 +419,30 @@ export function getProjectDatabaseConnection(projectId: string): Database.Databa
   const db = new Database(dbPath);
   configureDatabase(db);
 
-  projectDatabases.set(projectId, db);
+  projectDatabases.set(cacheKey, db);
   return db;
 }
 
 /**
  * Close a specific project's database connection
  */
-export function closeProjectDatabase(projectId: string): void {
-  const db = projectDatabases.get(projectId);
+export function closeProjectDatabase(projectId: string, baseDir?: string): void {
+  const cacheKey = baseDir ? `${baseDir}:${projectId}` : projectId;
+  const db = projectDatabases.get(cacheKey);
   if (db) {
-    try {
-      db.close();
-    } catch {
-      // Ignore errors on close
-    }
-    projectDatabases.delete(projectId);
+    try { db.close(); } catch {}
+    projectDatabases.delete(cacheKey);
   }
 }
 
 /**
  * Delete a project's database and directory
  */
-export function deleteProjectDatabase(projectId: string): void {
+export function deleteProjectDatabase(projectId: string, baseDir?: string): void {
   validateIdFormat(projectId, 'project ID');
-  closeProjectDatabase(projectId);
+  closeProjectDatabase(projectId, baseDir);
 
-  const dataDir = getDataDir();
+  const dataDir = baseDir || getDataDir();
   const projectDir = path.join(dataDir, 'projects', projectId);
 
   if (fs.existsSync(projectDir)) {
@@ -477,10 +468,11 @@ export function closeAllConnections(): void {
     closeAnalyticsDatabase(deploymentId);
   }
 
-  // Close all project databases
-  for (const [projectId] of projectDatabases) {
-    closeProjectDatabase(projectId);
+  // Close all project databases (keys may be composite "baseDir:projectId")
+  for (const [, db] of projectDatabases) {
+    try { db.close(); } catch {}
   }
+  projectDatabases.clear();
 
   // Close core database
   closeCoreDatabase();

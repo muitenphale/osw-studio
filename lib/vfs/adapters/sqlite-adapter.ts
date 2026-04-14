@@ -14,6 +14,7 @@
  * Analytics data is stored in these optional deployment databases.
  */
 
+import path from 'path';
 import type { Database } from 'better-sqlite3';
 import { StorageAdapter } from './types';
 import { Project, VirtualFile, FileTreeNode, CustomTemplate, Deployment, EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '../types';
@@ -381,6 +382,15 @@ export class SQLiteAdapter implements StorageAdapter {
   private deploymentDatabases = new Map<string, DeploymentDatabase>();
   private analyticsDatabases = new Map<string, AnalyticsDatabase>();
   private projectDatabases = new Map<string, ProjectDatabase>();
+  private dbPath: string | undefined;
+  private baseDir: string | undefined;
+
+  constructor(dbPath?: string) {
+    this.dbPath = dbPath;
+    if (dbPath) {
+      this.baseDir = path.dirname(dbPath);
+    }
+  }
 
   /**
    * Initialize the adapter - sets up database and runs migrations
@@ -388,7 +398,7 @@ export class SQLiteAdapter implements StorageAdapter {
   async init(): Promise<void> {
     if (this.initialized) return;
 
-    this.db = getCoreDatabase();
+    this.db = getCoreDatabase(this.dbPath);
     await this.runMigrations();
     this.initialized = true;
   }
@@ -427,7 +437,7 @@ export class SQLiteAdapter implements StorageAdapter {
   getProjectDatabase(projectId: string): ProjectDatabase {
     let projectDb = this.projectDatabases.get(projectId);
     if (!projectDb) {
-      projectDb = new ProjectDatabase(projectId);
+      projectDb = new ProjectDatabase(projectId, this.baseDir);
       projectDb.init();
       this.projectDatabases.set(projectId, projectDb);
     }
@@ -442,6 +452,15 @@ export class SQLiteAdapter implements StorageAdapter {
       throw new Error('SQLiteAdapter not initialized. Call init() first.');
     }
     return this.db;
+  }
+
+  /**
+   * Get the underlying better-sqlite3 database for advanced operations
+   * (e.g., wrapping multiple operations in a transaction).
+   * Prefer using adapter methods when possible.
+   */
+  getCoreDB(): Database {
+    return this.getDB();
   }
 
   /**
@@ -819,7 +838,7 @@ export class SQLiteAdapter implements StorageAdapter {
 
     // Delete project database if it exists
     this.projectDatabases.delete(id);
-    deleteProjectDatabase(id);
+    deleteProjectDatabase(id, this.baseDir);
   }
 
   async listProjects(fields?: string[]): Promise<Project[]> {

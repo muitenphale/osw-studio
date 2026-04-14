@@ -28,10 +28,12 @@ function escapeIdentifier(name: string): string {
 export class ProjectDatabase {
   private db: Database;
   private projectId: string;
+  private baseDir: string | undefined;
 
-  constructor(projectId: string) {
+  constructor(projectId: string, baseDir?: string) {
     this.projectId = projectId;
-    this.db = getProjectDatabaseConnection(projectId);
+    this.baseDir = baseDir;
+    this.db = getProjectDatabaseConnection(projectId, baseDir);
   }
 
   /**
@@ -45,13 +47,21 @@ export class ProjectDatabase {
    * Close the database connection
    */
   close(): void {
-    closeProjectDatabase(this.projectId);
+    closeProjectDatabase(this.projectId, this.baseDir);
   }
 
   /**
    * Execute DDL statements (CREATE TABLE, etc.)
    */
+  private static readonly BLOCKED_PATTERNS = /^\s*(ATTACH|DETACH|PRAGMA|VACUUM)\b/i;
+
   executeDDL(sql: string): void {
+    const statements = sql.split(';').filter(s => s.trim());
+    for (const stmt of statements) {
+      if (ProjectDatabase.BLOCKED_PATTERNS.test(stmt.trim())) {
+        throw new Error('Statement type not allowed');
+      }
+    }
     this.db.exec(sql);
   }
 
@@ -101,6 +111,10 @@ export class ProjectDatabase {
     rows: unknown[][];
     rowsAffected: number;
   } {
+    if (ProjectDatabase.BLOCKED_PATTERNS.test(sql)) {
+      throw new Error('Statement type not allowed');
+    }
+
     const trimmedSql = sql.trim().toLowerCase();
     const isSelect = trimmedSql.startsWith('select');
 

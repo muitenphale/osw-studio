@@ -40,6 +40,7 @@ interface ProjectSettingsPanelProps {
   project: Project;
   onProjectUpdate: (project: Project) => void;
   enabled: boolean;
+  workspaceId?: string;
 }
 
 function createFunctionsProvider(projectId: string): FunctionsDataProvider {
@@ -349,7 +350,7 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
   );
 }
 
-export function ProjectSettingsPanel({ project, onProjectUpdate, enabled }: ProjectSettingsPanelProps) {
+export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, workspaceId }: ProjectSettingsPanelProps) {
   const [activeTab, setActiveTab] = useState('general');
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 
@@ -471,6 +472,7 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled }: Proj
                     onSchemaChange={() => {
                       vfs.refreshServerContext();
                     }}
+                    workspaceId={workspaceId}
                   />
                 </TabsContent>
               </>
@@ -489,9 +491,10 @@ interface ProjectSettingsModalProps {
   onProjectUpdate: (project: Project) => void;
   enabled: boolean;
   onToggleEnabled: (enabled: boolean) => void;
+  workspaceId?: string;
 }
 
-export function ProjectSettingsModal({ project, isOpen, onClose, onProjectUpdate, enabled, onToggleEnabled }: ProjectSettingsModalProps) {
+export function ProjectSettingsModal({ project, isOpen, onClose, onProjectUpdate, enabled, onToggleEnabled, workspaceId }: ProjectSettingsModalProps) {
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 
   return (
@@ -517,7 +520,7 @@ export function ProjectSettingsModal({ project, isOpen, onClose, onProjectUpdate
           </div>
         </DialogHeader>
         <div className="flex-1 overflow-hidden">
-          <ProjectSettingsPanel project={project} onProjectUpdate={onProjectUpdate} enabled={enabled} />
+          <ProjectSettingsPanel project={project} onProjectUpdate={onProjectUpdate} enabled={enabled} workspaceId={workspaceId} />
         </div>
       </DialogContent>
     </Dialog>

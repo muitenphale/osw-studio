@@ -378,7 +378,10 @@ async function executeShellSegment(
 
   if (serverCommands.includes(command) && deploymentId) {
     try {
-      const response = await fetch('/api/shell/execute', {
+      // Use workspace-scoped URL if workspace cookie is set
+      const wsMatch = typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
+      const shellUrl = wsMatch ? `/api/w/${wsMatch[1]}/shell/execute` : '/api/shell/execute';
+      const response = await fetch(shellUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deploymentId, cmd: cmdArray })

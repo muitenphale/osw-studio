@@ -36,12 +36,19 @@ Download complete, deployable websites with one click
 **🎯 Templates & Skills**
 Start from templates or teach AI your preferred workflows
 
+## Two Modes
+
+**Browser Mode** (default) -- everything runs in your browser. No server, no account, complete privacy. Export your site as a ZIP and deploy anywhere.
+
+**Server Mode** -- self-host for teams or clients. Adds workspaces (isolated environments with their own projects and deployments), user accounts with role-based access, static site publishing, databases, and an admin dashboard. See **[Server Mode](?doc=server-mode)** and **[Multitenancy](?doc=multitenancy)**.
+
 ## Who Is This For?
 
 - **Non-developers** who want to build websites without learning code
 - **Designers** who want to prototype ideas quickly
 - **Developers** who want AI assistance for web projects
-- **Anyone** who wants to build a website faster
+- **Agencies** who want to host client sites and let clients make updates via AI
+- **Teams** who want a shared web development platform
 
 ## Quick Start
 

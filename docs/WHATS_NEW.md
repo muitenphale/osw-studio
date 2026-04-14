@@ -6,6 +6,18 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.57.0 - Workspaces & Multitenancy (2026-04-14)
+
+Server Mode now supports multiple users and workspaces. Workspaces are isolated environments with their own projects, deployments, and quotas. Multiple users can share a workspace. Browser Mode is unaffected.
+
+- **Workspaces** - The core unit of organization. Each workspace has its own database, projects, deployments, templates, and skills. Create workspaces for different clients, teams, or projects. Manage them from the workspace switcher in the sidebar or the admin panel at `/admin/workspaces`
+- **Shared Access** - Grant users access to workspaces. An agency can build a site in a workspace and invite the client so they can make updates via the AI
+- **User Accounts** - First visitor to a fresh instance creates the admin account. Email and password authentication. Admins manage users at `/admin/users`. Additional registration can be open (self-service) or closed (admin-only) via `REGISTRATION_MODE`
+- **Quotas** - Each workspace has configurable limits for projects, deployments, and storage. Enforced at creation and publishing time
+- **Upgrading** - Existing single-user instances automatically migrate data to a default workspace on first login after upgrading
+
+---
+
 ## v1.56.0 - Semantic Blocks (2026-04-12)
 
 Build pages visually by dragging blocks onto the live preview. Semantic blocks are implementation descriptions, not pre-built components. Place one where you want it, and the AI writes custom code that integrates with your existing project.

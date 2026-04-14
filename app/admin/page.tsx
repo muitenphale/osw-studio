@@ -7,9 +7,9 @@ export default function AdminPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Always redirect to dashboard
-    // Server mode: middleware handles auth redirect to /admin/login if not authenticated
-    router.push('/admin/dashboard');
+    // Middleware handles workspace redirect for authenticated users.
+    // If we reach here, redirect to login.
+    router.push('/admin/login');
   }, [router]);
 
   return (

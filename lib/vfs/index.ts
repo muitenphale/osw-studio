@@ -336,7 +336,12 @@ export class VirtualFileSystem {
       } else {
         // Client side: fetch schema from API
         try {
-          const response = await fetch(`/api/admin/deployments/${deploymentId}/server-context`);
+          // Use workspace-scoped URL if workspace cookie is set
+          const wsCookie = typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
+          const ctxUrl = wsCookie
+            ? `/api/w/${wsCookie[1]}/admin/deployments/${deploymentId}/server-context`
+            : `/api/admin/deployments/${deploymentId}/server-context`;
+          const response = await fetch(ctxUrl);
           if (response.ok) {
             const data = await response.json();
             const schemaFile = data.files?.find((f: { path: string }) => f.path === '/.server/db/schema.sql');

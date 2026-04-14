@@ -9,6 +9,8 @@ import { Logo } from '@/components/ui/logo';
 import {
   FolderOpen,
   Globe,
+  Users,
+  Building2,
   LayoutTemplate,
   Sparkles,
   Settings,
@@ -28,6 +30,7 @@ import { DOCS_ITEMS } from '@/lib/constants/docs';
 import { cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
 import pkg from '@/package.json';
+import { WorkspaceSwitcher } from '@/components/workspace-switcher';
 
 // Collapsed sidebar width
 export const COLLAPSED_SIDEBAR_WIDTH = 56; // Width in pixels for icon-only buttons
@@ -55,6 +58,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'deployments', label: 'Deployments', icon: Globe, path: 'deployments', serverModeOnly: true },
   { id: 'templates', label: 'Templates', icon: LayoutTemplate, path: 'templates' },
   { id: 'skills', label: 'Skills', icon: Sparkles, path: 'skills' },
+  { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true },
   {
     id: 'docs',
     label: 'Docs',
@@ -91,6 +95,7 @@ const SYSTEM_ACTIONS: SidebarItem[] = [
 
 interface SidebarProps {
   currentView: string;
+  workspaceId?: string;
   onNavigate: (view: string) => void;
   onProjectSelect: (project: Project) => void;
   onStartTour?: () => void;
@@ -107,6 +112,7 @@ interface SidebarProps {
 
 function SidebarContent({
   currentView,
+  workspaceId,
   onNavigate,
   onProjectSelect,
   onStartTour,
@@ -186,20 +192,20 @@ function SidebarContent({
     loadRecentProjects();
   }, []);
 
-  // Load sync status for Server Mode
+  // Load sync status for Server Mode (only when workspace context exists)
   useEffect(() => {
-    if (!isServerMode) return;
+    if (!isServerMode || !workspaceId) return;
 
     async function loadSyncStatus() {
       try {
         const status = await getSyncOverviewStatus();
         setSyncStatus(status);
-      } catch (error) {
-        console.error('Failed to load sync status:', error);
+      } catch {
+        // Sync status unavailable — non-fatal
       }
     }
     loadSyncStatus();
-  }, [isServerMode]);
+  }, [isServerMode, workspaceId]);
 
   // Load pinned state from localStorage
   useEffect(() => {
@@ -270,7 +276,15 @@ function SidebarContent({
       if (item.path.startsWith('/')) {
         router.push(item.path);
       } else if (isServerMode) {
-        router.push(`/admin/${item.path}`);
+        // System-wide items (users, workspaces) always go to /admin/
+        const systemItems = ['users', 'workspaces'];
+        if (systemItems.includes(item.id)) {
+          router.push(`/admin/${item.path}`);
+        } else if (workspaceId) {
+          router.push(`/w/${workspaceId}/${item.path}`);
+        } else {
+          router.push(`/admin/${item.path}`);
+        }
       } else {
         // Browser Mode: Use router.push to clear query params when navigating away from docs
         router.push('/');
@@ -396,6 +410,11 @@ function SidebarContent({
         )}
       </button>
 
+      {/* Workspace Switcher (Server Mode only) */}
+      {isServerMode && !collapsed && (
+        <WorkspaceSwitcher workspaceId={workspaceId} />
+      )}
+
       {/* Main Navigation - Single scrollable container */}
       <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
         {visibleSidebarItems.map((item) => {
@@ -513,13 +532,14 @@ function SidebarContent({
                   {item.subItems.map((subItem) => {
                     const SubIcon = subItem.icon;
                     // For docs, check currentDocId. For settings, check URL param or path
+                    const wsBase = workspaceId ? `/w/${workspaceId}` : '/admin';
                     const isSubItemActive = subItem.file
                       ? currentDocId === subItem.id
                       : item.id === 'settings'
                         ? (isServerMode
-                            ? window.location.pathname === `/admin/${item.id}/${subItem.id}`
+                            ? (window.location.pathname === `${wsBase}/${item.id}/${subItem.id}` || window.location.pathname === `/admin/${item.id}/${subItem.id}`)
                             : currentSettingsTab === subItem.id)
-                        : (isServerMode && window.location.pathname === `/admin/${item.id}/${subItem.id}`);
+                        : (isServerMode && (window.location.pathname === `${wsBase}/${item.id}/${subItem.id}` || window.location.pathname === `/admin/${item.id}/${subItem.id}`));
 
                     return (
                       <Button
@@ -532,12 +552,13 @@ function SidebarContent({
                         onClick={() => {
                           onMobileOpenChange?.(false);
                           if (isServerMode) {
+                            const subBase = workspaceId ? `/w/${workspaceId}` : '/admin';
                             if (subItem.file) {
                               // Docs sub-item
-                              router.push(`/admin/docs?doc=${subItem.id}`);
+                              router.push(`${subBase}/docs?doc=${subItem.id}`);
                             } else {
                               // Settings sub-item
-                              router.push(`/admin/${item.id}/${subItem.id}`);
+                              router.push(`${subBase}/${item.id}/${subItem.id}`);
                             }
                           } else {
                             // Browser mode

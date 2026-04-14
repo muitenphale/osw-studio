@@ -20,9 +20,11 @@ import type { SecretsDataProvider } from './data-providers';
 interface SecretsManagerProps {
   deploymentId?: string;
   dataProvider?: SecretsDataProvider;
+  workspaceId?: string;
 }
 
-export function SecretsManager({ deploymentId, dataProvider }: SecretsManagerProps) {
+export function SecretsManager({ deploymentId, dataProvider, workspaceId }: SecretsManagerProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function SecretsManager({ deploymentId, dataProvider }: SecretsManagerPro
         setSecrets(result.secrets);
         setEncryptionConfigured(result.encryptionConfigured);
       } else if (deploymentId) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets`);
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/secrets`);
         if (!res.ok) {
           const data = await res.json();
           throw new Error(data.error || 'Failed to load secrets');
@@ -66,7 +68,7 @@ export function SecretsManager({ deploymentId, dataProvider }: SecretsManagerPro
       if (dataProvider) {
         await dataProvider.remove(secret.id);
       } else if (deploymentId) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets/${secret.id}`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/secrets/${secret.id}`, {
           method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete secret');
@@ -86,7 +88,7 @@ export function SecretsManager({ deploymentId, dataProvider }: SecretsManagerPro
       } else if (!deploymentId) {
         throw new Error('No deployment ID available');
       } else if (editingSecret) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets/${editingSecret.id}`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/secrets/${editingSecret.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -96,7 +98,7 @@ export function SecretsManager({ deploymentId, dataProvider }: SecretsManagerPro
           throw new Error(err.error || 'Failed to update secret');
         }
       } else {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/secrets`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/secrets`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),

@@ -10,16 +10,18 @@ interface SchemaViewerProps {
   deploymentId?: string;
   schemaEndpoint?: string;
   showSystemTablesToggle?: boolean;
+  workspaceId?: string;
 }
 
-export function SchemaViewer({ deploymentId, schemaEndpoint, showSystemTablesToggle = true }: SchemaViewerProps) {
+export function SchemaViewer({ deploymentId, schemaEndpoint, showSystemTablesToggle = true, workspaceId }: SchemaViewerProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [showSystemTables, setShowSystemTables] = useState(false);
 
-  const endpoint = schemaEndpoint || `/api/admin/deployments/${deploymentId}/database/schema`;
+  const endpoint = schemaEndpoint || `${apiBase}/admin/deployments/${deploymentId}/database/schema`;
 
   useEffect(() => {
     loadSchema();

@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.52.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.57.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -38,11 +38,11 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 - **Full IDE** - Monaco editor, live preview, file explorer, multi-tab support
 - **Templates & Skills** - Reusable project templates (with bundled backend infrastructure) and AI workflow guides
 - **Export anywhere** - Download as ZIP, deploy to Vercel/Netlify/GitHub Pages
-- **Optional Server Mode** - Self-host a multi-site publishing platform with built-in SEO, analytics, and admin dashboard
+- **Optional Server Mode** - Self-host a multi-user platform with workspaces, publishing, SEO, analytics, and admin dashboard
 
 **Perfect for:** Business websites, landing pages, portfolios, documentation sites, blogs, React apps, interactive tools
 
-**Two modes:** Browser Mode (build and export as ZIP) or [Server Mode](#server-mode-optional) (self-hosted platform with databases, APIs, and publishing)
+**Two modes:** Browser Mode (build and export as ZIP) or [Server Mode](#server-mode-optional) (self-hosted platform with workspaces, databases, APIs, and publishing)
 
 ## 🚀 Quick Start
 
@@ -110,7 +110,7 @@ npm run dev
 | **Database-backed Apps** | CRUD apps, dashboards, admin panels with per-deployment SQLite |
 | **Blogs & CMS** | Static posts with Handlebars partials, comments via Edge Functions |
 | **API Backends** | REST APIs with database access, secrets management, auth flows |
-| **Multi-site Platform** | Host multiple deployments on one instance |
+| **Multi-user Platform** | Workspaces with shared access, quotas, and per-workspace isolation |
 
 See [Server Mode](#server-mode-optional) for full details.
 
@@ -182,8 +182,9 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 - ✅ Zero configuration
 
 ### Server Mode (Optional)
+- ✅ **Workspaces** - Isolated environments with own projects, deployments, and quotas
+- ✅ **Multi-user** - User accounts with shared workspace access and admin management
 - ✅ SQLite persistence (no external database setup)
-- ✅ Admin authentication (JWT sessions)
 - ✅ Static site publishing to `/deployments/{deploymentId}/`
 - ✅ Edge Functions - JavaScript API endpoints with database access
 - ✅ Scheduled Functions - Run edge functions on cron schedules
@@ -196,7 +197,6 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 - ✅ Project sync (IndexedDB ↔ SQLite)
 - ✅ Custom domains via reverse proxy
 - ✅ Site Templates - Create from templates with automatic backend provisioning
-- ✅ Blog template - Static posts with Handlebars partials, ready for comments
 
 **Quick Start (Server Mode):**
 
@@ -204,18 +204,18 @@ OSW Studio runs client-side by default (Browser Mode). For advanced use cases, e
 # 1. Configure .env
 NEXT_PUBLIC_SERVER_MODE=true
 SESSION_SECRET=$(openssl rand -base64 32)
-ADMIN_PASSWORD=your_secure_password
 ANALYTICS_SECRET=$(openssl rand -base64 32)
 SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)
 
 # 2. Start server (SQLite databases created automatically)
 npm install && npm run dev
 
-# 3. Access at http://localhost:3000/admin/login
+# 3. Visit http://localhost:3000/admin — create admin account on first visit
 ```
 
 **Documentation:**
 - [Server Mode Guide](docs/SERVER_MODE.md) - Full setup and features
+- [Multitenancy Guide](docs/MULTITENANCY.md) - Workspaces, users, quotas
 - [Backend Features](docs/BACKEND_FEATURES.md) - Edge Functions, Secrets, Database
 
 ## Tech Stack

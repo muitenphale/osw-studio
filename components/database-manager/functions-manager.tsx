@@ -21,9 +21,11 @@ interface FunctionsManagerProps {
   deploymentId?: string;
   dataProvider?: FunctionsDataProvider;
   hideRuntimeFeatures?: boolean;
+  workspaceId?: string;
 }
 
-export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatures }: FunctionsManagerProps) {
+export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatures, workspaceId }: FunctionsManagerProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [functions, setFunctions] = useState<EdgeFunction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
       if (dataProvider) {
         setFunctions(await dataProvider.list());
       } else if (deploymentId) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions`);
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/functions`);
         if (!res.ok) {
           const data = await res.json();
           throw new Error(data.error || 'Failed to load functions');
@@ -62,7 +64,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
       if (dataProvider) {
         await dataProvider.toggle(fn.id, !fn.enabled);
       } else if (deploymentId) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions/${fn.id}`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/functions/${fn.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: !fn.enabled }),
@@ -84,7 +86,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
       if (dataProvider) {
         await dataProvider.remove(fn.id);
       } else if (deploymentId) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions/${fn.id}`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/functions/${fn.id}`, {
           method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete function');
@@ -99,7 +101,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
 
   const copyUrl = (fn: EdgeFunction) => {
     if (!deploymentId) return;
-    const url = `${window.location.origin}/api/deployments/${deploymentId}/functions/${fn.name}`;
+    const url = `${window.location.origin}${apiBase}/deployments/${deploymentId}/functions/${fn.name}`;
     navigator.clipboard.writeText(url);
     setCopiedUrl(fn.id);
     setTimeout(() => setCopiedUrl(null), 2000);
@@ -112,7 +114,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
       } else if (!deploymentId) {
         throw new Error('No deployment ID available');
       } else if (editingFunction) {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions/${editingFunction.id}`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/functions/${editingFunction.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -122,7 +124,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
           throw new Error(err.error || 'Failed to update function');
         }
       } else {
-        const res = await fetch(`/api/admin/deployments/${deploymentId}/functions`, {
+        const res = await fetch(`${apiBase}/admin/deployments/${deploymentId}/functions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
@@ -267,7 +269,7 @@ export function FunctionsManager({ deploymentId, dataProvider, hideRuntimeFeatur
                       </DropdownMenuItem>
                       {!hideRuntimeFeatures && deploymentId && (
                         <DropdownMenuItem
-                          onClick={() => window.open(`/api/deployments/${deploymentId}/functions/${fn.name}`, '_blank')}
+                          onClick={() => window.open(`${apiBase}/deployments/${deploymentId}/functions/${fn.name}`, '_blank')}
                         >
                           <ExternalLink className="h-4 w-4 mr-2" />
                           Open in Browser

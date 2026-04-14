@@ -57,11 +57,12 @@ import { drainRuntimeErrors, peekRuntimeErrors, formatRuntimeErrors } from '@/li
 interface WorkspaceProps {
   project: Project;
   onBack: () => void;
+  workspaceId?: string;
 }
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
-export function Workspace({ project, onBack }: WorkspaceProps) {
+export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -1551,6 +1552,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         projectId={project.id}
         selectedDeploymentId={selectedDeploymentId}
         onDeploymentChange={handleDeploymentChange}
+        workspaceId={workspaceId}
       />
 
       {/* Project settings button */}
@@ -2354,6 +2356,7 @@ export function Workspace({ project, onBack }: WorkspaceProps) {
         onProjectUpdate={handleProjectSettingsUpdate}
         enabled={backendEnabled}
         onToggleEnabled={handleBackendToggle}
+        workspaceId={workspaceId}
       />
 
     </TooltipProvider>

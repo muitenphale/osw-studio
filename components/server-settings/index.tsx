@@ -15,9 +15,10 @@ interface ServerSettingsModalProps {
   deployment: Deployment;
   isOpen: boolean;
   onClose: () => void;
+  workspaceId?: string;
 }
 
-export function ServerSettingsModal({ deployment, isOpen, onClose }: ServerSettingsModalProps) {
+export function ServerSettingsModal({ deployment, isOpen, onClose, workspaceId }: ServerSettingsModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-4xl h-[80vh] flex flex-col">
@@ -29,7 +30,7 @@ export function ServerSettingsModal({ deployment, isOpen, onClose }: ServerSetti
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden">
-          <DatabaseManager deploymentId={deployment.id} />
+          <DatabaseManager deploymentId={deployment.id} workspaceId={workspaceId} />
         </div>
       </DialogContent>
     </Dialog>

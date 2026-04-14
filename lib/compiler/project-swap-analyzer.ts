@@ -9,7 +9,7 @@
 
 import 'server-only';
 
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { getSQLiteAdapter, getWorkspaceAdapter } from '@/lib/vfs/adapters/server';
 import { RuntimeDatabase } from '@/lib/vfs/adapters/runtime-database';
 import type { EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '@/lib/vfs/types';
 
@@ -80,8 +80,9 @@ function diffByName<T extends { name: string; code?: string; enabled?: boolean }
 export async function analyzeProjectSwap(
   newProjectId: string,
   deploymentId: string,
+  workspaceId?: string,
 ): Promise<SwapDiff> {
-  const adapter = getSQLiteAdapter();
+  const adapter = workspaceId ? getWorkspaceAdapter(workspaceId) : getSQLiteAdapter();
   await adapter.init();
 
   // Read incoming project's backend features from core SQLite

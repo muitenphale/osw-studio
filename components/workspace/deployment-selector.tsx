@@ -23,6 +23,7 @@ interface DeploymentSelectorProps {
   selectedDeploymentId: string | null;
   onDeploymentChange: (deploymentId: string | null, deploymentName: string | null) => void;
   className?: string;
+  workspaceId?: string;
 }
 
 export function DeploymentSelector({
@@ -30,7 +31,9 @@ export function DeploymentSelector({
   selectedDeploymentId,
   onDeploymentChange,
   className,
+  workspaceId,
 }: DeploymentSelectorProps) {
+  const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +51,7 @@ export function DeploymentSelector({
         setLoading(true);
         setError(null);
 
-        const response = await fetch(`/api/projects/${projectId}/deployments`);
+        const response = await fetch(`${apiBase}/projects/${projectId}/deployments`);
         if (!response.ok) {
           throw new Error('Failed to fetch deployments');
         }

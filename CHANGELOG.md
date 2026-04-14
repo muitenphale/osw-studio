@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.57.0 - 2026-04-14
+
+### Multitenancy & Workspaces (Server Mode)
+
+- **Workspace-based data isolation**: Each workspace gets its own `data/workspaces/{workspaceId}/osws.sqlite` database. Projects, files, deployments, templates, and skills are scoped per-workspace. A separate `data/system.sqlite` manages user accounts, workspaces, and access grants
+- **Shared workspace access**: Multiple users can be granted access to the same workspace. An agency can create a workspace for a client, build the site, then invite the client to make their own updates via the AI
+- **Workspace-scoped URL routing**: All workspace pages live at `/w/{workspaceId}/projects`, `/w/{workspaceId}/deployments`, etc. API routes under `/api/w/{workspaceId}/sync/`, `/api/w/{workspaceId}/deployments/`, etc. Legacy `/admin/` paths redirect to the user's default workspace
+- **Workspace switcher**: Dropdown in the sidebar shows all workspaces the user has access to with role badges. Switching navigates to the same view in the new workspace. Admins can access workspace management directly from the switcher. Workspace name cached in localStorage for instant display on page load
+- **User registration and authentication**: New `/api/auth/register` endpoint and `/admin/register` page. Login supports email + password auth against the system database, with admin password fallback for single-user instances
+- **Route protection**: All workspace-scoped routes verify the user has access to the workspace. Middleware enforces auth for `/w/` and `/api/w/` paths. Previously unprotected routes secured
+- **Quota enforcement**: Each workspace has configurable limits for projects, deployments, and storage. Project count checked at creation, deployment count at publishing, storage checked on file sync. Storage warning banner appears at 80% usage. Sync status API returns full quota info (used/max for projects, deployments, storage)
+- **Admin management**: New `/admin/users` and `/admin/workspaces` pages. User creation includes workspace assignment (new workspace, existing workspace, or none). User expansion shows workspace memberships. Workspace management shows members, stats, quotas with create/edit/delete and access grant/revoke. Workspace deletion cleans up filesystem
+- **First-user-is-admin setup**: Fresh instances redirect to a registration page on first visit. The first user to register becomes admin with an unlimited workspace. No `ADMIN_PASSWORD` env var needed for new installs. Legacy admin password only works as a bootstrap mechanism when zero users exist
+- **Instance configuration**: `REGISTRATION_MODE` (open/closed) controls self-registration. `INSTANCE_API_KEY` enables machine-to-machine admin API auth. `INSTANCE_ID` identifies the instance
+- **Legacy data migration**: Upgrading from single-user mode automatically copies projects, deployments, templates, and skills from `data/osws.sqlite` to the default workspace on login. Workspace repair endpoint (`POST /api/admin/workspaces/{id}/repair`) detects and fixes orphaned data, missing deployment routes, and incomplete migrations
+- **Workspace-scoped publish pipeline**: Static builder, backend feature extractor, and project swap analyzer all use the workspace adapter. All view components (deployments, database managers, server settings) fetch from workspace-scoped API URLs
+
+### Security
+
+- **Timing-safe comparisons**: API key and admin password comparisons use `crypto.timingSafeEqual`
+- **SQL statement blocking**: ATTACH, DETACH, PRAGMA, VACUUM blocked in user-facing SQL execution paths
+- **Session validation**: Deactivated users' sessions invalidated on next request via DB check
+- **Analytics ownership**: Analytics read/clear endpoints verify deployment ownership
+- **Email validation**: Registration validates email format
+- **Path validation**: Workspace IDs validated as UUIDs before file path construction
+
 ## v1.56.0 - 2026-04-12
 
 ### Semantic Blocks

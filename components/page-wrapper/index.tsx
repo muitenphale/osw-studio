@@ -10,42 +10,52 @@ import { GuidedTourProvider } from '@/components/guided-tour/context';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { AboutModal } from '@/components/about-modal';
 
-type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'deployments' | 'docs' | 'settings';
+type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'deployments' | 'users' | 'workspaces' | 'docs' | 'settings';
 
 interface PageWrapperProps {
   view: View;
+  workspaceId?: string;
   settingsTab?: 'model' | 'application';
   autoCreateProject?: boolean;
 }
 
-const VIEW_ROUTES: Record<string, string> = {
-  dashboard: '/admin',
-  projects: '/admin/projects',
-  templates: '/admin/templates',
-  skills: '/admin/skills',
-  deployments: '/admin/deployments',
-  docs: '/admin/docs',
-  settings: '/admin/settings',
-};
+function getViewRoute(view: string, workspaceId?: string): string {
+  const base = workspaceId ? `/w/${workspaceId}` : '/admin';
+  const routes: Record<string, string> = {
+    dashboard: `${base}/dashboard`,
+    projects: `${base}/projects`,
+    deployments: `${base}/deployments`,
+    settings: `${base}/settings`,
+    skills: `${base}/skills`,
+    templates: `${base}/templates`,
+    docs: `${base}/docs`,
+    // System-wide routes (always /admin/)
+    users: '/admin/users',
+    workspaces: '/admin/workspaces',
+  };
+  return routes[view] || `${base}/projects`;
+}
 
-function PageWrapperInner({ view, settingsTab, autoCreateProject }: PageWrapperProps) {
+function PageWrapperInner({ view, workspaceId, settingsTab, autoCreateProject }: PageWrapperProps) {
   const router = useRouter();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showAboutModal, setShowAboutModal] = useState(false);
 
   const handleNavigate = useCallback((targetView: string) => {
-    const route = VIEW_ROUTES[targetView] || `/admin/${targetView}`;
+    const route = getViewRoute(targetView, workspaceId);
     router.push(route);
-  }, [router]);
+  }, [router, workspaceId]);
 
   const content = selectedProject ? (
     <Workspace
       project={selectedProject}
       onBack={() => setSelectedProject(null)}
+      workspaceId={workspaceId}
     />
   ) : (
     <ContentArea
       view={view}
+      workspaceId={workspaceId}
       onProjectSelect={setSelectedProject}
       settingsTab={settingsTab}
       onNavigate={handleNavigate}
@@ -57,6 +67,7 @@ function PageWrapperInner({ view, settingsTab, autoCreateProject }: PageWrapperP
     <>
       <PageLayout
         currentView={view}
+        workspaceId={workspaceId}
         onNavigate={handleNavigate}
         onProjectSelect={setSelectedProject}
         onOpenAbout={() => setShowAboutModal(true)}
@@ -73,10 +84,10 @@ function PageWrapperInner({ view, settingsTab, autoCreateProject }: PageWrapperP
   );
 }
 
-export function PageWrapper({ view, settingsTab, autoCreateProject }: PageWrapperProps) {
+export function PageWrapper({ view, workspaceId, settingsTab, autoCreateProject }: PageWrapperProps) {
   return (
     <GuidedTourProvider>
-      <PageWrapperInner view={view} settingsTab={settingsTab} autoCreateProject={autoCreateProject} />
+      <PageWrapperInner view={view} workspaceId={workspaceId} settingsTab={settingsTab} autoCreateProject={autoCreateProject} />
     </GuidedTourProvider>
   );
 }

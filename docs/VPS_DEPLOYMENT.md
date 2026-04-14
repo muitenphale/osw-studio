@@ -156,16 +156,15 @@ SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)
 cat > .env << EOF
 NEXT_PUBLIC_SERVER_MODE=true
 SESSION_SECRET=$SESSION_SECRET
-ADMIN_PASSWORD=your_secure_password_here
 SECURE_COOKIES=false
 ANALYTICS_SECRET=$ANALYTICS_SECRET
 SECRETS_ENCRYPTION_KEY=$SECRETS_ENCRYPTION_KEY
 EOF
 ```
 
-Change `your_secure_password_here` to your admin password.
-
 > **Note:** `SECURE_COOKIES=false` is required when running HTTP without SSL. Remove this line after adding HTTPS.
+>
+> No `ADMIN_PASSWORD` needed. On first visit to `/admin`, you'll create the admin account interactively.
 
 ### Build & Start
 

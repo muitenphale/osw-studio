@@ -4,11 +4,12 @@ import React, { useState, useEffect } from 'react';
 import { Project } from '@/lib/vfs/types';
 import { Sidebar } from '@/components/sidebar';
 import { AppHeader } from '@/components/ui/app-header';
-import { Cloud, AlertTriangle, Database } from 'lucide-react';
+import { Cloud, AlertTriangle, Database, X } from 'lucide-react';
 import { SyncDialog } from '@/components/project-manager/sync-dialog';
 import { cn, logger } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
-import { getSyncOverviewStatus } from '@/lib/vfs/auto-sync';
+import { getSyncOverviewStatus, setAutoSyncWorkspaceId } from '@/lib/vfs/auto-sync';
+import { getSyncManager } from '@/lib/vfs/sync-manager';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,7 @@ import { Button } from '@/components/ui/button';
 interface PageLayoutProps {
   children: React.ReactNode;
   currentView: string;
+  workspaceId?: string;
   onNavigate: (view: string) => void;
   onProjectSelect: (project: Project) => void;
   onStartTour?: () => void;
@@ -33,6 +35,7 @@ interface PageLayoutProps {
 export function PageLayout({
   children,
   currentView,
+  workspaceId,
   onNavigate,
   onProjectSelect,
   onStartTour,
@@ -48,15 +51,23 @@ export function PageLayout({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [initModalOpen, setInitModalOpen] = useState(false);
   const [localProjectCount, setLocalProjectCount] = useState(0);
+  const [needsMigration, setNeedsMigration] = useState(false);
+  const [migratingViaRelogin, setMigratingViaRelogin] = useState(false);
+  const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
   const INIT_DISMISSED_KEY = 'osw-server-init-dismissed';
 
-  // Check if server needs initialization on mount (Server Mode only)
+  // Set workspace context for auto-sync and sync-manager,
+  // then check server initialization status
   useEffect(() => {
-    if (!isServerMode || !showSidebar) return;
+    if (workspaceId) {
+      setAutoSyncWorkspaceId(workspaceId);
+      getSyncManager(workspaceId);
+    }
 
-    // Check if user has already dismissed this modal
+    if (!isServerMode || !showSidebar || !workspaceId) return;
+
     const dismissed = localStorage.getItem(INIT_DISMISSED_KEY);
     if (dismissed === 'true') return;
 
@@ -65,7 +76,6 @@ export function PageLayout({
         const status = await getSyncOverviewStatus();
         setLocalProjectCount(status.localProjectCount);
 
-        // Show modal if server is uninitialized but local has projects
         if (status.isUninitialized && status.localProjectCount > 0) {
           setInitModalOpen(true);
         }
@@ -74,7 +84,43 @@ export function PageLayout({
       }
     }
     checkServerInit();
-  }, [isServerMode, showSidebar]);
+
+    async function checkQuota() {
+      try {
+        const res = await fetch(`/api/w/${workspaceId}/sync/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.quota?.storage) {
+          const pct = Math.round((data.quota.storage.usedMb / data.quota.storage.maxMb) * 100);
+          if (pct >= 80) {
+            setQuotaWarning(`You have used ${pct}% of your workspace storage (${data.quota.storage.usedMb} MB / ${data.quota.storage.maxMb} MB)`);
+          } else {
+            setQuotaWarning(null);
+          }
+        }
+      } catch {}
+    }
+    checkQuota();
+  }, [workspaceId, isServerMode, showSidebar]);
+
+  // Check if this is a migration scenario (legacy data exists but workspace is empty)
+  useEffect(() => {
+    if (!initModalOpen || !isServerMode) return;
+
+    async function checkMigration() {
+      try {
+        // If the workspace is empty but there's a legacy DB, this needs migration via re-login
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated) {
+            setNeedsMigration(true);
+          }
+        }
+      } catch {}
+    }
+    checkMigration();
+  }, [initModalOpen, isServerMode]);
 
   const handleDismissInitModal = () => {
     localStorage.setItem(INIT_DISMISSED_KEY, 'true');
@@ -86,6 +132,21 @@ export function PageLayout({
     setSyncDialogOpen(true);
   };
 
+  const handleMigrationRelogin = async () => {
+    setMigratingViaRelogin(true);
+    try {
+      // Delete the workspace DB files so migration runs fresh on next login
+      if (workspaceId) {
+        await fetch(`/api/admin/workspaces/${workspaceId}/repair`, { method: 'POST' });
+      }
+      // Log out — on re-login, ensureDefaultWorkspace will migrate legacy data
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/admin/login');
+    } catch {
+      setMigratingViaRelogin(false);
+    }
+  };
+
   // When in Workspace, don't show sidebar or header
   if (!showSidebar) {
     return <>{children}</>;
@@ -95,13 +156,14 @@ export function PageLayout({
     <div className="relative flex h-full overflow-hidden">
       <Sidebar
         currentView={currentView}
+        workspaceId={workspaceId}
         onNavigate={onNavigate}
         onProjectSelect={onProjectSelect}
         onStartTour={onStartTour}
         onOpenAbout={onOpenAbout}
         onOpenSettings={onOpenSettings}
         onServerSync={() => setSyncDialogOpen(true)}
-        onLogoClick={() => router.push('/admin')}
+        onLogoClick={() => router.push(workspaceId ? `/w/${workspaceId}/projects` : '/admin')}
         onPinnedChange={setSidebarPinned}
         onHoverChange={setSidebarHovering}
         onCollapsedChange={setSidebarCollapsed}
@@ -132,6 +194,17 @@ export function PageLayout({
         />
         {/* Content area */}
         <div className="flex-1 overflow-hidden">
+          {quotaWarning && (
+            <div className="bg-orange-500/10 border-b border-orange-500/20 px-4 py-2 text-sm text-orange-400 flex items-center justify-between">
+              <span>{quotaWarning}</span>
+              <button
+                onClick={() => setQuotaWarning(null)}
+                className="text-orange-400/60 hover:text-orange-400 ml-4 shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           {children}
         </div>
       </div>
@@ -148,10 +221,13 @@ export function PageLayout({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-orange-500" />
-              Server Database Not Initialized
+              {needsMigration ? 'Workspace Setup Required' : 'Server Database Not Initialized'}
             </DialogTitle>
             <DialogDescription>
-              Your server database is empty, but you have {localProjectCount} project{localProjectCount !== 1 ? 's' : ''} stored locally.
+              {needsMigration
+                ? 'Your workspace needs to be initialized with your existing data. A quick re-login will set everything up automatically.'
+                : `Your server database is empty, but you have ${localProjectCount} project${localProjectCount !== 1 ? 's' : ''} stored locally.`
+              }
             </DialogDescription>
           </DialogHeader>
 
@@ -159,16 +235,23 @@ export function PageLayout({
             <div className="flex items-start gap-3 p-3 bg-muted rounded-lg">
               <Database className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
               <div className="text-sm">
-                <p className="font-medium">Why does this matter?</p>
-                <p className="text-muted-foreground mt-1">
-                  The <strong>Deployments</strong> feature requires projects to be synced to the server database.
-                  Until you push your local projects, the Deployments view won&apos;t show any projects to publish.
-                </p>
+                {needsMigration ? (
+                  <>
+                    <p className="font-medium">What happens?</p>
+                    <p className="text-muted-foreground mt-1">
+                      You&apos;ll be briefly logged out. On login, your existing projects, deployments, and settings will be migrated to your workspace automatically.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium">Why does this matter?</p>
+                    <p className="text-muted-foreground mt-1">
+                      The <strong>Deployments</strong> feature requires projects to be synced to the server database.
+                      Until you push your local projects, the Deployments view won&apos;t show any projects to publish.
+                    </p>
+                  </>
+                )}
               </div>
-            </div>
-
-            <div className="text-sm text-muted-foreground">
-              Click <strong>Open Sync</strong> to push your local projects to the server, or dismiss this message to configure it later.
             </div>
           </div>
 
@@ -179,12 +262,21 @@ export function PageLayout({
             >
               Dismiss
             </Button>
-            <Button
-              onClick={handleOpenSyncFromInit}
-            >
-              <Cloud className="w-4 h-4 mr-2" />
-              Open Sync
-            </Button>
+            {needsMigration ? (
+              <Button
+                onClick={handleMigrationRelogin}
+                disabled={migratingViaRelogin}
+              >
+                {migratingViaRelogin ? 'Setting up...' : 'Set Up Workspace'}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleOpenSyncFromInit}
+              >
+                <Cloud className="w-4 h-4 mr-2" />
+                Open Sync
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,13 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const router = useRouter();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showRegisterLink, setShowRegisterLink] = useState(false);
+  const [checkingSetup, setCheckingSetup] = useState(true);
+
+  // Check if instance needs setup or registration is open
+  useEffect(() => {
+    fetch('/api/auth/setup-status')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.needsSetup) {
+          // No users exist — redirect to registration
+          router.replace('/admin/register');
+          return;
+        }
+        setShowRegisterLink(data?.registrationOpen || false);
+        setCheckingSetup(false);
+      })
+      .catch(() => setCheckingSetup(false));
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -15,12 +35,13 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
+      const body = email ? { email, password } : { password };
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -30,12 +51,16 @@ export default function LoginPage() {
         return;
       }
 
-      // Login successful - redirect to admin area
-      router.push('/admin');
-    } catch (err) {
+      // Login successful - redirect to workspace or admin area
+      if (data.defaultWorkspaceId) {
+        document.cookie = `osw_workspace=${data.defaultWorkspaceId};path=/;max-age=${60 * 60 * 24 * 365}`;
+        if (data.defaultWorkspaceName) localStorage.setItem('osw-workspace-name', data.defaultWorkspaceName);
+        router.push(`/w/${data.defaultWorkspaceId}/projects`);
+      } else {
+        router.push('/admin');
+      }
+    } catch {
       setError('An error occurred. Please try again.');
-      console.error('Login error:', err);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -80,11 +105,30 @@ export default function LoginPage() {
         </div>
 
         {/* Title */}
-        <h1 className="text-3xl font-semibold mb-2 tracking-tight">OSW Studio Admin</h1>
-        <p className="text-zinc-400 mb-8">Enter your password to continue</p>
+        <h1 className="text-3xl font-semibold mb-2 tracking-tight">OSW Studio</h1>
+        <p className="text-zinc-400 mb-8">Sign in to your account</p>
+
+        {checkingSetup && (
+          <div className="py-8 text-zinc-500 text-sm">Checking setup...</div>
+        )}
 
         {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" style={checkingSetup ? { display: 'none' } : undefined}>
+          <div className="text-left">
+            <label htmlFor="email" className="block text-sm font-medium text-zinc-400 mb-2">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+              placeholder="you@example.com"
+              autoFocus
+            />
+          </div>
+
           <div className="text-left">
             <label htmlFor="password" className="block text-sm font-medium text-zinc-400 mb-2">
               Password
@@ -97,7 +141,6 @@ export default function LoginPage() {
               className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
               placeholder="Enter your password"
               required
-              autoFocus
             />
           </div>
 
@@ -115,6 +158,15 @@ export default function LoginPage() {
             {isLoading ? 'Logging in...' : 'Login'}
           </button>
         </form>
+
+        {showRegisterLink && (
+          <p className="mt-6 text-sm text-zinc-500">
+            Don&apos;t have an account?{' '}
+            <Link href="/admin/register" className="text-orange-400 hover:text-orange-300 transition-colors">
+              Create one
+            </Link>
+          </p>
+        )}
 
         {/* Footer */}
         <div className="mt-12 pt-6 border-t border-zinc-800 flex items-center justify-center gap-2 text-sm text-zinc-500">

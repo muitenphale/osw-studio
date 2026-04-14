@@ -53,7 +53,7 @@ Server Mode adds:
 
 **Use Cases:**
 - Production deployments
-- Multi-user environments
+- Multi-user environments (see **[Multitenancy](?doc=multitenancy)**)
 - Publishing static sites
 - Persistent project storage
 
@@ -72,8 +72,9 @@ NEXT_PUBLIC_SERVER_MODE=true
 # Session security (generate with: openssl rand -base64 32)
 SESSION_SECRET=your_random_secret_here
 
-# Admin password
-ADMIN_PASSWORD=your_secure_password_here
+# Admin password (optional — only needed for headless/scripted bootstrap)
+# For interactive setup, skip this and create admin via /admin/register on first visit
+# ADMIN_PASSWORD=your_secure_password_here
 
 # Optional: Analytics secret
 ANALYTICS_SECRET=your_analytics_secret_here
@@ -103,7 +104,7 @@ SQLite databases are created automatically:
 - **Admin panel**: http://localhost:3000/admin/login
 - **Published sites**: http://localhost:3000/deployments/{id}/
 
-**Login with** ADMIN_PASSWORD from .env. After login, you'll land on the **Dashboard** with server stats and traffic metrics.
+**On first visit**, you'll be prompted to create an admin account. After login, you'll land on the **Dashboard** with server stats and traffic metrics.
 
 ---
 
@@ -210,7 +211,6 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
      ```
      NEXT_PUBLIC_SERVER_MODE=true
      SESSION_SECRET=<generate>
-     ADMIN_PASSWORD=<your password>
      NEXT_PUBLIC_APP_URL=${{ RAILWAY_PUBLIC_DOMAIN }}
      ```
 
@@ -247,11 +247,17 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 |----------|----------|-------------|
 | `NEXT_PUBLIC_SERVER_MODE` | Yes | Set to `true` to enable Server Mode |
 | `SESSION_SECRET` | Yes | Random string for JWT signing |
-| `ADMIN_PASSWORD` | Yes | Password for admin login |
+| `ADMIN_PASSWORD` | No | Bootstrap only. Used for initial setup when no user accounts exist. Once the first account is created via `/admin/register`, this is ignored. New installs can skip this entirely. |
 | `ANALYTICS_SECRET` | No | Secret for analytics API |
 | `SECRETS_ENCRYPTION_KEY` | No | 256-bit key for encrypting secrets |
 | `SECURE_COOKIES` | No | Set to `false` to allow insecure cookies (pre-SSL only) |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL for SEO/sitemaps |
+| `REGISTRATION_MODE` | No | `open` to allow user self-registration, `closed` (default) for admin-only provisioning |
+| `NEXT_PUBLIC_REGISTRATION_MODE` | No | Client-side mirror of `REGISTRATION_MODE` |
+| `INSTANCE_API_KEY` | No | Shared secret for machine-to-machine admin API auth |
+| `INSTANCE_ID` | No | Instance identifier for multi-instance setups |
+
+For multitenancy details, see **[Multitenancy](?doc=multitenancy)**.
 
 ---
 
@@ -281,18 +287,11 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 **Symptoms**: Can't login to /admin
 
 **Solutions**:
-1. Verify `ADMIN_PASSWORD` is set in .env
-2. Try resetting password:
-   ```bash
-   # Update .env
-   ADMIN_PASSWORD=new_password_here
-
-   # Restart server
-   pm2 restart osw-studio  # or npm run dev
-   ```
-3. Clear browser cookies
-4. Try incognito mode
-5. Check `SESSION_SECRET` is set
+1. If no users exist yet, visit `/admin` to create the admin account
+2. Clear browser cookies and try again
+3. Try incognito mode
+4. Check `SESSION_SECRET` is set in .env
+5. If you've forgotten your password, delete `data/system.sqlite` and restart to re-create the admin account (workspace data is preserved)
 
 ### Performance Issues
 

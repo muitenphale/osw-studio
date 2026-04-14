@@ -40,6 +40,7 @@ export const DOCS_ITEMS: DocItem[] = [
   { id: 'vps-deployment', title: 'VPS Deployment', icon: ServerCog, file: 'VPS_DEPLOYMENT.md' },
   { id: 'site-publishing', title: 'Deployment Publishing', icon: Upload, file: 'SITE_PUBLISHING.md' },
   { id: 'backend-features', title: 'Backend', icon: Database, file: 'BACKEND_FEATURES.md' },
+  { id: 'multitenancy', title: 'Multitenancy', icon: Users, file: 'MULTITENANCY.md' },
 
   // Help & Advanced
   { id: 'faq', title: 'FAQ', icon: HelpCircle, file: 'FAQ.md' },

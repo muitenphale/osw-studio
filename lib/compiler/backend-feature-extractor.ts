@@ -11,7 +11,7 @@
 
 import 'server-only';
 
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { getSQLiteAdapter, getWorkspaceAdapter } from '@/lib/vfs/adapters/server';
 import { RuntimeDatabase } from '@/lib/vfs/adapters/runtime-database';
 import { ProjectDatabase } from '@/lib/vfs/adapters/project-database';
 import { projectDatabaseExists, getProjectDatabasePath } from '@/lib/vfs/adapters/sqlite-connection';
@@ -40,7 +40,8 @@ export interface ExtractionSummary {
  */
 export async function extractBackendFeatures(
   projectId: string,
-  deploymentId: string
+  deploymentId: string,
+  workspaceId?: string
 ): Promise<ExtractionSummary> {
   const summary: ExtractionSummary = {
     edgeFunctions: 0,
@@ -51,7 +52,7 @@ export async function extractBackendFeatures(
     errors: [],
   };
 
-  const adapter = getSQLiteAdapter();
+  const adapter = workspaceId ? getWorkspaceAdapter(workspaceId) : getSQLiteAdapter();
   await adapter.init();
 
   // Read backend features from project tables in core SQLite
