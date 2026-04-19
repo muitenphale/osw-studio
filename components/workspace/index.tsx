@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Project, VirtualFile } from '@/lib/vfs/types';
+import { Project, VirtualFile, ProjectRuntime } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { FileExplorer } from '@/components/file-explorer';
@@ -64,7 +64,6 @@ type FocusTarget = FocusContextPayload & { timestamp: number };
 
 export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [prompt, setPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
   const [currentOrchestrator, setCurrentOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
   const [persistedOrchestrator, setPersistedOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
@@ -73,6 +72,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
   const [entryPoint, setEntryPoint] = useState<string | undefined>(project.settings?.previewEntryPoint);
+  const [projectRuntime, setProjectRuntime] = useState<ProjectRuntime | undefined>(project.settings?.runtime);
   const [focusContext, setFocusContext] = useState<FocusTarget | null>(null);
   const [placedBlocks, setPlacedBlocks] = useState<PlacedBlock[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -85,9 +85,9 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   });
   const lastFocusSignatureRef = useRef<{ signature: string; timestamp: number } | null>(null);
   const previewRef = useRef<MultipagePreviewHandle>(null);
-  const retryTriggerRef = useRef<boolean>(false);
   const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
   const generatingRef = useRef(false);
+  const handleGenerateRef = useRef<((promptText?: string, images?: PendingImage[]) => Promise<void>) | null>(null);
   const [initialCheckpointId, setInitialCheckpointId] = useState<string | null>(null);
   const [checkpointRefreshKey, setCheckpointRefreshKey] = useState(0);
   const [currentModel, setCurrentModel] = useState(configManager.getDefaultModel());
@@ -109,6 +109,16 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     };
     window.addEventListener('runtimeErrorsChanged', handler);
     return () => window.removeEventListener('runtimeErrorsChanged', handler);
+  }, []);
+
+  // Listen for runtime changes from the CLI shell (e.g., LLM runs `runtime handlebars`)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const runtime = (e as CustomEvent).detail?.runtime;
+      if (runtime) setProjectRuntime(runtime);
+    };
+    window.addEventListener('runtimeChanged', handler);
+    return () => window.removeEventListener('runtimeChanged', handler);
   }, []);
 
   // Get cost settings for conditional display
@@ -143,7 +153,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   }, [currentModel]);
   
   // Console panel — visible by default for terminal-mode runtimes (Python, Lua), togglable for all
-  const isTerminalRuntime = getRuntimeConfig(project.settings?.runtime || 'handlebars').previewMode === 'terminal';
+  const isTerminalRuntime = getRuntimeConfig(projectRuntime || 'handlebars').previewMode === 'terminal';
 
   // Load persisted panel visibility from localStorage, with runtime-aware defaults
   const savedPanels = useMemo(() => {
@@ -721,7 +731,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const handleAddPromptFile = useCallback(async () => {
     try {
       const { getDomainPrompt } = await import('@/lib/llm/prompts');
-      const runtime = project.settings?.runtime || 'handlebars';
+      const runtime = projectRuntime || 'handlebars';
       await vfs.createFile(project.id, '/.PROMPT.md', getDomainPrompt(runtime));
       window.dispatchEvent(new CustomEvent('filesChanged', { detail: { projectId: project.id } }));
       toast.success('.PROMPT.md added to project');
@@ -729,7 +739,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       logger.error('Failed to add .PROMPT.md:', err);
       toast.error('Failed to add .PROMPT.md');
     }
-  }, [project.id, project.settings?.runtime]);
+  }, [project.id, projectRuntime]);
 
   const focusPreviewSnippet = focusContext ? truncateHtmlSnippet(focusContext.outerHTML, 240) : '';
 
@@ -1020,10 +1030,10 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       setRefreshTrigger(prev => prev + 1);
     }
     // If runtime changed, refresh preview
-    if (updated.settings?.runtime !== project.settings?.runtime) {
+    if (updated.settings?.runtime !== projectRuntime) {
       setRefreshTrigger(prev => prev + 1);
     }
-  }, [entryPoint, project.settings?.runtime]);
+  }, [entryPoint, projectRuntime]);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)
@@ -1241,20 +1251,17 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       toast.success('Restored checkpoint and retrying...');
       handleFilesChange();
 
-      // Set the prompt to the original user message
-      setPrompt(userMessageContent);
-
-      // Set the retry trigger ref to initiate generation
-      // This will be picked up by the useEffect watching the prompt
-      retryTriggerRef.current = true;
+      // Retry generation with the original user message.
+      // Use setTimeout so handleGenerate (declared below) is available.
+      setTimeout(() => handleGenerateRef.current?.(userMessageContent), 0);
 
     } catch (error) {
       logger.error('Error during retry:', error);
       toast.error('Failed to retry');
     }
-  }, [handleFilesChange, project.id, debugEvents, setPrompt]);
+  }, [handleFilesChange, project.id, debugEvents]);
 
-  const handleGenerate = async (images?: PendingImage[], overridePrompt?: string) => {
+  const handleGenerate = async (promptText?: string, images?: PendingImage[]) => {
     if (isTourLockingInput) {
       return;
     }
@@ -1263,7 +1270,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     drainRuntimeErrors();
     setRuntimeErrors([]);
 
-    const trimmedPrompt = (overridePrompt ?? prompt).trim();
+    const trimmedPrompt = (promptText ?? '').trim();
 
     if (!trimmedPrompt && (!images || images.length === 0)) {
       toast.error('Please enter a prompt');
@@ -1435,7 +1442,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         });
       }
 
-      setPrompt('');
       if (focusContext) {
         setFocusContext(null);
       }
@@ -1470,6 +1476,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     }
   };
 
+  handleGenerateRef.current = handleGenerate;
+
   const handleStop = useCallback(() => {
     if (currentOrchestrator) {
       currentOrchestrator.stop();
@@ -1493,25 +1501,13 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     const errors = drainRuntimeErrors();
     if (errors.length === 0) return;
     setRuntimeErrors([]);
-    handleGenerate(undefined, formatRuntimeErrors(errors));
+    handleGenerate(formatRuntimeErrors(errors));
   }, [handleGenerate]);
 
   const handleClearRuntimeErrors = useCallback(() => {
     drainRuntimeErrors();
     setRuntimeErrors([]);
   }, []);
-
-  // Watch for retry trigger and execute generation
-  useEffect(() => {
-    if (retryTriggerRef.current && prompt.trim()) {
-      // Use setTimeout to ensure the prompt state has fully updated
-      setTimeout(() => {
-        handleGenerate();
-        // Reset the retry flag after generation starts
-        retryTriggerRef.current = false;
-      }, 50);
-    }
-  }, [prompt]);
 
   const headerActions: HeaderAction[] = [
     {
@@ -1640,7 +1636,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
           deploymentId={selectedDeploymentId}
           onCaptureScreenshot={handleCaptureScreenshot}
           entryPoint={entryPoint}
-          runtime={project.settings?.runtime}
+          runtime={projectRuntime}
           placementActive={paletteOpen}
           onPlacementToggle={handlePlacementToggle}
           onPlacementComplete={handlePlacementComplete}
@@ -1966,8 +1962,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   events={debugEvents}
                   onRestore={handleRestoreCheckpoint}
                   onRetry={handleRetry}
-                  prompt={prompt}
-                  setPrompt={setPrompt}
                   generating={generating}
                   onGenerate={handleGenerate}
                   onStop={handleStop}
@@ -2011,7 +2005,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)`, minWidth: '240px' }}>
                   <MultiTabEditor
                     projectId={project.id}
-                    runtime={project.settings?.runtime}
+                    runtime={projectRuntime}
                     onClose={() => setShowEditor(false)}
                   />
                 </div>
@@ -2021,7 +2015,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ minWidth: '240px' }}>
                   <ConsolePanel
                     projectId={project.id}
-                    runtime={project.settings?.runtime || 'handlebars'}
+                    runtime={projectRuntime || 'handlebars'}
                     bufferedMessages={consoleBufferRef.current}
                     onBufferConsumed={() => { consoleBufferRef.current = []; }}
                     onClose={() => setShowConsole(false)}
@@ -2041,7 +2035,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     deploymentId={selectedDeploymentId}
                     onCaptureScreenshot={handleCaptureScreenshot}
                     entryPoint={entryPoint}
-                    runtime={project.settings?.runtime}
+                    runtime={projectRuntime}
                     placementActive={paletteOpen}
                     onPlacementToggle={handlePlacementToggle}
                     onPlacementComplete={handlePlacementComplete}
@@ -2184,8 +2178,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 events={debugEvents}
                 onRestore={handleRestoreCheckpoint}
                 onRetry={handleRetry}
-                prompt={prompt}
-                setPrompt={setPrompt}
                 generating={generating}
                 onGenerate={handleGenerate}
                 onStop={handleStop}
@@ -2228,7 +2220,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
               <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)` }}>
                 <MultiTabEditor
                   projectId={project.id}
-                  runtime={project.settings?.runtime}
+                  runtime={projectRuntime}
                   onClose={() => setShowEditor(false)}
                 />
               </div>
@@ -2246,7 +2238,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   deploymentId={selectedDeploymentId}
                   onCaptureScreenshot={handleCaptureScreenshot}
                   entryPoint={entryPoint}
-                  runtime={project.settings?.runtime}
+                  runtime={projectRuntime}
                   placementActive={paletteOpen}
                   onPlacementToggle={handlePlacementToggle}
                   onPlacementComplete={handlePlacementComplete}
@@ -2258,7 +2250,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
               <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative">
                 <ConsolePanel
                   projectId={project.id}
-                  runtime={project.settings?.runtime || 'handlebars'}
+                  runtime={projectRuntime || 'handlebars'}
                   bufferedMessages={consoleBufferRef.current}
                   onBufferConsumed={() => { consoleBufferRef.current = []; }}
                 />

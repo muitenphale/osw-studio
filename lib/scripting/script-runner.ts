@@ -5,7 +5,7 @@ import type { ScriptRuntime, ScriptWorkerResponse } from './types';
 
 type OutputListener = (msg: ScriptWorkerResponse) => void;
 
-const EXECUTION_TIMEOUT_MS = 30_000;
+const EXECUTION_TIMEOUT_MS = 60_000;
 
 class ScriptRunner {
   private worker: Worker | null = null;
@@ -65,6 +65,8 @@ class ScriptRunner {
         this.emit({ type: 'error', data: `Script execution timed out after ${EXECUTION_TIMEOUT_MS / 1000} seconds` });
         pushCompileError(entryPoint, `Execution timed out after ${EXECUTION_TIMEOUT_MS / 1000}s — possible infinite loop`);
         commitCompilation();
+        // Emit complete so tool-registry listeners resolve instead of hanging
+        this.emit({ type: 'complete', exitCode: 1 });
         this.abort();
       }
     }, EXECUTION_TIMEOUT_MS);

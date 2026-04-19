@@ -235,7 +235,6 @@ export class MultiAgentOrchestrator {
   private readonly maxMalformedRetries = 2; // Max consecutive retries before allowing through
   private readonly malformedThresholdForReminder = 3; // After this many total failures, add persistent reminder
   private compactionCount = 0;
-  private lastKnownPromptTokens = 0;
   private pauseResolve: (() => void) | null = null;
   private toolCallCount = 0; // Telemetry: total tool calls executed
   private turnCount = 0; // Telemetry: total LLM turns completed
@@ -253,7 +252,6 @@ export class MultiAgentOrchestrator {
     return true;
   }
 
-  private static readonly AUTO_COMPACT_THRESHOLD = 0.80; // Compact at 80% of limit
   private static readonly RECENT_KEEP_RATIO = 0.20; // Keep 20% of recent messages verbatim
   private static readonly SUMMARY_TOKEN_RATIO = 0.10; // Cap summary at 10% of limit
   private static readonly DEFAULT_COMPACTION_LIMIT = 128000;
@@ -364,6 +362,21 @@ export class MultiAgentOrchestrator {
     this.nudgeCount = 0;
     this.malformedToolCallRetries = 0;
     this.lastStatusResult = null;
+
+    // Strip trailing nudge messages from a previous nudge_exhaustion exit.
+    // Without this, the conversation ends with consecutive user messages that
+    // cause the model to return empty responses on the next execution.
+    const conversation = this.conversations.get(this.currentConversationId);
+    if (conversation) {
+      while (conversation.messages.length > 0) {
+        const last = conversation.messages[conversation.messages.length - 1];
+        if (last.role === 'user' && typeof last.content === 'string' && last.content.includes('Before finishing, run the status command')) {
+          conversation.messages.pop();
+        } else {
+          break;
+        }
+      }
+    }
 
     try {
       // Get file tree for context
@@ -772,15 +785,14 @@ export class MultiAgentOrchestrator {
       }
 
       // Check compaction threshold (parent orchestrator only).
-      // Placed after assistant message + tool results are added so the full
-      // conversation state is captured in the compaction summary.
-      if (this.rootAgent.type === 'orchestrator' && this.lastKnownPromptTokens > 0) {
+      // Uses cumulative prompt tokens (reliable across all providers) rather than
+      // per-response usage (depends on stream_options support).
+      if (this.rootAgent.type === 'orchestrator' && this.totalUsage.promptTokens > 0) {
         const { provider } = this.getProviderConfig();
         if (configManager.isCompactionEnabled(provider)) {
           const compactionLimit = this.resolveCompactionLimit();
-          const threshold = compactionLimit * MultiAgentOrchestrator.AUTO_COMPACT_THRESHOLD;
-          if (this.lastKnownPromptTokens >= threshold) {
-            logger.info(`[Compaction] Triggering compaction (promptTokens=${this.lastKnownPromptTokens}, threshold=${threshold})`);
+          if (this.totalUsage.promptTokens >= compactionLimit) {
+            logger.info(`[Compaction] Triggering compaction (promptTokens=${this.totalUsage.promptTokens}, limit=${compactionLimit})`);
             await this.compactConversation(conversationId);
           }
         }
@@ -1724,7 +1736,7 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
     const conversation = this.conversations.get(conversationId);
     if (!conversation) return;
 
-    const preCompactTokens = this.lastKnownPromptTokens;
+    const preCompactTokens = this.totalUsage.promptTokens;
     const compactionLimit = this.resolveCompactionLimit();
 
     logger.info(`[Compaction] Starting compaction #${this.compactionCount + 1} (promptTokens=${preCompactTokens}, limit=${compactionLimit})`);
@@ -1916,7 +1928,7 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
 
     // 6. Update state
     this.compactionCount++;
-    this.lastKnownPromptTokens = 0; // Will be updated by next API response
+    this.totalUsage.promptTokens = 0; // Reset so cumulative count restarts post-compaction
 
     // Reset loop detection (stale after context change)
     this.lastToolCallSignature = null;
@@ -2098,9 +2110,6 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
       }
 
       this.onProgress?.('usage', { usage, totalCost: this.totalCost, totalUsage: { ...this.totalUsage } });
-
-      // Track prompt tokens for compaction threshold check
-      this.lastKnownPromptTokens = usage.promptTokens;
     }
 
     return result;

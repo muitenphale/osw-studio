@@ -23,6 +23,8 @@ Use a cloud AI service. You'll need an API key and will pay per usage (typically
 | **Groq** | [Get Key](https://console.groq.com/keys) |
 | **HuggingFace** | [Get Token](https://huggingface.co/settings/tokens) |
 | **SambaNova** | [Get Key](https://cloud.sambanova.ai/) |
+| **MiniMax** | [Get Key](https://www.minimax.io/platform/user-center/basic-information/interface-key) |
+| **Zhipu** | [Get Key](https://bigmodel.cn/usercenter/apikeys) |
 
 **Note**: OSW Studio is developed using OpenRouter, so that provider has the most testing.
 
@@ -56,6 +58,8 @@ Run AI models on your computer. Completely free but requires installation.
 
 - **[Ollama](https://ollama.ai)** - Run open-source models locally via CLI
 - **[LM Studio](https://lmstudio.ai)** - GUI for running local models
+- **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - Lightweight C++ inference server
+- **[mesh-llm](https://github.com/michaelneale/mesh-llm)** - Free open-model inference via a peer-to-peer network (run `mesh-llm --auto` locally to join)
 
 ---
 
@@ -99,6 +103,9 @@ Let's build a simple personal website.
    - **Starter (Vue)** - Progressive framework with SFC support
    - **Starter (Python)** - Python scripts via Pyodide WASM
    - **Starter (Lua)** - Lua scripts via wasmoon WASM
+   - **Landing Page with Contact Form** - Contact page wired to an edge function (Server Mode)
+   - **React Demo: Task Tracker** - Fully working task app with local state
+   - **Blog with Comments** - Multi-page blog with comments via a server function (Server Mode)
 
 You'll see the workspace with 4 panels:
 - **Chat** (left-most) - Talk to AI

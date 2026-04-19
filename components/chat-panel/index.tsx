@@ -61,10 +61,8 @@ interface ChatPanelProps {
   onRestore?: (checkpointId: string) => void;
   onRetry?: (checkpointId: string) => void;
   // Input functionality
-  prompt: string;
-  setPrompt: (value: string) => void;
   generating: boolean;
-  onGenerate: (images?: PendingImage[]) => void;
+  onGenerate: (prompt: string, images?: PendingImage[]) => void;
   onStop: () => void;
   onContinue?: () => void;
   // Focus context
@@ -169,8 +167,6 @@ export function ChatPanel({
   events,
   onRestore,
   onRetry,
-  prompt,
-  setPrompt,
   generating,
   onGenerate,
   onStop,
@@ -200,6 +196,16 @@ export function ChatPanel({
   const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const isScrollingProgrammatically = useRef(false);
+
+  // Prompt state — owned by ChatPanel, never leaves this component until submit
+  const [prompt, setPrompt] = useState('');
+
+  // Clear prompt when generation starts
+  const prevGenerating = useRef(generating);
+  if (generating && !prevGenerating.current) {
+    setPrompt('');
+  }
+  prevGenerating.current = generating;
 
   // Image handling state
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -288,12 +294,12 @@ export function ChatPanel({
   // Handle send with images
   const handleSend = useCallback(() => {
     if (pendingImages.length > 0) {
-      onGenerate(pendingImages);
+      onGenerate(prompt, pendingImages);
       setPendingImages([]);
     } else {
-      onGenerate();
+      onGenerate(prompt);
     }
-  }, [onGenerate, pendingImages]);
+  }, [onGenerate, pendingImages, prompt]);
 
   // Listen for tour event to open provider settings
   useEffect(() => {
@@ -541,31 +547,37 @@ export function ChatPanel({
           }
           break;
 
-        case 'tool_param_delta':
-          // Handle both coalesced (data.all) and individual delta formats for tool parameters
+        case 'tool_param_delta': {
+          // Concatenate all fragments and REPLACE parameters (like assistant_delta).
+          // data.all contains the complete history of fragments — join them all
+          // to get the full string, then replace (not append to) the tool's parameters.
           const paramDeltaItems = event.data?.all || [event.data];
 
-          // Process all parameter deltas in the event
+          // Group fragments by toolId
+          const fragmentsByTool = new Map<string, string>();
           for (const paramDelta of paramDeltaItems) {
-            const { toolId, partialArguments } = paramDelta || {};
+            const { toolId, fragment, partialArguments } = paramDelta || {};
             if (!toolId) continue;
+            const text = fragment ?? partialArguments ?? '';
+            fragmentsByTool.set(toolId, (fragmentsByTool.get(toolId) || '') + text);
+          }
 
-            // Find the tool item with this ID
+          for (const [toolId, cumulative] of fragmentsByTool) {
             const toolItem = state.currentTurn.items.find(
               item => item.type === 'tool' && (item.data as ToolCall)?.id === toolId
             );
 
             if (toolItem) {
               const tool = toolItem.data as ToolCall;
-              // Try to parse as JSON, otherwise show as _raw
               try {
-                tool.parameters = JSON.parse(partialArguments);
+                tool.parameters = JSON.parse(cumulative);
               } catch {
-                tool.parameters = { _raw: partialArguments };
+                tool.parameters = { _raw: cumulative };
               }
             }
           }
           break;
+        }
 
         case 'assistant_delta':
           // Text arriving means reasoning is done
@@ -740,7 +752,10 @@ export function ChatPanel({
 
         case 'iteration':
           state.currentTurn.iteration = event.data?.iteration;
-          // Start a new turn for next iteration
+          // Start a new turn for next iteration.
+          // Strip orphan waiting indicators so empty-response iterations
+          // don't leave permanent spinners in the history.
+          state.currentTurn.items = state.currentTurn.items.filter(item => item.type !== 'waiting');
           if (state.currentTurn.items.length > 0) {
             state.result.push(state.currentTurn);
             state.currentTurn = {

@@ -15,15 +15,30 @@ Server Mode unlocks powerful backend capabilities for your published deployments
 - **Logs** - Execution history and debugging
 - **AI Integration** - AI awareness of backend features via `/.server/` folder
 
+## Where Backend Features Live
+
+Backend features are **project-scoped** — they belong to the project, not to a specific deployment. When you publish the project, its backend features are extracted into the deployment's runtime database. The same project can be published multiple times; each deployment gets a snapshot of the project's backend features at publish time.
+
+You can manage backend features in two places:
+
+1. **Project Settings** (primary, in the workspace): Click **Project Settings** in the workspace header to open a modal with Schema, Functions, Helpers, Secrets, and Schedules tabs. Changes take effect in the project and will be included in the next publish.
+2. **Deployment Server Settings** (for an already-published deployment): Open the deployment in the Admin Dashboard to inspect and tweak the runtime copy of its backend. This is useful for rotating secrets or debugging a published deployment without re-publishing from the project.
+
 ## Prerequisites
 
 - OSW Studio running in **Server Mode**
-- A published deployment with `databaseEnabled: true`
-- Admin access to the deployment
+- A project with Backend enabled (toggle in Project Settings)
 
 ## Accessing Server Settings
 
-1. Open the **Admin Dashboard** (`/admin`)
+**From the workspace (recommended):**
+1. Open your project
+2. Click **Project Settings** in the workspace header
+3. Toggle **Backend Enabled** if it isn't already
+4. Use the tabs to create edge functions, server functions, secrets, and schedules
+
+**From the Admin Dashboard (for published deployments):**
+1. Open the **Admin Dashboard** (`/admin`) or `/w/{workspaceId}/deployments`
 2. Navigate to **Deployments** and select your deployment
 3. Click the **Server Settings** button (server icon) next to Deployment Settings
    - The server icon only appears for published deployments with database enabled
@@ -886,8 +901,8 @@ OSW Studio's AI assistant can understand and work with your backend features whe
 
 ### How It Works
 
-1. **Select a Deployment** - Use the deployment selector dropdown in the workspace header
-2. **Server Context Loaded** - OSW Studio fetches the deployment's backend features
+1. **Project Backend Context** - When the project has Backend Enabled, its edge functions, helpers, secrets, schedules, and schema are mounted automatically in `/.server/`
+2. **Optional Deployment Overlay** - Selecting a deployment in the workspace header additionally layers in that deployment's runtime state (published functions, live schema, etc.)
 3. **AI Awareness** - The AI receives information about available:
    - Edge functions (endpoints, methods)
    - Database schema (tables, columns)
@@ -907,7 +922,11 @@ When a deployment is selected, a hidden `/.server/` folder appears in the file e
 | `secrets/*.json` | Secret names (not values) |
 | `db/schema.sql` | Database schema |
 
-These files are **read-only** and **transient** - they reflect the current deployment's state but are not saved with the project.
+These files reflect the project's backend feature state:
+- **Schema** (`db/schema.sql`) is read-only — edit schema by running SQL in Project Settings or via the AI's `sqlite3` shell command
+- **Functions, helpers, secrets, and schedules** can be created and edited by the AI using shell commands. Changes update the corresponding records in the project's database
+
+Files are transient in the sense that they're regenerated from the project's backend state — you don't commit them manually.
 
 ### Using AI with Backend Features
 

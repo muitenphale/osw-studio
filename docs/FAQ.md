@@ -6,7 +6,7 @@
 
 ### What is OSW Studio?
 
-OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — Static (pure HTML/CSS/JS), Handlebars (HTML with templating), React, Preact, Svelte, and Vue — all compiled in the browser with no build tools needed.
+OSW Studio (Open Source Web Studio) is a browser-based AI development environment where you describe what you want and an AI agent writes the code. It supports multiple project runtimes — Static (pure HTML/CSS/JS), Handlebars (HTML with templating), React, Preact, Svelte, Vue, Python, and Lua — all running in the browser with no build tools needed.
 
 ### Is OSW Studio free?
 
@@ -40,7 +40,7 @@ The application itself is **free and open source** (MIT license). However:
 - **Cloud providers** (OpenAI, Anthropic, etc.): Yes, get key from provider
 - **HuggingFace**: Free tier with $0.10/month credits — create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) with "Inference Providers" permission. On HF Spaces, OAuth sign-in is also available (no token needed).
 - **ChatGPT subscription** (Plus/Pro): No API key needed — authenticate with your ChatGPT session via the Codex CLI. See [Getting Started](?doc=getting-started) for setup.
-- **Local providers** (Ollama, LM Studio): No, run models locally for free
+- **Local providers** (Ollama, LM Studio, llama.cpp, mesh-llm): No, run models locally for free
 
 ### Is my data private?
 
@@ -139,6 +139,7 @@ In Browser Mode, you can share projects by exporting as .osws files or ZIP archi
 - HTML, CSS, JavaScript, JSON
 - TypeScript, TSX, JSX
 - Svelte (.svelte), Vue (.vue)
+- Python (.py), Lua (.lua)
 - Markdown, TXT, XML, SVG
 - Handlebars (.hbs)
 
@@ -373,12 +374,12 @@ Yes! Skills are markdown files with YAML frontmatter:
 
 ### Can I create custom Templates?
 
-Yes! Export any project as template:
-1. Right-click project
-2. "Export as Template"
-3. Fill metadata
-4. Download .oswt file
-5. Import into any OSW Studio instance
+Yes! Turn any project into a template:
+1. Open the project
+2. **Menu (⋮) → Create a Template**
+3. Fill in name, description, category, tags
+4. The template is saved to your instance's library
+5. To share with others, export it as `.oswt` from the Templates view
 
 ---
 

@@ -414,8 +414,9 @@ navigator.storage.estimate().then(estimate => {
 
 **Solutions**:
 1. **Check file paths**:
-   - Use relative paths: `./images/logo.png`
-   - Not absolute: `/images/logo.png`
+   - Absolute paths from the project root work: `/images/logo.png`
+   - Relative paths also work: `./images/logo.png`
+   - Paths are case-sensitive
 
 2. **Verify files exist**:
    - Check file explorer

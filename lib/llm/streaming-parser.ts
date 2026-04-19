@@ -146,6 +146,35 @@ export async function parseStreamingResponse(
 
             if (provider === 'anthropic') {
               // Handle Anthropic streaming format
+              // Anthropic usage: input_tokens in message_start, output_tokens in message_delta
+              if (json.type === 'message_start' && json.message?.usage) {
+                const u = json.message.usage;
+                usageInfo = {
+                  promptTokens: u.input_tokens || 0,
+                  completionTokens: u.output_tokens || 0,
+                  totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0),
+                  cachedTokens: u.cache_read_input_tokens,
+                  reasoningTokens: 0,
+                  model: options.model,
+                  provider
+                };
+              } else if (json.type === 'message_delta' && json.usage) {
+                const outputTokens = json.usage.output_tokens || 0;
+                if (usageInfo) {
+                  usageInfo.completionTokens = outputTokens;
+                  usageInfo.totalTokens = usageInfo.promptTokens + outputTokens;
+                } else {
+                  usageInfo = {
+                    promptTokens: 0,
+                    completionTokens: outputTokens,
+                    totalTokens: outputTokens,
+                    reasoningTokens: 0,
+                    model: options.model,
+                    provider
+                  };
+                }
+              }
+
               // Check for Anthropic stop reasons
               if (json.type === 'message_delta' && json.delta?.stop_reason) {
                 lastFinishReason = json.delta.stop_reason;
@@ -206,7 +235,7 @@ export async function parseStreamingResponse(
                     toolCallsById[toolId].function.arguments = anthropicToolBuffers[toolId];
                     onProgress?.('tool_param_delta', {
                       toolId,
-                      partialArguments: anthropicToolBuffers[toolId]
+                      fragment: json.delta.partial_json
                     });
                   }
                 }
@@ -382,7 +411,7 @@ export async function parseStreamingResponse(
                       if (!suppressAssistantDelta) {
                         onProgress?.('tool_param_delta', {
                           toolId: toolCallsById[key].id,
-                          partialArguments: toolCallsById[key].function.arguments
+                          fragment: argFragment
                         });
                       }
                     }
@@ -411,7 +440,7 @@ export async function parseStreamingResponse(
                     if (!suppressAssistantDelta && currentToolCall) {
                       onProgress?.('tool_param_delta', {
                         toolId: currentToolCall.id,
-                        partialArguments: toolCallBuffer
+                        fragment: argFragment
                       });
                     }
                   }
@@ -423,8 +452,8 @@ export async function parseStreamingResponse(
               }
             }
 
-            // Parse usage info
-            if (json.usage) {
+            // Parse usage info (OpenAI-compatible format; Anthropic handled above)
+            if (json.usage && provider !== 'anthropic') {
               usageInfo = {
                 promptTokens: json.usage.prompt_tokens || 0,
                 completionTokens: json.usage.completion_tokens || 0,

@@ -133,6 +133,17 @@ Web accessibility best practices (WCAG guidelines).
 
 **When to use**: Always - accessibility should be standard
 
+### Server Mode Skills
+
+These skills guide the AI when working with a published deployment's backend:
+
+- **Server** - Overview of Server Mode's backend features and `/.server/` context
+- **Functions** - Edge functions (API endpoints) and server functions (helpers)
+- **Database** - SQLite access from edge functions, schema design, migrations
+- **Secrets** - Managing API keys and sensitive configuration
+
+**When to use**: When a deployment is selected and you're building or extending backend features.
+
 ---
 
 ## Using Skills
@@ -184,11 +195,11 @@ Create skills for:
    - Keep it focused on one topic
 
 2. **Save as skill**
-   - Go to **Skills** view
-   - Click **Create Skill**
+   - Go to **Skills** view and click **Create Skill**, or
+   - Click the **+** button in the Skills panel header inside a workspace
    - Paste your content
    - Add metadata (name, description, tags)
-   - Save
+   - Save — the skill is immediately available to the AI on the next message
 
 3. **Use your skill**
    - Enable it like built-in skills

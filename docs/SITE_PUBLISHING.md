@@ -43,11 +43,14 @@ Server Mode lets you publish static sites directly from your OSW Studio instance
 4. Static builder runs:
    - Loads project files from server
    - Compiles Handlebars templates (partials from `/templates/`, context from `/data.json`)
+   - Uses pre-built `bundle.js` for framework runtimes (React, Preact, Svelte, Vue)
    - Rewrites internal links to include `/deployments/{id}/` prefix
    - Injects configured settings (scripts, analytics, SEO)
    - Generates sitemap.xml and robots.txt
    - Writes to `/public/deployments/{id}/`
 5. Site is live!
+
+**Note**: Python and Lua projects cannot be published — they run only in the browser's WASM runtime. Use ZIP export for offline distribution instead.
 
 ### Accessing Published Deployments
 

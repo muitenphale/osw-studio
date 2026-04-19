@@ -48,12 +48,14 @@ Your 3 most recent projects appear in the sidebar for quick access.
 
 ## Project Workspace
 
-When you open a project, you'll see 4 panels:
+The workspace displays up to 3 panels side-by-side. Open, close, and reorder panels from the sidebar or panel headers — drag the grip handle in a panel header to rearrange. Panel widths, order, and visibility persist between sessions.
+
+Available panels: Chat, File Explorer, Code Editor, Preview, Console (Python/Lua), Skills, Checkpoints, Debug, Settings. When you open a 4th panel, the rightmost panel is replaced.
 
 ### Workspace Header
 
 The header contains key controls:
-- **Project name** - Click to rename
+- **Project name** - Displayed in the header
 - **Mode toggle** - Switch between Chat (read-only) and Code (full access) modes
 - **Deployment selector** (Server Mode only) - Choose which published deployment's backend context to load
 
@@ -66,7 +68,7 @@ In Server Mode, a dropdown appears in the workspace header that lets you select 
 
 See **[Server Mode → Server Context Integration](?doc=server-mode#server-context-integration)** for details.
 
-### Chat (Left-most)
+### Chat
 
 Talk to AI to build and modify your project. The chat panel has two modes:
 
@@ -83,7 +85,7 @@ Talk to AI to build and modify your project. The chat panel has two modes:
 
 **Pro tip**: If unsure, start with Chat mode to see how the AI views your project. You can also one-shot prompt full multi-page websites, though smaller, focused tasks are generally more consistent.
 
-### File Explorer (2nd)
+### File Explorer
 
 Browse your project structure:
 - Click folders to expand/collapse
@@ -102,24 +104,28 @@ OSW Studio uses hidden folders (starting with `.`) to provide AI context:
 
 These folders are **read-only** and **transient** - their contents are generated dynamically to provide context to the AI and are not saved with your project
 
-### Code Editor (3rd)
+### Code Editor
 
 View and edit code:
 - Multiple tabs for different files
 - Syntax highlighting
 - Save with `Cmd/Ctrl+S`
-- Supports HTML, CSS, JavaScript, TypeScript, TSX, JSON, Markdown
+- Supports HTML, CSS, JavaScript, TypeScript, TSX, JSON, Markdown, XML, SVG, Python, Lua, Svelte, Vue SFCs
 
-### Live Preview (Last)
+### Live Preview
 
 See your website in real-time:
 - Updates automatically when files change
 - Click links to navigate
-- Test responsive design with resize
+- Test responsive design with mobile/tablet/desktop size presets
+- Click **Maximize** to fill the whole screen with the preview (hides all other panels)
 - Open in new tab for full testing
-- Use the **focus tool** to select specific elements or sections and add them to message context for targeted AI edits
+- Use the **focus tool** to select specific elements and add them to message context for targeted AI edits
+- Drag **semantic blocks** from the Blocks palette onto the preview — the AI writes code that fits your project
 
-You can open and close panels from their headers and the sidebar on the workspace.
+### Console (Python/Lua)
+
+For terminal runtimes (Python, Lua), the Console panel shows script output and lets you see errors from script execution. Opens automatically for terminal runtimes.
 
 ---
 
@@ -241,10 +247,6 @@ Start new conversations when switching to different features
 ---
 
 ## Common Tasks
-
-### Rename a Project
-
-Projects are renamed through the Projects view menu (feature may vary).
 
 ### Duplicate a Project
 

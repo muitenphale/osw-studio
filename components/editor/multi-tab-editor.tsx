@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
 import MonacoEditor, { useMonaco } from '@monaco-editor/react';
 import { VirtualFile, ProjectRuntime } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
@@ -10,6 +10,25 @@ import { Button } from '@/components/ui/button';
 import { cn, logger } from '@/lib/utils';
 import { useTheme } from 'next-themes';
 import { useTypescriptIntelliSense } from '@/lib/hooks/use-typescript-intellisense';
+
+/** Error boundary to catch Monaco disposal crashes during panel resize/move. */
+class EditorErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    logger.warn('[EditorErrorBoundary] Monaco recovered from error:', error.message);
+  }
+  componentDidUpdate(_: unknown, prevState: { hasError: boolean }) {
+    if (this.state.hasError && !prevState.hasError) {
+      // Re-render the editor on the next tick
+      requestAnimationFrame(() => this.setState({ hasError: false }));
+    }
+  }
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
 
 interface MultiTabEditorProps {
   projectId: string;
@@ -238,7 +257,7 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
   const getFileType = (path: string) => {
     const ext = path.split('.').pop()?.toLowerCase();
     
-    if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp'].includes(ext || '')) {
+    if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'].includes(ext || '')) {
       return { type: 'image', language: 'plaintext' };
     }
     
@@ -253,6 +272,7 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
       'json': 'json',
       'md': 'markdown',
       'txt': 'plaintext',
+      'svg': 'xml',
       'xml': 'xml',
       'yaml': 'yaml',
       'yml': 'yaml',
@@ -404,25 +424,27 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
                 }
                 
                 return (
-                  <MonacoEditor
-                    height="100%"
-                    path={activeFile.file.path}
-                    language={getLanguageFromPath(activeFile.file.path)}
-                    value={activeFile.content ?? ''}
-                    onChange={(value) => handleContentChange(value, activeFile.file.path)}
-                    theme={mounted ? (resolvedTheme === 'dark' ? 'vs-dark' : 'light') : 'vs-dark'}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      lineNumbers: 'on',
-                      roundedSelection: false,
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
-                      tabSize: 2,
-                      wordWrap: 'on',
-                      wrappingIndent: 'indent'
-                    }}
-                  />
+                  <EditorErrorBoundary>
+                    <MonacoEditor
+                      height="100%"
+                      path={activeFile.file.path}
+                      language={getLanguageFromPath(activeFile.file.path)}
+                      value={activeFile.content ?? ''}
+                      onChange={(value) => handleContentChange(value, activeFile.file.path)}
+                      theme={mounted ? (resolvedTheme === 'dark' ? 'vs-dark' : 'light') : 'vs-dark'}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 14,
+                        lineNumbers: 'on',
+                        roundedSelection: false,
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        tabSize: 2,
+                        wordWrap: 'on',
+                        wrappingIndent: 'indent'
+                      }}
+                    />
+                  </EditorErrorBoundary>
                 );
               })()}
             </div>

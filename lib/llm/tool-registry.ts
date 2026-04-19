@@ -282,6 +282,12 @@ One command at a time as a single string.`,
         const repairResult = attemptJSONRepair(toolCall.function.arguments);
 
         if (repairResult.success) {
+          // Shell tool: repaired JSON with a cmd field is safe to execute.
+          // A truncated heredoc writes truncated content, which the model can detect and continue.
+          if (toolId === 'shell' && typeof repairResult.repaired?.cmd === 'string') {
+            logger.warn(`[ToolRegistry] Repaired shell JSON, executing truncated command`);
+            return await tool.executor.execute(projectId, repairResult.repaired, context);
+          }
           logger.warn(`[ToolRegistry] Repaired ${toolId} but safety unknown, not executing`);
           return `Error: ${errorMessage}\n\nNote: JSON repair succeeded but operation type is unclear. Please split into smaller operations.`;
         }

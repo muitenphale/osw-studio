@@ -10,7 +10,8 @@ OSW Studio is a browser-based development environment where you describe what yo
 - Landing pages and marketing sites
 - Blogs and documentation sites
 - Interactive web applications
-- Anything that runs in a browser (HTML/CSS/JS, React, Svelte, Vue, Preact)
+- Python and Lua scripts with an interactive console
+- Anything that runs in a browser (HTML/CSS/JS, Handlebars, React, Preact, Svelte, Vue, Python, Lua)
 
 ## How It Works
 
@@ -22,19 +23,25 @@ OSW Studio is a browser-based development environment where you describe what yo
 ## Key Features
 
 **🤖 Multiple AI Providers**
-Choose from OpenAI, Anthropic Claude, Google Gemini, HuggingFace (free tier), ChatGPT subscription (Plus/Pro), or run locally with Ollama
+Choose from 14+ providers: OpenRouter, OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, SambaNova, MiniMax, Zhipu, mesh-llm, ChatGPT subscription (Plus/Pro), or run locally with Ollama, LM Studio, or llama.cpp
 
 **💾 Works in Your Browser**
 Everything stays private in your browser. No server required.
 
+**🖥️ Desktop App**
+Native app for macOS, Windows, and Linux with built-in publishing and sync
+
 **🎨 Live Preview**
 See your website update in real-time as AI builds it
+
+**🧱 Semantic Blocks**
+Drag 36 pre-defined blocks (heroes, forms, pricing, galleries) onto the preview — the AI writes code that fits your project's style
 
 **📦 Export Ready**
 Download complete, deployable websites with one click
 
 **🎯 Templates & Skills**
-Start from templates or teach AI your preferred workflows
+Start from 12 built-in templates or teach AI your preferred workflows
 
 ## Two Modes
 

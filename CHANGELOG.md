@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.58.0 - 2026-04-19
+
+### ES Module Support
+
+- **Import map injection**: Preview auto-injects `<script type="importmap">` for non-bundled runtimes (Static, Handlebars), mapping VFS JS/TS paths to blob URLs. Enables `<script type="module">` with `import`/`export` between project files — no bundler needed. Preview-only; published sites serve real files and don't need it.
+- **Static runtime prompt**: AI guidance for Static projects now covers ES module imports with absolute paths and CDN URLs for third-party libraries.
+
+### AI Orchestration
+
+- **Conversation compaction improvements**: Compaction is now disabled by default — enable per provider in Settings. When enabled, the threshold uses cumulative prompt tokens instead of per-response usage, so it works consistently across all providers. Compaction fires at exactly the configured limit. Anthropic usage fields (`input_tokens`/`output_tokens`) now parse correctly.
+- **Truncated tool call recovery**: When a `shell` tool call's JSON is truncated (large `cat` heredoc hitting `max_tokens`), the repaired command executes instead of returning a generic error. Truncated heredocs write truncated content, which the model can detect and continue from.
+- **Script timeout no longer hangs**: Script execution timeout (now 60s, was 30s) emits a `complete` event before aborting the worker, so the tool call resolves with a timeout error instead of hanging forever on "executing".
+- **Nudge cleanup on follow-up**: When a user sends a follow-up message after nudge exhaustion, stale nudge messages are stripped from the conversation. Previously, consecutive nudge messages remained and caused the model to return empty responses on the next turn.
+
+### UI
+
+- **Login and register theming**: Login and register pages now follow the app's light/dark theme instead of being hardcoded dark. The logo component auto-inverts colors with theme (light: black bg + white letters, dark: white bg + black letters).
+- **Live runtime switching**: When the AI changes the project runtime (e.g., `runtime handlebars`), the preview picks it up immediately. Previously the preview kept using the old runtime until the project was saved and reopened, causing raw Handlebars tokens like `{{> nav}}` to appear unprocessed.
+- **Monaco editor error boundary**: The editor panel no longer crashes the entire UI when Monaco's internal render fires after disposal (e.g., during panel resize/move). An error boundary catches the error and silently re-mounts the editor.
+- **Chat input performance**: Prompt state now lives inside the chat panel. Typing in the textarea no longer re-renders the file explorer, editor, preview, and every other workspace child on every keystroke.
+- **Tool call streaming performance**: Tool parameter deltas now emit small fragments instead of cumulative snapshots, fixing O(N²) memory blowup and UI lag during long tool call streaming. Also fixed garbled `_raw` parameters and missing command previews on tool badges.
+- **Orphan waiting indicator fix**: Empty-response iterations no longer leave permanent "Waiting for response..." spinners in the chat.
+- **SVG files open as text**: SVG files now open in Monaco as editable XML instead of showing the image preview placeholder.
+- **SVG output from Python**: Script worker no longer base64-encodes SVG files written to `/output/` — they're treated as text (like HTML/JSON) instead of binary images.
+- **Model search auto-focus**: When opening settings with a connected provider, the model search input auto-focuses instead of the provider dropdown — users can start searching models immediately.
+
 ## v1.57.0 - 2026-04-14
 
 ### Multitenancy & Workspaces (Server Mode)

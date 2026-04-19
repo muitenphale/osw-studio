@@ -258,18 +258,24 @@ Change all instances of "Company" to "Studio"
 
 ### Tool Execution
 
-When AI works in Code Mode, you'll see it use tools:
+When AI works in Code Mode, all file operations run through a single `shell` tool. You'll see commands like:
 
 **Creating files:**
 ```
-🔧 write: cat > index.html << 'EOF' ...
+🔧 shell: cat > index.html << 'EOF' ...
 ✅ Created index.html
 ```
 
 **Editing files:**
 ```
-🔧 write: sed -i 's/old/new/' styles.css
+🔧 shell: sed -i 's/old/new/' styles.css
 ✅ Updated styles.css
+```
+or for larger edits:
+```
+🔧 shell: ss /styles.css << 'EOF'
+search===replace
+EOF
 ```
 
 **Reading files:**
@@ -452,9 +458,31 @@ Set up a scheduled function to clean up old records every night at 3am
 
 ### How It Works
 
-OSW Studio mounts a `/.server/` hidden folder containing JSON files with your deployment's backend context. The LLM reads these to understand what's exists and writes to them to extend them.
+OSW Studio mounts a `/.server/` hidden folder containing JSON files with your deployment's backend context. The LLM reads these to understand what exists and writes to them to extend them.
 
 See **[Backend → AI Integration](?doc=backend-features#ai-integration)** for more details.
+
+---
+
+## Visual Context & Control
+
+### Focus Tool
+
+Click the **crosshair** icon in the preview toolbar, then click any element to attach it as context to your next message. The AI receives the element's HTML, path, and surrounding structure, so you can say "make this bigger" instead of describing what you mean.
+
+### Semantic Blocks
+
+Open the **Blocks** palette in the preview toolbar and drag any of the 36 blocks (hero, pricing, gallery, contact form, etc.) onto the preview at the position you want. The AI writes code that integrates with your existing project's style — blocks are specifications, not pre-built snippets.
+
+### Image Attachments
+
+Drop images into the chat input to include them as context. Works with any vision-capable model — the model selector shows a **Vision** badge for supported models.
+
+### Pause, Continue, Retry
+
+- **Stop** - Click Stop during generation to halt the AI immediately.
+- **Continue** - If the AI stops because of an API error or timeout, Continue resumes with feedback about what went wrong.
+- **Retry** - Every user message has a Retry button that rewinds to the checkpoint before that message and re-runs it.
 
 ---
 

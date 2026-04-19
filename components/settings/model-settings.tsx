@@ -393,6 +393,7 @@ export function ModelSettingsPanel({ onClose, onModelChange, showJudgeModel, onJ
           <ModelSelector
             provider={selectedProvider}
             mode="inline"
+            autoFocus={apiKeyStored || (!providerConfig.apiKeyRequired && !providerConfig.usesOAuth)}
             onChange={(modelId) => {
               if (typeof window !== 'undefined') {
                 localStorage.setItem(`osw-studio-code-model-${selectedProvider}`, modelId);

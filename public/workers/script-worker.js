@@ -113,7 +113,7 @@ del _ep_dir
       try {
         const data = py.FS.readFile(filePath);
         const ext = filename.split('.').pop().toLowerCase();
-        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext)) {
           let binary = '';
           for (let i = 0; i < data.length; i++) {
             binary += String.fromCharCode(data[i]);

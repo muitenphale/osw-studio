@@ -29,12 +29,14 @@ Each template has a **runtime** that determines how the project is built and pre
 
 | Runtime | Description |
 |---------|-------------|
-| **Static** | Pure HTML, CSS, and JavaScript |
+| **Static** | Pure HTML, CSS, and JavaScript (ES module imports supported) |
 | **Handlebars** | HTML, CSS, and JavaScript with Handlebars templating |
 | **React** | Component-based React + TypeScript with automatic bundling |
 | **Preact** | Lightweight React alternative (~3KB) with signals support |
 | **Svelte** | Svelte 5 with compile-time reactivity and runes |
 | **Vue** | Vue 3 with Composition API and SFC support |
+| **Python** | Python scripts via Pyodide WASM, running in an interactive Console |
+| **Lua** | Lua scripts via wasmoon WASM, running in an interactive Console |
 
 Some templates also include **backend features** — edge functions, database schema, server functions, and secrets. These show a "Backend" badge and require Server Mode for full functionality. In Browser Mode, backend templates create the frontend files normally.
 
@@ -275,21 +277,21 @@ Create templates for:
    - Include all files and assets
    - Test thoroughly
 
-2. **Export as template**
+2. **Create a template**
    - Open the project
-   - Click **Menu** (⋮) → **Export**
-   - Choose **Template**
+   - Click **Menu** (⋮) → **Create a Template**
    - Fill in template information:
      - Name
      - Description
      - Category
      - Tags
      - Preview image (optional)
+   - The template is saved to your instance's template library
 
 3. **Use your template**
    - Find it in the Templates view
    - Create new projects from it
-   - Share with others (export as file)
+   - Export to `.oswt` from the Templates view to share with others
 
 ###What Makes a Good Template
 
@@ -381,7 +383,7 @@ Improve them over time as you learn better patterns
 ## Templates vs Skills
 
 **Templates** = Starting point for a project
-- Complete file structure (HTML/CSS/JS, React, Svelte, Vue, or Preact)
+- Complete file structure for any runtime (Static, Handlebars, React, Preact, Svelte, Vue, Python, Lua)
 - Some templates include backend features (edge functions, database schema, secrets)
 - Backend features are provisioned automatically in Server Mode
 

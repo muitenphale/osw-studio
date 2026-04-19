@@ -779,8 +779,25 @@ export class VirtualServer {
 })();
 </script>`;
 
-    // Insert in head for early execution
-    const injectedScripts = vfsScript + '\n' + consoleScript;
+    // Build ES module import map for non-bundled runtimes.
+    // Maps VFS JS/TS paths to blob URLs so <script type="module"> imports resolve.
+    let importMapScript = '';
+    if (!isRuntimeBundled(this.runtime) && blobUrls) {
+      const imports: Record<string, string> = {};
+      for (const [path, url] of blobUrls) {
+        if (/\.(js|mjs|ts)$/i.test(path)) {
+          imports[path] = url;                                       // /scripts/utils.js
+          if (path.startsWith('/')) imports['.' + path] = url;       // ./scripts/utils.js
+        }
+      }
+      if (Object.keys(imports).length > 0) {
+        importMapScript = `<script type="importmap">${JSON.stringify({ imports })}</script>\n`;
+      }
+    }
+
+    // Insert in head for early execution.
+    // Import map must precede any <script type="module">, so it goes first.
+    const injectedScripts = importMapScript + vfsScript + '\n' + consoleScript;
     if (content.includes('</head>')) {
       content = content.replace('</head>', injectedScripts + '\n</head>');
     } else if (content.includes('<body>')) {

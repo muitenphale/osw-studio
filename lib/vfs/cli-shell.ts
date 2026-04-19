@@ -2442,6 +2442,11 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
             await vfs.createFile(projectId, '/.PROMPT.md', newPrompt);
           }
 
+          // Notify workspace so preview picks up the new runtime immediately
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('runtimeChanged', { detail: { runtime } }));
+          }
+
           return { stdout: `Runtime changed to ${requested}`, stderr: '', exitCode: 0 };
         } catch (err: any) {
           return { stdout: '', stderr: `Failed to change runtime: ${err.message}`, exitCode: 1 };

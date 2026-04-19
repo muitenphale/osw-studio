@@ -36,6 +36,13 @@ WHAT YOU CAN BUILD:
 • Responsive layouts with CSS (inline, <style> blocks, or external .css files)
 • Client-side data visualization, forms, animations, etc.
 
+ES MODULES:
+You can use <script type="module"> and import/export between project files:
+  import { initGame } from '/scripts/game.js';
+  import { formatDate } from '/lib/utils.js';
+Use absolute paths starting with / for imports between files.
+For third-party libraries, use CDN URLs: import confetti from 'https://esm.sh/canvas-confetti';
+
 MULTI-PAGE WEBSITES:
 Create separate .html files for each page. Share styles and scripts across pages:
 - /index.html — Home page

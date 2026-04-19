@@ -441,16 +441,16 @@ class ConfigManager {
 
   isCompactionEnabled(provider: ProviderId): boolean {
     const settings = this.getSettings();
-    return settings.compactionEnabled?.[provider] ?? true; // default: enabled
+    return settings.compactionEnabled?.[provider] ?? false; // default: disabled
   }
 
   setCompactionEnabled(provider: ProviderId, enabled: boolean): void {
     const settings = this.getSettings();
     const map = { ...settings.compactionEnabled };
     if (enabled) {
-      delete map[provider]; // default is true, so remove to save space
+      map[provider] = true;
     } else {
-      map[provider] = false;
+      delete map[provider]; // default is false, so remove to save space
     }
     this.setSetting('compactionEnabled', map);
   }

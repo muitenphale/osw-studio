@@ -110,7 +110,7 @@ See **[Server Mode](?doc=server-mode)** for the full variable list.
 
 **Admin-managed** (default): Admin creates users and workspaces via `/admin/users` and `/admin/workspaces`, then grants access.
 
-### 3. Create Workspaces
+### 4. Create Workspaces
 
 **Via admin UI** at `/admin/workspaces`:
 - Click "New Workspace", set a name and assign an owner
@@ -123,7 +123,7 @@ POST /api/admin/workspaces
 { "name": "Sweet Candies", "ownerEmail": "dev@agency.com" }
 ```
 
-### 4. Grant Access
+### 5. Grant Access
 
 **Via admin UI**: Expand a workspace, click "Add Member", enter email and role.
 

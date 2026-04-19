@@ -412,6 +412,12 @@ Habits:
       stream: streamEnabled
     };
 
+    // Request usage stats in streaming responses (needed for compaction threshold).
+    // Most OpenAI-compatible providers support this; skip for local servers that may reject it.
+    if (streamEnabled && selectedProvider !== 'ollama' && selectedProvider !== 'lmstudio' && selectedProvider !== 'anthropic') {
+      requestBody.stream_options = { include_usage: true };
+    }
+
     // Add images for Ollama at request level
     if (selectedProvider === 'ollama' && ollamaImages.length > 0) {
       requestBody.images = ollamaImages;

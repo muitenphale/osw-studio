@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.57.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.58.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -34,7 +34,7 @@ Static sites have always been fast, cheap to host, and secure. The tradeoff was 
 - **Multiple runtimes** - Static (HTML/CSS/JS), Handlebars (templated websites), React, Preact, Svelte, Vue, Python, Lua
 - **Sandboxed agent** - AI operates in a virtual file system with automatic checkpoints - explore freely, rollback anytime
 - **Dual AI modes** - Chat (exploration, planning) + Code (full implementation)
-- **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp
+- **Multi-provider AI** - OpenRouter (200+ models), OpenAI, Anthropic, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp, mesh-llm
 - **Full IDE** - Monaco editor, live preview, file explorer, multi-tab support
 - **Templates & Skills** - Reusable project templates (with bundled backend infrastructure) and AI workflow guides
 - **Export anywhere** - Download as ZIP, deploy to Vercel/Netlify/GitHub Pages
@@ -81,7 +81,7 @@ npm run dev
 - **Dual Modes**:
   - 💬 **Chat Mode** - Exploration, planning, Q&A
   - 🔧 **Code Mode** - Full implementation with file operations
-- **12 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp
+- **13 LLM Providers** - OpenRouter, OpenAI, Anthropic Claude, Google Gemini, Groq, HuggingFace, MiniMax, Zhipu AI, SambaNova, Ollama, LM Studio, llama.cpp, mesh-llm
 - **200+ Models** - From tiny 4B tool models to SOTA frontier models
 - **Smart Agent** - Uses shell commands for all file operations, with explicit build verification and status evaluation
 - **Skills System** - Teach AI your workflow preferences with Anthropic-style skills
@@ -150,6 +150,8 @@ The agent runs entirely in your browser, operating on a virtual file system (Ind
 **Local (Free, Private):**
 - [Ollama](https://ollama.ai) - Run models locally (no API key)
 - [LM Studio](https://lmstudio.ai) - Local model hosting
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) - Lightweight C++ inference server
+- [mesh-llm](https://github.com/michaelneale/mesh-llm) - Peer-to-peer network for free open-model inference
 
 **Cloud:**
 - [OpenRouter](https://openrouter.ai) - 200+ models, pay-per-use
@@ -220,11 +222,11 @@ npm install && npm run dev
 
 ## Tech Stack
 
-- **Framework**: Next.js 15.3.3, React 19, TypeScript
+- **Framework**: Next.js 15.5, React 19, TypeScript
 - **UI**: TailwindCSS v4, Radix UI primitives
 - **Editor**: Monaco Editor (VS Code engine)
 - **Storage**: IndexedDB (browser), SQLite (server mode)
-- **AI**: 12 LLM provider integrations
+- **AI**: 13 LLM provider integrations
 - **Templating**: Handlebars.js for components
 - **Export**: JSZip for deployment packages
 

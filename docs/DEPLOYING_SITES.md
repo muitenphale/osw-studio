@@ -32,7 +32,10 @@ Most platforms offer free tiers for static sites, automatic HTTPS, and custom do
 3. Select **Export as ZIP**
 4. Save the file
 
-The ZIP contains compiled HTML/CSS/JS ready for deployment. Handlebars templates (`.hbs` files) are pre-compiled using data from `/data.json` and excluded from the export.
+The ZIP contains compiled HTML/CSS/JS ready for deployment:
+- **Static/Handlebars**: Handlebars `.hbs` templates are pre-compiled using `/data.json` and excluded from the export
+- **React/Preact/Svelte/Vue**: Source files (`.tsx`, `.svelte`, `.vue`) are bundled into a single `bundle.js` that the export references — the bundle is runtime-independent and works on any static host
+- **Python/Lua**: These runtimes execute in the browser via WASM and cannot be deployed to external hosts — use ZIP export for offline use or self-host in Server Mode instead
 
 ### .osws Export (For Backup)
 

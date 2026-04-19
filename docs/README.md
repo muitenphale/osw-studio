@@ -75,6 +75,11 @@ OSW Studio supports multiple project runtimes — pick the one that fits your ne
 ✅ **npm ecosystem** - Import packages by name, fetched from CDN at runtime
 ✅ **Single-file components** - Svelte `.svelte` and Vue `.vue` files compiled in-browser
 
+**Python & Lua:**
+✅ **Scripts and algorithms** - Run Python (via Pyodide) and Lua (via wasmoon) in an interactive Console
+✅ **Data processing** - Experiment with code without leaving the browser
+✅ **Learning environment** - Try language features with instant feedback
+
 **Server Mode adds:**
 ✅ **Workspaces** - Isolated environments for teams, clients, or projects
 ✅ **Multi-user** - User accounts with shared workspace access
@@ -120,11 +125,12 @@ Download your complete site and deploy to Vercel, Netlify, or any static host in
 ### Features
 
 **Major Features:**
-- Multiple project runtimes (Static, React, Preact, Svelte, Vue, more planned)
-- Multi-provider AI support (10+ providers, including ChatGPT subscription and HuggingFace free tier)
+- Multiple project runtimes (Static, Handlebars, React, Preact, Svelte, Vue, Python, Lua)
+- Multi-provider AI support (14+ providers, including ChatGPT subscription and HuggingFace free tier)
 - Dual modes (Chat/Code)
+- Semantic blocks — drag pre-defined layouts onto the preview
 - Templates & Skills systems
-- Browser mode (IndexedDB)
+- Browser mode (IndexedDB) and Desktop app (macOS/Windows/Linux)
 - Optional Server mode with workspaces and multi-user support
 - Site publishing with SEO & analytics
 - Edge functions & database management

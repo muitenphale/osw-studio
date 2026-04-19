@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.58.0 - ES Modules & Stability (2026-04-19)
+
+You can now use ES module imports between project files in Static and Handlebars projects — no bundler needed. Login and register pages follow your light/dark theme. Plus a collection of stability fixes for the editor, chat input, and AI orchestration.
+
+- **ES Module Imports** - Use `<script type="module">` with `import` and `export` between project files. Absolute paths like `import { foo } from '/scripts/utils.js'` just work in the preview. For third-party libraries, use CDN URLs (`https://esm.sh/...`). Published sites serve the real files, so imports work in production too
+- **Themed Login & Register** - Login and register pages now follow your light/dark theme instead of being locked to dark mode. The logo auto-inverts to match
+- **Live Runtime Switching** - When the AI changes the project runtime mid-conversation, the preview picks it up immediately. Previously you had to save and reopen the project to see raw `{{> nav}}` tokens get processed
+- **Editor No Longer Crashes** - An error boundary around Monaco catches the disposal errors that used to take down the whole workspace during panel resize or move
+- **Snappier Chat Input** - Typing in the prompt textarea no longer re-renders the file explorer, editor, and preview on every keystroke
+- **Compaction Improvements** - Conversation compaction is now off by default — enable it per provider in Settings if you want long sessions to compact automatically. When enabled, the threshold works correctly across all providers (including Anthropic) and fires at exactly the configured limit
+
+---
+
 ## v1.57.0 - Workspaces & Multitenancy (2026-04-14)
 
 Server Mode now supports multiple users and workspaces. Workspaces are isolated environments with their own projects, deployments, and quotas. Multiple users can share a workspace. Browser Mode is unaffected.

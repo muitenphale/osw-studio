@@ -45,9 +45,10 @@ interface ModelSelectorProps {
   hideModelDetails?: boolean;
   mode?: 'popover' | 'inline';
   skipGlobalSync?: boolean;
+  autoFocus?: boolean;
 }
 
-export function ModelSelector({ provider, value: _value, onChange, className, hideModelDetails, mode = 'popover', skipGlobalSync }: ModelSelectorProps) {
+export function ModelSelector({ provider, value: _value, onChange, className, hideModelDetails, mode = 'popover', skipGlobalSync, autoFocus }: ModelSelectorProps) {
   const currentProvider = provider || configManager.getSelectedProvider();
   const providerConfig = getProvider(currentProvider);
   const onChangeRef = useRef(onChange);
@@ -549,6 +550,7 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 border-0 bg-transparent dark:bg-transparent shadow-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-sm"
+              autoFocus={autoFocus}
             />
             {searchQuery && (
               <Button

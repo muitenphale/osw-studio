@@ -123,8 +123,8 @@ When you select a deployment from the **Deployment Selector** dropdown (in the w
 
 This hidden folder contains:
 - **db/schema.sql** - Database schema (read-only, use `sqlite3` for DDL)
-- **edge-functions/*.json** - Edge functions (editable via `write` tool)
-- **server-functions/*.json** - Server functions (editable via `write` tool)
+- **edge-functions/*.json** - Edge functions (editable via shell commands)
+- **server-functions/*.json** - Server functions (editable via shell commands)
 - **secrets/*.json** - Secret placeholders (editable - AI creates, user sets values in admin UI)
 
 These files are:
@@ -188,7 +188,23 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 
 > **Important**: Server Mode requires **persistent file system** storage because published sites are written to `/public/deployments/` and databases are stored locally. Serverless platforms like Vercel, Netlify, and Cloudflare Workers **will not work** for Server Mode.
 
-### Option 1: Railway (Recommended)
+### Option 1: Desktop App (Easiest)
+
+**Why**: Zero setup — download, install, run. The desktop app bundles the full server with SQLite, so you get publishing and sync without running a server.
+
+**Pricing**: Free
+
+**Steps:**
+
+1. Download the installer for your platform from [GitHub Releases](https://github.com/o-stahl/osw-studio/releases)
+2. Install and launch — authentication is bypassed for the single local user
+3. Published sites are served locally at `http://localhost:3000/deployments/{id}/`
+
+**Best for**: Personal use, local development, and evaluating Server Mode features without provisioning a server.
+
+---
+
+### Option 2: Railway (Recommended for Hosting)
 
 **Why**: Simple setup, persistent storage, usage-based pricing
 
@@ -220,7 +236,7 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 
 ---
 
-### Option 2: VPS (Full Control)
+### Option 3: VPS (Full Control)
 
 **Why**: Complete control, custom domains, lowest cost at scale
 
