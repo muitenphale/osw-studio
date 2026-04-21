@@ -116,10 +116,31 @@ export async function parseStreamingResponse(
   const contentBlockIndexToToolId: Record<number, string> = {};
   let anthropicThinkingBlockIndex: number | null = null;  // Track active thinking block
 
+  // Stream read timeout — if the provider hangs (no data for STREAM_READ_TIMEOUT_MS),
+  // treat whatever we have as the complete response. Some providers (e.g., Qwen via
+  // OpenRouter/Alibaba) hang mid-stream without sending [DONE] or finish_reason.
+  const STREAM_READ_TIMEOUT_MS = 45_000;
+  let streamTimedOut = false;
+  let readTimer: ReturnType<typeof setTimeout> | null = null;
+
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const readResult = await Promise.race([
+        reader.read(),
+        new Promise<{ done: true; value: undefined }>(resolve => {
+          readTimer = setTimeout(() => resolve({ done: true, value: undefined }), STREAM_READ_TIMEOUT_MS);
+        })
+      ]);
+      if (readTimer) { clearTimeout(readTimer); readTimer = null; }
+      const { done, value } = readResult;
+      if (done) {
+        if (!value && !lastFinishReason) {
+          streamTimedOut = true;
+          logger.warn('[StreamParser] Stream read timeout or premature close (no finish_reason received)');
+          reader.cancel().catch(() => {});
+        }
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -499,6 +520,14 @@ export async function parseStreamingResponse(
       content += thinkTagBuffer;
     }
     thinkTagBuffer = '';
+  }
+
+  // Mark as truncated if the stream timed out with pending tool calls
+  if (streamTimedOut) {
+    if (Object.keys(toolCallsById).length > 0) {
+      wasTruncated = true;
+    }
+    onProgress?.('stream_timeout', {});
   }
 
   // Pass tool calls as-is - let tool-registry handle JSON repair with smart strategies

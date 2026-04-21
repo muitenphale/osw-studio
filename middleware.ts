@@ -13,7 +13,23 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { verifySession } from '@/lib/auth/session';
+import { verifySession, maybeRefreshSession, SESSION_COOKIE_NAME, SESSION_DURATION } from '@/lib/auth/session';
+import type { SessionData } from '@/lib/auth/session';
+
+async function nextWithRefreshedSession(session: SessionData): Promise<NextResponse> {
+  const response = NextResponse.next();
+  const refreshed = await maybeRefreshSession(session);
+  if (refreshed) {
+    response.cookies.set(SESSION_COOKIE_NAME, refreshed, {
+      httpOnly: true,
+      secure: process.env.SECURE_COOKIES !== 'false' && process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: SESSION_DURATION / 1000,
+      path: '/',
+    });
+  }
+  return response;
+}
 
 // Views that have moved from /admin/{view} to /w/{workspaceId}/{view}
 const WORKSPACE_VIEWS = ['projects', 'dashboard', 'deployments', 'settings', 'skills', 'templates', 'docs'];
@@ -40,7 +56,7 @@ export async function middleware(request: NextRequest) {
     const session = await verifySession(token);
     if (!session) return NextResponse.redirect(new URL('/admin/login', request.url));
 
-    return NextResponse.next();
+    return nextWithRefreshedSession(session);
   }
 
   // ============================================
@@ -60,7 +76,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    return NextResponse.next();
+    return nextWithRefreshedSession(session);
   }
 
   // ============================================
@@ -81,6 +97,7 @@ export async function middleware(request: NextRequest) {
       if (!session) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
+      return nextWithRefreshedSession(session);
     }
     return NextResponse.next();
   }
@@ -137,7 +154,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/admin/login', request.url));
     }
 
-    return NextResponse.next();
+    return nextWithRefreshedSession(session);
   }
 
   return NextResponse.next();

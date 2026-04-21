@@ -13,6 +13,10 @@ import { FUNCTIONS_SKILL } from './built-in/functions';
 import { DATABASE_SKILL } from './built-in/database';
 import { SECRETS_SKILL } from './built-in/secrets';
 import { FRONTEND_DESIGN_SKILL } from './built-in/frontend-design';
+import { FRONTEND_DESIGN_BOLD_GEOMETRIC_SKILL } from './built-in/frontend-design-bold-geometric';
+import { FRONTEND_DESIGN_SOFT_ORGANIC_SKILL } from './built-in/frontend-design-soft-organic';
+import { FRONTEND_DESIGN_EDITORIAL_SKILL } from './built-in/frontend-design-editorial';
+import { FRONTEND_DESIGN_MINIMAL_SKILL } from './built-in/frontend-design-minimal';
 
 /**
  * Registry of all built-in skills
@@ -54,6 +58,22 @@ export const BUILT_IN_SKILLS: BuiltInSkillDefinition[] = [
   {
     id: 'frontend-design',
     content: FRONTEND_DESIGN_SKILL
+  },
+  {
+    id: 'frontend-design-bold-geometric',
+    content: FRONTEND_DESIGN_BOLD_GEOMETRIC_SKILL
+  },
+  {
+    id: 'frontend-design-soft-organic',
+    content: FRONTEND_DESIGN_SOFT_ORGANIC_SKILL
+  },
+  {
+    id: 'frontend-design-editorial',
+    content: FRONTEND_DESIGN_EDITORIAL_SKILL
+  },
+  {
+    id: 'frontend-design-minimal',
+    content: FRONTEND_DESIGN_MINIMAL_SKILL
   }
 ];
 

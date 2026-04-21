@@ -890,7 +890,7 @@ export class SQLiteAdapter implements StorageAdapter {
     }
 
     const stmt = db.prepare(`
-      INSERT INTO files (
+      INSERT OR REPLACE INTO files (
         id, project_id, path, name, type, content,
         mime_type, size, created_at, updated_at, metadata
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

@@ -592,6 +592,30 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     return `${head}\n  (...truncated...)\n${tail}`;
   }, []);
 
+  // Truncate an HTML snippet so the given marker comment stays visible with
+  // surrounding context on both sides. Used for semantic block drops where the
+  // marker's position is the whole point of the snippet — head/tail truncation
+  // would drop the marker whenever it falls in the middle of a large parent.
+  const truncateHtmlAroundMarker = useCallback((html: string, marker: string, maxLength: number = 1200) => {
+    if (!html) return '';
+    if (html.length <= maxLength) return html;
+    const markerIdx = html.indexOf(marker);
+    if (markerIdx === -1) {
+      // Fall back to head/tail when the marker isn't present
+      const headLength = Math.max(0, Math.floor(maxLength * 0.6));
+      const tailLength = Math.max(0, Math.floor(maxLength * 0.3));
+      const head = html.slice(0, headLength);
+      const tail = tailLength > 0 ? html.slice(-tailLength) : '';
+      return `${head}\n  (...truncated...)\n${tail}`;
+    }
+    const half = Math.max(0, Math.floor((maxLength - marker.length) / 2));
+    const start = Math.max(0, markerIdx - half);
+    const end = Math.min(html.length, markerIdx + marker.length + half);
+    const prefix = start > 0 ? '(...truncated...)\n' : '';
+    const suffix = end < html.length ? '\n(...truncated...)' : '';
+    return `${prefix}${html.slice(start, end)}${suffix}`;
+  }, []);
+
   const describeFocusTarget = useCallback((target: FocusTarget) => {
     const attributeEntries = Object.entries(target.attributes || {}).slice(0, 6);
     if (attributeEntries.length === 0) {
@@ -625,7 +649,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     if (blocks.length === 0) return '';
     const lines = [
       'Semantic blocks to implement:',
-      'The user has placed the following semantic blocks at specific positions in the preview. Implement each block at the position marked by the <!-- ??? INSERT ... HERE ??? --> comment in the HTML context below. The user chose this position intentionally — find a creative way to make the block work naturally at that exact location, adapting its layout and content to fit the surrounding context. Match the existing project\'s styling, colors, fonts, and conventions. Use placeholder/sample content where needed.',
+      'The user has placed the following semantic blocks at specific positions in the preview. Each block\'s HTML context below contains an HTML comment marker of the form `<!-- INSERT <block name> HERE -->` at the exact drop position — implement the block at that location. The user chose this position intentionally, so honor it precisely; adapt the block\'s layout and content to fit the surrounding context, and match the existing project\'s styling, colors, fonts, and conventions. Use placeholder/sample content where needed.',
       '',
     ];
     blocks.forEach((placed, index) => {
@@ -634,8 +658,9 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       lines.push(`[${index + 1}] ${block.name} (page: ${placed.page})`);
       lines.push(`    Description: ${block.description}`);
       if (placed.htmlContext) {
-        const snippet = truncateHtmlSnippet(placed.htmlContext, 1200);
-        lines.push(`    Insert position in context:`);
+        const marker = `<!-- INSERT ${block.name} HERE -->`;
+        const snippet = truncateHtmlAroundMarker(placed.htmlContext, marker, 1200);
+        lines.push(`    Insert position in context (look for \`${marker}\`):`);
         lines.push('    ```html');
         lines.push(`    ${snippet}`);
         lines.push('    ```');
@@ -645,7 +670,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       lines.push('');
     });
     return lines.join('\n');
-  }, []);
+  }, [truncateHtmlAroundMarker]);
 
   const handleFocusSelection = useCallback((selection: FocusContextPayload | null) => {
     if (!selection) {
@@ -707,12 +732,17 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     setFullscreenPreview(false);
   }, []);
 
-  // Listen for showPreview event (dispatched by AI preview command)
+  // Listen for showPreview event (dispatched by AI preview command).
+  // Only opens the panel — never toggles it closed if already open.
+  const showPreviewRef = useRef(showPreview);
+  showPreviewRef.current = showPreview;
   useEffect(() => {
-    const handler = () => togglePanel('preview');
+    const handler = () => {
+      if (!showPreviewRef.current) togglePanel('preview');
+    };
     window.addEventListener('showPreview', handler);
     return () => window.removeEventListener('showPreview', handler);
-  }, []);
+  }, [togglePanel]);
 
   const handleSetEntryPoint = useCallback(async (path: string) => {
     try {
@@ -1446,6 +1476,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         setFocusContext(null);
       }
       if (placedBlocks.length > 0) {
+        placedBlocks.forEach(b => previewRef.current?.removePlaceholder(b.placementId));
         setPlacedBlocks([]);
       }
     } catch (error) {

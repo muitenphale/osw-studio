@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.59.0 - 2026-04-21
+
+### AI Orchestration
+
+- **Resilient large file writes**: Multiple layers of recovery for when a provider truncates or hangs during a large tool call (e.g., writing a big CSS file via heredoc). The streaming parser times out after 45 seconds of no data instead of hanging indefinitely. Truncated heredoc content is written to the file so the model can continue from where it left off. A fallback heredoc extractor catches cases where the primary parser fails. Commands truncated before the heredoc operator completes are rejected with a clear retry message instead of being misinterpreted.
+- **Tool error recovery**: When a tool call fails and the model responds with no content, the orchestrator prompts it to retry instead of nudging for `status --complete`. Previously this led to nudge exhaustion and task termination.
+
+### UI
+
+- **Semantic block drops land at the drop position**: Blocks dropped inside large parent elements now land where you put them instead of drifting elsewhere.
+- **Accurate tool badge during streaming**: While a `shell` tool call is still streaming, the badge label and command preview reflect the command that's already arrived — "write", "read", "search", etc. labels and partial command text show up immediately instead of a generic "shell" badge.
+- **Backend unreachable banner**: When an API call to OSW Studio's own server fails with a network error or 5xx, a persistent red banner appears. Clarifies why model discovery and AI generation aren't working. Clears automatically on the next successful request.
+- **Preview command won't close an open panel**: When the AI runs `preview <path>` and the preview panel is already open, the panel stays open instead of toggling closed.
+- **Media file preview in editor**: Image files (png, jpg, gif, webp, bmp, ico) and video files (mp4, webm, ogg) now display inline previews in the editor panel with playback controls for video. Previously video files showed "Unsupported File Type".
+- **Upload progress for large files**: Files over 512KB show a loading toast with file name and size during upload.
+- **Upload overlay fix**: The "Drop files here to upload" overlay no longer gets stuck when an upload errors.
+
+### Auth & Sync (Server Mode)
+
+- **Rolling session refresh**: Active sessions are extended automatically. When a request hits the middleware past the session's halfway point, a fresh cookie is issued. Active users stay logged in instead of being kicked out at a hard 24-hour wall.
+- **Session-expired banner**: When an auth-gated API call returns 401, an amber banner appears with a "Log in" link. Previously auto-sync failures were silent.
+- **Auto-sync stops retrying on 401**: Bails immediately on expired session instead of burning through 3 retry attempts.
+
+### Skills
+
+- **Frontend Design skill tree**: The monolithic `frontend-design` skill is now a base skill plus four aesthetic sub-skills. The base covers universal principles (Design Intent block, typography tiers, color construction, spacing, interaction, anti-patterns) and directs the AI to pick the aesthetic that fits the project. Sub-skills teach design thinking — what kinds of fonts to look for, how color relationships should feel, what motion communicates — without hardcoding specific values. Each generation produces different choices within the aesthetic's guardrails.
+  - `frontend-design-bold-geometric` — massive type, high contrast, kinetic energy (product launches, brand sites)
+  - `frontend-design-soft-organic` — warm, rounded, gentle (SaaS, wellness, consumer products)
+  - `frontend-design-editorial` — serif-forward, magazine grids, content-dense (blogs, publications, portfolios)
+  - `frontend-design-minimal` — extreme whitespace, monochrome, restrained (luxury, architecture, photography)
+
+### Bug Fixes
+
+- **File sync UNIQUE constraint error**: Publishing or syncing a project to the server could fail with `UNIQUE constraint failed: files.id` when a stale file record survived the delete-then-recreate cycle. Syncs are now idempotent.
+
 ## v1.58.0 - 2026-04-19
 
 ### ES Module Support

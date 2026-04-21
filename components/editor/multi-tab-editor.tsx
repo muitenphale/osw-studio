@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
 import MonacoEditor, { useMonaco } from '@monaco-editor/react';
-import { VirtualFile, ProjectRuntime } from '@/lib/vfs/types';
+import { VirtualFile, ProjectRuntime, getSpecificMimeType } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
-import { X, Code2, Save, FileCode, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { X, Code2, Save, FileCode, Image as ImageIcon, Film, AlertCircle } from 'lucide-react';
 import { PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import { cn, logger } from '@/lib/utils';
@@ -254,13 +254,30 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
     };
   }, [handleKeyDown]);
 
+  const getMediaDataUrl = (file: OpenFile): string => {
+    const mime = getSpecificMimeType(file.file.path);
+    const content = file.file.content ?? file.content;
+    if (content instanceof ArrayBuffer) {
+      const bytes = new Uint8Array(content);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return `data:${mime};base64,${btoa(binary)}`;
+    }
+    // Already a base64 string
+    return `data:${mime};base64,${content}`;
+  };
+
   const getFileType = (path: string) => {
     const ext = path.split('.').pop()?.toLowerCase();
     
-    if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'].includes(ext || '')) {
+    if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'ico'].includes(ext || '')) {
       return { type: 'image', language: 'plaintext' };
     }
-    
+
+    if (['mp4', 'webm', 'ogg'].includes(ext || '')) {
+      return { type: 'video', language: 'plaintext' };
+    }
+
     const textExtensions: Record<string, string> = {
       'js': 'javascript',
       'mjs': 'javascript',
@@ -378,18 +395,17 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
                           </p>
                         </div>
                         <div className="border rounded-lg p-4 bg-muted/30 max-h-96 overflow-auto">
-                          <img 
-                            src={`data:image/${activeFile.file.path.split('.').pop()};base64,${activeFile.content}`}
+                          <img
+                            src={getMediaDataUrl(activeFile)}
                             alt={activeFile.file.name}
                             className="max-w-full h-auto rounded shadow-sm"
                             onError={(e) => {
                               const target = e.target as HTMLImageElement;
                               target.style.display = 'none';
-                              const errorMsg = target.parentElement?.querySelector('.error-msg');
-                              if (!errorMsg) {
+                              if (!target.parentElement?.querySelector('.error-msg')) {
                                 const div = document.createElement('div');
-                                div.className = 'error-msg text-sm text-muted-foreground flex items-center gap-2';
-                                div.innerHTML = '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Unable to display image';
+                                div.className = 'error-msg text-sm text-muted-foreground';
+                                div.textContent = 'Unable to display image';
                                 target.parentElement?.appendChild(div);
                               }
                             }}
@@ -402,7 +418,43 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
                     </div>
                   );
                 }
-                
+
+                if (fileType.type === 'video') {
+                  return (
+                    <div className="h-full flex items-center justify-center bg-background p-8">
+                      <div className="text-center space-y-4 max-w-2xl w-full">
+                        <Film className="h-12 w-12 mx-auto text-muted-foreground" />
+                        <div className="space-y-2">
+                          <h3 className="text-lg font-medium">Video Preview</h3>
+                          <p className="text-sm text-muted-foreground">
+                            {activeFile.file.name}
+                          </p>
+                        </div>
+                        <div className="border rounded-lg p-4 bg-muted/30 overflow-auto">
+                          <video
+                            src={getMediaDataUrl(activeFile)}
+                            controls
+                            className="max-w-full max-h-96 mx-auto rounded shadow-sm"
+                            onError={(e) => {
+                              const target = e.target as HTMLVideoElement;
+                              target.style.display = 'none';
+                              if (!target.parentElement?.querySelector('.error-msg')) {
+                                const div = document.createElement('div');
+                                div.className = 'error-msg text-sm text-muted-foreground';
+                                div.textContent = 'Unable to play video';
+                                target.parentElement?.appendChild(div);
+                              }
+                            }}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Video files cannot be edited in the text editor
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+
                 if (fileType.type === 'unsupported') {
                   return (
                     <div className="h-full flex items-center justify-center bg-background p-8">

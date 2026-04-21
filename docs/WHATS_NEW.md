@@ -6,6 +6,26 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.59.0 - Design Skills & Streaming Resilience (2026-04-21)
+
+The frontend design skill is now a skill tree — a base skill with universal design principles plus four aesthetic sub-skills (bold-geometric, soft-organic, editorial, minimal) that teach the AI how to think within each aesthetic rather than applying a one-size-fits-all template. Large file writes are more resilient to provider issues, and the editor now previews images and video files inline.
+
+### Skills
+- **Frontend Design skill tree** - The AI now picks an aesthetic direction (bold-geometric, soft-organic, editorial, or minimal) and follows a complete design philosophy — what kinds of fonts to look for, how color relationships should feel, what motion communicates. Each generation produces genuinely different results within the chosen aesthetic
+
+### AI
+- **Resilient large file writes** - When a provider truncates or hangs mid-stream (common with some models on large heredoc writes), OSW Studio now recovers gracefully — writing what was received, prompting the model to continue, and timing out after 45 seconds instead of hanging forever
+
+### Editor
+- **Media file preview** - Image and video files now show inline previews in the editor with playback controls, instead of "Unsupported File Type"
+- **Upload progress** - Large file uploads show a progress toast with file name and size
+
+### Server Mode
+- **Rolling session refresh** - Active sessions are extended automatically so you don't get logged out mid-work
+- **Session-expired banner** - A visible banner appears when your session expires, with a direct "Log in" link
+
+---
+
 ## v1.58.0 - ES Modules & Stability (2026-04-19)
 
 You can now use ES module imports between project files in Static and Handlebars projects — no bundler needed. Login and register pages follow your light/dark theme. Plus a collection of stability fixes for the editor, chat input, and AI orchestration.

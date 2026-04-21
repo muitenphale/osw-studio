@@ -5,6 +5,7 @@ import TanstackProvider from "@/components/providers/tanstack-query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import "@/assets/globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import { BackendStatusBanner } from "@/components/backend-status-banner";
 
 const inter = Inter({
   variable: "--font-inter-sans",
@@ -74,6 +75,7 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <Toaster richColors position="bottom-center" />
+          <BackendStatusBanner />
           <TanstackProvider>
             {children}
           </TanstackProvider>

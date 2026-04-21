@@ -339,17 +339,19 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
   const handleFileDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDraggingOver(false);
+    try {
+      const items = Array.from(e.dataTransfer.items);
 
-    const items = Array.from(e.dataTransfer.items);
-    
-    for (const item of items) {
-      if (item.kind === 'file') {
-        const file = item.getAsFile();
-        if (file) {
-          await uploadFile(file, '/');
+      for (const item of items) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) {
+            await uploadFile(file, '/');
+          }
         }
       }
+    } finally {
+      setIsDraggingOver(false);
     }
   };
 
@@ -367,10 +369,11 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
 
     const filePath = targetDir === '/' ? `/${file.name}` : `${targetDir}/${file.name}`;
+    const isLarge = file.size > 512 * 1024; // 512KB threshold
 
-    try {
+    const doUpload = async () => {
       let content: string | ArrayBuffer;
-      
+
       if (fileType === 'image' || fileType === 'video' || fileType === 'binary') {
         content = await file.arrayBuffer();
       } else {
@@ -379,13 +382,29 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
 
       await vfs.createFile(projectId, filePath, content);
       await loadFiles();
-      toast.success(`Uploaded ${file.name}`);
+    };
+
+    try {
+      if (isLarge) {
+        const sizeMB = (file.size / 1e6).toFixed(1);
+        await toast.promise(doUpload(), {
+          loading: `Uploading ${file.name} (${sizeMB} MB)…`,
+          success: `Uploaded ${file.name}`,
+          error: () => {
+            // Suppress toast — error is handled in the outer catch
+            return null as unknown as string;
+          },
+        });
+      } else {
+        await doUpload();
+        toast.success(`Uploaded ${file.name}`);
+      }
     } catch (error: any) {
       if (error.message?.includes('already exists')) {
         if (confirm(`File "${file.name}" already exists. Overwrite?`)) {
           try {
             await vfs.deleteFile(projectId, filePath);
-            await uploadFile(file, targetDir); // Retry
+            await uploadFile(file, targetDir);
           } catch (deleteError) {
             logger.error('Failed to overwrite file:', deleteError);
             toast.error('Failed to overwrite file');

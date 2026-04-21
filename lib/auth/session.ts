@@ -67,6 +67,22 @@ export async function verifySession(token: string): Promise<SessionData | null> 
 }
 
 /**
+ * Returns a refreshed token if the session is past the halfway point of its
+ * lifetime, otherwise null (keep the existing cookie).
+ *
+ * Used by middleware to extend active sessions without re-issuing a cookie on
+ * every single request.
+ */
+export async function maybeRefreshSession(session: SessionData): Promise<string | null> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const remainingMs = (session.exp - nowSec) * 1000;
+  if (remainingMs > SESSION_DURATION / 2) return null;
+  return createSession(session.userId, session.email, session.isAdmin);
+}
+
+export { SESSION_COOKIE_NAME, SESSION_DURATION };
+
+/**
  * Get current session from cookies
  */
 export async function getSession(): Promise<SessionData | null> {

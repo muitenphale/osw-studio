@@ -111,6 +111,21 @@ One command at a time as a single string.`,
             if (heredocMatch[4]) {
               trailingCommands = heredocMatch[4].trim();
             }
+          } else {
+            // Fallback: heredoc regex failed (e.g., truncated output missing closing delimiter).
+            // Detect << in the command and extract everything after the first newline as stdin.
+            const fallbackMatch = cmdString.match(/^([^\n]*?)\s*<<-?\s*['"]?(\w+)['"]?([^\n]*)\n([\s\S]+)$/);
+            if (fallbackMatch) {
+              const beforeHeredoc = fallbackMatch[1].trim();
+              const delimiter = fallbackMatch[2];
+              const afterDelimiter = (fallbackMatch[3] || '').trim();
+              let content = fallbackMatch[4];
+              // Strip closing delimiter if present at end (without final newline)
+              const closingRe = new RegExp('\\n' + delimiter + '\\s*$');
+              content = content.replace(closingRe, '');
+              heredocStdin = content;
+              cmdString = afterDelimiter ? beforeHeredoc + ' ' + afterDelimiter : beforeHeredoc;
+            }
           }
 
           // Handle newline-chained commands (e.g., "ls -la\ncat file\ngrep pattern")
@@ -277,19 +292,62 @@ One command at a time as a single string.`,
 
       // Check if this is a JSON truncation error - attempt smart repair
       if (isJSONTruncationError(error)) {
-        logger.warn(`[ToolRegistry] JSON truncation detected for ${toolId}, attempting repair...`);
+        logger.warn(
+          `[ToolRegistry] JSON truncation detected for ${toolId}, attempting repair. Original: ${JSON.stringify(toolCall.function.arguments)}`
+        );
 
         const repairResult = attemptJSONRepair(toolCall.function.arguments);
 
         if (repairResult.success) {
-          // Shell tool: repaired JSON with a cmd field is safe to execute.
-          // A truncated heredoc writes truncated content, which the model can detect and continue.
           if (toolId === 'shell' && typeof repairResult.repaired?.cmd === 'string') {
+            const repairedCmd: string = repairResult.repaired.cmd;
+            const validation = validateRepairedShellCommand(repairedCmd);
+
+            if (!validation.ok) {
+              // Check if this is a truncated heredoc write — salvage what we can.
+              // The cmd may contain partial heredoc content (e.g., "cat > /file << 'EOF'\n...content...")
+              // or the truncation happened before the << was complete (e.g., "cat > /file <").
+              const redirectMatch = repairedCmd.match(/>\s*(\S+)/);
+              const hasHeredocContent = /<<-?\s*['"]?\w+['"]?[^\n]*\n/.test(repairedCmd);
+
+              if (hasHeredocContent && redirectMatch) {
+                // Heredoc with content that got truncated — execute it.
+                // The fallback heredoc extractor in the executor will parse out the content.
+                logger.warn(`[ToolRegistry] Repaired shell command has truncated heredoc, executing salvaged write`);
+                const result = await tool.executor.execute(projectId, repairResult.repaired, context);
+                // Append a note so the model knows the file was written but content was cut off
+                const targetFile = redirectMatch[1];
+                return result + `\n\nNote: Your output was truncated mid-write. The file ${targetFile} was written with partial content. Continue writing from where you left off using cat >> ${targetFile} (append mode) or rewrite the remainder.`;
+              }
+
+              // No salvageable heredoc content — truly broken command
+              logger.warn(`[ToolRegistry] Repaired shell command is syntactically broken (${validation.reason}), refusing to execute`);
+              return `Error: Command was cut off during streaming — nothing was written. Retry the file write. If the file is large, split into multiple smaller cat commands.`;
+            }
             logger.warn(`[ToolRegistry] Repaired shell JSON, executing truncated command`);
             return await tool.executor.execute(projectId, repairResult.repaired, context);
           }
           logger.warn(`[ToolRegistry] Repaired ${toolId} but safety unknown, not executing`);
           return `Error: ${errorMessage}\n\nNote: JSON repair succeeded but operation type is unclear. Please split into smaller operations.`;
+        }
+
+        // JSON repair failed — but for shell heredoc writes we can still try to salvage.
+        // Extract cmd and content directly from the raw truncated JSON string.
+        if (toolId === 'shell') {
+          const rawArgs = toolCall.function.arguments;
+          // Match: {"cmd": "cat > /file << 'DELIM'\ncontent...
+          const rawHeredoc = rawArgs.match(/["']cmd["']\s*:\s*["']((?:cat|tee)\s+.*?>\s*(\S+).*?<<-?\s*['"]?\w+['"]?[^\n]*\\n[\s\S]{20,})/);
+          if (rawHeredoc) {
+            // Unescape JSON string escapes to get the actual command
+            const unescaped = rawHeredoc[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            logger.warn(`[ToolRegistry] JSON repair failed but salvaged heredoc from raw JSON for ${rawHeredoc[2]}`);
+            try {
+              const result = await tool.executor.execute(projectId, { cmd: unescaped }, context);
+              return result + `\n\nNote: Your output was truncated mid-write. The file ${rawHeredoc[2]} was written with partial content. Continue writing from where you left off using cat >> ${rawHeredoc[2]} (append mode) or rewrite the remainder.`;
+            } catch {
+              // Fall through to generic error
+            }
+          }
         }
 
         logger.error(`[ToolRegistry] JSON repair failed for ${toolId}:`, repairResult.error);
@@ -302,6 +360,26 @@ One command at a time as a single string.`,
     }
   }
 
+}
+
+// Trailing incomplete operators that indicate the command was cut mid-syntax.
+// Requires the operator to be at EOS after trimming whitespace, preceded by
+// whitespace or start-of-string so operators appearing inside arguments aren't
+// mistaken for trailing truncation.
+const TRAILING_INCOMPLETE_OPERATOR_RE = /(?:^|\s)(?:<<?|>>?|\|\|?|&&)\s*$/;
+
+function validateRepairedShellCommand(cmd: string): { ok: true } | { ok: false; reason: string } {
+  const trimmed = cmd.replace(/\s+$/, '');
+  if (!trimmed) {
+    return { ok: false, reason: 'command is empty after repair' };
+  }
+  if (TRAILING_INCOMPLETE_OPERATOR_RE.test(trimmed)) {
+    return {
+      ok: false,
+      reason: 'command ends with a dangling redirect, pipe, or logical operator'
+    };
+  }
+  return { ok: true };
 }
 
 /**

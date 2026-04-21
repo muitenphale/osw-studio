@@ -124,6 +124,17 @@ interface Turn {
   taskStartTime?: number;
 }
 
+// Extract the `cmd` string value from a still-streaming (potentially invalid) JSON blob.
+function extractPartialCmd(raw: string): string | null {
+  const match = raw.match(/^\s*\{\s*"cmd"\s*:\s*"((?:\\.|[^"\\])*)/);
+  if (!match) return null;
+  try {
+    return JSON.parse('"' + match[1] + '"');
+  } catch {
+    return match[1] || null;
+  }
+}
+
 function classifyShellCommand(cmd: string | string[] | undefined): 'shell' | 'write' | 'status' | 'delegate' {
   if (!cmd) return 'shell';
   const s = (Array.isArray(cmd) ? cmd.join(' ') : String(cmd)).trimStart();
@@ -482,12 +493,13 @@ export function ChatPanel({
 
           for (let toolIndex = 0; toolIndex < calls.length; toolIndex++) {
             const call = calls[toolIndex];
-            let parameters = {};
+            let parameters: Record<string, unknown> = {};
             try {
               parameters = call.function?.arguments ? JSON.parse(call.function.arguments) : {};
             } catch {
-              // If JSON parsing fails (streaming/partial), use raw string
-              parameters = { _raw: call.function?.arguments || '' };
+              const raw = call.function?.arguments || '';
+              const partialCmd = extractPartialCmd(raw);
+              parameters = partialCmd !== null ? { cmd: partialCmd, _raw: raw } : { _raw: raw };
             }
 
             const tool: ToolCall = {
@@ -549,11 +561,8 @@ export function ChatPanel({
 
         case 'tool_param_delta': {
           // Concatenate all fragments and REPLACE parameters (like assistant_delta).
-          // data.all contains the complete history of fragments — join them all
-          // to get the full string, then replace (not append to) the tool's parameters.
           const paramDeltaItems = event.data?.all || [event.data];
 
-          // Group fragments by toolId
           const fragmentsByTool = new Map<string, string>();
           for (const paramDelta of paramDeltaItems) {
             const { toolId, fragment, partialArguments } = paramDelta || {};
@@ -572,7 +581,10 @@ export function ChatPanel({
               try {
                 tool.parameters = JSON.parse(cumulative);
               } catch {
-                tool.parameters = { _raw: cumulative };
+                const partialCmd = extractPartialCmd(cumulative);
+                tool.parameters = partialCmd !== null
+                  ? { cmd: partialCmd, _raw: cumulative }
+                  : { _raw: cumulative };
               }
             }
           }

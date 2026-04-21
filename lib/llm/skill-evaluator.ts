@@ -8,6 +8,7 @@
 
 import { SkillMetadata } from '@/lib/vfs/skills/types';
 import { logger } from '@/lib/utils';
+import { apiFetch } from '@/lib/api/backend-status';
 
 export interface SkillEvalResult {
   skillIds: string[];
@@ -57,7 +58,7 @@ Reply with ONLY a JSON array of skill numbers that are relevant. Multiple skills
   const timeout = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const response = await fetch('/api/generate', {
+    const response = await apiFetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,

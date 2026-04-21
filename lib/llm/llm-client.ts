@@ -2,12 +2,13 @@
 import { ProviderId } from './providers/types';
 import { getProvider } from './providers/registry';
 import { configManager } from '../config/storage';
+import { apiFetch } from '../api/backend-status';
 
 export async function validateApiKey(apiKey: string, provider: ProviderId): Promise<boolean> {
   if (!apiKey) return false;
 
   try {
-    const response = await fetch('/api/validate-key', {
+    const response = await apiFetch('/api/validate-key', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -41,7 +42,7 @@ export async function getAvailableModels(apiKey?: string, provider?: ProviderId)
   }
 
   try {
-    const response = await fetch('/api/models', {
+    const response = await apiFetch('/api/models', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

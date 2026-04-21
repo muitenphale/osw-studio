@@ -10,6 +10,7 @@ import { cn, logger } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { getSyncOverviewStatus, setAutoSyncWorkspaceId } from '@/lib/vfs/auto-sync';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
+import { apiFetch } from '@/lib/api/backend-status';
 import {
   Dialog,
   DialogContent,
@@ -87,7 +88,7 @@ export function PageLayout({
 
     async function checkQuota() {
       try {
-        const res = await fetch(`/api/w/${workspaceId}/sync/status`);
+        const res = await apiFetch(`/api/w/${workspaceId}/sync/status`);
         if (!res.ok) return;
         const data = await res.json();
         if (data.quota?.storage) {

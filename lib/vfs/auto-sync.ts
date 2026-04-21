@@ -9,6 +9,7 @@ import { Project } from './types';
 import { vfs } from './index';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api/backend-status';
 
 // ── Workspace-scoped URL helpers ─────────────────────────────────────────────
 
@@ -154,13 +155,21 @@ export async function autoSyncProject(projectId: string, silent = true): Promise
     const files = await vfs.listFiles(projectId);
 
     // Push to server
-    const response = await fetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`), {
+    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ project, files }),
     });
+
+    if (response.status === 401) {
+      // Session expired — the auth-expired banner is surfaced by apiFetch.
+      // No point retrying; re-auth is required from the user.
+      syncRetries.delete(projectId);
+      logger.warn(`[AutoSync] Skipping ${projectId}: session expired`);
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(`Sync failed: ${response.status}`);
@@ -223,7 +232,7 @@ export async function checkServerUpdates(projectId: string): Promise<boolean> {
   }
 
   try {
-    const response = await fetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`));
+    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`));
     if (!response.ok) {
       if (response.status === 404) {
         // Project doesn't exist on server
@@ -262,7 +271,7 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
   }
 
   try {
-    const response = await fetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`));
+    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`));
     if (!response.ok) {
       throw new Error(`Failed to pull updates: ${response.status}`);
     }
@@ -329,7 +338,7 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
 
   try {
     // Fetch server status
-    const response = await fetch(getAutoSyncApiUrl('/sync/status'));
+    const response = await apiFetch(getAutoSyncApiUrl('/sync/status'));
     if (!response.ok) {
       // 404 = old route deleted (no workspace context), 401 = not authenticated
       // Return empty status instead of throwing
@@ -403,7 +412,7 @@ export async function autoPullAllProjects(): Promise<{
 
   try {
     // Get all server project statuses
-    const response = await fetch(getAutoSyncApiUrl('/sync/status'));
+    const response = await apiFetch(getAutoSyncApiUrl('/sync/status'));
     if (!response.ok) {
       logger.debug('[AutoSync] Server not available for pull');
       return { pulled: 0, skipped: 0, errors: 0 };
@@ -420,7 +429,7 @@ export async function autoPullAllProjects(): Promise<{
 
         if (!localProject) {
           // Project doesn't exist locally - pull it
-          const pullResponse = await fetch(getAutoSyncApiUrl(`/sync/projects/${serverStatus.id}`));
+          const pullResponse = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${serverStatus.id}`));
           if (!pullResponse.ok) {
             errors++;
             continue;
@@ -500,7 +509,7 @@ export async function autoSyncSkill(skill: import('./skills/types').Skill): Prom
 export async function autoDeleteSkill(skillId: string): Promise<void> {
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
   try {
-    await fetch(getAutoSyncApiUrl(`/sync/skills/${skillId}`), { method: 'DELETE' });
+    await apiFetch(getAutoSyncApiUrl(`/sync/skills/${skillId}`), { method: 'DELETE' });
     logger.debug(`[AutoSync] Skill ${skillId} deleted from server`);
   } catch (error) {
     logger.error(`[AutoSync] Failed to delete skill ${skillId} from server:`, error);
@@ -528,7 +537,7 @@ export async function autoSyncTemplate(template: import('./types').CustomTemplat
 export async function autoDeleteTemplate(templateId: string): Promise<void> {
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
   try {
-    await fetch(getAutoSyncApiUrl(`/sync/templates/${templateId}`), { method: 'DELETE' });
+    await apiFetch(getAutoSyncApiUrl(`/sync/templates/${templateId}`), { method: 'DELETE' });
     logger.debug(`[AutoSync] Template ${templateId} deleted from server`);
   } catch (error) {
     logger.error(`[AutoSync] Failed to delete template ${templateId} from server:`, error);

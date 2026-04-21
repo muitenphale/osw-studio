@@ -23,6 +23,7 @@ import { evaluateRelevantSkills } from './skill-evaluator';
 import { skillsService } from '@/lib/vfs/skills';
 import { track } from '@/lib/telemetry';
 import { extractToolAnalytics } from '@/lib/telemetry/tool-analytics';
+import { apiFetch } from '@/lib/api/backend-status';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -228,6 +229,7 @@ export class MultiAgentOrchestrator {
   private readonly patternRepeatThreshold = 2; // How many repeats of a pattern to trigger termination
   private nudgeCount = 0; // Track how many times we've nudged for status
   private readonly maxNudges = 3; // Max nudge attempts before giving up
+  private lastIterationHadToolError = false; // Track if previous iteration had a failed tool call
   private lastStatusResult: { task: string; done: string; remaining: string; complete: boolean; hasExplicitFlag: boolean } | null = null; // Track status result
   private activeSubOrchestrators = new Set<MultiAgentOrchestrator>(); // Track running sub-agents for stop propagation
   private malformedToolCallRetries = 0; // Track consecutive retries for malformed tool call detection
@@ -362,6 +364,7 @@ export class MultiAgentOrchestrator {
     this.nudgeCount = 0;
     this.malformedToolCallRetries = 0;
     this.lastStatusResult = null;
+    this.lastIterationHadToolError = false;
 
     // Strip trailing nudge messages from a previous nudge_exhaustion exit.
     // Without this, the conversation ends with consecutive user messages that
@@ -746,6 +749,20 @@ export class MultiAgentOrchestrator {
           }
         }
 
+        // After a tool error + reasoning-only response, the model is likely confused.
+        // Prompt it to retry instead of asking for status.
+        if (this.lastIterationHadToolError && !hasContent) {
+          this.lastIterationHadToolError = false; // Only inject once
+          logger.info('[MultiAgentOrchestrator] Reasoning-only response after tool error, prompting retry');
+          this.onProgress?.('tool_error_retry', { iteration });
+          this.addMessage(conversationId, {
+            role: 'user',
+            content: 'Your previous command failed (likely a streaming issue). Continue your work — retry writing the file. If the file is large, split it into multiple smaller cat commands.',
+            ui_metadata: { isSyntheticError: true }
+          });
+          continue;
+        }
+
         // No status yet - nudge (up to maxNudges times)
         if (this.nudgeCount < this.maxNudges) {
           this.nudgeCount++;
@@ -779,9 +796,13 @@ export class MultiAgentOrchestrator {
         ...(response.reasoningDetails && { reasoning_details: response.reasoningDetails })
       });
 
-      // Add tool results
+      // Add tool results and track errors
+      this.lastIterationHadToolError = false;
       for (const result of toolResults) {
         this.addMessage(conversationId, result);
+        if (typeof result.content === 'string' && result.content.startsWith('Error:')) {
+          this.lastIterationHadToolError = true;
+        }
       }
 
       // Check compaction threshold (parent orchestrator only).
@@ -1866,7 +1887,7 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
       max_tokens: summaryMaxTokens,
     };
 
-    const response = await fetch('/api/generate', {
+    const response = await apiFetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
@@ -2041,7 +2062,7 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
     onRetry?: (attempt: number, delay: number, status: number) => void
   ): Promise<Response> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const response = await fetch(url, { ...options, signal: this.abortController.signal });
+      const response = await apiFetch(url, { ...options, signal: this.abortController.signal });
 
       // Retry on rate limits (429), transient server errors (502, 504), and Anthropic overloaded (529)
       // Note: 503 is NOT retried — OpenRouter uses it for "no provider available" which is not transient

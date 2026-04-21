@@ -1,78 +1,115 @@
 /**
  * Frontend Design - Built-in Skill
- * Visual design quality guidelines for distinctive, polished interfaces
+ * Universal design principles and aesthetic direction selection
  */
 
-export const FRONTEND_DESIGN_SKILL = String.raw`---
+export const FRONTEND_DESIGN_SKILL = `---
 name: frontend-design
-description: Read when building visually polished pages, landing pages, dashboards, or portfolios. Covers typography, color, layout, motion, and avoiding generic aesthetics.
+description: Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applications (examples include websites, landing pages, dashboards, React components, HTML/CSS layouts, or when styling/beautifying any web UI). Generates creative, polished code and UI design that avoids generic AI aesthetics.
 ---
 
-# Frontend Design Quality
+This skill establishes universal design principles and requires you to commit to a specific aesthetic direction before writing code. For deeper guidance, read the aesthetic sub-skill that matches your chosen direction.
 
-This skill guides creation of visually distinctive interfaces that avoid generic AI aesthetics. It covers the aesthetic layer — typography, color, composition, motion, and atmosphere. For project structure and execution order, see the workflow skill.
+## Step 1: Design Intent (Required)
 
-## Design Thinking
+Before writing any code, output a design intent block as a comment at the top of your first file. Making these decisions explicitly prevents defaulting to generic patterns.
 
-Before writing any CSS, commit to an aesthetic direction. Every project should feel intentionally designed for its context, not assembled from defaults.
+\`\`\`
+/*
+ * DESIGN INTENT
+ * Tone: [one phrase — e.g., "dark cinematic", "bright editorial", "warm minimal", "bold geometric"]
+ * Fonts: [display] + [body] — e.g., "Cormorant Garamond 300 + DM Sans 400"
+ * Palette: [bg] [surface] [text] [accent] — e.g., "#0a0a0a #141414 #e8e6e1 #c4841d"
+ * Layout: [one phrase — e.g., "asymmetric split hero, full-bleed color blocks"]
+ * Memorable element: [the one thing someone remembers — e.g., "oversized serif hero text"]
+ */
+\`\`\`
 
-**Pick a tone** and execute it with consistency. A few examples: brutally minimal, maximalist/layered, editorial/magazine, retro/vintage, brutalist/raw, soft/pastel, dark & cinematic, geometric/art deco. There are many more — the point is to choose one and commit. A cohesive simple design always beats an inconsistent elaborate one.
+Every decision below flows from this block. If a technique doesn't match the stated tone, don't use it.
 
-**What makes it memorable?** Identify the one visual element someone will remember — an unusual color, a striking typographic choice, an unexpected layout. Design around that anchor.
+## Step 2: Choose an Aesthetic Direction
 
-## Typography
+After setting your design intent, read the sub-skill that best matches your tone. Each one is a complete recipe — specific fonts, colors, spacing, motion, and component patterns. Following one produces a cohesive, opinionated result instead of a generic mix.
 
-Typography is the single highest-impact design choice. Pick two fonts maximum — a distinctive display font for headings and a clean body font for text. The pairing should reflect the project's tone.
+**Available aesthetics:**
 
-Some strong Google Fonts pairings for inspiration:
-- Playfair Display + Source Sans 3 (editorial), Sora + DM Sans (geometric), Fraunces + Outfit (warm), Cormorant Garamond + Lato (luxurious), Archivo Black + Work Sans (impactful)
+| Sub-skill | Tone | Good for |
+|-----------|------|----------|
+| \`frontend-design-bold-geometric\` | High contrast, massive type, kinetic energy | Product launches, brand sites, portfolios with attitude |
+| \`frontend-design-soft-organic\` | Warm, rounded, gentle, approachable | SaaS, wellness, consumer products, friendly startups |
+| \`frontend-design-editorial\` | Serif-forward, content-dense, magazine-like | Blogs, publications, long-form portfolios, news |
+| \`frontend-design-minimal\` | Extreme whitespace, monochrome, restrained | Luxury brands, architecture, photography, high-end portfolios |
 
-Make headings dramatically larger than body text — timid size differences create visual monotony. A hero headline at 3-4.5rem against 1rem body text creates real hierarchy.
+Read the matching sub-skill with: \`cat /.skills/frontend-design-{name}.md\`
 
-Don't default to a single generic font (Arial, system-ui) for everything. That's the fastest way to look templated.
+If the project doesn't clearly fit one aesthetic, pick the closest match and adapt. Blending two is fine as long as the Design Intent block states your choices clearly. When in doubt, default to bold-geometric for marketing/product sites and soft-organic for apps/tools.
 
-## Color & Theme
+## Universal Principles
 
-Build a color system with CSS custom properties — a dominant color, one sharp accent, surface tones, and text colors. A dominant-plus-accent approach outperforms evenly distributed multi-color palettes.
+These apply regardless of which aesthetic you choose.
 
-For dark themes, avoid pure black (#000) — use #0a0a0a or #111. For light themes, use warm (#fafaf9) or cool (#f8fafc) off-whites instead of #fff. Tint your grays warm or cool rather than using neutral #999.
+### Typography
 
-Ensure text-on-background contrast meets WCAG AA (4.5:1). Use accent color sparingly — CTAs, active states, key highlights only.
+Pick two fonts: a display font for headings and a body font for text. The sub-skill specifies exact pairings, but these rules are universal:
 
-Avoid purple-to-blue gradients on white backgrounds — they're the most overused AI-generated palette.
+- **Size hierarchy matters.** Hero headings should be dramatically larger than body text. Use \`clamp()\` for fluid scaling. Timid size differences (2rem heading, 1rem body) create monotony.
+- **Weight as a tool.** Light weights (300) on large text create elegance. Heavy weights (700–800) create impact. Mixing both adds range.
+- **Never default to system fonts.** Arial, Helvetica, system-ui as primary fonts signal "no design thought went into this."
 
-## Spatial Composition
+### Color
 
-Generous spacing is the clearest signal of professional design. Sections need real breathing room (5-8rem padding), not token spacing. Vary padding between sections rather than making everything uniform.
+- **Three text tiers, not two.** Headings (full), body (muted), captions/metadata (dim). Two tiers makes body text either compete with headings or disappear.
+- **Tint your neutrals.** Pure grays (#999, #666) feel dead. Warm-shift for warm designs, cool-shift for cool ones.
+- **One accent, used sparingly.** CTAs, active states, key highlights. Per-item color variants are fine if systematic.
 
-Not every section needs to be centered-and-stacked. Consider asymmetric layouts, overlapping elements that break into adjacent sections, full-bleed sections alternating with contained content, and varied column widths. Body text should max out around 65-75 characters per line (~42rem) for readability.
+### Spacing & Layout
 
-## Backgrounds & Atmosphere
+- **Generous section padding (5–8rem vertical)** is the clearest signal of professional design.
+- **Content width variation.** Body text narrow (max 640px), headings wider, images and color blocks full-bleed. The contrast creates rhythm.
+- **Vary spacing between sections** rather than making everything uniform.
 
-Flat solid-color backgrounds feel lifeless. Create depth and atmosphere with subtle gradients, mesh/radial gradient layers, noise or grain textures (SVG filter overlays), geometric patterns, or layered transparencies. Match the technique to the aesthetic — a brutalist site uses raw textures differently than a luxury one.
+### Images
 
-Alternate between light and dark sections for visual rhythm. This creates natural content separation without relying on borders or dividers.
+When using stock photography (Unsplash URLs work without API keys: \`https://images.unsplash.com/photo-{id}?w={width}&q=80&fit=crop\`):
 
-## Motion & Interaction
+- All images: \`object-fit: cover\`, consistent border-radius matching the tone.
+- Dark overlay on hero images for text readability.
+- Image strips (3 side-by-side, 35–45vh) provide visual breathing room between content sections.
 
-Every interactive element should respond to interaction — hover states on cards, links, and buttons are table stakes. Use CSS transitions (transform, opacity, box-shadow) rather than animating layout properties.
+### Interaction
 
-For scroll-triggered reveals, use IntersectionObserver to add a class when elements enter the viewport. Keep motion purposeful — pick a few key moments rather than animating everything. Excessive bounce and elastic easing looks cheap; subtle ease-out movements feel more refined.
+All interactive elements need hover feedback. This is non-negotiable regardless of aesthetic:
+- Cards: translate up 4–6px, deepen shadow. Transition 0.4–0.6s ease-out.
+- Links/buttons: color change, underline transition, or subtle scale (1.02).
+- Images in cards: scale 1.03–1.05 with overflow hidden.
 
-## Shadows & Depth
+### Mobile & Responsive
 
-Single box-shadows look flat. Layer multiple shadows at different offsets and opacities for realistic elevation — a tight shadow for definition, a medium spread for depth, and a large soft shadow for atmosphere.
+- Touch targets: minimum 44px for all interactive elements.
+- Stack split layouts vertically on mobile.
+- Fluid typography via \`clamp()\`.
+- Navigation must collapse on mobile (hamburger pattern).
+- Read the \`responsive\` skill for complete mobile guidance.
+
+### Selection & Scrollbar
+
+Small details that signal intentionality:
+- \`::selection\` color matching the accent.
+- Custom scrollbar: thin track in surface color, thumb in accent. Or hide entirely for immersive layouts.
 
 ## What to Avoid
 
-These patterns make interfaces look AI-generated and generic:
-- Same font for everything, no display/body distinction
+These patterns make interfaces look AI-generated:
+
+- Same font for headings and body with no weight/size distinction
+- Neutral grays without warm or cool tinting
 - Uniform spacing — every section padded identically
-- Everything centered and symmetrical
-- Inconsistent border-radius — pick sharp, subtle, or rounded and commit
-- No hover states — interactive elements feel dead
-- Neutral gray text (#999) instead of warm or cool tinted grays
-- Equal-width everything — no variation in content width
-- Single background tone throughout — no light/dark rhythm
-- Placeholder content left in — replace all Lorem ipsum with realistic text
+- Everything centered and symmetrical for the entire page
+- Single background tone throughout with no surface variation
+- Inconsistent border-radius — pick a radius language and commit
+- No hover states on interactive elements
+- Purple-to-blue gradients on white backgrounds
+- Using the same font (Space Grotesk, Inter, etc.) across every generation
+- Scroll hijacking or libraries that override native scroll
+- Bounce/elastic easing — subtle ease-out feels more refined
 `;
