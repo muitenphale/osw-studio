@@ -1,10 +1,25 @@
 import { VirtualFileSystem } from './index';
 import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-errors';
 
+/**
+ * Minimal context passed from the orchestrator into the shell executor so
+ * commands can emit progress events (e.g. `ask`, `brief`, `spec`) without
+ * depending on browser globals. Defined here to avoid a circular import
+ * with lib/llm; callers pass a compatible subset of ToolExecutionContext.
+ */
+export interface ShellContext {
+  onProgress?: (event: string, data?: any) => void;
+}
+
 type ShellResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /**
+   * Optional reason flag the orchestrator can act on. Currently used by `ask`
+   * to signal "awaiting_user" so the loop pauses for a chip selection.
+   */
+  exitReason?: string;
 };
 
 const TRUNCATE_CHARS = 100000;
@@ -618,7 +633,8 @@ async function vfsShellExecute(
   vfs: VirtualFileSystem,
   projectId: string,
   cmd: string[],
-  stdin?: string
+  stdin?: string,
+  ctx?: ShellContext
 ): Promise<ShellResult> {
   // Validate inputs
   if (!projectId || typeof projectId !== 'string') {
@@ -659,18 +675,21 @@ async function vfsShellExecute(
     const allStdout: string[] = [];
     const allStderr: string[] = [];
     let lastExitCode = 0;
+    let lastExitReason: string | undefined;
 
     for (const singleCmd of commands) {
-      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd);
+      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd, undefined, ctx);
       if (result.stdout) allStdout.push(result.stdout);
       if (result.stderr) allStderr.push(result.stderr);
       lastExitCode = result.exitCode;
+      lastExitReason = result.exitReason;
     }
 
     return {
       stdout: allStdout.join('\n'),
       stderr: allStderr.join('\n'),
-      exitCode: lastExitCode
+      exitCode: lastExitCode,
+      exitReason: lastExitReason
     };
   }
 
@@ -696,18 +715,21 @@ async function vfsShellExecute(
     // Execute commands sequentially
     const allStdout: string[] = [];
     const allStderr: string[] = [];
+    let lastExitReason: string | undefined;
 
     for (const singleCmd of commands) {
-      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd);
+      const result = await vfsShellExecuteSingle(vfs, projectId, singleCmd, undefined, ctx);
       if (result.stdout) allStdout.push(result.stdout);
       if (result.stderr) allStderr.push(result.stderr);
+      lastExitReason = result.exitReason;
 
       // Stop on first failure (that's && semantics)
       if (result.exitCode !== 0) {
         return {
           stdout: allStdout.join('\n'),
           stderr: allStderr.join('\n'),
-          exitCode: result.exitCode
+          exitCode: result.exitCode,
+          exitReason: result.exitReason
         };
       }
     }
@@ -715,7 +737,8 @@ async function vfsShellExecute(
     return {
       stdout: allStdout.join('\n'),
       stderr: allStderr.join('\n'),
-      exitCode: 0
+      exitCode: 0,
+      exitReason: lastExitReason
     };
   }
 
@@ -741,7 +764,7 @@ async function vfsShellExecute(
     // Execute commands sequentially, stop on first success
     let lastResult: ShellResult = { stdout: '', stderr: '', exitCode: 1 };
     for (const singleCmd of commands) {
-      lastResult = await vfsShellExecuteSingle(vfs, projectId, singleCmd);
+      lastResult = await vfsShellExecuteSingle(vfs, projectId, singleCmd, undefined, ctx);
       if (lastResult.exitCode === 0) {
         return lastResult;
       }
@@ -768,13 +791,13 @@ async function vfsShellExecute(
     if (currentSeg.length > 0) segments.push(currentSeg);
 
     if (segments.length < 2) {
-      return vfsShellExecuteSingle(vfs, projectId, cleanCmd);
+      return vfsShellExecuteSingle(vfs, projectId, cleanCmd, undefined, ctx);
     }
 
     // Execute pipe chain left-to-right, passing stdout as stdin
     let pipeStdin: string | undefined = stdin;
     for (let i = 0; i < segments.length; i++) {
-      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], pipeStdin);
+      const result = await vfsShellExecuteSingle(vfs, projectId, segments[i], pipeStdin, ctx);
       if (result.exitCode !== 0) return result;
       pipeStdin = result.stdout;
     }
@@ -782,7 +805,7 @@ async function vfsShellExecute(
     return { stdout: pipeStdin || '', stderr: '', exitCode: 0 };
   }
 
-  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, stdin);
+  return vfsShellExecuteSingle(vfs, projectId, cleanCmd, stdin, ctx);
 }
 
 /**
@@ -845,7 +868,8 @@ async function vfsShellExecuteSingle(
   vfs: VirtualFileSystem,
   projectId: string,
   cleanCmd: string[],
-  stdin?: string
+  stdin?: string,
+  ctx?: ShellContext
 ): Promise<ShellResult> {
   // Extract redirect operators (> or >>) before processing the command
   const { cleanArgs: argsAfterRedirect, redirect } = extractRedirect(cleanCmd.slice(1));
@@ -1798,10 +1822,18 @@ Tip: Use -C for balanced context. PATH defaults to / if omitted.`,
             continue;
           }
           // Address-based expression (/pattern/d, 5,10d, $d, /p1/,/p2/c\text, etc.)
-          // Must distinguish from file paths like /index.html:
-          //   Address: /pattern/<cmd> or /pattern/,  (closed /.../ followed by command or comma)
-          //   Path:    /filename.ext                  (no closing / + command)
-          if (/^\d+[,dpcians]/.test(a) || /^[\\$]/.test(a) || /^\/[^/]*\/[,dpcians]/.test(a)) {
+          // Must distinguish from file paths like /styles/style.css:
+          //   Address: /re/d, /re/p, /re/n         (command letter at end of token)
+          //            /re/c\text, /re/a\text, /re/i\text  (command letter + backslash)
+          //            /re/,/re2/...                (range — comma right after the first addr)
+          //   Path:    /dir/file.ext               (second slash followed by arbitrary text)
+          // The previous heuristic `/^\/[^/]*\/[,dpcians]/` misclassified any path whose
+          // basename began with d/p/c/i/a/n/s (e.g. /src/index.ts → command `i`).
+          if (
+            /^\d+[,dpcians]/.test(a) ||
+            /^[\\$]/.test(a) ||
+            /^\/[^/]*\/(?:[dpn]$|[cai]\\|,)/.test(a)
+          ) {
             expressions.push(a);
             continue;
           }
@@ -2505,6 +2537,127 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
           exitCode: 0
         };
       }
+      case 'ask': {
+        // ask [--prompt "Question"] "Option A" "Option B" "Option C"
+        // Presents tappable chip options to the user. The orchestrator detects
+        // exitReason='awaiting_user' and pauses the loop until the user picks.
+        let askPrompt: string | undefined;
+        const options: string[] = [];
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (a === '--prompt' && args[i + 1] !== undefined) {
+            askPrompt = args[++i];
+          } else if (a) {
+            options.push(a);
+          }
+        }
+        if (options.length < 2) {
+          return {
+            stdout: '',
+            stderr: 'Usage: ask [--prompt "Question"] "Option A" "Option B" ["Option C" ...]\nNeed at least two options.',
+            exitCode: 1
+          };
+        }
+        ctx?.onProgress?.('ask', { prompt: askPrompt, options });
+        return {
+          stdout: `Awaiting user selection. Options presented: ${options.map(o => `"${o}"`).join(', ')}`,
+          stderr: '',
+          exitCode: 0,
+          exitReason: 'awaiting_user'
+        };
+      }
+      case 'brief': {
+        // brief --merge << 'EOF' { ...JSON... } EOF
+        // Merges a JSON object into the project brief. The body comes via stdin.
+        const mode = args[0];
+        if (mode !== '--merge') {
+          return {
+            stdout: '',
+            stderr: 'Usage: brief --merge << \'EOF\'\n{ ...JSON... }\nEOF',
+            exitCode: 1
+          };
+        }
+        if (!stdin || !stdin.trim()) {
+          return {
+            stdout: '',
+            stderr: 'brief --merge: expected JSON body via heredoc (<< \'EOF\' ... EOF).',
+            exitCode: 1
+          };
+        }
+        let parsed: any;
+        try {
+          parsed = JSON.parse(stdin.trim());
+        } catch (err: any) {
+          return {
+            stdout: '',
+            stderr: `brief --merge: invalid JSON — ${err.message}`,
+            exitCode: 1
+          };
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return {
+            stdout: '',
+            stderr: 'brief --merge: body must be a JSON object.',
+            exitCode: 1
+          };
+        }
+        ctx?.onProgress?.('brief_update', { brief: parsed });
+        const fields = Object.keys(parsed);
+        return {
+          stdout: fields.length > 0 ? `Brief updated: ${fields.join(', ')}` : 'Brief unchanged.',
+          stderr: '',
+          exitCode: 0
+        };
+      }
+      case 'spec': {
+        // spec --append "Section heading" << 'EOF'
+        // prose content
+        // EOF
+        const mode = args[0];
+        if (mode !== '--append') {
+          return {
+            stdout: '',
+            stderr: 'Usage: spec --append "Section heading" << \'EOF\'\nprose\nEOF',
+            exitCode: 1
+          };
+        }
+        const section = args[1];
+        if (!section || typeof section !== 'string' || !section.trim()) {
+          return {
+            stdout: '',
+            stderr: 'spec --append: section heading required as second argument.',
+            exitCode: 1
+          };
+        }
+        if (!stdin || !stdin.trim()) {
+          return {
+            stdout: '',
+            stderr: 'spec --append: expected prose body via heredoc (<< \'EOF\' ... EOF).',
+            exitCode: 1
+          };
+        }
+        ctx?.onProgress?.('spec_update', {
+          section: section.trim(),
+          content: stdin.trim()
+        });
+        return {
+          stdout: `Spec updated: ${section.trim()}`,
+          stderr: '',
+          exitCode: 0
+        };
+      }
+      case 'propose-create': {
+        // propose-create — signals project is ready to create (user confirms via button).
+        // The accumulated brief is held client-side; this command just flips the
+        // "ready" flag. The orchestrator detects this and ends the setup loop.
+        ctx?.onProgress?.('project_ready', {});
+        return {
+          stdout: 'Project ready to create. The user can review the brief and click "Create now" to confirm.',
+          stderr: '',
+          exitCode: 0,
+          exitReason: 'setup_propose_create'
+        };
+      }
       case 'ss': {
         // ss (supersed) — smart file editing with multiple modes
         // Syntax: ss [flags] /path/to/file << 'EOF'\nsearch\n===\nreplacement\nEOF
@@ -2679,15 +2832,21 @@ Note: sqlite3 is only available in Server Mode and when a deployment context is 
 
 // Create a global instance that can be imported
 export const vfsShell = {
-  execute: async (projectId: string, cmd: string[], stdin?: string): Promise<{ success: boolean; stdout?: string; stderr?: string }> => {
+  execute: async (
+    projectId: string,
+    cmd: string[],
+    stdin?: string,
+    ctx?: ShellContext
+  ): Promise<{ success: boolean; stdout?: string; stderr?: string; exitReason?: string }> => {
     // Import singleton vfs to ensure transient files (skills) are available
     const { vfs } = await import('./index');
     await vfs.init();
-    const result = await vfsShellExecute(vfs, projectId, cmd, stdin);
+    const result = await vfsShellExecute(vfs, projectId, cmd, stdin, ctx);
     return {
       success: result.exitCode === 0,
       stdout: result.stdout,
-      stderr: result.stderr
+      stderr: result.stderr,
+      exitReason: result.exitReason
     };
   }
 };

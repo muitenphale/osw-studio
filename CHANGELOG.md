@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.60.0 - 2026-04-26
+
+### Describe Mode
+
+- **Conversational project setup**: New "Plan the project first" option in the create-project dialog opens a chat with a setup agent. Describe what you want to build; the agent figures out the runtime, template, pages, and any backend capabilities through a short conversation. The project is scaffolded with full context, so the in-project agent doesn't ask the same questions again. Replaces the "AI Project Setup" template shortcut (removed).
+- **Live brief sidebar**: Project brief updates in real time as the conversation progresses — name, type, pages, capabilities, direction, plus runtime and template under the hood. Collapsible spec preview shows accumulated context. The "Create now" button enables once the brief has the minimum it needs (name + runtime + template).
+- **Tappable chip prompts**: When the agent asks closed-ended questions ("What aesthetic — bold, soft, editorial, minimal?"), it presents tappable options instead of free text. Selecting one sends it as the next message.
+- **Creation confirmation**: When the brief is ready the agent proposes creation; the user reviews the brief and clicks "Create project" to confirm or "Not yet" to keep adjusting. Declining attaches a context note to the next message so the agent knows without re-asking.
+- **Output files**: Projects from describe mode start with `.PROMPT.md` (terse brief appended to the runtime's domain prompt), `.DESIGN.md` (substantive context from the conversation), and `.DESIGN-CONVERSATION.md` (raw transcript with agent prose, ask prompts, and spec sections).
+- **Stack defaults**: Defaults to Handlebars + vanilla HTML/CSS/JS for most websites. Frameworks only when the user names one or a feature requires one.
+
+### AI Orchestration
+
+- **`ask` shell command**: The in-project agent can now present tappable chip options to the user instead of asking in prose — useful when it hits a real either/or choice and wants a single decision before proceeding. `ask [--prompt "Question"] "Option A" "Option B" "Option C"`. The user's selection becomes the next message in the conversation.
+- **Live reasoning preview**: The reasoning badge now shows the latest streamed thinking content while the model is still generating, instead of a static `Thinking...` label. Falls back to `Thinking...` only before any content arrives.
+
+### UI
+
+- **Backend status banner improvements**: Refresh button checks server reachability instead of the models API. Dismiss button on both banners. Improved messaging about sync impact and local data safety.
+- **Hidden files bar in file explorer**: Bottom bar shows the count of hidden files and folders. Clicking toggles visibility. Tooltip explains that dot-prefixed items are excluded from deployments and ZIP exports but included in backups and templates.
+- **Dot-prefix export exclusion**: Any root-level file or directory starting with `.` (e.g. `.PROMPT.md`, `.DESIGN.md`, `.skills/`) is excluded from deployments and ZIP exports, while still being included in backups and templates.
+- **Unsaved changes guard**: Back button, logo click, Escape, and browser tab close prompt for confirmation when the AI is generating or there are unsaved changes. Applies to both the workspace and the create-project dialog.
+- **Fullscreen preview preserves state**: Entering and exiting fullscreen no longer wipes the chat draft or reloads the preview iframe. Workspace panels stay mounted across the transition.
+- **Folder drag-and-drop upload**: Dropping a folder into the file explorer recurses into it, preserving the folder structure and uploading all files inside. A persistent loading toast shows live progress (e.g. `Uploading 17/42 files · 3/3 folders`). Intermediate directories are auto-created. Unsupported files inside folders are silently skipped.
+- **Single preview reload when deleting a directory**: Deleting a folder with many files now triggers one preview compile and one file-tree refresh at the end, instead of one per contained file — eliminates flicker on large deletions.
+- **Pagination on list views**: Projects, Templates, and Deployments paginate at 24 per page; Skills at 30. Skills also unifies its previously separate Built-in and Custom sections into a single list with toggle chips to hide either group.
+
+### Telemetry
+
+- **New anonymous events**: `project_create` (method: quick/describe, runtime, template), `deployment_publish` (runtime, success/fail, has_custom_domain), `compaction_fired` (tokens before/after, provider/model), `image_attached` (source: drop/paste, count). All categorical — no file contents, prompts, names, or domain values. Disclosure dialog updated with matching bullets.
+
+### Bug Fixes
+
+- **Chained heredocs written to the wrong file**: When a single `shell` call contained multiple back-to-back heredocs (e.g. several `cat > /file << 'EOF' … EOF` blocks), the greedy heredoc regex matched the *last* `EOF` in the input, so the first file received everything in between as its body — including the literal `EOF` lines and the intermediate commands. Subsequent files were silently skipped. The shell executor now splits compound commands into individual statements before parsing each heredoc, so each `EOF` correctly terminates its own block.
+- **sed misclassified many real file paths as expressions**: `sed -i 's/old/new/g' /styles/style.css` failed with `sed: unsupported command "style.css"` because the argument parser flagged any path whose basename began with d/p/c/i/a/n/s as a sed address-expression rather than a file. The classifier now requires the command letter to be at a valid terminator, so common paths like `/src/index.ts` and `/public/nav.svg` are correctly treated as files.
+- **Empty assistant text bubble**: Reasoning models (e.g. Kimi K2.6) sometimes emit a whitespace-only assistant message between reasoning and the tool call. That rendered as an empty bordered bubble. The chat panel now skips text items whose accumulated content is just whitespace.
+- **Spurious `/api/sync/status` 404s in dev**: The sync status dialog hook auto-fetched on mount, hitting a pre-multitenancy URL when no workspace was scoped yet. The fetch now runs only when the dialog opens.
+- **Transient rate-limits misreported as "credit limit reached"**: When OpenRouter returned a 429 with a transient upstream rate-limit message (e.g. "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly"), the error classifier matched the substring "limit" inside "rate-limited" and reported "OpenRouter credit limit reached. Add credits…" — sending users to the wrong fix. The classifier now checks for rate-limit phrasing (or a `Retry-After` header) first and returns a "temporarily rate-limited, try again in a moment" message; the credit-exhaustion path keeps the stricter keyword set.
+- **Shell commands with newline-wrapped `cmd` fail as "command not found"**: When models sent `cmd` with leading/trailing newlines (e.g. `"\ncat index.html\n"`), `parseShellCommand` didn't treat `\n` as a word separator — newlines were appended to the command name, producing `"\ncat"` instead of `"cat"`, which missed the switch-case lookup. The parser now splits on `\n` and `\r` alongside spaces and tabs.
+- **DeepSeek V4 Pro 400 on multi-turn conversations**: DeepSeek V4 Pro via OpenRouter returned `The reasoning_content in the thinking mode must be passed back to the API` on every follow-up turn. DeepSeek validates the *presence* of a `reasoning_details` field on prior assistant messages — even when no reasoning content was actually streamed back. Assistant messages now always include the field (defaulting to an empty array), so multi-turn replay satisfies the validation.
+
 ## v1.59.0 - 2026-04-21
 
 ### AI Orchestration

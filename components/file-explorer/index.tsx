@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -59,6 +60,8 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
   const [draggedItem, setDraggedItem] = useState<FileTreeItem | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [hiddenFileCount, setHiddenFileCount] = useState(0);
+  const [hiddenFolderCount, setHiddenFolderCount] = useState(0);
   const [promptDismissed, setPromptDismissed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem(`osw-prompt-dismissed-${projectId}`) === 'true';
@@ -121,11 +124,37 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         allItems.push(...filteredTransient);
       }
 
+      // Count hidden items (dot-prefixed at root level) — always, regardless of showHidden
+      // Include transient items (e.g. .skills/, .server/) in the count even when not shown
+      let countItems = allItems;
+      if (!showHidden) {
+        const transientFiles = await vfs.listDirectory(projectId, '/', { includeTransient: true });
+        const existingPaths = new Set(allItems.map(item => item.path));
+        const transientDot = transientFiles.filter(f => f.path.startsWith('/.') && !existingPaths.has(f.path));
+        countItems = [...allItems, ...transientDot];
+      }
+      let hFiles = 0;
+      const hFolders = new Set<string>();
+      for (const item of countItems) {
+        const firstSeg = item.path.split('/').filter(Boolean)[0];
+        if (!firstSeg?.startsWith('.')) continue;
+        if (item.type === 'directory') {
+          hFolders.add(item.path);
+        } else {
+          const segments = item.path.split('/').filter(Boolean);
+          if (segments.length === 1) {
+            hFiles++;
+          } else {
+            hFolders.add('/' + firstSeg);
+          }
+        }
+      }
+
       // Include generated files (bundle.js, bundle.css) — always visible
       const generatedFiles = vfs.getGeneratedFiles();
-      const existingPaths = new Set(allItems.map(item => item.path));
+      const knownPaths = new Set(allItems.map(item => item.path));
       for (const gf of generatedFiles) {
-        if (!existingPaths.has(gf.path)) {
+        if (!knownPaths.has(gf.path)) {
           allItems.push(gf);
         }
       }
@@ -133,6 +162,8 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
       // Only update state if this is still the latest call
       if (version !== loadFilesVersionRef.current) return;
 
+      setHiddenFileCount(hFiles);
+      setHiddenFolderCount(hFolders.size);
       const projectFiles = allItems.filter(item => item.type !== 'directory') as VirtualFile[];
       setFiles(projectFiles);
       setFileTree(buildFileTree(allItems, showHidden));
@@ -336,18 +367,153 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
   };
 
+  // Walk a dropped DataTransfer entry, yielding a flat list of {file, path}
+  // pairs where `path` preserves the dropped folder structure under parentPath.
+  // Uses the webkit entry API (FileSystemEntry) which is the only way to
+  // recurse into dropped directories — item.getAsFile() on a folder returns a
+  // zero-byte File with the folder's name (which is what caused the
+  // "file type not supported: background" error when dropping a folder).
+  const collectEntryFiles = async (
+    entry: any,
+    parentPath: string
+  ): Promise<Array<{ file: File; path: string }>> => {
+    const joinPath = (dir: string, name: string) =>
+      dir === '/' ? `/${name}` : `${dir}/${name}`;
+
+    if (entry?.isFile) {
+      const file: File = await new Promise((resolve, reject) =>
+        entry.file(resolve, reject)
+      );
+      return [{ file, path: joinPath(parentPath, entry.name) }];
+    }
+    if (entry?.isDirectory) {
+      const myPath = joinPath(parentPath, entry.name);
+      const reader = entry.createReader();
+      const results: Array<{ file: File; path: string }> = [];
+      // readEntries may return in batches — loop until empty.
+      while (true) {
+        const batch: any[] = await new Promise((resolve, reject) =>
+          reader.readEntries(resolve, reject)
+        );
+        if (!batch.length) break;
+        for (const child of batch) {
+          const sub = await collectEntryFiles(child, myPath);
+          results.push(...sub);
+        }
+      }
+      return results;
+    }
+    return [];
+  };
+
+  // Ensure every ancestor directory in `path` exists. VFS.createFile only
+  // creates the immediate parent via updateFileTree, which leaves gaps for
+  // deeply nested uploads like /a/b/c/file.png when /a and /a/b don't exist.
+  const ensureAncestorDirs = async (filePath: string) => {
+    const parts = filePath.split('/').filter(Boolean);
+    parts.pop(); // drop file name
+    let acc = '';
+    for (const part of parts) {
+      acc += '/' + part;
+      await vfs.createDirectory(projectId, acc);
+    }
+  };
+
   const handleFileDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     try {
       const items = Array.from(e.dataTransfer.items);
+      const collected: Array<{ file: File; path: string }> = [];
+      let hasFolder = false;
 
       for (const item of items) {
-        if (item.kind === 'file') {
+        if (item.kind !== 'file') continue;
+        const entry = (item as any).webkitGetAsEntry?.();
+        if (entry?.isDirectory) {
+          hasFolder = true;
+          const sub = await collectEntryFiles(entry, '/');
+          collected.push(...sub);
+        } else if (entry?.isFile) {
+          const sub = await collectEntryFiles(entry, '/');
+          collected.push(...sub);
+        } else {
+          // Fallback for browsers without entry API.
           const file = item.getAsFile();
-          if (file) {
-            await uploadFile(file, '/');
+          if (file) collected.push({ file, path: `/${file.name}` });
+        }
+      }
+
+      if (hasFolder) {
+        // Pre-compute unique directories so progress totals are known upfront.
+        const dirPaths = new Set<string>();
+        for (const { path } of collected) {
+          const parts = path.split('/').filter(Boolean);
+          parts.pop(); // drop file name
+          let acc = '';
+          for (const p of parts) {
+            acc += '/' + p;
+            dirPaths.add(acc);
           }
+        }
+        // Sort shallowest-first so parents exist before children when we create them.
+        const sortedDirs = [...dirPaths].sort((a, b) => a.split('/').length - b.split('/').length);
+        const totalDirs = sortedDirs.length;
+        const totalFiles = collected.length;
+
+        const renderProgress = (filesDone: number, dirsDone: number) =>
+          `Uploading ${filesDone}/${totalFiles} files · ${dirsDone}/${totalDirs} folders`;
+
+        const toastId = toast.loading(renderProgress(0, 0));
+
+        // Create directories first — fast but gives the progress bar something
+        // to move on even when all files are in one deep folder.
+        let dirsDone = 0;
+        for (const dirPath of sortedDirs) {
+          try {
+            await vfs.createDirectory(projectId, dirPath);
+          } catch (err) {
+            logger.error('Failed to create directory during folder upload:', dirPath, err);
+          }
+          dirsDone++;
+          toast.loading(renderProgress(0, dirsDone), { id: toastId });
+        }
+
+        // Then stream files. skipReload avoids a file-tree refetch per file;
+        // preview debounces filesChanged itself (150ms), so we don't spam it.
+        let uploaded = 0;
+        let skipped = 0;
+        let failed = 0;
+        for (const { file, path } of collected) {
+          const result = await uploadFile(file, undefined, {
+            explicitPath: path,
+            silent: true,
+            skipReload: true,
+          });
+          if (result === 'ok') uploaded++;
+          else if (result === 'unsupported' || result === 'too-large') skipped++;
+          else failed++;
+          toast.loading(renderProgress(uploaded + skipped + failed, dirsDone), { id: toastId });
+        }
+
+        // Single refresh at the end.
+        await loadFiles();
+
+        const parts: string[] = [];
+        if (uploaded) parts.push(`${uploaded} file${uploaded === 1 ? '' : 's'}`);
+        if (totalDirs) parts.push(`${totalDirs} folder${totalDirs === 1 ? '' : 's'}`);
+        if (skipped) parts.push(`${skipped} skipped`);
+        if (failed) parts.push(`${failed} failed`);
+        if (uploaded === 0 && failed === 0 && skipped === 0) {
+          toast.error('No supported files found in folder', { id: toastId });
+        } else if (failed > 0) {
+          toast.error(`Uploaded ${parts.join(' · ')}`, { id: toastId });
+        } else {
+          toast.success(`Uploaded ${parts.join(' · ')}`, { id: toastId });
+        }
+      } else {
+        for (const { file, path } of collected) {
+          await uploadFile(file, undefined, { explicitPath: path });
         }
       }
     } finally {
@@ -355,20 +521,27 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
   };
 
-  const uploadFile = async (file: File, targetDir: string) => {
+  const uploadFile = async (
+    file: File,
+    targetDir: string | undefined,
+    options?: { explicitPath?: string; silent?: boolean; skipReload?: boolean }
+  ): Promise<'ok' | 'unsupported' | 'too-large' | 'error'> => {
+    const silent = options?.silent === true;
+    const skipReload = options?.skipReload === true;
     if (!isFileSupported(file.name)) {
-      toast.error(`File type not supported: ${file.name}`);
-      return;
+      if (!silent) toast.error(`File type not supported: ${file.name}`);
+      return 'unsupported';
     }
 
     const fileType = getFileTypeFromPath(file.name);
     const sizeLimit = FILE_SIZE_LIMITS[fileType];
     if (file.size > sizeLimit) {
-      toast.error(`File too large: ${file.name}. Maximum size is ${Math.round(sizeLimit / 1024 / 1024)}MB`);
-      return;
+      if (!silent) toast.error(`File too large: ${file.name}. Maximum size is ${Math.round(sizeLimit / 1024 / 1024)}MB`);
+      return 'too-large';
     }
 
-    const filePath = targetDir === '/' ? `/${file.name}` : `${targetDir}/${file.name}`;
+    const filePath = options?.explicitPath
+      ?? (targetDir === '/' || !targetDir ? `/${file.name}` : `${targetDir}/${file.name}`);
     const isLarge = file.size > 512 * 1024; // 512KB threshold
 
     const doUpload = async () => {
@@ -380,8 +553,9 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         content = await file.text();
       }
 
+      await ensureAncestorDirs(filePath);
       await vfs.createFile(projectId, filePath, content);
-      await loadFiles();
+      if (!skipReload) await loadFiles();
     };
 
     try {
@@ -389,7 +563,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         const sizeMB = (file.size / 1e6).toFixed(1);
         await toast.promise(doUpload(), {
           loading: `Uploading ${file.name} (${sizeMB} MB)…`,
-          success: `Uploaded ${file.name}`,
+          success: silent ? null as unknown as string : `Uploaded ${file.name}`,
           error: () => {
             // Suppress toast — error is handled in the outer catch
             return null as unknown as string;
@@ -397,23 +571,30 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         });
       } else {
         await doUpload();
-        toast.success(`Uploaded ${file.name}`);
+        if (!silent) toast.success(`Uploaded ${file.name}`);
       }
+      return 'ok';
     } catch (error: any) {
       if (error.message?.includes('already exists')) {
+        if (silent) {
+          // Folder upload: don't prompt, skip duplicates silently.
+          return 'error';
+        }
         if (confirm(`File "${file.name}" already exists. Overwrite?`)) {
           try {
             await vfs.deleteFile(projectId, filePath);
-            await uploadFile(file, targetDir);
+            return await uploadFile(file, targetDir, options);
           } catch (deleteError) {
             logger.error('Failed to overwrite file:', deleteError);
             toast.error('Failed to overwrite file');
+            return 'error';
           }
         }
-      } else {
-        logger.error('Failed to upload file:', error);
-        toast.error(`Failed to upload ${file.name}: ${error.message}`);
+        return 'error';
       }
+      logger.error('Failed to upload file:', error);
+      if (!silent) toast.error(`Failed to upload ${file.name}: ${error.message}`);
+      return 'error';
     }
   };
 
@@ -834,6 +1015,33 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
             </Button>
           </div>
         </div>
+      )}
+
+      {/* Hidden files bar */}
+      {(hiddenFileCount > 0 || hiddenFolderCount > 0) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setShowHidden(!showHidden)}
+              className="shrink-0 w-full flex items-center gap-1.5 px-3 py-1.5 border-t border-border text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              {showHidden ? (
+                <><EyeOff className="h-3 w-3 shrink-0" />Hide hidden files</>
+              ) : (
+                <><Eye className="h-3 w-3 shrink-0" />{(() => {
+                  const parts: string[] = [];
+                  if (hiddenFileCount > 0) parts.push(`${hiddenFileCount} ${hiddenFileCount === 1 ? 'file' : 'files'}`);
+                  if (hiddenFolderCount > 0) parts.push(`${hiddenFolderCount} ${hiddenFolderCount === 1 ? 'folder' : 'folders'}`);
+                  return parts.join(', ') + ' hidden';
+                })()}</>
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[240px] text-xs">
+            Files starting with . are excluded from deployments and ZIP exports, but included in backups and templates.
+          </TooltipContent>
+        </Tooltip>
       )}
     </div>
   );

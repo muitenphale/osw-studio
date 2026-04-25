@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CustomTemplate, BackendFeatures } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
@@ -13,6 +13,8 @@ import { TemplateCard } from './template-card';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
+import { usePagination } from '@/lib/hooks/use-pagination';
+import { Pagination, PaginationRange } from '@/components/ui/pagination';
 import {
   Upload,
   Search,
@@ -308,6 +310,12 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     }
   });
 
+  const templatesPagination = usePagination(sortedTemplates, {
+    perPage: 24,
+    resetOn: [searchQuery, sortBy, typeFilter],
+  });
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+
   if (loading || creating) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -406,7 +414,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       </div>
 
       {/* Templates Grid/List */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6">
+      <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6">
         <div className="mx-auto max-w-7xl">
         {sortedTemplates.length === 0 ? (
           <div className="flex items-center justify-center h-full">
@@ -438,21 +446,36 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
             </div>
           </div>
         ) : (
-          <div className={viewMode === 'grid'
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-            : 'space-y-3'
-          }>
-            {sortedTemplates.map((template) => (
-              <TemplateCard
-                key={template.id}
-                template={template}
-                onSelect={handleCreateProject}
-                onDelete={handleDeleteTemplate}
-                onExport={handleExportTemplate}
-                viewMode={viewMode}
-              />
-            ))}
-          </div>
+          <>
+            <PaginationRange
+              total={templatesPagination.total}
+              rangeStart={templatesPagination.rangeStart}
+              rangeEnd={templatesPagination.rangeEnd}
+              totalPages={templatesPagination.totalPages}
+              className="mb-2"
+            />
+            <div className={viewMode === 'grid'
+              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+              : 'space-y-3'
+            }>
+              {templatesPagination.pageItems.map((template) => (
+                <TemplateCard
+                  key={template.id}
+                  template={template}
+                  onSelect={handleCreateProject}
+                  onDelete={handleDeleteTemplate}
+                  onExport={handleExportTemplate}
+                  viewMode={viewMode}
+                />
+              ))}
+            </div>
+            <Pagination
+              page={templatesPagination.page}
+              totalPages={templatesPagination.totalPages}
+              onPageChange={templatesPagination.setPage}
+              scrollTarget={listScrollRef}
+            />
+          </>
         )}
         </div>
       </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Deployment, Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
@@ -19,6 +19,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
+import { track } from '@/lib/telemetry';
+import { usePagination } from '@/lib/hooks/use-pagination';
+import { Pagination, PaginationRange } from '@/components/ui/pagination';
 
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
@@ -272,6 +275,8 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     // Set publishing state
     setPublishingStates(prev => ({ ...prev, [deploymentId]: true }));
 
+    let trackedRuntime = 'unknown';
+
     try {
       // First, sync files from IndexedDB to server
       toast.info('Syncing project files...');
@@ -286,6 +291,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
       // served as static sites. Use ZIP export instead.
       const { isRuntimeBundled, getRuntimeConfig } = await import('@/lib/runtimes/registry');
       const runtime = project.settings?.runtime;
+      trackedRuntime = runtime ?? 'unknown';
       if (runtime && getRuntimeConfig(runtime).previewMode === 'terminal') {
         throw new Error(`${getRuntimeConfig(runtime).label} projects cannot be published as static sites. Use ZIP export instead.`);
       }
@@ -351,6 +357,12 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
 
       const result = await response.json();
 
+      track('deployment_publish', {
+        runtime: runtime ?? 'unknown',
+        result: 'success',
+        has_custom_domain: !!deployment.customDomain,
+      });
+
       toast.success(`Deployment published! ${result.filesWritten} files written.`);
 
       // Update state optimistically with publish data
@@ -365,6 +377,11 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
       setPublishingStates(prev => ({ ...prev, [deploymentId]: false }));
     } catch (error) {
       logger.error('Failed to publish:', error);
+      track('deployment_publish', {
+        runtime: trackedRuntime,
+        result: 'fail',
+        has_custom_domain: !!deployment.customDomain,
+      });
       toast.error(error instanceof Error ? error.message : 'Failed to publish. Please try again.');
       // Clear publishing state on error
       setPublishingStates(prev => ({ ...prev, [deploymentId]: false }));
@@ -542,6 +559,12 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     return sorted;
   }, [deployments, projects, searchQuery, sortBy]);
 
+  const deploymentsPagination = usePagination(filteredAndSortedDeployments, {
+    perPage: 24,
+    resetOn: [searchQuery, sortBy],
+  });
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+
   if (!isServerMode) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -618,7 +641,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         </div>
 
         {/* Deployments Grid/List */}
-        <div className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
+        <div ref={listScrollRef} className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
           <div className="mx-auto max-w-7xl">
             {filteredAndSortedDeployments.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -641,29 +664,44 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredAndSortedDeployments.map((deployment) => {
-                  const project = projects.find(p => p.id === deployment.projectId);
-                  return (
-                    <DeploymentCard
-                      key={deployment.id}
-                      deployment={deployment}
-                      project={project}
-                      isPublishing={publishingStates[deployment.id] || false}
-                      onOpenSettings={handleOpenSettings}
-                      onOpenServerSettings={handleOpenServerSettings}
-                      onViewAnalytics={handleViewAnalytics}
-                      onEditProject={handleEditProject}
-                      onPublish={handlePublish}
-                      onDisable={handleDisable}
-                      onEnable={handleEnable}
-                      onDelete={handleDelete}
-                      onExportAsTemplate={handleExportAsTemplate}
-                      onThumbnailChange={handleDeploymentThumbnailChange}
-                    />
-                  );
-                })}
-              </div>
+              <>
+                <PaginationRange
+                  total={deploymentsPagination.total}
+                  rangeStart={deploymentsPagination.rangeStart}
+                  rangeEnd={deploymentsPagination.rangeEnd}
+                  totalPages={deploymentsPagination.totalPages}
+                  className="mb-2"
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {deploymentsPagination.pageItems.map((deployment) => {
+                    const project = projects.find(p => p.id === deployment.projectId);
+                    return (
+                      <DeploymentCard
+                        key={deployment.id}
+                        deployment={deployment}
+                        project={project}
+                        isPublishing={publishingStates[deployment.id] || false}
+                        onOpenSettings={handleOpenSettings}
+                        onOpenServerSettings={handleOpenServerSettings}
+                        onViewAnalytics={handleViewAnalytics}
+                        onEditProject={handleEditProject}
+                        onPublish={handlePublish}
+                        onDisable={handleDisable}
+                        onEnable={handleEnable}
+                        onDelete={handleDelete}
+                        onExportAsTemplate={handleExportAsTemplate}
+                        onThumbnailChange={handleDeploymentThumbnailChange}
+                      />
+                    );
+                  })}
+                </div>
+                <Pagination
+                  page={deploymentsPagination.page}
+                  totalPages={deploymentsPagination.totalPages}
+                  onPageChange={deploymentsPagination.setPage}
+                  scrollTarget={listScrollRef}
+                />
+              </>
             )}
           </div>
         </div>

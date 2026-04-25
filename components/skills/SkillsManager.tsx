@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Skill } from '@/lib/vfs/skills/types';
 import { skillsService } from '@/lib/vfs/skills';
 import { vfs } from '@/lib/vfs';
@@ -39,6 +39,8 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { SkillEditor } from './SkillEditor';
+import { usePagination } from '@/lib/hooks/use-pagination';
+import { Pagination, PaginationRange } from '@/components/ui/pagination';
 
 export function SkillsManager() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -51,6 +53,8 @@ export function SkillsManager() {
   const [globalEnabled, setGlobalEnabled] = useState(true);
   const [evaluationEnabled, setEvaluationEnabled] = useState(false);
   const [enabledSkills, setEnabledSkills] = useState<Set<string>>(new Set());
+  const [showBuiltIn, setShowBuiltIn] = useState(true);
+  const [showCustom, setShowCustom] = useState(true);
 
   useEffect(() => {
     loadSkills();
@@ -231,13 +235,22 @@ export function SkillsManager() {
     setSelectedSkill(null);
   };
 
-  const filteredSkills = skills.filter(skill =>
-    skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    skill.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredSkills = skills.filter(skill => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch =
+      skill.name.toLowerCase().includes(q) ||
+      skill.description.toLowerCase().includes(q);
+    if (!matchesSearch) return false;
+    if (skill.isBuiltIn && !showBuiltIn) return false;
+    if (!skill.isBuiltIn && !showCustom) return false;
+    return true;
+  });
 
-  const builtInSkills = filteredSkills.filter(s => s.isBuiltIn);
-  const customSkills = filteredSkills.filter(s => !s.isBuiltIn);
+  const skillsPagination = usePagination(filteredSkills, {
+    perPage: 30,
+    resetOn: [searchQuery, showBuiltIn, showCustom],
+  });
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
 
   if (loading) {
     return (
@@ -285,6 +298,31 @@ export function SkillsManager() {
               </div>
             </div>
 
+            {/* Source filter chips */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Show:</span>
+              <Button
+                variant={showBuiltIn ? 'default' : 'outline'}
+                size="sm"
+                className="h-7 px-2 gap-1.5"
+                onClick={() => setShowBuiltIn(v => !v)}
+                aria-pressed={showBuiltIn}
+              >
+                <FileText className="w-3 h-3" />
+                Built-in
+              </Button>
+              <Button
+                variant={showCustom ? 'default' : 'outline'}
+                size="sm"
+                className="h-7 px-2 gap-1.5"
+                onClick={() => setShowCustom(v => !v)}
+                aria-pressed={showCustom}
+              >
+                <Sparkles className="w-3 h-3" />
+                Custom
+              </Button>
+            </div>
+
             {/* Global Enable/Disable Toggle */}
             <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
               <div className="flex items-center gap-2">
@@ -324,16 +362,20 @@ export function SkillsManager() {
         </div>
 
         {/* Skills List */}
-        <div className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
+        <div ref={listScrollRef} className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
           <div className="mx-auto max-w-7xl">
             {filteredSkills.length === 0 ? (
               <div className="text-center py-12">
                 <Sparkles className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                 <h3 className="text-lg font-semibold mb-2">No skills found</h3>
                 <p className="text-muted-foreground mb-4">
-                  {searchQuery ? 'Try a different search query' : 'Create your first custom skill'}
+                  {!showBuiltIn && !showCustom
+                    ? 'Both Built-in and Custom are hidden — enable at least one above.'
+                    : searchQuery
+                      ? 'Try a different search query'
+                      : 'Create your first custom skill'}
                 </p>
-                {!searchQuery && (
+                {!searchQuery && showBuiltIn && showCustom && (
                   <Button onClick={handleCreateNew}>
                     <Plus className="w-4 h-4 mr-2" />
                     Create Skill
@@ -341,53 +383,34 @@ export function SkillsManager() {
                 )}
               </div>
             ) : (
-              <div className="space-y-6">
-                {/* Built-in Skills */}
-                {builtInSkills.length > 0 && (
-                  <div>
-                    <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                      <FileText className="w-5 h-5" />
-                      Built-in Skills ({builtInSkills.length})
-                    </h2>
-                    <div className="grid gap-3">
-                      {builtInSkills.map(skill => (
-                        <SkillCard
-                          key={skill.id}
-                          skill={skill}
-                          isEnabled={enabledSkills.has(skill.id)}
-                          globalEnabled={globalEnabled}
-                          onToggle={handleSkillToggle}
-                          onEdit={handleEdit}
-                          onDelete={handleDelete}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Custom Skills */}
-                {customSkills.length > 0 && (
-                  <div>
-                    <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                      <Sparkles className="w-5 h-5" />
-                      Custom Skills ({customSkills.length})
-                    </h2>
-                    <div className="grid gap-3">
-                      {customSkills.map(skill => (
-                        <SkillCard
-                          key={skill.id}
-                          skill={skill}
-                          isEnabled={enabledSkills.has(skill.id)}
-                          globalEnabled={globalEnabled}
-                          onToggle={handleSkillToggle}
-                          onEdit={handleEdit}
-                          onDelete={handleDelete}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <>
+                <PaginationRange
+                  total={skillsPagination.total}
+                  rangeStart={skillsPagination.rangeStart}
+                  rangeEnd={skillsPagination.rangeEnd}
+                  totalPages={skillsPagination.totalPages}
+                  className="mb-2"
+                />
+                <div className="grid gap-3">
+                  {skillsPagination.pageItems.map(skill => (
+                    <SkillCard
+                      key={skill.id}
+                      skill={skill}
+                      isEnabled={enabledSkills.has(skill.id)}
+                      globalEnabled={globalEnabled}
+                      onToggle={handleSkillToggle}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+                <Pagination
+                  page={skillsPagination.page}
+                  totalPages={skillsPagination.totalPages}
+                  onPageChange={skillsPagination.setPage}
+                  scrollTarget={listScrollRef}
+                />
+              </>
             )}
           </div>
         </div>

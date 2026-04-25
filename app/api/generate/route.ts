@@ -589,10 +589,31 @@ Habits:
         );
       }
 
-      // Credit/quota exhaustion (402, or 429 with usage-related keywords)
+      // Transient rate-limit (429 with rate-limit phrasing or a Retry-After header).
+      // Checked BEFORE credit-exhaustion so messages like "temporarily rate-limited
+      // upstream, retry shortly" don't get misclassified as credit exhaustion just
+      // because the substring "limit" appears inside "rate-limited".
+      if (response.status === 429 && (
+        rateLimitHeaders['Retry-After'] ||
+        lowerError.includes('rate-limited') ||
+        lowerError.includes('rate limit') ||
+        lowerError.includes('too many requests') ||
+        lowerError.includes('temporarily') ||
+        lowerError.includes('retry shortly') ||
+        lowerError.includes('retry after')
+      )) {
+        return NextResponse.json(
+          { error: `${providerConfig.name} is temporarily rate-limited. Try again in a moment.` },
+          { status: 429, headers: rateLimitHeaders }
+        );
+      }
+
+      // Credit/quota exhaustion (402, or 429 with usage-related keywords).
+      // Note: "limit" is intentionally excluded because it false-matches "rate-limited".
       if (response.status === 402 || (response.status === 429 && (
-        lowerError.includes('credit') || lowerError.includes('usage') || lowerError.includes('limit') ||
-        lowerError.includes('exceeded') || lowerError.includes('quota') || lowerError.includes('billing')
+        lowerError.includes('credit') || lowerError.includes('quota') ||
+        lowerError.includes('billing') || lowerError.includes('exceeded') ||
+        lowerError.includes('insufficient') || lowerError.includes('usage')
       ))) {
         if (selectedProvider === 'huggingface') {
           return NextResponse.json(

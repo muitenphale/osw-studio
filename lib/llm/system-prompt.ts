@@ -1,5 +1,6 @@
 import { skillsService } from '@/lib/vfs/skills';
 import type { AgentType } from './agent';
+import { SETUP_SYSTEM_PROMPT } from '@/lib/describe/setup-prompt';
 
 /**
  * Prompt appended as a user message when requesting conversation compaction.
@@ -33,6 +34,7 @@ export interface ServerContextMetadata {
 }
 
 export async function buildShellSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string, agentType?: AgentType, modelSupportsTools = true): Promise<string> {
+  if (agentType === 'setup') return SETUP_SYSTEM_PROMPT;
   if (agentType === 'explore') return buildExplorePrompt(serverContext, projectId);
   if (agentType === 'plan') return buildPlanPrompt(serverContext, projectId);
   if (agentType === 'task') return buildTaskAgentPrompt(serverContext, projectId);
@@ -98,7 +100,8 @@ Shell commands:
 - Edit: ss /file << 'EOF' (multiline search===replace — primary editing tool)
 - Entity edit: ss --entity /file << 'EOF' (give opening line only — auto-finds closing tag/bracket)
 - New file: cat > /file << 'EOF'\\ncontent\\nEOF (creation and full rewrites only)
-- Pipes: cmd1 | cmd2, cmd > file, cmd >> file`;
+- Pipes: cmd1 | cmd2, cmd > file, cmd >> file
+- Ask user: ask [--prompt "Question"] "Option A" "Option B" "Option C" — present tappable chip choices when you need a single decision from the user with 2–5 candidate options. Prefer this over asking in prose for either/or choices: the user gets buttons instead of having to type. For open-ended elicitation (describe your brand, what's the content?), prose is the right shape. Example: ask --prompt "Aesthetic direction?" "Bold geometric" "Soft organic" "Editorial" "Minimal" "You pick". When you call ask, do NOT also run status in the same iteration — ask itself ends the iteration cleanly and the user's selection becomes the next message.`;
   }
 
   prompt += `

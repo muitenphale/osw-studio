@@ -409,8 +409,9 @@ function shouldExcludeFromExport(filePath: string): boolean {
     return true;
   }
 
-  // Exclude internal system files
-  if (filePath === '/.PROMPT.md') {
+  // Exclude dot-prefixed files and directories (e.g. .PROMPT.md, .DESIGN.md, .skills/)
+  const firstSegment = filePath.split('/').filter(Boolean)[0];
+  if (firstSegment && firstSegment.startsWith('.')) {
     return true;
   }
 

@@ -887,6 +887,107 @@ document.addEventListener('DOMContentLoaded', initApp);`,
   },
 ];
 
+// ─── Setup Agent (Describe Mode) ─────────────────────────────────────
+
+const setupScenarios: TestScenario[] = [
+  {
+    id: 'setup-simple-landing',
+    name: 'Simple landing page',
+    category: 'setup',
+    agentType: 'setup',
+    skipProjectSetup: true,
+    prompt: 'A simple landing page for my coffee shop called "Bean There". Single page, clean and minimal.',
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'brief --merge', description: 'Agent updates the brief' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'Bean There|bean.there|coffee', description: 'Brief captures the business name or type' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'landing|single|page', description: 'Brief captures page structure' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'propose-create', description: 'Agent proposes project creation' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'runtime[^a-z]+(static|handlebars)', description: 'Brief sets a visual runtime' },
+    ],
+    timeout: 60000,
+  },
+  {
+    id: 'setup-multi-page-portfolio',
+    name: 'Multi-page portfolio',
+    category: 'setup',
+    agentType: 'setup',
+    skipProjectSetup: true,
+    prompt: 'I want a portfolio site for my photography. Home page, a gallery, and an about page. I like dark themes with lots of whitespace. Use Tailwind.',
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'brief --merge', description: 'Agent updates the brief' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'pages.*home|pages.*gallery|pages.*about', description: 'Brief captures page list' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'tailwind|Tailwind', description: 'Brief captures Tailwind styling choice' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'dark|whitespace|photography', description: 'Brief captures direction/vibe' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'propose-create', description: 'Agent proposes project creation' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'runtime[^a-z]+handlebars', description: 'Multi-page site infers handlebars runtime' },
+    ],
+    timeout: 60000,
+  },
+  {
+    id: 'setup-with-backend',
+    name: 'Site with contact form (backend)',
+    category: 'setup',
+    agentType: 'setup',
+    skipProjectSetup: true,
+    prompt: 'A freelance web design agency site. I need a contact form where clients can reach me without seeing my email. Professional, modern look. Three pages: home, services, contact.',
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'brief --merge', description: 'Agent updates the brief' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'serverFunctions|server_functions|server.*function|contact.*form', description: 'Agent detects backend need from contact form requirement' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'capabilities', description: 'Brief includes capabilities section' },
+      // Either propose-create or a clarifying ask is a valid terminal action for setup mode.
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'propose-create|^ask\\b|\\bask --prompt', description: 'Agent ends with propose-create or a clarifying ask' },
+    ],
+    timeout: 60000,
+  },
+  {
+    id: 'setup-react-app',
+    name: 'Interactive React app',
+    category: 'setup',
+    agentType: 'setup',
+    skipProjectSetup: true,
+    prompt: 'I want to build a task tracker app with React. Users should be able to add, complete, and delete tasks. Use a clean minimal UI.',
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'brief --merge', description: 'Agent updates the brief' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'react|React', description: 'Brief captures React runtime' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'task|tracker|todo', description: 'Brief captures app type' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'propose-create', description: 'Agent proposes project creation' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'runtime[^a-z]+react', description: 'Brief sets react runtime' },
+    ],
+    timeout: 60000,
+  },
+  {
+    id: 'setup-spec-routing',
+    name: 'Spec routing (substantive context)',
+    category: 'setup',
+    agentType: 'setup',
+    skipProjectSetup: true,
+    prompt: 'A portfolio site for Sarah Chen, a woodworker in Portland who makes custom furniture and cutting boards. She wants to show her work and let people request commissions. The gallery should have before/after shots of her pieces. Three pages: home, gallery, contact. Use Tailwind.',
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'brief --merge', description: 'Agent updates the brief' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'spec --append', description: 'Agent routes substantive context to spec' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'Sarah|woodwork|furniture|cutting.board|commission|before.*after', description: 'Spec captures substantive project context' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'propose-create', description: 'Agent proposes project creation' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'runtime[^a-z]+handlebars', description: 'Multi-page site infers handlebars runtime' },
+    ],
+    timeout: 60000,
+  },
+  {
+    id: 'setup-minimal-input',
+    name: 'Minimal user input',
+    category: 'setup',
+    agentType: 'setup',
+    skipProjectSetup: true,
+    prompt: 'A blog.',
+    assertions: [
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'brief --merge', description: 'Agent updates the brief even with minimal input' },
+      { type: 'tool_args_match', toolName: 'shell', pattern: 'blog|Blog', description: 'Brief captures blog type' },
+    ],
+    timeout: 60000,
+  },
+];
+
+testScenarios.push(...setupScenarios);
+
 // ─── Test Tracks ─────────────────────────────────────────────────────
 export const testTracks: TestTrack[] = [
   {
@@ -924,5 +1025,11 @@ export const testTracks: TestTrack[] = [
     name: 'Compaction',
     description: 'Compaction: context continuity through automatic conversation summarization',
     scenarioIds: testScenarios.filter(s => s.category === 'compaction').map(s => s.id),
+  },
+  {
+    id: 'setup',
+    name: 'Setup (Describe)',
+    description: 'Setup agent: brief extraction, runtime inference, project creation from natural language',
+    scenarioIds: testScenarios.filter(s => s.category === 'setup').map(s => s.id),
   },
 ];

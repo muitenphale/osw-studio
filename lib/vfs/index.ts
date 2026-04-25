@@ -1109,12 +1109,12 @@ export class VirtualFileSystem {
     }
   }
 
-  async deleteFile(projectId: string, path: string): Promise<void> {
+  async deleteFile(projectId: string, path: string, options?: { silent?: boolean }): Promise<void> {
     this.ensureInitialized();
 
     try {
       await this.adapter.deleteFile(projectId, path);
-      await this.updateFileTree(projectId, path, 'delete');
+      await this.updateFileTree(projectId, path, 'delete', options?.silent === true);
       saveManager.markDirty(projectId);
     } catch (error) {
       throw error;
@@ -1272,19 +1272,22 @@ export class VirtualFileSystem {
 
   async deleteDirectory(projectId: string, path: string): Promise<void> {
     this.ensureInitialized();
-    
+
     const allFiles = await this.adapter.listFiles(projectId);
     const dirPath = path.endsWith('/') ? path : path + '/';
-    
+
+    // Delete each contained file silently so listeners (preview compile,
+    // file-tree reload) don't fire N times — one event is dispatched at the
+    // end of this method instead.
     for (const file of allFiles) {
       if (file.path.startsWith(dirPath)) {
-        await this.deleteFile(projectId, file.path);
+        await this.deleteFile(projectId, file.path, { silent: true });
       }
     }
-    
+
     await this.adapter.deleteTreeNode(projectId, path);
     saveManager.markDirty(projectId);
-    
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
     }
@@ -1947,8 +1950,9 @@ export class VirtualFileSystem {
       return true;
     }
 
-    // Exclude internal system files
-    if (filePath === '/.PROMPT.md') {
+    // Exclude dot-prefixed files and directories (e.g. .PROMPT.md, .DESIGN.md, .skills/)
+    const firstSegment = filePath.split('/').filter(Boolean)[0];
+    if (firstSegment && firstSegment.startsWith('.')) {
       return true;
     }
 
@@ -2000,7 +2004,7 @@ export class VirtualFileSystem {
     return '/' + parts.join('/');
   }
 
-  private async updateFileTree(projectId: string, path: string, operation: 'create' | 'delete'): Promise<void> {
+  private async updateFileTree(projectId: string, path: string, operation: 'create' | 'delete', silent = false): Promise<void> {
     const parentPath = this.getParentPath(path);
     if (parentPath === null) return;
     
@@ -2026,7 +2030,7 @@ export class VirtualFileSystem {
       parentNode.children = children;
       await this.adapter.updateTreeNode(parentNode);
 
-      if (typeof window !== 'undefined') {
+      if (!silent && typeof window !== 'undefined') {
         window.dispatchEvent(new Event('filesChanged'));
       }
     }

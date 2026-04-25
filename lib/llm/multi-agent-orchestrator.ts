@@ -150,7 +150,7 @@ export interface AgentMessage {
   content: string | ContentBlock[];  // String or array of content blocks (for multimodal)
   tool_calls?: ToolCall[];
   tool_call_id?: string;
-  reasoning_details?: ReasoningDetail[];  // For Gemini thinking models - MUST be preserved
+  reasoning_details?: ReasoningDetail[];  // Reasoning blob preserved on assistant messages — required for multi-turn replay (Gemini, DeepSeek V4 Pro, etc.)
   // UI metadata for session recovery and display hints
   ui_metadata?: {
     checkpointId?: string;
@@ -231,6 +231,8 @@ export class MultiAgentOrchestrator {
   private readonly maxNudges = 3; // Max nudge attempts before giving up
   private lastIterationHadToolError = false; // Track if previous iteration had a failed tool call
   private lastStatusResult: { task: string; done: string; remaining: string; complete: boolean; hasExplicitFlag: boolean } | null = null; // Track status result
+  private setupComplete = false; // Setup agent: propose-create was called
+  private awaitingUserSelection = false; // ask command: pause loop until next user message
   private activeSubOrchestrators = new Set<MultiAgentOrchestrator>(); // Track running sub-agents for stop propagation
   private malformedToolCallRetries = 0; // Track consecutive retries for malformed tool call detection
   private totalMalformedToolCalls = 0; // Track total malformed calls in session (doesn't reset)
@@ -365,6 +367,8 @@ export class MultiAgentOrchestrator {
     this.malformedToolCallRetries = 0;
     this.lastStatusResult = null;
     this.lastIterationHadToolError = false;
+    this.setupComplete = false;
+    this.awaitingUserSelection = false;
 
     // Strip trailing nudge messages from a previous nudge_exhaustion exit.
     // Without this, the conversation ends with consecutive user messages that
@@ -504,8 +508,10 @@ export class MultiAgentOrchestrator {
       // Run agent loop
       await this.runAgentLoop(this.currentConversationId, this.rootAgent);
 
-      // Create final checkpoint
-      await this.recordAutoCheckpoint(`After: ${userPrompt.substring(0, 60)}`);
+      // Create final checkpoint (skip for setup agent — pre-project, no VFS)
+      if (this.rootAgent.type !== 'setup') {
+        await this.recordAutoCheckpoint(`After: ${userPrompt.substring(0, 60)}`);
+      }
 
       return {
         success: true,
@@ -528,7 +534,9 @@ export class MultiAgentOrchestrator {
         stack: error instanceof Error ? error.stack : undefined
       });
 
-      await this.recordAutoCheckpoint(`After failure: ${userPrompt.substring(0, 60)}`);
+      if (this.rootAgent.type !== 'setup') {
+        await this.recordAutoCheckpoint(`After failure: ${userPrompt.substring(0, 60)}`);
+      }
 
       return {
         success: false,
@@ -669,8 +677,8 @@ export class MultiAgentOrchestrator {
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const hasContent = response.content && response.content.trim();
 
-        // Explore/plan agents finish when they stop calling tools — no status needed
-        if (agent.type === 'explore' || agent.type === 'plan') {
+        // Explore/plan/setup agents finish when they stop calling tools — no status needed
+        if (agent.type === 'explore' || agent.type === 'plan' || agent.type === 'setup') {
           if (hasContent) {
             this.addMessage(conversationId, {
               role: 'assistant',
@@ -788,12 +796,18 @@ export class MultiAgentOrchestrator {
         agent
       );
 
-      // Add assistant message with tool calls and reasoning_details (for Gemini)
+      // Add assistant message with tool calls and reasoning_details.
+      // The field is always set (defaulting to []) because some providers
+      // (notably DeepSeek V4 Pro via OpenRouter) validate that prior assistant
+      // turns carry the field on multi-turn replay, even when no reasoning
+      // content was produced. Empty arrays are accepted by every provider that
+      // sees this field; providers that transform messages (Anthropic, Gemini)
+      // ignore it during their own message-format conversions.
       this.addMessage(conversationId, {
         role: 'assistant',
         content: response.content || '',
         tool_calls: response.toolCalls,
-        ...(response.reasoningDetails && { reasoning_details: response.reasoningDetails })
+        reasoning_details: response.reasoningDetails ?? []
       });
 
       // Add tool results and track errors
@@ -847,6 +861,21 @@ export class MultiAgentOrchestrator {
           this.onProgress?.('exit_reason', { reason, iteration });
           break;
         }
+      }
+
+      // Setup agent: exit after propose-create (signals "ready, user confirms")
+      if (this.setupComplete) {
+        logger.info('[MultiAgentOrchestrator] Exit: setup propose-create called');
+        this.onProgress?.('exit_reason', { reason: 'setup_complete', iteration });
+        break;
+      }
+
+      // ask command: pause loop until next user message (their selection becomes
+      // the next user input and resumes the loop on a fresh execute() call).
+      if (this.awaitingUserSelection) {
+        logger.info('[MultiAgentOrchestrator] Exit: ask command — awaiting user selection');
+        this.onProgress?.('exit_reason', { reason: 'awaiting_user', iteration });
+        break;
       }
     }
 
@@ -1435,11 +1464,17 @@ Please revise your approach.`;
         args: toolCall.function.arguments
       });
 
-      // Build execution context
+      // Build execution context. Wrap onProgress so we can pick off control-flow
+      // events (`ask`, `project_ready`) that need to flip orchestrator flags
+      // before forwarding them to the UI's progress channel.
       const context: ToolExecutionContext = {
         agentType: agent.type,
         isReadOnly: this.chatMode || agent.isReadOnly, // Chat mode forces read-only for all agents
-        onProgress: this.onProgress
+        onProgress: (event, data) => {
+          if (event === 'ask') this.awaitingUserSelection = true;
+          if (event === 'project_ready') this.setupComplete = true;
+          this.onProgress?.(event, data);
+        }
       };
 
       try {
@@ -1528,7 +1563,7 @@ Please revise your approach.`;
 
     await this.ensurePricing(provider, model);
 
-    const tools = toolRegistry.getDefinitions(agent.tools);
+    const tools = toolRegistry.getDefinitions(agent.tools, agent.type);
 
     const apiUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/api/generate`
@@ -1970,6 +2005,18 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
       postCompactEstimate,
       compactionNumber: this.compactionCount,
     });
+
+    try {
+      const { provider, model } = this.getProviderConfig();
+      track('compaction_fired', {
+        tokens_before: preCompactTokens,
+        tokens_after: postCompactEstimate,
+        provider,
+        model,
+      });
+    } catch {
+      // telemetry best-effort
+    }
   }
 
   /**
@@ -2117,7 +2164,7 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
       configManager.updateSessionCost(usage, cost);
 
       const sessionId = configManager.getCurrentSession()?.sessionId;
-      if (!this.projectId.startsWith('test-')) {
+      if (!this.projectId.startsWith('test-') && this.rootAgent.type !== 'setup') {
         vfs.updateProjectCost(this.projectId, {
           cost,
           provider: usage.provider || provider || 'unknown',
@@ -2219,10 +2266,15 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
 
     try {
       const args = JSON.parse(toolCall.function.arguments);
-      const cmd = Array.isArray(args.cmd)
-        ? args.cmd.join(' ')
-        : String(args.cmd || '');
-      return `${toolName}:${cmd}`;
+      if (toolName === 'shell') {
+        // Shell: signature from command string
+        const cmd = Array.isArray(args.cmd)
+          ? args.cmd.join(' ')
+          : String(args.cmd || '');
+        return `${toolName}:${cmd}`;
+      }
+      // Non-shell tools: signature from full serialized arguments
+      return `${toolName}:${toolCall.function.arguments}`;
     } catch {
       return `${toolName}:${toolCall.function.arguments}`;
     }

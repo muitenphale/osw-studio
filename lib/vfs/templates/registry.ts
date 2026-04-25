@@ -18,18 +18,6 @@ const BUILT_IN_EPOCH = new Date('2025-01-01T00:00:00Z');
 
 export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
   {
-    id: 'ai-setup',
-    name: 'AI Project Setup',
-    description: 'Describe your project and the AI will configure the runtime, file structure, and project instructions',
-    isBuiltIn: true,
-    runtime: 'static',
-    updatedAt: BUILT_IN_EPOCH,
-    metadata: {
-      author: 'OSW Studio',
-      tags: ['ai', 'setup', 'auto']
-    }
-  },
-  {
     id: 'blank',
     name: 'Website Starter',
     description: 'Minimal starting template with basic HTML/CSS/JS structure',
@@ -254,5 +242,5 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
 ];
 
 export function getBuiltInTemplatesForRuntime(runtime: ProjectRuntime): BuiltInTemplateMetadata[] {
-  return BUILT_IN_TEMPLATES.filter(t => t.runtime === runtime && t.id !== 'ai-setup');
+  return BUILT_IN_TEMPLATES.filter(t => t.runtime === runtime);
 }

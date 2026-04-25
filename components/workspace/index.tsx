@@ -100,6 +100,28 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   // Keep generatingRef in sync for runtime error listener
   useEffect(() => { generatingRef.current = generating; }, [generating]);
 
+  // Guard against accidental navigation away with unsaved changes or active generation
+  const guardedBack = useCallback(() => {
+    if (generating) {
+      if (!window.confirm('The AI is still generating. Leave anyway?')) return;
+      currentOrchestrator?.stop();
+    } else if (isDirty) {
+      if (!window.confirm('You have unsaved changes. Leave anyway?')) return;
+    }
+    onBack();
+  }, [generating, isDirty, currentOrchestrator, onBack]);
+
+  // Browser beforeunload — warn when dirty or generating
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (generating || isDirty) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [generating, isDirty]);
+
   // Subscribe to runtime errors that arrive after generation completes
   useEffect(() => {
     const handler = () => {
@@ -1545,7 +1567,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       id: 'back',
       label: 'Back to projects',
       icon: ArrowLeft,
-      onClick: onBack,
+      onClick: guardedBack,
       variant: 'outline'
     }
   ];
@@ -1654,36 +1676,13 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     </div>
   );
 
-  if (fullscreenPreview) {
-    return (
-      <div className="h-[100dvh] flex flex-col bg-background">
-        <MultipagePreview
-          ref={previewRef}
-          projectId={project.id}
-          refreshTrigger={refreshTrigger}
-          onFocusSelection={handleFocusSelection}
-          hasFocusTarget={Boolean(focusContext)}
-          onClose={handleExitFullscreen}
-          deploymentId={selectedDeploymentId}
-          onCaptureScreenshot={handleCaptureScreenshot}
-          entryPoint={entryPoint}
-          runtime={projectRuntime}
-          placementActive={paletteOpen}
-          onPlacementToggle={handlePlacementToggle}
-          onPlacementComplete={handlePlacementComplete}
-          isFullscreen
-        />
-      </div>
-    );
-  }
-
   return (
     <TooltipProvider>
       <div className="h-[100dvh] flex flex-col">
         {/* Header */}
         <AppHeader
           leftText={project.name}
-          onLogoClick={onBack}
+          onLogoClick={guardedBack}
           actions={headerActions}
           mobileMenuContent={mobileMenuContent}
           desktopOnlyContent={desktopHeaderContent}
@@ -2055,14 +2054,19 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
               )};
 
               if (showPreview) panelMap['preview'] = { minSize: 20, content: (
-                <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-preview-rgb), 0.01), rgba(var(--panel-preview-rgb), 0.01)), var(--card)`, minWidth: '240px' }}>
+                <div
+                  className={fullscreenPreview
+                    ? "fixed inset-0 z-50 bg-background flex flex-col"
+                    : "h-full border border-border rounded-lg shadow-sm overflow-hidden relative"}
+                  style={fullscreenPreview ? undefined : { background: `linear-gradient(0deg, rgba(var(--panel-preview-rgb), 0.01), rgba(var(--panel-preview-rgb), 0.01)), var(--card)`, minWidth: '240px' }}
+                >
                   <MultipagePreview
                     ref={previewRef}
                     projectId={project.id}
                     refreshTrigger={refreshTrigger}
                     onFocusSelection={handleFocusSelection}
                     hasFocusTarget={Boolean(focusContext)}
-                    onClose={handleClosePreview}
+                    onClose={fullscreenPreview ? handleExitFullscreen : handleClosePreview}
                     deploymentId={selectedDeploymentId}
                     onCaptureScreenshot={handleCaptureScreenshot}
                     entryPoint={entryPoint}
@@ -2071,6 +2075,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     onPlacementToggle={handlePlacementToggle}
                     onPlacementComplete={handlePlacementComplete}
                     onFullscreen={handleEnterFullscreen}
+                    isFullscreen={fullscreenPreview}
                   />
                 </div>
               )};

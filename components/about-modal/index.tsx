@@ -92,13 +92,6 @@ export function AboutModal({ open, onOpenChange }: AboutModalProps) {
                 Live Demo (HuggingFace)
                 <ExternalLink className="h-3 w-3" />
               </a>
-              <a href="https://www.buymeacoffee.com/otst" target="_blank" rel="noopener noreferrer">
-                <img 
-                  src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" 
-                  alt="Buy Me A Coffee" 
-                  style={{height: '30px', width: '109px'}} 
-                />
-              </a>
             </div>
           </section>
         </div>

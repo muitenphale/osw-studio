@@ -8,7 +8,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/o-stahl/osw-studio?style=social)](https://github.com/o-stahl/osw-studio/stargazers)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-Try%20Now-success)](https://huggingface.co/spaces/otst/osw-studio)
-[![Version](https://img.shields.io/badge/Version-1.59.0-blue)](https://github.com/o-stahl/osw-studio/releases)
+[![Version](https://img.shields.io/badge/Version-1.60.0-blue)](https://github.com/o-stahl/osw-studio/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/o-stahl/osw-studio/pulls)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mAJ8Ss4u)
 
@@ -288,12 +288,6 @@ OSW Studio is a **solo-maintained, community-driven** project. Contributions wel
 - 📣 Share what you've built (open an issue or discussion!)
 
 **Built something cool?** I'd love to see it! Share your creations in GitHub Discussions or open an issue with screenshots.
-
-## ☕ Support
-
-If OSW Studio saved you time or helped with a project, consider supporting development:
-
-[☕ Buy me a coffee](https://buymeacoffee.com/otst)
 
 ## License
 

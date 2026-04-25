@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ChevronDown, X, Crosshair, LayoutGrid, Image as ImageIcon } from 'lucide-react';
+import { ChevronDown, X, Crosshair, LayoutGrid, Image as ImageIcon, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
 import { getBlockById } from '@/lib/semantic-blocks/registry';
@@ -26,6 +26,8 @@ interface MessageContextProps {
   images?: PendingImage[];
   /** For readOnly mode: image content blocks from the stored message */
   imageBlocks?: ContentBlock[];
+  /** Non-dismissable system note (e.g. "user declined project creation") */
+  systemNote?: string | null;
   onClearFocus?: () => void;
   onRemoveBlock?: (placementId: string) => void;
   onClearBlocks?: () => void;
@@ -126,6 +128,7 @@ export function MessageContext({
   semanticBlocks,
   images,
   imageBlocks,
+  systemNote,
   onClearFocus,
   onRemoveBlock,
   onClearBlocks,
@@ -137,11 +140,13 @@ export function MessageContext({
   const hasImages = images && images.length > 0;
   const hasImageBlocks = imageBlocks && imageBlocks.some(b => b.type === 'image_url');
   const hasFocus = !!focusContext;
+  const hasNote = !!systemNote;
 
-  if (!hasFocus && !hasBlocks && !hasImages && !hasImageBlocks) return null;
+  if (!hasFocus && !hasBlocks && !hasImages && !hasImageBlocks && !hasNote) return null;
 
   // Build summary for collapsed readOnly view
   const summaryParts: string[] = [];
+  if (hasNote) summaryParts.push('note');
   if (hasFocus) summaryParts.push('focus');
   if (hasBlocks) summaryParts.push(`${semanticBlocks!.length} block${semanticBlocks!.length !== 1 ? 's' : ''}`);
   if (hasImages) summaryParts.push(`${images!.length} image${images!.length !== 1 ? 's' : ''}`);
@@ -166,6 +171,16 @@ export function MessageContext({
         <span className="font-medium text-[10px] uppercase tracking-wider text-primary/80">Included in next message</span>
       </div>
       {/* Sections */}
+      {hasNote && (
+        <Section
+          icon={Info}
+          label="Context"
+          summary={systemNote!.length > 40 ? systemNote!.slice(0, 37) + '...' : systemNote!}
+          readOnly={true}
+        >
+          <p className="text-[11px] text-foreground/70 leading-relaxed">{systemNote}</p>
+        </Section>
+      )}
       {hasFocus && (
         <Section
           icon={Crosshair}

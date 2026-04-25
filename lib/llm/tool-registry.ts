@@ -16,6 +16,34 @@ import type { ScriptRuntime } from '@/lib/scripting/types';
 
 export type ToolId = 'shell';
 
+/**
+ * Narrow shell description used by the describe-mode setup agent. Lists only
+ * the four setup-time commands and intentionally omits VFS commands like
+ * cat/rg/ls — setup runs without project context, so VFS commands have
+ * nothing to act on and would confuse the model.
+ */
+const SETUP_SHELL_DESCRIPTION = `Run setup commands during project intake.
+
+Commands:
+- brief --merge << 'EOF'
+  { "name": "...", "runtime": "handlebars", "template": "blank", ... }
+  EOF
+  Merge JSON into the project brief. Call this when the user reveals config (name, pages, runtime, etc.).
+  Brief fields: name, type, runtime, template, pages (string[]), language, direction, styling, capabilities, notes.
+
+- spec --append "Section heading" << 'EOF'
+  prose content
+  EOF
+  Append substantive context to .DESIGN.md under a section heading. Reuse existing section headings to grow them rather than creating duplicates.
+
+- ask [--prompt "Question"] "Option A" "Option B" "Option C"
+  Present tappable chip options to the user. The current iteration ends and the loop resumes when the user selects an option (their selection becomes the next message). Use for closed-ended choices.
+
+- propose-create
+  Signal the project is ready to create. The brief must contain name, runtime, and template. Enables the user's "Create now" button. The user may continue adjusting after this; call again if needed.
+
+One command at a time as a single string.`;
+
 interface ToolExecutor {
   /**
    * Execute the tool with given arguments
@@ -64,7 +92,7 @@ export class ToolRegistry {
         name: 'shell',
         description: `Run shell commands in the virtual file system.
 
-Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, ss, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status, delegate, runtime.
+Commands: cat, head, tail, ls, tree, grep, rg, find, mkdir, mv, cp, rm, touch, sed, ss, echo, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status, delegate, runtime, ask.
 Pipes (cmd1 | cmd2), redirects (> file, >> file), heredocs (<< 'EOF'), chaining (&&, ||, ;), and brace expansion ({a,b,c}) are supported.
 Run scripts: python <file>, lua <file>. Show output in preview: preview <path>.
 
@@ -90,53 +118,25 @@ One command at a time as a single string.`,
             return 'Error: cmd must be a string. Pass the complete command as a single string (e.g., "ls -la /")';
           }
 
-          // Extract heredoc content if present
-          // Supports both orderings:
-          //   cat > file << 'EOF'\ncontent\nEOF   (standard)
-          //   cat << 'EOF' > file\ncontent\nEOF   (reversed — common with Gemini models)
-          // Also handles chained commands after the heredoc (e.g., ... EOF\npython file.py)
-          let heredocStdin: string | undefined;
           let cmdString = unescapeHtmlEntities(args.cmd);
-          let trailingCommands: string | undefined;
-          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?([^\n]*)\n([\s\S]*)\n\1(?:[ \t]*\n([\s\S]+))?\s*$/);
-          if (heredocMatch) {
-            heredocStdin = heredocMatch[3];
-            cmdString = cmdString.slice(0, heredocMatch.index!).trim();
-            // Append any content after the delimiter but before the newline
-            // (e.g., " > file" from "cat << 'EOF' > file")
-            const afterDelimiter = (heredocMatch[2] || '').trim();
-            if (afterDelimiter) {
-              cmdString = cmdString + ' ' + afterDelimiter;
-            }
-            if (heredocMatch[4]) {
-              trailingCommands = heredocMatch[4].trim();
-            }
-          } else {
-            // Fallback: heredoc regex failed (e.g., truncated output missing closing delimiter).
-            // Detect << in the command and extract everything after the first newline as stdin.
-            const fallbackMatch = cmdString.match(/^([^\n]*?)\s*<<-?\s*['"]?(\w+)['"]?([^\n]*)\n([\s\S]+)$/);
-            if (fallbackMatch) {
-              const beforeHeredoc = fallbackMatch[1].trim();
-              const delimiter = fallbackMatch[2];
-              const afterDelimiter = (fallbackMatch[3] || '').trim();
-              let content = fallbackMatch[4];
-              // Strip closing delimiter if present at end (without final newline)
-              const closingRe = new RegExp('\\n' + delimiter + '\\s*$');
-              content = content.replace(closingRe, '');
-              heredocStdin = content;
-              cmdString = afterDelimiter ? beforeHeredoc + ' ' + afterDelimiter : beforeHeredoc;
-            }
-          }
 
-          // Handle newline-chained commands (e.g., "ls -la\ncat file\ngrep pattern")
-          // Some models chain commands with \n instead of && or ;
-          // Only applies when no heredoc was extracted (heredoc content has its own \n handling)
-          if (!heredocStdin && cmdString.includes('\n')) {
+          // Newline-separated compound commands (multiple statements, possibly including
+          // chained heredocs) are split here first. splitNewlineCommands is the single
+          // authoritative parser for heredoc boundaries: it iterates line-by-line and
+          // recognises a closing delimiter as a line whose trim equals the opener. This
+          // lets a sequence like
+          //   cat > /a << 'EOF'
+          //   content-a
+          //   EOF
+          //   cat > /b << 'EOF'
+          //   content-b
+          //   EOF
+          // split into two independent commands instead of one giant heredoc body.
+          if (cmdString.includes('\n')) {
             const multiCmds = splitNewlineCommands(cmdString);
             if (multiCmds.length > 1) {
               const outputs: string[] = [];
               for (const singleCmd of multiCmds) {
-                // Each command may itself contain a heredoc — recurse through the full executor
                 const lineResult = await this.get('shell')!.executor.execute(projectId, { cmd: singleCmd }, context);
                 if (lineResult && lineResult !== 'Command succeeded with no output') {
                   outputs.push(lineResult);
@@ -145,6 +145,40 @@ One command at a time as a single string.`,
                 if (lineResult.startsWith('Error')) break;
               }
               return outputs.length > 0 ? outputs.join('\n') : 'Command succeeded with no output';
+            }
+          }
+
+          // Single logical command from here on — at most one heredoc.
+          // Supports both orderings:
+          //   cat > file << 'EOF'\ncontent\nEOF   (standard)
+          //   cat << 'EOF' > file\ncontent\nEOF   (reversed — common with Gemini models)
+          // Also handles trailing commands after the heredoc (e.g., ... EOF\npython file.py).
+          let heredocStdin: string | undefined;
+          let trailingCommands: string | undefined;
+          const heredocMatch = cmdString.match(/<<-?\s*['"]?(\w+)['"]?([^\n]*)\n([\s\S]*?)\n\1(?:[ \t]*\n([\s\S]+))?\s*$/);
+          if (heredocMatch) {
+            heredocStdin = heredocMatch[3];
+            cmdString = cmdString.slice(0, heredocMatch.index!).trim();
+            const afterDelimiter = (heredocMatch[2] || '').trim();
+            if (afterDelimiter) {
+              cmdString = cmdString + ' ' + afterDelimiter;
+            }
+            if (heredocMatch[4]) {
+              trailingCommands = heredocMatch[4].trim();
+            }
+          } else {
+            // Fallback: heredoc regex failed (e.g., truncated stream missing closing delimiter).
+            // Detect << in the command and extract everything after the first newline as stdin.
+            const fallbackMatch = cmdString.match(/^([^\n]*?)\s*<<-?\s*['"]?(\w+)['"]?([^\n]*)\n([\s\S]+)$/);
+            if (fallbackMatch) {
+              const beforeHeredoc = fallbackMatch[1].trim();
+              const delimiter = fallbackMatch[2];
+              const afterDelimiter = (fallbackMatch[3] || '').trim();
+              let content = fallbackMatch[4];
+              const closingRe = new RegExp('\\n' + delimiter + '\\s*$');
+              content = content.replace(closingRe, '');
+              heredocStdin = content;
+              cmdString = afterDelimiter ? beforeHeredoc + ' ' + afterDelimiter : beforeHeredoc;
             }
           }
 
@@ -229,18 +263,25 @@ One command at a time as a single string.`,
   }
 
   /**
-   * Get tool definition by ID
+   * Get tool definition by ID. Pass agentType to get a per-agent description
+   * variant (e.g. setup mode gets a shell description that lists only the
+   * four setup commands instead of the full VFS shell command set).
    */
-  getDefinition(id: ToolId): ToolDefinition | undefined {
-    return this.tools.get(id)?.definition;
+  getDefinition(id: ToolId, agentType?: string): ToolDefinition | undefined {
+    const tool = this.tools.get(id);
+    if (!tool) return undefined;
+    if (id === 'shell' && agentType === 'setup') {
+      return { ...tool.definition, description: SETUP_SHELL_DESCRIPTION };
+    }
+    return tool.definition;
   }
 
   /**
    * Get all tool definitions for a list of tool IDs.
    */
-  getDefinitions(toolIds: string[]): ToolDefinition[] {
+  getDefinitions(toolIds: string[], agentType?: string): ToolDefinition[] {
     return toolIds
-      .map(id => this.getDefinition(id as ToolId))
+      .map(id => this.getDefinition(id as ToolId, agentType))
       .filter((def): def is ToolDefinition => def !== undefined);
   }
 
@@ -496,7 +537,9 @@ async function executeShellSegment(
   }
 
   // VFS shell fallthrough (handles pipes, redirects, etc.)
-  const result = await vfsShell.execute(projectId, cmdArray, heredocStdin);
+  const result = await vfsShell.execute(projectId, cmdArray, heredocStdin, {
+    onProgress: context.onProgress
+  });
 
   // Refresh server context if shell command modified .server/ files
   if (isWriteOperation(cmdArray) && cmdArray.some(a => a.includes('/.server/'))) {
@@ -592,7 +635,7 @@ function parseShellCommand(cmdStr: string): string[] {
       if (char === '"' || char === "'") {
         inQuotes = true;
         quoteChar = char;
-      } else if (char === ' ' || char === '\t') {
+      } else if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
         if (current.length > 0) {
           args.push(current);
           current = '';

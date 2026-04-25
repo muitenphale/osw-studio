@@ -6,6 +6,38 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.60.0 - Describe Mode (2026-04-26)
+
+New way to start a project: click "Plan the project first" in the create dialog and describe what you want to build. A setup agent figures out the runtime, template, pages, and capabilities through a short conversation. The project starts with full context so the in-project agent doesn't ask the same questions again. Plus folder drag-and-drop upload, paginated list views, a live reasoning preview, and the in-project agent can now ask quick questions with tappable buttons.
+
+### Describe Mode
+- **Conversational setup** — Describe what you're building and the agent fills out a project brief and design spec. Review everything in the sidebar before creating
+- **Tappable chip prompts** — The agent presents options as tappable buttons when there's a small set of choices, instead of asking in free text
+- **Context handoff** — Projects start with `.PROMPT.md`, `.DESIGN.md`, and `.DESIGN-CONVERSATION.md` so nothing from the setup conversation is lost
+
+### Building with the AI
+- **In-project agent can ask with chips** — When the AI hits a real either/or choice (a library to use, a layout direction, etc.), it can now surface tappable options instead of asking in prose. Picking one resumes the task with that decision baked in
+- **Live reasoning preview** — The reasoning badge now streams the latest thinking inline instead of showing a static `Thinking...` label, so you can see what the model is working through in real time
+
+### File Explorer
+- **Folder drag-and-drop upload** — Drop a folder onto the file explorer and the whole tree gets uploaded with the structure preserved. A single progress toast shows live counts ("Uploading 17/42 files · 3/3 folders")
+- **Hidden files indicator** — A bar at the bottom shows how many dot-prefixed files and folders are hidden, with a tooltip explaining what it means for exports
+- **Faster directory delete** — Deleting a folder with many files now triggers a single preview rebuild at the end instead of one per file
+
+### Quality of Life
+- **Unsaved changes guard** — Leaving a project or closing the browser tab now warns when the AI is generating or there are unsaved changes
+- **Fullscreen preview keeps your chat draft** — Toggling the preview in and out of fullscreen no longer wipes what you were typing or reloads the preview
+- **Paginated list views** — Projects, Templates, Deployments, and Skills now paginate instead of rendering every item at once. Large libraries scroll and search faster. Skills also unifies its Built-in and Custom sections into a single list with toggle chips to hide either group
+
+### Fixes
+- **Chained file writes** — When the AI wrote multiple files in one go via back-to-back heredocs, the first file used to swallow everything that followed and the rest were skipped. All files now land where they should
+- **`sed` on common file paths** — `sed -i 's/old/new/g' /styles/style.css` and similar commands no longer fail with "unsupported command 'style.css'". The shell parser correctly distinguishes paths from sed expressions
+
+### Privacy & Telemetry
+- **Expanded anonymous analytics disclosure** — A few new categorical events (which creation flow and runtime were used, publish success/failure, compaction token counts, whether an image was attached) help surface which features actually matter. The disclosure dialog lists them explicitly, and no file contents, prompts, or names are ever collected. Opt-out remains available
+
+---
+
 ## v1.59.0 - Design Skills & Streaming Resilience (2026-04-21)
 
 The frontend design skill is now a skill tree — a base skill with universal design principles plus four aesthetic sub-skills (bold-geometric, soft-organic, editorial, minimal) that teach the AI how to think within each aesthetic rather than applying a one-size-fits-all template. Large file writes are more resilient to provider issues, and the editor now previews images and video files inline.

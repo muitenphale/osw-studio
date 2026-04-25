@@ -16,7 +16,7 @@ export interface StreamResponse {
   usage?: UsageInfo;
   wasTruncated?: boolean;   // True if response was cut off due to max_tokens
   finishReason?: string;    // The actual finish reason from the API
-  reasoningDetails?: ReasoningDetail[];  // Gemini reasoning blocks with signatures
+  reasoningDetails?: ReasoningDetail[];  // Structured reasoning blocks (Gemini signatures, etc.) for multi-turn replay
 }
 
 export interface StreamParserOptions {
@@ -51,7 +51,7 @@ export async function parseStreamingResponse(
   let usageInfo: UsageInfo | undefined;
   let wasTruncated = false;
   let lastFinishReason: string | undefined;
-  let reasoningDetails: ReasoningDetail[] = [];  // For Gemini thinking models
+  let reasoningDetails: ReasoningDetail[] = [];  // Structured reasoning blocks captured for multi-turn replay
 
   // State for extracting inline <think>...</think> blocks (MiniMax, Ollama thinking models, etc.)
   let inThinkBlock = false;
@@ -338,12 +338,20 @@ export async function parseStreamingResponse(
                 }
               }
 
-              // Capture reasoning_details for Gemini thinking models (OpenRouter format)
-              // These contain signatures that MUST be preserved for multi-turn tool use
+              // Capture reasoning_details for thinking models (OpenRouter normalized format).
+              // These contain signatures/blobs that MUST be preserved on assistant messages
+              // for multi-turn replay — DeepSeek V4 Pro returns 400 ("reasoning_content in
+              // the thinking mode must be passed back to the API") on the second turn if
+              // the prior assistant turn lacks them.
+              //
               // IMPORTANT: Gemini sends CUMULATIVE SNAPSHOTS, not incremental deltas.
               // Each rd.text contains the FULL text so far, not just the new portion.
-              // Skip if we already handled reasoning via delta.reasoning (DeepSeek via OpenRouter)
-              if (!handledReasoningDelta && delta?.reasoning_details && Array.isArray(delta.reasoning_details)) {
+              //
+              // Some providers (DeepSeek via OpenRouter) emit BOTH delta.reasoning AND
+              // delta.reasoning_details for the same content. We always capture the
+              // structured details (storage), but suppress the duplicate UI delta
+              // emission when handledReasoningDelta is already true (display).
+              if (delta?.reasoning_details && Array.isArray(delta.reasoning_details)) {
                 for (const rd of delta.reasoning_details) {
                   // Merge or update reasoning details
                   const existingIdx = reasoningDetails.findIndex(
@@ -363,8 +371,9 @@ export async function parseStreamingResponse(
                         // Store full snapshot (replace, not append)
                         reasoningDetails[existingIdx].text = rd.text;
 
-                        // Emit delta event with just the new portion
-                        if (deltaText && !suppressAssistantDelta) {
+                        // Emit delta event with just the new portion — but only if we
+                        // didn't already emit via delta.reasoning above.
+                        if (deltaText && !suppressAssistantDelta && !handledReasoningDelta) {
                           onProgress?.('reasoning_delta', { text: deltaText });
                         }
                       }
@@ -374,20 +383,25 @@ export async function parseStreamingResponse(
                     }
                   } else {
                     reasoningDetails.push(rd as ReasoningDetail);
-                    // Emit delta for new reasoning detail
-                    if (rd.text && !suppressAssistantDelta) {
+                    // Emit delta for new reasoning detail — gated as above.
+                    if (rd.text && !suppressAssistantDelta && !handledReasoningDelta) {
                       onProgress?.('reasoning_delta', { text: rd.text });
                     }
                   }
                 }
-                // Update reasoning buffer from the latest cumulative text
-                // Use the last reasoning detail's text as the current total
-                const latestText = reasoningDetails
-                  .filter(rd => rd.text)
-                  .map(rd => rd.text)
-                  .join('');
-                if (latestText) {
-                  reasoning = latestText; // Replace, don't append
+                // Update reasoning buffer from the latest cumulative text only when
+                // we own the reasoning stream. When delta.reasoning is the source of
+                // truth (DeepSeek), it already populated `reasoning` incrementally and
+                // we shouldn't overwrite it with the structured details (which may not
+                // contain the same text content for all providers).
+                if (!handledReasoningDelta) {
+                  const latestText = reasoningDetails
+                    .filter(rd => rd.text)
+                    .map(rd => rd.text)
+                    .join('');
+                  if (latestText) {
+                    reasoning = latestText; // Replace, don't append
+                  }
                 }
               }
 

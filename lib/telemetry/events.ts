@@ -9,6 +9,10 @@ export type TelemetryEventName =
   | 'task_fail'
   | 'tool_call'
   | 'api_error'
+  | 'project_create'
+  | 'deployment_publish'
+  | 'compaction_fired'
+  | 'image_attached'
   | 'telemetry_disabled'
   | 'telemetry_accepted';
 

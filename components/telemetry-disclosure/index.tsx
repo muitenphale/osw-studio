@@ -77,6 +77,10 @@ export function TelemetryDisclosure({ open, onDismiss }: TelemetryDisclosureProp
                       <li>Whether tasks succeed or fail (not what was asked)</li>
                       <li>Which tools the AI uses and whether they work</li>
                       <li>API error types (not error messages)</li>
+                      <li>Which creation flow and runtime are used when a project is created (e.g. quick vs. describe, static vs. react)</li>
+                      <li>Whether a publish succeeded or failed, and whether a custom domain is configured (not the domain)</li>
+                      <li>Whether conversation compaction ran, with token counts only (not messages)</li>
+                      <li>Whether an image was attached to a chat message (not the image itself)</li>
                       <li>Session heartbeats (how long the app is open)</li>
                       <li>A randomly generated ID stored in your browser to count unique visitors</li>
                     </ul>

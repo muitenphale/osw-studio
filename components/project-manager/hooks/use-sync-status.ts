@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { vfs } from '@/lib/vfs';
 import { skillsService } from '@/lib/vfs/skills/service';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
@@ -27,7 +27,7 @@ const INITIAL_STATUS: DetailedSyncStatus = {
   projects: EMPTY_CATEGORY,
   skills: EMPTY_CATEGORY,
   templates: EMPTY_CATEGORY,
-  loading: true,
+  loading: false,
   error: null,
 };
 
@@ -229,10 +229,6 @@ export function useSyncStatus() {
       setRefreshing(false);
     }
   }, [syncManager, hasLoaded]);
-
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
 
   return {
     status,

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, DragEvent, Clipboard
 import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X, Brain, Image as ImageIcon } from 'lucide-react';
 import { DebugEvent } from '@/components/debug-panel';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
+import { ChipsBlock } from './chips';
 import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +16,7 @@ import { PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { ContentBlock } from '@/lib/llm/types';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
 import { MessageContext } from '@/components/message-context';
+import { track } from '@/lib/telemetry';
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
@@ -93,6 +95,13 @@ interface ChatPanelProps {
   placedBlocks?: PlacedBlock[];
   onRemovePlacedBlock?: (placementId: string) => void;
   onClearPlacedBlocks?: () => void;
+  // Layout overrides
+  hideHeader?: boolean;
+  className?: string;
+  /** Content rendered in place of the composer (e.g. creation confirmation) */
+  composerOverlay?: React.ReactNode;
+  /** Non-dismissable system note shown in context area (consumed on next send) */
+  systemNote?: string | null;
 }
 
 interface ToolCall {
@@ -106,7 +115,7 @@ interface ToolCall {
 
 interface TurnItem {
   id: string;
-  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'error_paused' | 'user' | 'synthetic_error' | 'project_context' | 'compaction';
+  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'error_paused' | 'user' | 'synthetic_error' | 'project_context' | 'compaction' | 'ask';
   timestamp: number;
   data: any;
   eventId?: string;  // Links item to its source debug event (for coalesced updates)
@@ -201,6 +210,10 @@ export function ChatPanel({
   placedBlocks,
   onRemovePlacedBlock,
   onClearPlacedBlocks,
+  hideHeader,
+  className,
+  composerOverlay,
+  systemNote,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -233,6 +246,10 @@ export function ChatPanel({
     const files = Array.from(e.dataTransfer.files).filter(f =>
       f.type.startsWith('image/')
     );
+
+    if (files.length > 0) {
+      track('image_attached', { source: 'drop', count: files.length });
+    }
 
     for (const file of files) {
       const reader = new FileReader();
@@ -274,10 +291,12 @@ export function ChatPanel({
     const items = e.clipboardData?.items;
     if (!items) return;
 
+    let pastedCount = 0;
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
         const file = item.getAsFile();
         if (file) {
+          pastedCount++;
           const reader = new FileReader();
           reader.onload = () => {
             const dataUrl = reader.result as string;
@@ -294,6 +313,9 @@ export function ChatPanel({
           reader.readAsDataURL(file);
         }
       }
+    }
+    if (pastedCount > 0) {
+      track('image_attached', { source: 'paste', count: pastedCount });
     }
   }, [supportsVision]);
 
@@ -608,7 +630,7 @@ export function ChatPanel({
 
           const allText = deltaItems.map((d: any) => d?.text || '').join('');
 
-          if (allText) {
+          if (allText.trim()) {
             if (matchingTextItem) {
               // Update the existing text item for this event
               matchingTextItem.data = allText;
@@ -635,6 +657,19 @@ export function ChatPanel({
             type: 'plan',
             timestamp: event.timestamp,
             data: event.data?.content || ''
+          });
+          break;
+
+        case 'ask':
+          // Setup/orchestrator emitted an ask command — render tappable chips.
+          state.currentTurn.items.push({
+            id: `item-${state.itemIdCounter++}`,
+            type: 'ask',
+            timestamp: event.timestamp,
+            data: {
+              prompt: event.data?.prompt,
+              options: Array.isArray(event.data?.options) ? event.data.options : []
+            }
           });
           break;
 
@@ -946,26 +981,28 @@ export function ChatPanel({
   ) : null;
 
   return (
-    <PanelContainer dataTourId="assistant-panel">
-      <PanelHeader
-        icon={MessageSquare}
-        title="Chat"
-        color="var(--button-assistant-active)"
-        onClose={onClose}
-        panelKey="chat"
-        actions={onClearChat && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClearChat}
-            className="h-5 w-5"
-            title="Clear chat"
-            data-tour-id="clear-chat-button"
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        )}
-      />
+    <PanelContainer dataTourId="assistant-panel" className={className}>
+      {!hideHeader && (
+        <PanelHeader
+          icon={MessageSquare}
+          title="Chat"
+          color="var(--button-assistant-active)"
+          onClose={onClose}
+          panelKey="chat"
+          actions={onClearChat && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClearChat}
+              className="h-5 w-5"
+              title="Clear chat"
+              data-tour-id="clear-chat-button"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          )}
+        />
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -1017,6 +1054,7 @@ export function ChatPanel({
                   onContinue={onContinue}
                   onCancel={onStop}
                   generating={generating}
+                  onGenerate={onGenerate}
                   expandedItems={expandedItems}
                   onToggleExpanded={toggleExpanded}
                 />
@@ -1026,7 +1064,10 @@ export function ChatPanel({
         )}
       </div>
 
-      {/* Input */}
+      {/* Input — or composerOverlay when present */}
+      {composerOverlay ? (
+        <div className="p-3">{composerOverlay}</div>
+      ) : (
       <div className="p-3 space-y-2">
         {runtimeErrorHint}
         {/* Unified context component — focus, blocks, images */}
@@ -1034,6 +1075,7 @@ export function ChatPanel({
           focusContext={focusContextData}
           semanticBlocks={placedBlocks}
           images={pendingImages}
+          systemNote={systemNote}
           onClearFocus={() => setFocusContext(null)}
           onRemoveBlock={onRemovePlacedBlock}
           onClearBlocks={onClearPlacedBlocks}
@@ -1127,27 +1169,30 @@ export function ChatPanel({
                 </PopoverContent>
               </Popover>
 
-              <ToggleGroup
-                type="single"
-                value={chatMode ? 'chat' : 'code'}
-                onValueChange={(value) => {
-                  if (value) setChatMode(value === 'chat');
-                }}
-                className="gap-1"
-              >
-                <ToggleGroupItem value="chat" className="h-7 text-xs px-2">
-                  <MessageSquare className="h-3 w-3 mr-1" />
-                  Chat
-                </ToggleGroupItem>
-                <ToggleGroupItem value="code" className="h-7 text-xs px-2">
-                  <Code className="h-3 w-3 mr-1" />
-                  Code
-                </ToggleGroupItem>
-              </ToggleGroup>
+              {!hideHeader && (
+                <ToggleGroup
+                  type="single"
+                  value={chatMode ? 'chat' : 'code'}
+                  onValueChange={(value) => {
+                    if (value) setChatMode(value === 'chat');
+                  }}
+                  className="gap-1"
+                >
+                  <ToggleGroupItem value="chat" className="h-7 text-xs px-2">
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    Chat
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="code" className="h-7 text-xs px-2">
+                    <Code className="h-3 w-3 mr-1" />
+                    Code
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              )}
             </div>
           </div>
         </div>
       </div>
+      )}
     </PanelContainer>
   );
 }
@@ -1161,11 +1206,12 @@ interface TurnDisplayProps {
   onContinue?: () => void;
   onCancel?: () => void;
   generating?: boolean;
+  onGenerate?: (prompt: string, images?: PendingImage[]) => void;
   expandedItems: Set<string>;
   onToggleExpanded: (itemId: string) => void;
 }
 
-function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, onRetry, onContinue, onCancel, generating, expandedItems, onToggleExpanded }: TurnDisplayProps) {
+function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, onRetry, onContinue, onCancel, generating, onGenerate, expandedItems, onToggleExpanded }: TurnDisplayProps) {
   return (
     <div className="space-y-2" {...(turn.checkpointId ? { 'data-checkpoint-id': turn.checkpointId } : {})}>
       {/* Render items in chronological order */}
@@ -1243,6 +1289,23 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
                 <MarkdownRenderer content={item.data} />
               </div>
             );
+
+          case 'ask': {
+            const askData = item.data as { prompt?: string; options: string[] };
+            if (!askData.options || askData.options.length === 0) return null;
+            return (
+              <div key={item.id} className="text-sm text-foreground/90 bg-muted/20 px-3 py-2 rounded">
+                {askData.prompt && (
+                  <p className="text-sm text-foreground mb-1">{askData.prompt}</p>
+                )}
+                <ChipsBlock
+                  options={askData.options}
+                  onSelect={(value) => onGenerate?.(value)}
+                  disabled={!!generating}
+                />
+              </div>
+            );
+          }
 
           case 'project_context':
             return (
@@ -1558,10 +1621,11 @@ interface ReasoningDisplayProps {
 }
 
 function ReasoningDisplay({ itemId, content, isComplete, isExpanded, onToggle }: ReasoningDisplayProps) {
-  // Extract first line for preview, clean up common prefixes
   const lines = (content || '').split('\n').filter(l => l.trim());
-  const preview = lines[0]?.substring(0, 60) || 'Reasoning...';
+  const headPreview = lines[0]?.substring(0, 60) || 'Reasoning...';
+  const tailPreview = lines.length > 0 ? lines[lines.length - 1].slice(-120) : '';
   const isStreaming = !isComplete;
+  const streamingLabel = tailPreview || 'Thinking...';
 
   return (
     <div className="bg-violet-500/10 rounded-md transition-all p-1.5">
@@ -1578,7 +1642,7 @@ function ReasoningDisplay({ itemId, content, isComplete, isExpanded, onToggle }:
           <span className="text-xs font-mono">reasoning</span>
         </div>
         <code className="text-xs text-muted-foreground truncate flex-1">
-          {isStreaming ? 'Thinking...' : preview}
+          {isStreaming ? streamingLabel : headPreview}
         </code>
         <div className="ml-auto">
           <ChevronRight className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />

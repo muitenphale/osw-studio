@@ -216,13 +216,15 @@ export default function TestGenerationPage() {
     try {
       projectId = `test-${Date.now()}`;
 
-      const { vfs } = await import('@/lib/vfs');
-      await vfs.init();
-      await vfs.createProject(`Test: ${scenario.name}`, undefined, projectId);
+      if (!scenario.skipProjectSetup) {
+        const { vfs } = await import('@/lib/vfs');
+        await vfs.init();
+        await vfs.createProject(`Test: ${scenario.name}`, undefined, projectId);
 
-      if (scenario.setupFiles) {
-        for (const [filePath, content] of Object.entries(scenario.setupFiles)) {
-          await vfs.createFile(projectId, filePath, content);
+        if (scenario.setupFiles) {
+          for (const [filePath, content] of Object.entries(scenario.setupFiles)) {
+            await vfs.createFile(projectId, filePath, content);
+          }
         }
       }
 
@@ -248,7 +250,7 @@ export default function TestGenerationPage() {
 
       const orchestrator = new MultiAgentOrchestrator(
         projectId,
-        'orchestrator',
+        scenario.agentType || 'orchestrator',
         (message, step) => {
           if (message === 'assistant_delta') {
             const delta = step as ProgressDelta;
@@ -503,7 +505,7 @@ export default function TestGenerationPage() {
 
     orchestratorInstances.current.delete(key);
 
-    if (projectId) {
+    if (projectId && !scenario.skipProjectSetup) {
       try {
         const { vfs } = await import('@/lib/vfs');
         await vfs.deleteProject(projectId);

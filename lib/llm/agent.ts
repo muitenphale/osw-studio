@@ -2,7 +2,7 @@
  * Agent System - Defines different agent types and their capabilities
  */
 
-export type AgentType = 'orchestrator' | 'explore' | 'task' | 'plan';
+export type AgentType = 'orchestrator' | 'explore' | 'task' | 'plan' | 'setup';
 
 interface AgentConfig {
   type: AgentType;
@@ -73,6 +73,12 @@ export class AgentRegistry {
       tools: ['shell'],
       maxIterations: 10,
       isReadOnly: true
+    }));
+
+    this.register(new Agent({
+      type: 'setup',
+      tools: ['shell'],
+      maxIterations: 20
     }));
   }
 

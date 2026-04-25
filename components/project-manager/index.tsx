@@ -24,7 +24,10 @@ import {
   ArrowUpDown,
   Info,
   TestTube,
-  Github
+  Github,
+  MessageSquare,
+  ArrowRight,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   Dialog,
@@ -38,7 +41,6 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import {
-  AI_SETUP_PROJECT_TEMPLATE,
   BAREBONES_PROJECT_TEMPLATE,
   HANDLEBARS_STARTER_PROJECT_TEMPLATE,
   DEMO_PROJECT_TEMPLATE,
@@ -75,6 +77,10 @@ import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
 import { TemplateExportDialog } from '@/components/templates/template-export-dialog';
 import { ProjectSettingsModal } from '@/components/project-backend';
+import { DescribeMode } from '@/components/describe-mode';
+import { track } from '@/lib/telemetry';
+import { usePagination } from '@/lib/hooks/use-pagination';
+import { Pagination, PaginationRange } from '@/components/ui/pagination';
 
 interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
@@ -97,6 +103,20 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [newProjectTemplate, setNewProjectTemplate] = useState<string>('blank');
   const [newProjectRuntime, setNewProjectRuntime] = useState<ProjectRuntime>('static');
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
+  const [createMode, setCreateMode] = useState<'quick' | 'describe'>('quick');
+  const [describeDirty, setDescribeDirty] = useState(false);
+
+  const isQuickDirty = createMode === 'quick' && (
+    newProjectName !== '' || newProjectDescription !== '' ||
+    newProjectTemplate !== 'blank' || newProjectRuntime !== 'static'
+  );
+  const isCreateDirty = createMode === 'describe' ? describeDirty : isQuickDirty;
+
+  const confirmDiscard = useCallback((action: () => void) => {
+    if (!isCreateDirty || window.confirm('You have unsaved changes. Discard them?')) {
+      action();
+    }
+  }, [isCreateDirty]);
 
   // Auto-open create dialog when navigated from dashboard "New Project"
   useEffect(() => {
@@ -131,6 +151,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [tourActionProjectId, setTourActionProjectId] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const demoCreationRef = useRef(false);
+  const listScrollRef = useRef<HTMLElement | null>(null);
 
   // Derive backend enabled state from localStorage
   const backendProjectEnabled = backendProject ? migrateBackendKey(backendProject.id) : true;
@@ -325,12 +346,6 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       } else {
         // Built-in template
         switch (newProjectTemplate) {
-          case 'ai-setup':
-            // AI Setup always starts as static — the AI changes it via `runtime` command
-            finalProject.settings = { ...finalProject.settings, runtime: 'static' };
-            await vfs.updateProject(finalProject);
-            await createProjectFromTemplate(vfs, finalProject.id, AI_SETUP_PROJECT_TEMPLATE);
-            break;
           case 'handlebars-starter':
             await createProjectFromTemplate(vfs, finalProject.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
             break;
@@ -385,8 +400,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         }
       }
 
+      track('project_create', {
+        method: 'quick',
+        runtime: newProjectRuntime,
+        template: newProjectTemplate.startsWith('custom:') ? 'custom' : newProjectTemplate,
+      });
+
       toast.success('Project created successfully');
       setCreateDialogOpen(false);
+      setCreateMode('quick');
       setNewProjectName('');
       setNewProjectDescription('');
       setNewProjectTemplate('blank');
@@ -528,6 +550,11 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     sortBy
   );
 
+  const projectsPagination = usePagination(filteredProjects, {
+    perPage: 24,
+    resetOn: [searchQuery, sortBy],
+  });
+
   if (loading && !initialLoadComplete) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -542,7 +569,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   return (
     <div className={`flex flex-col ${hideHeader ? 'h-full' : 'h-[100dvh]'}`} style={{ background: `linear-gradient(var(--project-background-tint), var(--project-background-tint)), var(--background)` }}>
       {/* Main Content */}
-      <main className="flex-1 min-h-0 overflow-auto">
+      <main ref={listScrollRef} className="flex-1 min-h-0 overflow-auto">
         <div className="h-full flex flex-col">
             {/* Toolbar */}
             <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
@@ -648,38 +675,53 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                     )}
                   </div>
                 ) : (
-                  <div
-                    className={viewMode === 'grid'
-                      ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                      : 'space-y-3'}
-                    data-tour-id="projects-list"
-                  >
-                    {filteredProjects.map(project => {
-                      if (typeof project !== 'object' || !project.id || !project.name) {
-                        logger.error('Invalid project object:', project);
-                        return null;
-                      }
+                  <>
+                    <PaginationRange
+                      total={projectsPagination.total}
+                      rangeStart={projectsPagination.rangeStart}
+                      rangeEnd={projectsPagination.rangeEnd}
+                      totalPages={projectsPagination.totalPages}
+                      className="mb-2"
+                    />
+                    <div
+                      className={viewMode === 'grid'
+                        ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                        : 'space-y-3'}
+                      data-tour-id="projects-list"
+                    >
+                      {projectsPagination.pageItems.map(project => {
+                        if (typeof project !== 'object' || !project.id || !project.name) {
+                          logger.error('Invalid project object:', project);
+                          return null;
+                        }
 
-                      return (
-                        <ProjectCard
-                          key={project.id}
-                          project={project}
-                          onSelect={onProjectSelect}
-                          onDelete={deleteProject}
-                          onExport={exportProject}
-                          onExportZip={exportProjectAsZip}
-                          onDuplicate={duplicateProject}
-                          onPreview={setPreviewProject}
-                          onExportAsTemplate={setTemplateExportProject}
-                          onBackend={setBackendProject}
-                          onUpdate={handleProjectUpdate}
-                          viewMode={viewMode}
-                          forceMenuOpen={tourActionProjectId === project.id}
-                          highlightExport={tourRunning && tourStep === 'project-controls' && tourActionProjectId === project.id}
-                        />
-                      );
-                    })}
-                  </div>
+                        return (
+                          <ProjectCard
+                            key={project.id}
+                            project={project}
+                            onSelect={onProjectSelect}
+                            onDelete={deleteProject}
+                            onExport={exportProject}
+                            onExportZip={exportProjectAsZip}
+                            onDuplicate={duplicateProject}
+                            onPreview={setPreviewProject}
+                            onExportAsTemplate={setTemplateExportProject}
+                            onBackend={setBackendProject}
+                            onUpdate={handleProjectUpdate}
+                            viewMode={viewMode}
+                            forceMenuOpen={tourActionProjectId === project.id}
+                            highlightExport={tourRunning && tourStep === 'project-controls' && tourActionProjectId === project.id}
+                          />
+                        );
+                      })}
+                    </div>
+                    <Pagination
+                      page={projectsPagination.page}
+                      totalPages={projectsPagination.totalPages}
+                      onPageChange={projectsPagination.setPage}
+                      scrollTarget={listScrollRef}
+                    />
+                  </>
                 )}
               </div>
             </div>
@@ -734,168 +776,215 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         </footer>
       )}
 
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Create New Project</DialogTitle>
-            <DialogDescription>
-              Start a new project
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between items-center">
-                <Label htmlFor="name">Project Name</Label>
-                <span className="text-xs text-muted-foreground">
-                  {newProjectName.length}/50
-                </span>
+      <Dialog open={createDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          confirmDiscard(() => {
+            setCreateDialogOpen(false);
+            setCreateMode('quick');
+            setDescribeDirty(false);
+          });
+        } else {
+          setCreateDialogOpen(true);
+        }
+      }}>
+        <DialogContent
+          className={createMode === 'describe'
+            ? "sm:max-w-5xl h-[80vh] flex flex-col p-0 gap-0"
+            : "sm:max-w-md"
+          }
+          onInteractOutside={(e) => { if (isCreateDirty) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => {
+            if (isCreateDirty) {
+              e.preventDefault();
+              confirmDiscard(() => {
+                setCreateDialogOpen(false);
+                setCreateMode('quick');
+                setDescribeDirty(false);
+              });
+            }
+          }}
+        >
+          {createMode === 'describe' ? (
+            /* ── Describe mode header ── */
+            <DialogHeader className="px-4 py-3 border-b border-border shrink-0">
+              <div className="flex items-center gap-3">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => confirmDiscard(() => { setCreateMode('quick'); setDescribeDirty(false); })}>
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <DialogTitle className="text-sm">Describe your project</DialogTitle>
+                <DialogDescription className="sr-only">Conversational project setup with AI</DialogDescription>
               </div>
-              <Input
-                id="name"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value.slice(0, 50))}
-                placeholder="My Awesome Website"
-                className="mt-2"
-                maxLength={50}
-              />
-            </div>
-            <div>
-              <Label htmlFor="runtime">Runtime</Label>
-              <Select
-                value={newProjectRuntime}
-                onValueChange={(value) => {
-                  const runtime = value as ProjectRuntime;
-                  setNewProjectRuntime(runtime);
-                  // Reset template to first available for this runtime
-                  const templates = getBuiltInTemplatesForRuntime(runtime);
-                  setNewProjectTemplate(templates[0]?.id || 'blank');
-                }}
+            </DialogHeader>
+          ) : (
+            /* ── Quick mode header ── */
+            <DialogHeader>
+              <DialogTitle>Create a project</DialogTitle>
+              <DialogDescription className="sr-only">Set up a new project</DialogDescription>
+            </DialogHeader>
+          )}
+          {createMode === 'quick' ? (
+            <>
+              {/* Describe CTA — top card */}
+              <button
+                type="button"
+                onClick={() => setCreateMode('describe')}
+                className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg border border-primary/30 bg-primary/5 text-left hover:bg-primary/10 transition-colors group"
               >
-                <SelectTrigger id="runtime" className="mt-2 w-full">
-                  <div className="truncate flex-1 text-left">
-                    {getProjectRuntimes().find(r => r.value === newProjectRuntime)?.label}
+                <div className="h-9 w-9 rounded-md bg-primary/15 flex items-center justify-center shrink-0">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-primary">Plan the project first</p>
+                  <p className="text-xs text-muted-foreground">Chat with the agent to work out what you need. Skip repetitive setup once you start building.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-primary/60 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center">
+                    <Label htmlFor="name">Project name</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {newProjectName.length}/50
+                    </span>
                   </div>
-                </SelectTrigger>
-                <SelectContent>
-                  {getProjectRuntimes().map(rt => (
-                    <SelectItem key={rt.value} value={rt.value}>
-                      <div className="flex flex-col gap-0.5">
-                        <div className="font-medium">{rt.label}</div>
-                        <div className="text-xs text-muted-foreground">{rt.description}</div>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1.5">You can change this later in project settings.</p>
-            </div>
-            <div>
-              <div className="flex justify-between items-center">
-                <Label htmlFor="template">Template</Label>
-                {newProjectTemplate !== 'ai-setup' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewProjectRuntime('static');
-                      setNewProjectTemplate('ai-setup');
+                  <Input
+                    id="name"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value.slice(0, 50))}
+                    placeholder="My awesome website"
+                    className="mt-2"
+                    maxLength={50}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="runtime">Runtime</Label>
+                  <Select
+                    value={newProjectRuntime}
+                    onValueChange={(value) => {
+                      const runtime = value as ProjectRuntime;
+                      setNewProjectRuntime(runtime);
+                      // Reset template to first available for this runtime
+                      const templates = getBuiltInTemplatesForRuntime(runtime);
+                      setNewProjectTemplate(templates[0]?.id || 'blank');
                     }}
-                    className="text-xs text-primary underline"
                   >
-                    AI Project Setup
-                  </button>
-                )}
-              </div>
-              <Select
-                value={newProjectTemplate}
-                onValueChange={(value) => {
-                  setNewProjectTemplate(value);
-                  // If user manually selects a different template, exit AI Setup
-                  // (runtime stays as-is since user may have changed it)
-                }}
-              >
-                <SelectTrigger id="template" className="mt-2 w-full">
-                  <div className="truncate flex-1 text-left">
-                    {newProjectTemplate === 'ai-setup' ? 'AI Project Setup' : getTemplateDisplayName(newProjectTemplate)}
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ai-setup">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="font-medium">AI Project Setup</div>
-                      <div className="text-xs text-muted-foreground">AI configures runtime and structure</div>
-                    </div>
-                  </SelectItem>
-                  {filteredBuiltInTemplates.length > 0 && (
-                    <SelectGroup>
-                      {filteredBuiltInTemplates.map(template => (
-                        <SelectItem key={template.id} value={template.id}>
+                    <SelectTrigger id="runtime" className="mt-2 w-full">
+                      <div className="truncate flex-1 text-left">
+                        {getProjectRuntimes().find(r => r.value === newProjectRuntime)?.label}
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getProjectRuntimes().map(rt => (
+                        <SelectItem key={rt.value} value={rt.value}>
                           <div className="flex flex-col gap-0.5">
-                            <div className="font-medium">{template.name}</div>
-                            <div className="text-xs text-muted-foreground">{template.description}</div>
+                            <div className="font-medium">{rt.label}</div>
+                            <div className="text-xs text-muted-foreground">{rt.description}</div>
                           </div>
                         </SelectItem>
                       ))}
-                    </SelectGroup>
-                  )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1.5">You can change this later in project settings.</p>
+                </div>
+                <div>
+                  <Label htmlFor="template">Template</Label>
+                  <Select
+                    value={newProjectTemplate}
+                    onValueChange={(value) => setNewProjectTemplate(value)}
+                  >
+                    <SelectTrigger id="template" className="mt-2 w-full">
+                      <div className="truncate flex-1 text-left">
+                        {getTemplateDisplayName(newProjectTemplate)}
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredBuiltInTemplates.length > 0 && (
+                        <SelectGroup>
+                          {filteredBuiltInTemplates.map(template => (
+                            <SelectItem key={template.id} value={template.id}>
+                              <div className="flex flex-col gap-0.5">
+                                <div className="font-medium">{template.name}</div>
+                                <div className="text-xs text-muted-foreground">{template.description}</div>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                      {(() => {
+                        const filtered = customTemplates.filter(t => (t.runtime || 'handlebars') === newProjectRuntime);
+                        return filtered.length > 0 ? (
+                          <SelectGroup>
+                            <SelectLabel>Custom Templates</SelectLabel>
+                            {filtered.map(template => (
+                              <SelectItem key={template.id} value={`custom:${template.id}`}>
+                                <div className="flex flex-col gap-0.5">
+                                  <div className="font-medium">{template.name}</div>
+                                  <div className="text-xs text-muted-foreground">{template.description}</div>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ) : null;
+                      })()}
+                    </SelectContent>
+                  </Select>
                   {(() => {
-                    const filtered = customTemplates.filter(t => (t.runtime || 'handlebars') === newProjectRuntime);
-                    return filtered.length > 0 ? (
-                      <SelectGroup>
-                        <SelectLabel>Custom Templates</SelectLabel>
-                        {filtered.map(template => (
-                          <SelectItem key={template.id} value={`custom:${template.id}`}>
-                            <div className="flex flex-col gap-0.5">
-                              <div className="font-medium">{template.name}</div>
-                              <div className="text-xs text-muted-foreground">{template.description}</div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
+                    const allTemplates = [
+                      ...BUILT_IN_TEMPLATES,
+                      ...customTemplates.map(t => ({ ...t, isBuiltIn: false as const }))
+                    ];
+                    const selected = allTemplates.find(
+                      t => t.id === newProjectTemplate || `custom:${t.id}` === newProjectTemplate
+                    );
+                    return selected?.description ? (
+                      <div className="mt-1.5 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+                        <p className="text-xs text-muted-foreground">{selected.description}</p>
+                      </div>
                     ) : null;
                   })()}
-                </SelectContent>
-              </Select>
-              {(() => {
-                const allTemplates = [
-                  ...BUILT_IN_TEMPLATES,
-                  ...customTemplates.map(t => ({ ...t, isBuiltIn: false as const }))
-                ];
-                const selected = allTemplates.find(
-                  t => t.id === newProjectTemplate || `custom:${t.id}` === newProjectTemplate
-                );
-                return selected?.description ? (
-                  <div className="mt-1.5 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{selected.description}</p>
+                </div>
+                <div>
+                  <div className="flex justify-between items-center">
+                    <Label htmlFor="description">Description (optional)</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {newProjectDescription.length}/200
+                    </span>
                   </div>
-                ) : null;
-              })()}
-            </div>
-            <div>
-              <div className="flex justify-between items-center">
-                <Label htmlFor="description">Description (optional)</Label>
-                <span className="text-xs text-muted-foreground">
-                  {newProjectDescription.length}/200
-                </span>
+                  <Textarea
+                    id="description"
+                    value={newProjectDescription}
+                    onChange={(e) => setNewProjectDescription(e.target.value.slice(0, 200))}
+                    placeholder="A brief description of your project"
+                    className="mt-2 resize-none"
+                    rows={3}
+                    maxLength={200}
+                  />
+                </div>
               </div>
-              <Textarea
-                id="description"
-                value={newProjectDescription}
-                onChange={(e) => setNewProjectDescription(e.target.value.slice(0, 200))}
-                placeholder="A brief description of your project"
-                className="mt-2 resize-none"
-                rows={3}
-                maxLength={200}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => confirmDiscard(() => { setCreateDialogOpen(false); setCreateMode('quick'); })}>
+                  Cancel
+                </Button>
+                <Button onClick={createProject}>
+                  Create project
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <div className="flex-1 min-h-0">
+              <DescribeMode
+                onProjectCreated={(project) => {
+                  setCreateDialogOpen(false);
+                  setCreateMode('quick');
+                  setDescribeDirty(false);
+                  reloadProjects();
+                  onProjectSelect(project);
+                }}
+                onDirtyChange={setDescribeDirty}
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={createProject}>
-              Create Project
-            </Button>
-          </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
 

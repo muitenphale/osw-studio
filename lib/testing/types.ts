@@ -21,11 +21,15 @@ export interface AssertionResult {
 export interface TestScenario {
   id: string;
   name: string;
-  category: 'shell-read' | 'shell-write' | 'shell-search' | 'shell-text' | 'shell-preview' | 'file-editing' | 'status' | 'multi-tool' | 'delegate' | 'compaction';
+  category: 'shell-read' | 'shell-write' | 'shell-search' | 'shell-text' | 'shell-preview' | 'file-editing' | 'status' | 'multi-tool' | 'delegate' | 'compaction' | 'setup';
   prompt: string;
   setupFiles?: Record<string, string>;
   assertions?: TestAssertion[];
   timeout?: number;
+  /** Agent type to use (defaults to 'orchestrator'). */
+  agentType?: import('@/lib/llm/agent').AgentType;
+  /** If true, skip VFS project creation (e.g. setup agent tests). */
+  skipProjectSetup?: boolean;
 }
 
 export interface TestTrack {

@@ -13,7 +13,6 @@ export function BackendStatusBanner() {
     setStatus(getBackendStatus());
     return subscribeBackendStatus((s) => {
       setStatus(s);
-      // Clear dismissal if the underlying state changed (e.g., backend came back up)
       if (!s.backendDown && dismissed === 'backend') setDismissed(null);
       if (!s.authExpired && dismissed === 'auth') setDismissed(null);
     });
@@ -22,8 +21,9 @@ export function BackendStatusBanner() {
   const handleRefresh = async () => {
     setChecking(true);
     try {
-      const res = await fetch('/api/models');
-      if (res.ok) {
+      // Just check if the server is reachable — any non-network response means it's up
+      const res = await fetch('/', { method: 'HEAD' });
+      if (res.ok || res.status < 500) {
         markBackendUp();
       }
     } catch {
@@ -41,8 +41,8 @@ export function BackendStatusBanner() {
       >
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
         <span>
-          Backend unreachable — AI generation and model discovery won&apos;t work.
-          If you&apos;re on the hosted version, local providers (Ollama, LM Studio, llama.cpp) require running OSW Studio locally.
+          Backend unreachable. AI generation, project syncing, and publishing are unavailable.
+          Your work is saved locally. When the server is back, refresh the page and re-save your project(s).
         </span>
         <button
           type="button"
