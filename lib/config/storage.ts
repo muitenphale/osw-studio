@@ -63,6 +63,8 @@ export interface AppSettings {
   codexAuth?: CodexAuthData;
   hfAuth?: HFAuthData;
   telemetryOptIn?: boolean;
+  /** When true, emit llm_request and stream_raw_chunk debug events (ephemeral, not persisted). */
+  debugStreamEnabled?: boolean;
 }
 
 class ConfigManager {
@@ -477,6 +479,15 @@ class ConfigManager {
     return settings.reasoningEnabled?.[modelId] ?? false;
   }
 
+  getDebugStreamEnabled(): boolean {
+    const settings = this.getSettings();
+    return settings.debugStreamEnabled ?? false;
+  }
+
+  setDebugStreamEnabled(enabled: boolean): void {
+    this.setSetting('debugStreamEnabled', enabled);
+  }
+
   setReasoningEnabled(modelId: string, enabled: boolean): void {
     const settings = this.getSettings();
     const reasoningEnabled = { ...(settings.reasoningEnabled || {}) };
@@ -493,6 +504,15 @@ class ConfigManager {
 }
 
 export const configManager = new ConfigManager();
+
+/**
+ * Get the login URL — points to the external auth provider if configured, otherwise the local login page.
+ */
+export function getLoginUrl(): string {
+  return process.env.NEXT_PUBLIC_GATEWAY_URL
+    ? `${process.env.NEXT_PUBLIC_GATEWAY_URL}/login`
+    : '/admin/login';
+}
 
 /**
  * Migrate legacy 'osw-server-features-{id}' localStorage key to 'osw-backend-{id}'

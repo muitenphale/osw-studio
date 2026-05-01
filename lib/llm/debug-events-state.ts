@@ -17,7 +17,9 @@ export interface DebugEvent {
 const EPHEMERAL_EVENTS = new Set([
   'assistant_delta',
   'tool_param_delta',
-  'reasoning_delta'
+  'reasoning_delta',
+  'llm_request',
+  'stream_raw_chunk'
 ]);
 
 interface StoredDebugEventsState {

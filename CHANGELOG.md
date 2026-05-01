@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.61.0 - 2026-05-01
+
+### Multitenancy & Server Mode
+
+- **Workspace-scoped browser storage**: Each workspace gets its own IndexedDB database. Projects, files, skills, and templates are isolated per workspace. API keys remain in localStorage (per-browser, not synced). Browser mode unchanged.
+- **Session handoff**: External auth providers can establish authenticated sessions on an instance without knowing the user's password.
+- **Webhook event system**: Instances can emit lifecycle events to an external URL with signed payloads. Opt-in — zero overhead when unconfigured.
+- **External auth redirect**: When an external auth provider is configured, all login and session-expired flows redirect there.
+- **Managed mode**: Instances can be configured for external user management, disabling local user creation and routing auth to the managing provider.
+- **Legacy data migration**: Standalone instances automatically migrate existing data into workspace databases on first login. Managed instances start workspaces clean.
+
+### UI
+
+- **Discard Changes is now a split button**: Primary click still discards all changes since last save. The chevron opens the Checkpoints panel for browsing and restoring earlier points.
+- **Dashboard for non-admin users**: The workspace dashboard shows project counts, storage usage, and recent projects from the workspace sync API instead of requiring admin access.
+- **Sync prompt for empty workspaces**: When a workspace-scoped IndexedDB is empty but the server has projects, a "Sync Your Projects" dialog offers to open the sync panel.
+
+### Bug Fixes
+
+- **Preview reload storm on checkpoint restore**: Restoring a checkpoint with hundreds of files triggered dozens of preview recompiles. Now writes silently and dispatches a single event at the end.
+- **Conversation deadlock after stopping a streaming tool call**: Interrupted tool calls left orphaned messages that blocked all subsequent turns. The wire payload now drops empty tool calls and synthesizes placeholder results.
+- **Mid-stream upstream errors silently swallowed**: OpenRouter upstream errors delivered over 200 SSE connections are now surfaced in the error dialog instead of dropped.
+- **Stale workspace cookies**: Workspace-scoped routing (shell commands, deployment schema, IndexedDB selection) now requires server mode to be active — stale cookies from previous server mode sessions no longer affect browser mode. Logout clears the workspace cookie alongside the session cookie. Middleware clears both on invalid/expired sessions before redirecting.
+
+### Security
+
+- **Open redirect in session handoff**: The redirect parameter now only accepts relative paths, preventing redirects to external domains.
+- **Handoff workspace ID validated**: Workspace IDs extracted from redirect URLs are validated as UUIDs before being set in cookies.
+
+### Developer Tools
+
+- **Stream debug toggle in the Debug Events panel**: New checkbox next to "Auto-scroll". Emits `llm_request` and `stream_raw_chunk` events for inspecting outgoing payloads and raw SSE traffic. Off by default.
+
 ## v1.60.0 - 2026-04-26
 
 ### Describe Mode

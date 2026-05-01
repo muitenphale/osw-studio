@@ -39,11 +39,16 @@ function getDataDir(): string {
  * Returns the default workspace ID.
  */
 export async function ensureDefaultWorkspace(userId: string): Promise<string> {
+  // When in managed mode (WEBHOOK_URL set), workspaces start clean — no legacy migration.
+  // On standalone instances, migrate legacy data/osws.sqlite into the workspace for all users.
+  const isBalancerManaged = !!process.env.WEBHOOK_URL;
+
   // Check if user already has a default workspace
   const existing = getUserDefaultWorkspace(userId);
   if (existing) {
-    // Even if workspace exists, check if migration is needed (empty workspace with legacy data)
-    migrateLegacyData(existing);
+    if (!isBalancerManaged) {
+      migrateLegacyData(existing);
+    }
     return existing;
   }
 
@@ -68,8 +73,10 @@ export async function ensureDefaultWorkspace(userId: string): Promise<string> {
   });
   setDefaultWorkspace(userId, workspaceId);
 
-  // Migrate legacy data: copy data/osws.sqlite to the workspace if it has projects
-  migrateLegacyData(workspaceId);
+  // Migrate legacy data on standalone instances
+  if (!isBalancerManaged) {
+    migrateLegacyData(workspaceId);
+  }
 
   return workspaceId;
 }

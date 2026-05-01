@@ -6,6 +6,26 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.61.0 - Workspace Isolation (2026-05-01)
+
+Workspaces in multitenancy mode are now fully isolated in the browser. Each workspace gets its own local database, so switching workspaces means switching projects, skills, and templates — nothing bleeds through. API keys stay in your browser per device and are never sent to the server for storage. Plus a new split button for checkpoint access, a working dashboard for non-admin users, and several stability fixes.
+
+### Multitenancy
+- **Per-workspace browser storage** — Projects, files, skills, and templates are scoped to the active workspace. Browser mode is unchanged
+- **Server mode improvements** — Session handoff, webhook events, external auth redirect, and managed mode for multi-instance deployments
+
+### UI
+- **Discard Changes split button** — The chevron now opens the full Checkpoints panel for browsing and restoring earlier points
+- **Dashboard for all users** — Non-admin users on server mode see their project counts and recent projects instead of a blank page
+- **Sync prompt** — When your local browser is empty but the server has projects, a dialog offers to sync them down
+
+### Fixes
+- **Checkpoint restore no longer floods the preview** — Restoring a checkpoint with many files triggers one preview rebuild instead of hundreds
+- **Stopped tool calls no longer deadlock the conversation** — Interrupted streaming tool calls are cleaned up so the next message goes through
+- **Upstream errors surfaced** — Provider errors sent over 200 SSE connections now show in the error dialog
+
+---
+
 ## v1.60.0 - Describe Mode (2026-04-26)
 
 New way to start a project: click "Plan the project first" in the create dialog and describe what you want to build. A setup agent figures out the runtime, template, pages, and capabilities through a short conversation. The project starts with full context so the in-project agent doesn't ask the same questions again. Plus folder drag-and-drop upload, paginated list views, a live reasoning preview, and the in-project agent can now ask quick questions with tappable buttons.

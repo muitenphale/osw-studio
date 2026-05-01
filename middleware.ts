@@ -34,6 +34,12 @@ async function nextWithRefreshedSession(session: SessionData): Promise<NextRespo
 // Views that have moved from /admin/{view} to /w/{workspaceId}/{view}
 const WORKSPACE_VIEWS = ['projects', 'dashboard', 'deployments', 'settings', 'skills', 'templates', 'docs'];
 
+function loginRedirect(request: NextRequest): NextResponse {
+  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
+  if (gatewayUrl) return NextResponse.redirect(gatewayUrl + '/login');
+  return NextResponse.redirect(new URL('/admin/login', request.url));
+}
+
 export async function middleware(request: NextRequest) {
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
   const { pathname } = request.nextUrl;
@@ -51,10 +57,21 @@ export async function middleware(request: NextRequest) {
     }
 
     const token = request.cookies.get('osw_session')?.value;
-    if (!token) return NextResponse.redirect(new URL('/admin/login', request.url));
+    if (!token) {
+      const response = loginRedirect(request);
+      // Clear stale workspace cookie
+      response.cookies.delete('osw_workspace');
+      return response;
+    }
 
     const session = await verifySession(token);
-    if (!session) return NextResponse.redirect(new URL('/admin/login', request.url));
+    if (!session) {
+      const response = loginRedirect(request);
+      // Clear stale cookies
+      response.cookies.delete('osw_session');
+      response.cookies.delete('osw_workspace');
+      return response;
+    }
 
     return nextWithRefreshedSession(session);
   }
@@ -110,6 +127,12 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/', request.url));
     }
 
+    // When managed by an external auth provider, redirect login/register there
+    const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
+    if (gatewayUrl && (pathname === '/admin/login' || pathname === '/admin/register')) {
+      return NextResponse.redirect(gatewayUrl + '/login');
+    }
+
     // Allow login and register pages without auth
     // (Register API enforces REGISTRATION_MODE + zero-users check server-side)
     if (pathname === '/admin/login' || pathname === '/admin/register') {
@@ -117,10 +140,10 @@ export async function middleware(request: NextRequest) {
     }
 
     const token = request.cookies.get('osw_session')?.value;
-    if (!token) return NextResponse.redirect(new URL('/admin/login', request.url));
+    if (!token) return loginRedirect(request);
 
     const session = await verifySession(token);
-    if (!session) return NextResponse.redirect(new URL('/admin/login', request.url));
+    if (!session) return loginRedirect(request);
 
     // Only admins can access user/workspace management
     if (!session.isAdmin && (pathname.startsWith('/admin/users') || pathname.startsWith('/admin/workspaces'))) {
@@ -129,7 +152,7 @@ export async function middleware(request: NextRequest) {
       if (workspaceId) {
         return NextResponse.redirect(new URL(`/w/${workspaceId}/projects`, request.url));
       }
-      return NextResponse.redirect(new URL('/admin/login', request.url));
+      return loginRedirect(request);
     }
 
     // Legacy redirect: /admin/{view} -> /w/{workspaceId}/{view}
@@ -141,7 +164,7 @@ export async function middleware(request: NextRequest) {
           return NextResponse.redirect(new URL(newPath, request.url));
         }
         // No workspace cookie — redirect to login
-        return NextResponse.redirect(new URL('/admin/login', request.url));
+        return loginRedirect(request);
       }
     }
 
@@ -151,7 +174,7 @@ export async function middleware(request: NextRequest) {
       if (workspaceId) {
         return NextResponse.redirect(new URL(`/w/${workspaceId}/projects`, request.url));
       }
-      return NextResponse.redirect(new URL('/admin/login', request.url));
+      return loginRedirect(request);
     }
 
     return nextWithRefreshedSession(session);

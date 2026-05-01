@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Deployment } from '@/lib/vfs/types';
+import { getLoginUrl } from '@/lib/config/storage';
 import {
   Dialog,
   DialogContent,
@@ -73,7 +74,7 @@ export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDas
       const response = await fetch(`/api/analytics/${deployment.id}/overview`);
 
       if (response.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
 
@@ -102,7 +103,7 @@ export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDas
       const response = await fetch(`/api/analytics/${deployment.id}/storage`);
 
       if (response.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
 
@@ -130,7 +131,7 @@ export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDas
       });
 
       if (response.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
 
@@ -165,7 +166,7 @@ export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDas
       });
 
       if (response.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
 

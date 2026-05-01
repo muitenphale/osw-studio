@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon, Sparkles } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
@@ -49,6 +49,7 @@ import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
 import { ProjectSettingsModal } from '@/components/project-backend';
 import { SkillsPanel } from '@/components/workspace/skills-panel';
+import { SwitchWorkspaceLink } from '@/components/workspace/switch-workspace';
 import { PanelDragProvider } from '@/components/ui/panel';
 import { ConsolePanel } from '@/components/console';
 import { getRuntimeConfig } from '@/lib/runtimes/registry';
@@ -1112,7 +1113,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
   const handleFilesChange = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
-    window.dispatchEvent(new CustomEvent('filesChanged'));
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -1582,14 +1582,53 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   });
 
   if (initialCheckpointId) {
+    const discardDisabled = saveInProgress || !isDirty;
     headerActions.push({
       id: 'discard',
       label: 'Discard Changes',
-      icon: RotateCcw,
-      onClick: () => handleRestoreCheckpoint(initialCheckpointId, 'Last saved state'),
-      variant: 'outline',
-      disabled: saveInProgress || !isDirty,
-      dataTourId: 'discard-changes-button'
+      onClick: () => {},
+      content: (
+        <div className="flex items-center" data-tour-id="discard-changes-button">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleRestoreCheckpoint(initialCheckpointId, 'Last saved state')}
+            disabled={discardDisabled}
+            className="rounded-r-none border-r-0"
+          >
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Discard Changes
+          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => togglePanel('checkpoints')}
+                onMouseEnter={() => {
+                  if (showCheckpoints) {
+                    setPanelReplacePreview('checkpoints');
+                  } else {
+                    handleSidebarHover('checkpoints');
+                  }
+                }}
+                onMouseLeave={() => {
+                  setPanelReplacePreview(null);
+                  setPanelInsertPreview(null);
+                }}
+                disabled={saveInProgress}
+                className="rounded-l-none px-2"
+                aria-label={showCheckpoints ? 'Close checkpoints panel' : 'Open checkpoints panel'}
+              >
+                {showCheckpoints ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {showCheckpoints ? 'Close checkpoints' : 'All checkpoints'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )
     });
   }
 
@@ -1603,6 +1642,9 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         onDeploymentChange={handleDeploymentChange}
         workspaceId={workspaceId}
       />
+
+      {/* Switch workspace link */}
+      <SwitchWorkspaceLink />
 
       {/* Project settings button */}
       <Button

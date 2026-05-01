@@ -124,7 +124,8 @@ export const GUIDED_TOUR_STEPS: GuidedTourStepContent[] = [
     title: 'Checkpoints & Manual Saves',
     body: (
       <div className="space-y-2 text-sm text-muted-foreground">
-        <p>The "Discard Changes" button restores to the original saved point, letting you revert any changes back to your last manual save.</p>
+        <p>"Discard Changes" reverts everything back to your last manual save in one click.</p>
+        <p>The chevron next to it opens the Checkpoints panel, where you can browse and restore any earlier checkpoint — auto-saves are made after every AI task.</p>
         <p>If you like the result, use the Save button to lock it in as your manual checkpoint.</p>
       </div>
     ),

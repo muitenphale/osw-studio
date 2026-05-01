@@ -2,19 +2,33 @@
  * Adapter Factory
  *
  * Creates the appropriate storage adapter based on environment configuration.
- * Browser mode: IndexedDBAdapter only
- * Server mode: IndexedDBAdapter for working storage (server uses SQLiteAdapter via API)
+ * Browser mode: IndexedDBAdapter with default database name
+ * Server mode (with workspace): IndexedDBAdapter with workspace-scoped database name
  */
 
 import { StorageAdapter } from './types';
 import { IndexedDBAdapter } from './indexeddb-adapter';
 
 /**
- * Create storage adapter for client-side usage
- * Always returns IndexedDBAdapter (browser working storage)
+ * Read the workspace ID from the osw_workspace cookie (client-side).
+ * Returns undefined if not in a browser or no workspace cookie set.
+ */
+function getWorkspaceId(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const match = document.cookie.match(/(?:^|;\s*)osw_workspace=([^;]+)/);
+  return match?.[1] || undefined;
+}
+
+/**
+ * Create storage adapter for client-side usage.
+ * In server mode with a workspace cookie, uses a workspace-scoped IndexedDB (osw-studio-{workspaceId}).
+ * In browser mode, always uses the default database (osw-studio-db) regardless of stale cookies.
  */
 export function createClientAdapter(): StorageAdapter {
-  return new IndexedDBAdapter();
+  const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+  const workspaceId = isServerMode ? getWorkspaceId() : undefined;
+  const dbName = workspaceId ? `osw-studio-${workspaceId}` : undefined;
+  return new IndexedDBAdapter(dbName);
 }
 
 /**

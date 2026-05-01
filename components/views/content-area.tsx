@@ -52,6 +52,7 @@ export function ContentArea({
     case 'dashboard':
       return (
         <DashboardView
+          workspaceId={workspaceId}
           onNavigate={onNavigate}
           onProjectSelect={handleProjectSelectById}
           onStartTour={onStartTour}

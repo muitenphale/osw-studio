@@ -11,6 +11,8 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
+import { enqueueEvent } from '../webhooks/outbox';
+import { startDeliveryLoop } from '../webhooks/delivery';
 
 let systemDb: Database.Database | null = null;
 
@@ -85,6 +87,8 @@ export function getSystemDatabase(): Database.Database {
 
   initSystemSchema(systemDb);
 
+  startDeliveryLoop();
+
   return systemDb;
 }
 
@@ -138,6 +142,17 @@ function initSystemSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_workspace_access_workspace ON workspace_access(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_deployment_routing_workspace ON deployment_routing(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_deployment_routing_slug ON deployment_routing(slug);
+
+    CREATE TABLE IF NOT EXISTS webhook_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      delivered INTEGER NOT NULL DEFAULT 0,
+      delivered_at TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_attempted_at TEXT
+    );
   `);
 }
 
@@ -155,6 +170,8 @@ export function createUser(email: string, passwordHash: string, displayName?: st
     INSERT INTO users (id, email, password_hash, display_name)
     VALUES (?, ?, ?, ?)
   `).run(id, email.toLowerCase().trim(), passwordHash, displayName || null);
+
+  enqueueEvent('user.created', { userId: id, email: email.toLowerCase().trim(), displayName: displayName || null });
 
   return id;
 }
@@ -192,6 +209,7 @@ export function getUserCount(): number {
 export function deactivateUser(id: string): void {
   const db = getSystemDatabase();
   db.prepare("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+  enqueueEvent('user.deactivated', { userId: id });
 }
 
 /**
@@ -219,6 +237,11 @@ export function updateUser(id: string, updates: { display_name?: string; active?
 
   values.push(id);
   db.prepare(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+  const updated = getUserById(id);
+  if (updated) {
+    enqueueEvent('user.updated', { userId: id, email: updated.email, displayName: updated.display_name });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +266,8 @@ export function createWorkspace(name: string, ownerId: string): string {
   // Create workspace data directory
   const workspaceDir = path.join(getDataDir(), 'workspaces', id);
   ensureDir(workspaceDir);
+
+  enqueueEvent('workspace.created', { workspaceId: id, name, ownerId });
 
   return id;
 }
@@ -299,6 +324,10 @@ export function updateWorkspace(id: string, updates: {
 
   values.push(id);
   db.prepare(`UPDATE workspaces SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+  if (updates.name !== undefined) {
+    enqueueEvent('workspace.updated', { workspaceId: id, name: updates.name });
+  }
 }
 
 /**
@@ -307,6 +336,7 @@ export function updateWorkspace(id: string, updates: {
 export function deleteWorkspace(id: string): void {
   const db = getSystemDatabase();
   db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+  enqueueEvent('workspace.deleted', { workspaceId: id });
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +352,11 @@ export function grantWorkspaceAccess(userId: string, workspaceId: string, role: 
     INSERT OR REPLACE INTO workspace_access (user_id, workspace_id, role)
     VALUES (?, ?, ?)
   `).run(userId, workspaceId, role);
+
+  const grantedUser = getUserById(userId);
+  if (grantedUser) {
+    enqueueEvent('workspace.access_granted', { workspaceId, email: grantedUser.email, role });
+  }
 }
 
 /**
@@ -329,8 +364,13 @@ export function grantWorkspaceAccess(userId: string, workspaceId: string, role: 
  */
 export function revokeWorkspaceAccess(userId: string, workspaceId: string): void {
   const db = getSystemDatabase();
+  const revokedUser = getUserById(userId);
   db.prepare('DELETE FROM workspace_access WHERE user_id = ? AND workspace_id = ?')
     .run(userId, workspaceId);
+
+  if (revokedUser) {
+    enqueueEvent('workspace.access_revoked', { workspaceId, email: revokedUser.email });
+  }
 }
 
 /**

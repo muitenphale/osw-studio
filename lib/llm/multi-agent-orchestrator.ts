@@ -1547,8 +1547,84 @@ Please revise your approach.`;
   }
 
   /**
-   * Stream LLM response
+   * Repair orphan tool_calls in the wire payload. Two failure modes:
+   *  1. Empty-args tool_call (model emitted `arguments: ""`, often from a stop
+   *     during streaming or a provider hiccup). Providers reject this with
+   *     "invalid function arguments json string".
+   *  2. Tool_call with no matching `role:'tool'` reply before the next assistant
+   *     turn (e.g., user clicked stop after the assistant message landed but
+   *     before tool execution). Providers reject this with "tool_calls must be
+   *     followed by tool messages".
+   *
+   * For (1): drop the offending tool_call entry. If the assistant message ends
+   * up with no tool_calls and no content, drop the whole message.
+   * For (2): synthesize a `role:'tool'` placeholder so the sequence is well-formed.
+   *
+   * Operates on a copy; never mutates the persistent conversation history.
    */
+  private repairOrphanToolCalls(messages: Omit<AgentMessage, 'ui_metadata'>[]): Omit<AgentMessage, 'ui_metadata'>[] {
+    const out: Omit<AgentMessage, 'ui_metadata'>[] = [];
+    let repaired = 0;
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+
+      if (msg.role !== 'assistant' || !msg.tool_calls || msg.tool_calls.length === 0) {
+        out.push(msg);
+        continue;
+      }
+
+      const validCalls = msg.tool_calls.filter(tc => {
+        const args = tc.function?.arguments;
+        if (typeof args !== 'string' || args.trim() === '') {
+          repaired++;
+          return false;
+        }
+        return true;
+      });
+
+      const contentEmpty = typeof msg.content === 'string'
+        ? msg.content.trim() === ''
+        : !msg.content || (Array.isArray(msg.content) && msg.content.length === 0);
+
+      if (validCalls.length === 0) {
+        if (contentEmpty) {
+          continue;
+        }
+        const { tool_calls: _, ...rest } = msg;
+        out.push(rest);
+        continue;
+      }
+
+      out.push({ ...msg, tool_calls: validCalls });
+
+      const matchedIds = new Set<string>();
+      for (let j = i + 1; j < messages.length; j++) {
+        const next = messages[j];
+        if (next.role === 'assistant') break;
+        if (next.role === 'tool' && next.tool_call_id) {
+          matchedIds.add(next.tool_call_id);
+        }
+      }
+
+      for (const tc of validCalls) {
+        if (!matchedIds.has(tc.id)) {
+          out.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: 'No result — call was cancelled or aborted before completion.'
+          });
+          repaired++;
+        }
+      }
+    }
+
+    if (repaired > 0) {
+      logger.info(`[MultiAgentOrchestrator] Repaired ${repaired} orphan tool_call entr(ies) in wire payload`);
+    }
+    return out;
+  }
+
   private async streamLLMResponse(
     messages: AgentMessage[],
     agent: Agent
@@ -1577,6 +1653,12 @@ Please revise your approach.`;
       return rest;
     });
 
+    // Repair orphan tool_calls (assistant messages with empty-args calls or no
+    // matching tool result). Providers like Minimax via OpenRouter reject these
+    // mid-stream with "invalid function arguments json string" and the
+    // conversation deadlocks into a nudge loop on every retry.
+    sanitizedMessages = this.repairOrphanToolCalls(sanitizedMessages);
+
     // If model has been failing to use function calling, inject a reminder into the system message
     if (this.totalMalformedToolCalls >= this.malformedThresholdForReminder && sanitizedMessages.length > 0) {
       sanitizedMessages = sanitizedMessages.map((msg, idx) => {
@@ -1603,6 +1685,20 @@ Please revise your approach.`;
       ...(modelSupportsTools && tools && tools.length > 0 && { tool_choice: 'auto' }),
       ...(reasoningEnabled && { reasoning: { enabled: true } })
     };
+
+    if (configManager.getDebugStreamEnabled()) {
+      const toolNames = modelSupportsTools && tools ? tools.map(t => t.name) : [];
+      logger.info(`[DebugStream] llm_request → ${provider}/${model} (agent=${agent.type}, msgs=${sanitizedMessages.length}, tools=${toolNames.length})`);
+      const { apiKey: _redacted, ...redactedBody } = requestBody as typeof requestBody & { apiKey?: string };
+      this.onProgress?.('llm_request', {
+        provider,
+        model,
+        agent: agent.type,
+        messageCount: sanitizedMessages.length,
+        toolNames,
+        body: redactedBody
+      });
+    }
 
     const response = await this.fetchWithRetry(
       apiUrl,
@@ -1706,6 +1802,39 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
 
     this.turnCount++;
     const result = await this.parseStreamingResponseWithTracking(response, provider, model);
+
+    // Midstream error: provider sent { choices: [], error: {...} } as an SSE chunk
+    // (HTTP 200 but upstream rejected the request — common with OpenRouter when
+    // the upstream model returns a 4xx). Route through the same error_paused
+    // flow as HTTP errors so the user sees the actual reason instead of an
+    // empty response that gets nudged into oblivion.
+    if (result.midstreamError && (!result.toolCalls || result.toolCalls.length === 0) && !result.content) {
+      const errorMessage = result.midstreamError.message;
+      const status = typeof result.midstreamError.code === 'number' ? result.midstreamError.code : 0;
+      logger.warn(`[MultiAgentOrchestrator] Midstream error: ${errorMessage}`);
+      this.apiErrorCount++;
+      this.onProgress?.('error_paused', {
+        message: errorMessage,
+        status,
+        errorType: 'midstream',
+        provider,
+        model,
+      });
+
+      await new Promise<void>(resolve => { this.pauseResolve = resolve; });
+
+      if (this.stopped) {
+        throw new Error('Stopped by user');
+      }
+
+      messages.push({
+        role: 'user',
+        content: `⚠️ Provider rejected the request mid-stream: ${errorMessage}\n\nThe conversation may contain a malformed prior turn. Try a different approach.`,
+        ui_metadata: { isSyntheticError: true }
+      });
+      return this.streamLLMResponse(messages, agent);
+    }
+
     return { ...result, toolsSent: modelSupportsTools };
   }
 
@@ -2140,10 +2269,11 @@ DO NOT use ss with << 'EOF' blocks. Try again with sed or simpler commands.`
     response: Response,
     provider: string,
     model: string
-  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; reasoningDetails?: ReasoningDetail[] }> {
+  ): Promise<{ content?: string; toolCalls?: ToolCall[]; usage?: UsageInfo; reasoningDetails?: ReasoningDetail[]; midstreamError?: { code?: number | string; message: string } }> {
     const result = await parseStreamingResponse(response, {
       provider,
       model,
+      debugStream: configManager.getDebugStreamEnabled(),
       onProgress: this.onProgress
     });
 

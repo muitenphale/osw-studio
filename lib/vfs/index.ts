@@ -336,8 +336,9 @@ export class VirtualFileSystem {
       } else {
         // Client side: fetch schema from API
         try {
-          // Use workspace-scoped URL if workspace cookie is set
-          const wsCookie = typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
+          // Use workspace-scoped URL if in server mode with a workspace cookie
+          const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+          const wsCookie = isServerMode && typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
           const ctxUrl = wsCookie
             ? `/api/w/${wsCookie[1]}/admin/deployments/${deploymentId}/server-context`
             : `/api/admin/deployments/${deploymentId}/server-context`;
@@ -940,7 +941,7 @@ export class VirtualFileSystem {
     this.syncTimeouts.clear();
   }
 
-  async createFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {
+  async createFile(projectId: string, path: string, content: string | ArrayBuffer, options?: { silent?: boolean }): Promise<VirtualFile> {
     this.ensureInitialized();
 
     try {
@@ -985,12 +986,8 @@ export class VirtualFileSystem {
 
       await this.adapter.createFile(file);
 
-      await this.updateFileTree(projectId, path, 'create');
+      await this.updateFileTree(projectId, path, 'create', options?.silent === true);
       saveManager.markDirty(projectId);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('filesChanged'));
-      }
 
       return file;
     } catch (error) {
@@ -1065,7 +1062,7 @@ export class VirtualFileSystem {
     }
   }
 
-  async updateFile(projectId: string, path: string, content: string | ArrayBuffer): Promise<VirtualFile> {
+  async updateFile(projectId: string, path: string, content: string | ArrayBuffer, options?: { silent?: boolean }): Promise<VirtualFile> {
     this.ensureInitialized();
 
     try {
@@ -1097,7 +1094,7 @@ export class VirtualFileSystem {
       await this.adapter.updateFile(file);
       saveManager.markDirty(projectId);
 
-      if (typeof window !== 'undefined') {
+      if (!options?.silent && typeof window !== 'undefined') {
         const detail = { projectId, path };
         window.dispatchEvent(new CustomEvent('fileContentChanged', { detail }));
         window.dispatchEvent(new Event('filesChanged'));

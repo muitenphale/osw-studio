@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Deployment, Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
+import { getLoginUrl } from '@/lib/config/storage';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { DeploymentCard } from '../deployment-card';
 import { DeploymentSettingsModal } from '../deployment-settings';
@@ -75,7 +76,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
 
       // Redirect to login if unauthorized
       if (deploymentsResponse.status === 401 || projectsResponse.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
 

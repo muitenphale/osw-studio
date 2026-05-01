@@ -503,8 +503,9 @@ async function executeShellSegment(
 
   if (serverCommands.includes(command) && deploymentId) {
     try {
-      // Use workspace-scoped URL if workspace cookie is set
-      const wsMatch = typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
+      // Use workspace-scoped URL if in server mode with a workspace cookie
+      const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+      const wsMatch = isServerMode && typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
       const shellUrl = wsMatch ? `/api/w/${wsMatch[1]}/shell/execute` : '/api/shell/execute';
       const response = await fetch(shellUrl, {
         method: 'POST',

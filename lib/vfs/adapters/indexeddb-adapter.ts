@@ -9,18 +9,23 @@ import { Project, VirtualFile, FileTreeNode, CustomTemplate, EdgeFunction, Serve
 import { Skill } from '../skills/types';
 import { StorageAdapter } from './types';
 
-const DB_NAME = 'osw-studio-db';
+const DEFAULT_DB_NAME = 'osw-studio-db';
 const DB_VERSION = 6; // Migrate runtime 'static' → 'handlebars' for existing projects/templates
 
 export class IndexedDBAdapter implements StorageAdapter {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<void> | null = null;
+  private dbName: string;
+
+  constructor(dbName?: string) {
+    this.dbName = dbName || DEFAULT_DB_NAME;
+  }
 
   async init(): Promise<void> {
     // Re-init if the connection was lost (e.g., close() called, HMR, or browser eviction)
     if (this.initPromise && this.db) return this.initPromise;
     this.initPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = indexedDB.open(this.dbName, DB_VERSION);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {

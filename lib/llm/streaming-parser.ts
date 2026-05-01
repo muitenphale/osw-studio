@@ -17,12 +17,16 @@ export interface StreamResponse {
   wasTruncated?: boolean;   // True if response was cut off due to max_tokens
   finishReason?: string;    // The actual finish reason from the API
   reasoningDetails?: ReasoningDetail[];  // Structured reasoning blocks (Gemini signatures, etc.) for multi-turn replay
+  /** Midstream error surfaced via SSE chunk { choices: [], error: {...} }. */
+  midstreamError?: { code?: number | string; message: string };
 }
 
 export interface StreamParserOptions {
   provider: string;
   model: string;
   suppressAssistantDelta?: boolean;
+  /** When true, emit stream_raw_chunk events for each SSE line (debug). */
+  debugStream?: boolean;
   onProgress?: (event: string, data?: any) => void;
 }
 
@@ -122,6 +126,7 @@ export async function parseStreamingResponse(
   const STREAM_READ_TIMEOUT_MS = 45_000;
   let streamTimedOut = false;
   let readTimer: ReturnType<typeof setTimeout> | null = null;
+  let midstreamError: { code?: number | string; message: string } | undefined;
 
   try {
     while (true) {
@@ -147,6 +152,9 @@ export async function parseStreamingResponse(
       buffer = lines.pop() || '';
 
       for (const line of lines) {
+        if (line.length > 0 && options.debugStream) {
+          onProgress?.('stream_raw_chunk', { line });
+        }
         // Skip SSE comments
         if (line.startsWith(':')) {
           continue;
@@ -164,6 +172,21 @@ export async function parseStreamingResponse(
 
           try {
             const json = JSON.parse(data);
+
+            // Midstream error: some providers (OpenRouter → Minimax, etc.) deliver
+            // upstream errors as a normal chunk with empty choices and an error field
+            // instead of an HTTP error. Capture the message so the orchestrator can
+            // surface it instead of bottoming out in stream_timeout.
+            if (json.error && (!json.choices || json.choices.length === 0)) {
+              const err = json.error;
+              const message = typeof err === 'string'
+                ? err
+                : (err.message || JSON.stringify(err));
+              midstreamError = { code: err.code, message };
+              logger.warn(`[StreamParser] Midstream error: ${message}`);
+              onProgress?.('stream_error', { code: err.code, message });
+              continue;
+            }
 
             if (provider === 'anthropic') {
               // Handle Anthropic streaming format
@@ -554,7 +577,8 @@ export async function parseStreamingResponse(
     usage: usageInfo,
     wasTruncated,
     finishReason: lastFinishReason,
-    reasoningDetails: reasoningDetails.length > 0 ? reasoningDetails : undefined
+    reasoningDetails: reasoningDetails.length > 0 ? reasoningDetails : undefined,
+    midstreamError
   };
 }
 

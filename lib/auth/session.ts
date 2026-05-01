@@ -180,3 +180,53 @@ export function verifyInstanceApiKey(request: NextRequest): SessionData | null {
     exp: Math.floor(Date.now() / 1000) + 3600,
   };
 }
+
+/**
+ * Create a short-lived handoff token for external auth → instance session exchange.
+ * Token is a JWT valid for 30 seconds, signed with the same SESSION_SECRET.
+ */
+export async function createHandoffToken(userId: string): Promise<string> {
+  const secret = getSecretKey();
+  const token = await new SignJWT({
+    userId,
+    purpose: 'handoff',
+    jti: crypto.randomUUID(),
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setExpirationTime('30s')
+    .setIssuedAt()
+    .sign(secret);
+  return token;
+}
+
+// In-memory set of consumed JTIs for replay protection (auto-clears after 60s)
+const consumedJTIs = new Map<string, number>();
+
+/**
+ * Verify a handoff token. Returns the userId if valid, null otherwise.
+ * Single-use: consumed tokens are rejected.
+ */
+export async function verifyHandoffToken(token: string): Promise<{ userId: string } | null> {
+  try {
+    const secret = getSecretKey();
+    const { payload } = await jwtVerify(token, secret);
+
+    if (payload.purpose !== 'handoff') return null;
+
+    const jti = payload.jti;
+    if (!jti || consumedJTIs.has(jti)) return null;
+
+    // Mark as consumed
+    consumedJTIs.set(jti, Date.now());
+
+    // Cleanup old JTIs
+    const cutoff = Date.now() - 60000;
+    for (const [id, time] of consumedJTIs) {
+      if (time < cutoff) consumedJTIs.delete(id);
+    }
+
+    return { userId: payload.userId as string };
+  } catch {
+    return null;
+  }
+}

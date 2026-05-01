@@ -686,7 +686,18 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   useEffect(() => {
     compileAndLoad();
-  }, [projectId, refreshTrigger, compileAndLoad]);
+  }, [projectId, compileAndLoad]);
+
+  // refreshTrigger bumps coalesce with concurrent filesChanged events through
+  // the same debounce so a bulk operation produces one compile, not two.
+  const isFirstRefreshTrigger = useRef(true);
+  useEffect(() => {
+    if (isFirstRefreshTrigger.current) {
+      isFirstRefreshTrigger.current = false;
+      return;
+    }
+    scheduleCompile(true);
+  }, [refreshTrigger, scheduleCompile]);
 
   useEffect(() => {
     const handleFileChange = () => {

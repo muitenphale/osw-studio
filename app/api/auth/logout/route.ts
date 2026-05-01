@@ -1,7 +1,7 @@
 /**
  * Logout API Route
  *
- * Clears session cookie
+ * Clears session and workspace cookies
  */
 
 import { NextResponse } from 'next/server';
@@ -11,7 +11,9 @@ import { logger } from '@/lib/utils';
 export async function POST() {
   try {
     await clearSessionCookie();
-    return NextResponse.json({ success: true });
+    const response = NextResponse.json({ success: true });
+    response.cookies.delete('osw_workspace');
+    return response;
   } catch (error) {
     logger.error('[API /api/auth/logout] Error:', error);
     return NextResponse.json(

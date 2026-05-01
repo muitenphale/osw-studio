@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, password, displayName, workspaceAssignment, workspaceId: assignWorkspaceId } = body;
+    const { email, password, displayName, workspaceAssignment, workspaceId: assignWorkspaceId, isAdmin: makeAdmin } = body;
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
@@ -137,6 +137,14 @@ export async function POST(request: NextRequest) {
 
     const passwordHash = await hashPassword(password);
     const userId = createUser(email, passwordHash, displayName || undefined);
+
+    // Optionally promote to instance admin
+    if (makeAdmin) {
+      const { updateUser } = await import('@/lib/auth/system-database');
+      updateUser(userId, { active: 1 }); // updateUser doesn't support is_admin directly
+      const db = (await import('@/lib/auth/system-database')).getSystemDatabase();
+      db.prepare("UPDATE users SET is_admin = 1 WHERE id = ?").run(userId);
+    }
 
     // Workspace assignment
     let workspaceId: string | undefined;

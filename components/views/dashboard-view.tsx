@@ -93,6 +93,51 @@ interface BrowserDashboardData {
   }>;
 }
 
+// Fetch and parse the latest What's New entry from WHATS_NEW.md
+async function fetchWhatsNew(): Promise<BrowserDashboardData['whatsNew']> {
+  try {
+    const response = await fetch('/api/docs/WHATS_NEW.md');
+    if (!response.ok) return null;
+
+    const content = await response.text();
+    const versionMatch = content.match(/^## v(\d+\.\d+\.\d+)\s*-\s*(.+)$/m);
+    if (!versionMatch) return null;
+
+    const version = versionMatch[1];
+    const title = versionMatch[2].trim();
+    const versionIndex = content.indexOf(versionMatch[0]);
+    const afterVersion = content.substring(versionIndex + versionMatch[0].length);
+    const nextSectionMatch = afterVersion.match(/^(?:## |---)/m);
+    const sectionContent = nextSectionMatch
+      ? afterVersion.substring(0, nextSectionMatch.index)
+      : afterVersion;
+
+    const bulletRegex = /^[-*]\s+\*\*(.+?)\*\*\s*[-–]?\s*(.*)$/gm;
+    const highlights: string[] = [];
+    let match;
+
+    while ((match = bulletRegex.exec(sectionContent)) !== null && highlights.length < 4) {
+      const boldTitle = match[1].trim();
+      const description = match[2]?.trim();
+      highlights.push(description ? `${boldTitle} - ${description}` : boldTitle);
+    }
+
+    if (highlights.length === 0) {
+      const simpleBulletRegex = /^[-*]\s+(.+)$/gm;
+      while ((match = simpleBulletRegex.exec(sectionContent)) !== null && highlights.length < 4) {
+        const text = match[1].trim();
+        if (!text.match(/^\[.*\]\(.*\)$/)) {
+          highlights.push(text.replace(/\*\*/g, ''));
+        }
+      }
+    }
+
+    return { version, title, highlights };
+  } catch {
+    return null;
+  }
+}
+
 // Fetch dashboard data for browser mode (IndexedDB)
 async function fetchBrowserModeData(): Promise<BrowserDashboardData> {
   await vfs.init();
@@ -100,56 +145,7 @@ async function fetchBrowserModeData(): Promise<BrowserDashboardData> {
   const projects = await vfs.listProjects();
   const templates = await templateService.listCustomTemplates();
   const skills = await skillsService.getAllSkills();
-
-  // Fetch What's New - version, title, and highlights (matching server mode)
-  let whatsNew: BrowserDashboardData['whatsNew'] = null;
-
-  try {
-    const response = await fetch('/api/docs/WHATS_NEW.md');
-    if (response.ok) {
-      const content = await response.text();
-      // Find first version heading: ## v{version} - {title}
-      const versionMatch = content.match(/^## v(\d+\.\d+\.\d+)\s*-\s*(.+)$/m);
-      if (versionMatch) {
-        const version = versionMatch[1];
-        const title = versionMatch[2].trim();
-
-        // Get content after the version heading until the next ## or ---
-        const versionIndex = content.indexOf(versionMatch[0]);
-        const afterVersion = content.substring(versionIndex + versionMatch[0].length);
-        const nextSectionMatch = afterVersion.match(/^(?:## |---)/m);
-        const sectionContent = nextSectionMatch
-          ? afterVersion.substring(0, nextSectionMatch.index)
-          : afterVersion;
-
-        // Extract bullet points (lines starting with - or *)
-        const bulletRegex = /^[-*]\s+\*\*(.+?)\*\*\s*[-–]?\s*(.*)$/gm;
-        const highlights: string[] = [];
-        let match;
-
-        while ((match = bulletRegex.exec(sectionContent)) !== null && highlights.length < 4) {
-          const boldTitle = match[1].trim();
-          const description = match[2]?.trim();
-          highlights.push(description ? `${boldTitle} - ${description}` : boldTitle);
-        }
-
-        // If no bold bullet points found, try regular bullets
-        if (highlights.length === 0) {
-          const simpleBulletRegex = /^[-*]\s+(.+)$/gm;
-          while ((match = simpleBulletRegex.exec(sectionContent)) !== null && highlights.length < 4) {
-            const text = match[1].trim();
-            if (!text.match(/^\[.*\]\(.*\)$/)) {
-              highlights.push(text.replace(/\*\*/g, ''));
-            }
-          }
-        }
-
-        whatsNew = { version, title, highlights };
-      }
-    }
-  } catch {
-    // Use null if fetch fails
-  }
+  const whatsNew = await fetchWhatsNew();
 
   return {
     content: {
@@ -670,16 +666,43 @@ function TrafficLists({ data }: { data: DashboardData }) {
 }
 
 interface DashboardViewProps {
+  workspaceId?: string;
   onNavigate?: (view: string) => void;
   onProjectSelect?: (projectId: string) => void;
   onStartTour?: () => void;
 }
 
-export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: DashboardViewProps) {
+// Fetch workspace-scoped data for non-admin server mode users
+async function fetchWorkspaceData(workspaceId: string): Promise<BrowserDashboardData> {
+  const response = await fetch(`/api/w/${workspaceId}/sync/status`);
+  if (!response.ok) throw new Error('Failed to fetch workspace data');
+  const data = await response.json();
+  const whatsNew = await fetchWhatsNew();
+
+  return {
+    content: {
+      projects: data.summary?.projectCount || 0,
+      templates: data.summary?.templateCount || 0,
+      skills: data.summary?.skillCount || 0,
+    },
+    whatsNew,
+    recentProjects: (data.projects || [])
+      .sort((a: { updatedAt: string }, b: { updatedAt: string }) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 3)
+      .map((p: { id: string; name: string; updatedAt: string }) => ({
+        id: p.id,
+        name: p.name,
+        description: null,
+        updatedAt: p.updatedAt,
+      })),
+  };
+}
+
+export function DashboardView({ workspaceId, onNavigate, onProjectSelect, onStartTour }: DashboardViewProps) {
   const router = useRouter();
-  // Server mode data
+  // Server mode admin data
   const [serverData, setServerData] = useState<DashboardData | null>(null);
-  // Browser mode data
+  // Browser mode / workspace mode data
   const [browserData, setBrowserData] = useState<BrowserDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -689,12 +712,14 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
     setError(null);
 
     try {
-      if (isServerMode) {
-        // Server mode: fetch from API
+      if (isServerMode && workspaceId) {
+        // Server mode with workspace: use workspace-scoped data
+        const result = await fetchWorkspaceData(workspaceId);
+        setBrowserData(result);
+      } else if (isServerMode) {
+        // Server mode without workspace (legacy admin path)
         const response = await fetch('/api/admin/dashboard');
-        if (!response.ok) {
-          throw new Error('Failed to fetch dashboard data');
-        }
+        if (!response.ok) throw new Error('Failed to fetch dashboard data');
         const result = await response.json();
         setServerData(result);
       } else {
@@ -707,7 +732,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     fetchData();
@@ -730,7 +755,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
   }, [onProjectSelect]);
 
   // Loading state
-  const hasData = isServerMode ? !!serverData : !!browserData;
+  const hasData = !!serverData || !!browserData;
   if (loading && !hasData) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -759,7 +784,7 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
 
   if (!hasData) return null;
 
-  // Server mode render
+  // Server mode admin render (full system dashboard)
   if (isServerMode && serverData) {
     const hasWhatsNew = serverData.whatsNew?.highlights?.length > 0;
 
@@ -788,8 +813,8 @@ export function DashboardView({ onNavigate, onProjectSelect, onStartTour }: Dash
     );
   }
 
-  // Browser mode render
-  if (!isServerMode && browserData) {
+  // Browser mode render OR server mode non-admin workspace render
+  if (browserData) {
     const hasWhatsNew = browserData.whatsNew !== null;
 
     return (

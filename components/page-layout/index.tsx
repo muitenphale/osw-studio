@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { getSyncOverviewStatus, setAutoSyncWorkspaceId } from '@/lib/vfs/auto-sync';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { apiFetch } from '@/lib/api/backend-status';
+import { getLoginUrl } from '@/lib/config/storage';
 import {
   Dialog,
   DialogContent,
@@ -53,6 +54,7 @@ export function PageLayout({
   const [initModalOpen, setInitModalOpen] = useState(false);
   const [localProjectCount, setLocalProjectCount] = useState(0);
   const [needsMigration, setNeedsMigration] = useState(false);
+  const [needsPull, setNeedsPull] = useState(false);
   const [migratingViaRelogin, setMigratingViaRelogin] = useState(false);
   const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
 
@@ -78,6 +80,11 @@ export function PageLayout({
         setLocalProjectCount(status.localProjectCount);
 
         if (status.isUninitialized && status.localProjectCount > 0) {
+          // Server empty, local has projects → offer push
+          setInitModalOpen(true);
+        } else if (status.localProjectCount === 0 && status.serverProjectCount > 0) {
+          // Local empty, server has projects → offer pull (new workspace-scoped IndexedDB)
+          setNeedsPull(true);
           setInitModalOpen(true);
         }
       } catch (error) {
@@ -105,12 +112,12 @@ export function PageLayout({
   }, [workspaceId, isServerMode, showSidebar]);
 
   // Check if this is a migration scenario (legacy data exists but workspace is empty)
+  // Skip if needsPull is set — the user just needs to sync from server, not migrate legacy data
   useEffect(() => {
-    if (!initModalOpen || !isServerMode) return;
+    if (!initModalOpen || !isServerMode || needsPull) return;
 
     async function checkMigration() {
       try {
-        // If the workspace is empty but there's a legacy DB, this needs migration via re-login
         const res = await fetch('/api/auth/me');
         if (res.ok) {
           const data = await res.json();
@@ -121,7 +128,7 @@ export function PageLayout({
       } catch {}
     }
     checkMigration();
-  }, [initModalOpen, isServerMode]);
+  }, [initModalOpen, isServerMode, needsPull]);
 
   const handleDismissInitModal = () => {
     localStorage.setItem(INIT_DISMISSED_KEY, 'true');
@@ -142,7 +149,7 @@ export function PageLayout({
       }
       // Log out — on re-login, ensureDefaultWorkspace will migrate legacy data
       await fetch('/api/auth/logout', { method: 'POST' });
-      router.push('/admin/login');
+      window.location.href = getLoginUrl();
     } catch {
       setMigratingViaRelogin(false);
     }
@@ -222,11 +229,13 @@ export function PageLayout({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-orange-500" />
-              {needsMigration ? 'Workspace Setup Required' : 'Server Database Not Initialized'}
+              {needsMigration ? 'Workspace Setup Required' : needsPull ? 'Sync Your Projects' : 'Server Database Not Initialized'}
             </DialogTitle>
             <DialogDescription>
               {needsMigration
                 ? 'Your workspace needs to be initialized with your existing data. A quick re-login will set everything up automatically.'
+                : needsPull
+                ? 'Your workspace has projects on the server that need to be synced to this browser.'
                 : `Your server database is empty, but you have ${localProjectCount} project${localProjectCount !== 1 ? 's' : ''} stored locally.`
               }
             </DialogDescription>
@@ -241,6 +250,13 @@ export function PageLayout({
                     <p className="font-medium">What happens?</p>
                     <p className="text-muted-foreground mt-1">
                       You&apos;ll be briefly logged out. On login, your existing projects, deployments, and settings will be migrated to your workspace automatically.
+                    </p>
+                  </>
+                ) : needsPull ? (
+                  <>
+                    <p className="font-medium">What happens?</p>
+                    <p className="text-muted-foreground mt-1">
+                      Your server workspace has projects ready to use. Open Sync to pull them to this browser so you can start working.
                     </p>
                   </>
                 ) : (

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { getLoginUrl } from '@/lib/config/storage';
 import {
   Building2,
   Plus,
@@ -105,7 +106,7 @@ export function WorkspacesView() {
     try {
       const res = await fetch('/api/admin/workspaces');
       if (res.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
       if (!res.ok) throw new Error('Failed to load workspaces');

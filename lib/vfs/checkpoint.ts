@@ -494,24 +494,32 @@ class CheckpointManager {
         }
       }
       
+      // Restore each file silently so listeners (preview compile, file-tree
+      // reload) don't fire N times — one event is dispatched after the loop.
+      // Without this, restoring a checkpoint with many files (e.g. 250 image
+      // frames) triggers a reload storm as the debounce fires mid-loop and
+      // each compile races the next batch of writes.
       for (const [path, content] of checkpoint.files) {
         let actualContent: string | ArrayBuffer;
-        
-        // Check if content is base64-encoded binary data
+
         if (typeof content === 'object' && content.encoding === 'base64') {
           actualContent = this.base64ToArrayBuffer(content.data);
         } else {
           actualContent = content as string;
         }
-        
+
         const exists = currentFiles.some(f => f.path === path);
         if (exists) {
-          await vfs.updateFile(checkpoint.projectId, path, actualContent);
+          await vfs.updateFile(checkpoint.projectId, path, actualContent, { silent: true });
         } else {
-          await vfs.createFile(checkpoint.projectId, path, actualContent);
+          await vfs.createFile(checkpoint.projectId, path, actualContent, { silent: true });
         }
       }
-      
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('filesChanged'));
+      }
+
       this.currentCheckpoint = checkpointId;
       return true;
     } catch (error) {

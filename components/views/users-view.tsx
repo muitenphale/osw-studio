@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { getLoginUrl } from '@/lib/config/storage';
 import { Users, Plus, Search, MoreHorizontal, UserCheck, UserX, Trash2, Pencil, ChevronRight, ChevronDown, HardDrive, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -89,6 +90,7 @@ export function UsersView() {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+  const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
 
   useEffect(() => {
     loadUsers();
@@ -112,7 +114,7 @@ export function UsersView() {
     try {
       const res = await fetch('/api/admin/users');
       if (res.status === 401) {
-        window.location.href = '/admin/login';
+        window.location.href = getLoginUrl();
         return;
       }
       if (!res.ok) throw new Error('Failed to load users');
@@ -311,10 +313,16 @@ export function UsersView() {
 
             {/* Controls */}
             <div className="flex items-center gap-2">
-              <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
-                <Plus className="h-4 w-4" />
-                <span>New User</span>
-              </Button>
+              {isManagedMode ? (
+                <p className="text-sm text-muted-foreground">
+                  Users are managed externally
+                </p>
+              ) : (
+                <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  <span>New User</span>
+                </Button>
+              )}
             </div>
           </div>
         </div>

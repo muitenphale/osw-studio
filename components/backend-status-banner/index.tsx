@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, LogIn, RotateCw, X } from 'lucide-react';
 import { getBackendStatus, subscribeBackendStatus, markBackendUp, type BackendStatus } from '@/lib/api/backend-status';
+import { getLoginUrl } from '@/lib/config/storage';
 
 export function BackendStatusBanner() {
   const [status, setStatus] = useState<BackendStatus>({ backendDown: false, authExpired: false });
@@ -76,7 +77,7 @@ export function BackendStatusBanner() {
           Your session expired. Auto-sync and server-backed features are paused until you sign in again.
         </span>
         <a
-          href="/admin/login"
+          href={getLoginUrl()}
           className="inline-flex items-center gap-1 rounded border border-white/40 px-2 py-0.5 hover:bg-white/10 transition-colors"
         >
           <LogIn className="h-3 w-3" />

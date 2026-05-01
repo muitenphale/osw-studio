@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getLoginUrl } from '@/lib/config/storage';
 import {
   Dialog,
   DialogContent,
@@ -87,7 +88,7 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={() => (window.location.href = '/admin/login')}>
+            <Button onClick={() => (window.location.href = getLoginUrl())}>
               Go to Login
             </Button>
           </DialogFooter>

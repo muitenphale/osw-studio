@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ChevronDown, ChevronUp, Bug, Trash2 } from 'lucide-react';
 import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import { MemoryMonitor } from './memory-monitor';
+import { configManager } from '@/lib/config/storage';
 
 export interface DebugEvent {
   id: string;
@@ -28,6 +29,7 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [streamDebug, setStreamDebug] = useState<boolean>(() => configManager.getDebugStreamEnabled());
 
   // Compress consecutive assistant_delta, tool_param_delta, and reasoning_delta events
   // Only store count, not individual events - prevents O(N²) memory growth
@@ -172,8 +174,8 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
         />
       </div>
 
-      {/* Auto-scroll toggle */}
-      <div className="p-2 border-b border-border flex items-center gap-2">
+      {/* Toggles */}
+      <div className="p-2 border-b border-border flex items-center gap-4">
         <label className="text-xs flex items-center gap-1 cursor-pointer">
           <input
             type="checkbox"
@@ -182,6 +184,21 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
             className="rounded"
           />
           Auto-scroll
+        </label>
+        <label
+          className="text-xs flex items-center gap-1 cursor-pointer"
+          title="Emit llm_request and stream_raw_chunk events. Ephemeral, not persisted."
+        >
+          <input
+            type="checkbox"
+            checked={streamDebug}
+            onChange={(e) => {
+              setStreamDebug(e.target.checked);
+              configManager.setDebugStreamEnabled(e.target.checked);
+            }}
+            className="rounded"
+          />
+          Stream debug
         </label>
       </div>
 
