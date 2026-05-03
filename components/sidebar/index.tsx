@@ -43,6 +43,7 @@ interface SidebarItem {
   action?: string;
   href?: string;
   serverModeOnly?: boolean;
+  adminOnly?: boolean;
   hasRecentProjects?: boolean; // Special flag for Projects to show recent projects as sub-items
   subItems?: {
     id: string;
@@ -58,7 +59,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'deployments', label: 'Deployments', icon: Globe, path: 'deployments', serverModeOnly: true },
   { id: 'templates', label: 'Templates', icon: LayoutTemplate, path: 'templates' },
   { id: 'skills', label: 'Skills', icon: Sparkles, path: 'skills' },
-  { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true },
+  { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true, adminOnly: true },
   {
     id: 'docs',
     label: 'Docs',
@@ -148,6 +149,14 @@ function SidebarContent({
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
   const isDesktop = process.env.NEXT_PUBLIC_DESKTOP === 'true';
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!isServerMode) return;
+    fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.user?.isAdmin) setIsAdmin(true);
+    }).catch(() => {});
+  }, [isServerMode]);
 
   // Track if we're on mobile (client-side only)
   const [isMobile, setIsMobile] = useState(false);
@@ -250,7 +259,7 @@ function SidebarContent({
 
   // Filter sidebar items based on Server Mode
   const visibleSidebarItems = SIDEBAR_ITEMS.filter(
-    item => !item.serverModeOnly || isServerMode
+    item => (!item.serverModeOnly || isServerMode) && (!item.adminOnly || isAdmin)
   );
 
   const toggleExpanded = (itemId: string) => {

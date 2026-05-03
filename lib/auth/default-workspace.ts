@@ -26,6 +26,13 @@ import {
 import { hashPassword } from './passwords';
 import { logger } from '@/lib/utils';
 
+function openReadonlyDb(dbPath: string): Database.Database {
+  const db = new Database(dbPath, { readonly: true });
+  const key = process.env.DB_ENCRYPTION_KEY;
+  if (key) db.pragma(`key='${key}'`);
+  return db;
+}
+
 const DEFAULT_WORKSPACE_NAME = 'Local Workspace';
 
 function getDataDir(): string {
@@ -100,7 +107,7 @@ function migrateLegacyData(workspaceId: string): void {
   // Check if legacy DB actually has projects
   let legacyProjectCount = 0;
   try {
-    const db = new Database(legacyDbPath, { readonly: true });
+    const db = openReadonlyDb(legacyDbPath);
     const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
     if (row) {
       legacyProjectCount = (db.prepare('SELECT COUNT(*) as c FROM projects').get() as { c: number }).c;
@@ -113,7 +120,7 @@ function migrateLegacyData(workspaceId: string): void {
   // Check if workspace DB already has data (don't overwrite)
   if (fs.existsSync(workspaceDbPath)) {
     try {
-      const db = new Database(workspaceDbPath, { readonly: true });
+      const db = openReadonlyDb(workspaceDbPath);
       const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
       if (row) {
         const count = (db.prepare('SELECT COUNT(*) as c FROM projects').get() as { c: number }).c;
@@ -201,7 +208,7 @@ export function repairWorkspace(workspaceId: string): RepairResult {
   if (fs.existsSync(legacyDbPath)) {
     const legacyHasData = (() => {
       try {
-        const db = new Database(legacyDbPath, { readonly: true });
+        const db = openReadonlyDb(legacyDbPath);
         const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
         if (!tableExists) { db.close(); return false; }
         const count = (db.prepare('SELECT COUNT(*) as count FROM projects').get() as { count: number }).count;
@@ -214,7 +221,7 @@ export function repairWorkspace(workspaceId: string): RepairResult {
       const workspaceHasData = (() => {
         if (!fs.existsSync(workspaceDbPath)) return false;
         try {
-          const db = new Database(workspaceDbPath, { readonly: true });
+          const db = openReadonlyDb(workspaceDbPath);
           const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
           if (!tableExists) { db.close(); return false; }
           const count = (db.prepare('SELECT COUNT(*) as count FROM projects').get() as { count: number }).count;
@@ -247,7 +254,7 @@ export function repairWorkspace(workspaceId: string): RepairResult {
   if (fs.existsSync(legacyProjectsDir) && fs.existsSync(workspaceDbPath)) {
     try {
       // Get project IDs from workspace DB
-      const db = new Database(workspaceDbPath, { readonly: true });
+      const db = openReadonlyDb(workspaceDbPath);
       const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
       const projectIds: string[] = [];
       if (tableExists) {
@@ -273,7 +280,7 @@ export function repairWorkspace(workspaceId: string): RepairResult {
   // 3. Ensure all deployments in workspace DB are registered in deployment_routing
   if (fs.existsSync(workspaceDbPath)) {
     try {
-      const db = new Database(workspaceDbPath, { readonly: true });
+      const db = openReadonlyDb(workspaceDbPath);
       const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deployments'").get();
       if (tableExists) {
         const deployments = db.prepare('SELECT id FROM deployments').all() as { id: string }[];

@@ -159,6 +159,7 @@ export async function requireAuth(): Promise<SessionData> {
 /**
  * Verify instance API key for machine-to-machine auth.
  * Returns a synthetic admin session if the key is valid.
+ * When GATEWAY_IPS is set, restricts to those source IPs only.
  */
 export function verifyInstanceApiKey(request: NextRequest): SessionData | null {
   const apiKey = request.headers.get('x-instance-api-key');
@@ -171,6 +172,16 @@ export function verifyInstanceApiKey(request: NextRequest): SessionData | null {
     if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   } catch {
     return null;
+  }
+
+  const allowedIps = process.env.GATEWAY_IPS;
+  if (allowedIps) {
+    const clientIp =
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-real-ip') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+    const allowed = new Set(allowedIps.split(',').map(ip => ip.trim()));
+    if (!clientIp || !allowed.has(clientIp)) return null;
   }
 
   return {

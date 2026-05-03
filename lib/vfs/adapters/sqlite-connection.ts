@@ -74,11 +74,12 @@ function validateIdFormat(id: string, label: string): void {
  * Configure a database with WAL mode and foreign keys
  */
 function configureDatabase(db: Database.Database): void {
-  // Enable WAL mode for better concurrent access
+  const encryptionKey = process.env.DB_ENCRYPTION_KEY;
+  if (encryptionKey) {
+    db.pragma(`key='${encryptionKey}'`);
+  }
   db.pragma('journal_mode = WAL');
-  // Enable foreign key constraints
   db.pragma('foreign_keys = ON');
-  // Optimize for performance
   db.pragma('synchronous = NORMAL');
   db.pragma('cache_size = -64000'); // 64MB cache
   db.pragma('temp_store = MEMORY');

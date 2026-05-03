@@ -45,8 +45,24 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isDesktop = process.env.OSW_DESKTOP === 'true';
 
-  // Desktop app: skip all auth
-  if (isDesktop) return NextResponse.next();
+  // Desktop app: skip auth but still handle workspace routing
+  if (isDesktop) {
+    // Legacy redirect: /admin/{view} -> /w/{workspaceId}/{view}
+    if (pathname.startsWith('/admin')) {
+      for (const view of WORKSPACE_VIEWS) {
+        if (pathname === `/admin/${view}` || pathname.startsWith(`/admin/${view}/`)) {
+          const workspaceId = request.cookies.get('osw_workspace')?.value;
+          if (workspaceId) {
+            const newPath = pathname.replace(`/admin/${view}`, `/w/${workspaceId}/${view}`);
+            return NextResponse.redirect(new URL(newPath, request.url));
+          }
+          // No workspace cookie yet — redirect to root to trigger bootstrap
+          return NextResponse.redirect(new URL('/', request.url));
+        }
+      }
+    }
+    return NextResponse.next();
+  }
 
   // ============================================
   // Workspace page routes: /w/[workspaceId]/*

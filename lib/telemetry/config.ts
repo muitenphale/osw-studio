@@ -16,7 +16,7 @@ export const MAX_RETRIES = 3;
 export const RETRY_BASE_MS = 1_000;
 export const HEARTBEAT_INTERVAL_MS = 300_000;
 
-export function detectDeploymentType(): 'hf_space' | 'desktop' | 'server' | 'browser' {
+export function detectDeploymentType(): 'hf_space' | 'desktop' | 'managed' | 'server' | 'browser' {
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     if (hostname.includes('hf.space') || hostname.includes('huggingface.co')) {
@@ -27,9 +27,20 @@ export function detectDeploymentType(): 'hf_space' | 'desktop' | 'server' | 'bro
     return 'desktop';
   }
   if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
+    if (process.env.NEXT_PUBLIC_GATEWAY_URL) {
+      return 'managed';
+    }
     return 'server';
   }
   return 'browser';
+}
+
+export function getManagedContext(): Record<string, string> | null {
+  if (detectDeploymentType() !== 'managed') return null;
+  const ctx: Record<string, string> = {};
+  if (process.env.NEXT_PUBLIC_INSTANCE_ID) ctx.instance_id = process.env.NEXT_PUBLIC_INSTANCE_ID;
+  if (process.env.NEXT_PUBLIC_GATEWAY_URL) ctx.gateway_url = process.env.NEXT_PUBLIC_GATEWAY_URL;
+  return ctx;
 }
 
 import pkg from '@/package.json';

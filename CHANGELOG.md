@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.61.1 - 2026-05-03
+
+### Server Mode
+
+- **Session redirect fix**: Auth redirects now use `NEXT_PUBLIC_APP_URL` instead of `request.url`, which resolves to `0.0.0.0` in Next.js standalone mode.
+- **Admin-only sidebar items**: Users nav item hidden for non-admin users in the sidebar.
+- **Database encryption support**: All database connections accept an optional `DB_ENCRYPTION_KEY` pragma for encrypted SQLite. No-op when unset.
+- **API key IP allowlist**: Instance API key authentication can be restricted to specific source IPs via `GATEWAY_IPS` env var. Supports IPv4 and IPv6.
+- **Deployment type telemetry**: Telemetry now distinguishes deployment types (browser, server, desktop, multi-instance) for usage analytics.
+
+### Desktop
+
+- **Fixed 404 on launch**: Desktop app showed a Next.js 404 after the workspace routing changes in v1.57.0. The app now bootstraps a default workspace on first launch and routes directly to it.
+
 ## v1.61.0 - 2026-05-01
 
 ### Multitenancy & Server Mode

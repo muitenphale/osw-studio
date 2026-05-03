@@ -12,6 +12,7 @@ import {
   detectDeploymentType,
   getAppVersion,
   detectOsPlatform,
+  getManagedContext,
 } from './config';
 import { configManager } from '@/lib/config/storage';
 
@@ -42,6 +43,7 @@ export class TelemetryTracker {
   private deploymentType = 'browser';
   private osPlatform = 'unknown';
   private appVersion = 'unknown';
+  private managedContext: Record<string, string> | null = null;
 
   init(): void {
     try {
@@ -54,6 +56,7 @@ export class TelemetryTracker {
       this.deploymentType = detectDeploymentType();
       this.osPlatform = detectOsPlatform();
       this.appVersion = getAppVersion();
+      this.managedContext = getManagedContext();
       this.sessionStartTime = Date.now();
       this.initialized = true;
 
@@ -86,6 +89,7 @@ export class TelemetryTracker {
           deployment_type: this.deploymentType,
           os_platform: this.osPlatform,
           app_version: this.appVersion,
+          ...(this.managedContext ?? {}),
           ...(properties ?? {}),
         },
       };

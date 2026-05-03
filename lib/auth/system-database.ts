@@ -81,6 +81,10 @@ export function getSystemDatabase(): Database.Database {
 
   const dbPath = path.join(dataDir, 'system.sqlite');
   systemDb = new Database(dbPath);
+  const encryptionKey = process.env.DB_ENCRYPTION_KEY;
+  if (encryptionKey) {
+    systemDb.pragma(`key='${encryptionKey}'`);
+  }
   systemDb.pragma('journal_mode = WAL');
   systemDb.pragma('foreign_keys = ON');
   systemDb.pragma('synchronous = NORMAL');

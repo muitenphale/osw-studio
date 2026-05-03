@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.61.1 - Server Mode Security (2026-05-03)
+
+Server Mode gains several security and operational improvements for production deployments. Database connections support transparent encryption, API key auth can be locked to specific IPs, and telemetry now distinguishes deployment types for better usage analytics.
+
+### Server Mode
+- **Database encryption support** — All SQLite connections accept an optional encryption key via `DB_ENCRYPTION_KEY`. When set, databases are encrypted at rest using SQLCipher. Unset means no encryption — existing instances are unaffected
+- **API key IP allowlist** — Instance API key authentication can be restricted to specific source IPs via `GATEWAY_IPS`, so a leaked key alone isn't enough to call the admin API. Supports both IPv4 and IPv6
+- **Deployment type telemetry** — Telemetry events now distinguish deployment types (browser, server, desktop, multi-instance) for more accurate usage analytics
+- **Session redirect fix** — Auth redirects now use the configured app URL instead of the raw request URL, which resolves to `0.0.0.0` in Next.js standalone mode
+- **Admin-only sidebar items** — The Users nav item is hidden for non-admin users
+
+---
+
 ## v1.61.0 - Workspace Isolation (2026-05-01)
 
 Workspaces in multitenancy mode are now fully isolated in the browser. Each workspace gets its own local database, so switching workspaces means switching projects, skills, and templates — nothing bleeds through. API keys stay in your browser per device and are never sent to the server for storage. Plus a new split button for checkpoint access, a working dashboard for non-admin users, and several stability fixes.
