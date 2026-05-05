@@ -96,17 +96,17 @@ Dedicated responsive design skill.
 
 **When to use**: When building sites that need to work on mobile
 
-### Frontend Design
+### Frontend Design (12 sub-skills)
 
-Visual design quality guidance.
+Visual design quality guidance with 12 distinct aesthetic directions: bold-geometric, soft-organic, editorial, minimal, brutalist, retro-futuristic, art-deco, maximalist, playful, industrial, luxury, and terminal.
 
 **What it does:**
-- Typography and font pairing
+- Typography character and font pairing
 - Color systems with CSS custom properties
-- Spatial composition and motion
-- Avoiding generic AI aesthetics
+- Spatial composition and motion intent
+- Strong aesthetic commitment — each sub-skill pushes toward a distinct visual identity
 
-**When to use**: When you want polished, professional-looking output
+**When to use**: When you want polished, professional-looking output with a specific aesthetic direction. Enable the whole group or individual sub-skills.
 
 ### Handlebars Advanced
 
@@ -275,6 +275,36 @@ Built-in skills can't be edited.
 3. Confirm deletion
 
 Built-in skills can't be deleted.
+
+---
+
+## Skill Groups
+
+Groups let you enable or disable a set of related skills with one toggle.
+
+### Built-in Groups
+
+- **Frontend Design** — All 12 aesthetic sub-skills. Disable to remove design direction guidance entirely.
+- **Server Mode** — Server, Functions, Database, and Secrets skills. Disable when working on browser-only projects.
+- **Web Standards** — Responsive and Accessibility. Keep enabled for production-quality output.
+
+### How Groups Work
+
+- Enabling a group activates all its member skills
+- Disabling a group falls through to each skill's individual toggle
+- A skill can belong to multiple groups — enabling any one of them makes the skill active
+- Built-in group membership is fixed, but you can disable built-in groups
+
+### Custom Groups
+
+Create your own groups for project-specific workflows:
+
+1. Go to **Skills** view → **Groups** tab
+2. Click **New Group**
+3. Name it, add an optional description, and select member skills
+4. Toggle the group on/off as needed
+
+Edit or delete custom groups any time.
 
 ---
 

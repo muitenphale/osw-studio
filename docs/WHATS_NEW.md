@@ -6,6 +6,17 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.62.0 - Skill Groups & Design Expansion (2026-05-05)
+
+The frontend design skill system expands from 4 to 12 aesthetic directions — brutalist, retro-futuristic, art deco, maximalist, playful, industrial, luxury, and terminal join the original four. Skills can now be organized into groups for bulk enable/disable, making it easy to activate an entire design family or disable server-mode skills for browser-only projects.
+
+### Skills
+- **12 frontend design aesthetics** — Eight new sub-skills cover design spaces the original four couldn't reach, with less convergence between generations
+- **Skill groups** — Bundle skills under named toggles. Three built-in groups ship: Frontend Design, Server Mode, and Web Standards. Create your own custom groups for project-specific workflows
+- **Skills view redesign** — New tabbed interface with bulk actions, group badges, and member-count indicators
+
+---
+
 ## v1.61.1 - Server Mode Security (2026-05-03)
 
 Server Mode gains several security and operational improvements for production deployments. Database connections support transparent encryption, API key auth can be locked to specific IPs, and telemetry now distinguishes deployment types for better usage analytics.

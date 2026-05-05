@@ -7,7 +7,7 @@ export function SwitchWorkspaceLink() {
 
   return (
     <a
-      href={`${GATEWAY_URL}/studio`}
+      href={`${GATEWAY_URL}/account`}
       className="text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       Switch workspace

@@ -3,19 +3,25 @@
  * Skills are stored in localStorage (custom) and loaded from built-in registry
  */
 
-import { Skill, SkillMetadata } from './types';
+import { Skill, SkillMetadata, SkillGroup } from './types';
 import { parseSkillFile } from './parser';
-import { BUILT_IN_SKILLS } from './registry';
+import { BUILT_IN_SKILLS, BUILT_IN_GROUPS } from './registry';
 import { logger } from '@/lib/utils';
 import JSZip from 'jszip';
 
 const CUSTOM_SKILLS_KEY = 'osw_custom_skills';
 const ENABLED_STATE_KEY = 'osw_skills_enabled_state';
+const GROUPS_STATE_KEY = 'osw_skill_groups_state';
 
 interface EnabledState {
   globalEnabled: boolean;
   skillEvaluationEnabled: boolean;
   disabledSkills: Set<string>; // IDs of disabled skills
+}
+
+interface GroupsState {
+  disabledGroups: Set<string>;       // IDs of disabled groups
+  customGroups: Map<string, SkillGroup>;
 }
 
 /**
@@ -28,6 +34,10 @@ class SkillsService {
     globalEnabled: true,
     skillEvaluationEnabled: false,
     disabledSkills: new Set(),
+  };
+  private groupsState: GroupsState = {
+    disabledGroups: new Set(),
+    customGroups: new Map(),
   };
 
   /**
@@ -60,8 +70,26 @@ class SkillsService {
         };
       }
 
+      // Load groups state
+      const groupsStored = localStorage.getItem(GROUPS_STATE_KEY);
+      if (groupsStored) {
+        const parsed = JSON.parse(groupsStored);
+        const customGroups = new Map<string, SkillGroup>();
+        for (const g of parsed.customGroups || []) {
+          customGroups.set(g.id, {
+            ...g,
+            createdAt: new Date(g.createdAt),
+            updatedAt: new Date(g.updatedAt),
+          });
+        }
+        this.groupsState = {
+          disabledGroups: new Set(parsed.disabledGroups || []),
+          customGroups,
+        };
+      }
+
       this.initialized = true;
-      logger.info(`[SkillsService] Loaded ${this.customSkills.size} custom skills`);
+      logger.info(`[SkillsService] Loaded ${this.customSkills.size} custom skills, ${this.groupsState.customGroups.size} custom groups`);
     } catch (error) {
       logger.error('[SkillsService] Failed to load custom skills', error);
     }
@@ -93,6 +121,21 @@ class SkillsService {
       localStorage.setItem(ENABLED_STATE_KEY, JSON.stringify(state));
     } catch (error) {
       logger.error('[SkillsService] Failed to save enabled state', error);
+    }
+  }
+
+  /**
+   * Persist groups state to localStorage
+   */
+  private saveGroupsState(): void {
+    try {
+      const state = {
+        disabledGroups: Array.from(this.groupsState.disabledGroups),
+        customGroups: Array.from(this.groupsState.customGroups.values()),
+      };
+      localStorage.setItem(GROUPS_STATE_KEY, JSON.stringify(state));
+    } catch (error) {
+      logger.error('[SkillsService] Failed to save groups state', error);
     }
   }
 
@@ -284,6 +327,18 @@ class SkillsService {
     this.customSkills.delete(id);
     this.saveCustomSkills();
 
+    // Remove from any custom groups that contain it
+    let groupsChanged = false;
+    for (const group of this.groupsState.customGroups.values()) {
+      const idx = group.memberIds.indexOf(id);
+      if (idx !== -1) {
+        group.memberIds.splice(idx, 1);
+        group.updatedAt = new Date();
+        groupsChanged = true;
+      }
+    }
+    if (groupsChanged) this.saveGroupsState();
+
     // Background sync to server
     import('../auto-sync').then(({ autoDeleteSkill }) => autoDeleteSkill(id)).catch(() => {});
 
@@ -404,7 +459,7 @@ class SkillsService {
   }
 
   /**
-   * Check if a specific skill is enabled
+   * Check if a specific skill is individually enabled (ignoring groups)
    */
   async isSkillEnabled(skillId: string): Promise<boolean> {
     await this.init();
@@ -433,19 +488,40 @@ class SkillsService {
   }
 
   /**
-   * Get only enabled skills (respects global and per-skill settings)
+   * Get only enabled skills (respects global, per-skill, and group settings).
+   * A skill is active if:
+   *   - global skills system is enabled, AND
+   *   - either the skill is individually enabled, OR it belongs to at least one enabled group.
+   * Group membership ENABLES — an enabled group activates its members regardless of
+   * their individual toggle state. Individual toggle only matters when no enabled group
+   * is covering the skill.
    */
   async getEnabledSkills(): Promise<Skill[]> {
     await this.init();
 
-    // If globally disabled, return empty array
     if (!this.enabledState.globalEnabled) {
       return [];
     }
 
-    // Get all skills and filter by enabled state
     const allSkills = await this.getAllSkills();
-    return allSkills.filter(skill => !this.enabledState.disabledSkills.has(skill.id));
+    const allGroups = await this.getAllGroups();
+
+    // Build skill -> groups map for fast lookup
+    const skillToGroups = new Map<string, string[]>();
+    for (const group of allGroups) {
+      for (const memberId of group.memberIds) {
+        const arr = skillToGroups.get(memberId) ?? [];
+        arr.push(group.id);
+        skillToGroups.set(memberId, arr);
+      }
+    }
+
+    return allSkills.filter(skill => {
+      const inEnabledGroup = (skillToGroups.get(skill.id) ?? [])
+        .some(gid => !this.groupsState.disabledGroups.has(gid));
+      const individuallyEnabled = !this.enabledState.disabledSkills.has(skill.id);
+      return inEnabledGroup || individuallyEnabled;
+    });
   }
 
   /**
@@ -460,6 +536,185 @@ class SkillsService {
       path: `/.skills/${skill.id}.md`,
       isBuiltIn: skill.isBuiltIn,
     }));
+  }
+
+  // ============================================
+  // Group Management
+  // ============================================
+
+  /**
+   * Get all skill groups (built-in + custom)
+   */
+  async getAllGroups(): Promise<SkillGroup[]> {
+    await this.init();
+
+    const groups: SkillGroup[] = [];
+
+    for (const builtIn of BUILT_IN_GROUPS) {
+      groups.push({
+        id: builtIn.id,
+        name: builtIn.name,
+        description: builtIn.description,
+        memberIds: [...builtIn.memberIds],
+        isBuiltIn: true,
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-01'),
+      });
+    }
+
+    groups.push(...Array.from(this.groupsState.customGroups.values()));
+
+    return groups;
+  }
+
+  /**
+   * Get a single group by ID
+   */
+  async getGroup(id: string): Promise<SkillGroup | null> {
+    const all = await this.getAllGroups();
+    return all.find(g => g.id === id) ?? null;
+  }
+
+  /**
+   * Check if a group is enabled
+   */
+  async isGroupEnabled(groupId: string): Promise<boolean> {
+    await this.init();
+    return !this.groupsState.disabledGroups.has(groupId);
+  }
+
+  /**
+   * Enable a group (allows its members to be active)
+   */
+  async enableGroup(groupId: string): Promise<void> {
+    await this.init();
+    this.groupsState.disabledGroups.delete(groupId);
+    this.saveGroupsState();
+    logger.info(`[SkillsService] Enabled group: ${groupId}`);
+  }
+
+  /**
+   * Disable a group (its members are inactive unless they belong to another enabled group)
+   */
+  async disableGroup(groupId: string): Promise<void> {
+    await this.init();
+    this.groupsState.disabledGroups.add(groupId);
+    this.saveGroupsState();
+    logger.info(`[SkillsService] Disabled group: ${groupId}`);
+  }
+
+  /**
+   * Create a custom group
+   */
+  async createGroup(input: { name: string; description?: string; memberIds?: string[] }): Promise<SkillGroup> {
+    await this.init();
+
+    const id = this.slugify(input.name);
+    if (!id) {
+      throw new Error('Group name must contain at least one alphanumeric character');
+    }
+
+    if (this.groupsState.customGroups.has(id) || BUILT_IN_GROUPS.some(g => g.id === id)) {
+      throw new Error(`Group with name "${input.name}" already exists`);
+    }
+
+    const group: SkillGroup = {
+      id,
+      name: input.name,
+      description: input.description,
+      memberIds: input.memberIds ? [...new Set(input.memberIds)] : [],
+      isBuiltIn: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    this.groupsState.customGroups.set(id, group);
+    this.saveGroupsState();
+
+    logger.info(`[SkillsService] Created group: ${id}`);
+    return group;
+  }
+
+  /**
+   * Update a custom group's metadata or membership
+   */
+  async updateGroup(id: string, updates: { name?: string; description?: string; memberIds?: string[] }): Promise<SkillGroup> {
+    await this.init();
+
+    const existing = this.groupsState.customGroups.get(id);
+    if (!existing) {
+      throw new Error(`Group "${id}" not found`);
+    }
+
+    const updated: SkillGroup = {
+      ...existing,
+      name: updates.name ?? existing.name,
+      description: updates.description ?? existing.description,
+      memberIds: updates.memberIds ? [...new Set(updates.memberIds)] : existing.memberIds,
+      updatedAt: new Date(),
+    };
+
+    this.groupsState.customGroups.set(id, updated);
+    this.saveGroupsState();
+
+    logger.info(`[SkillsService] Updated group: ${id}`);
+    return updated;
+  }
+
+  /**
+   * Delete a custom group (does not delete its members)
+   */
+  async deleteGroup(id: string): Promise<void> {
+    await this.init();
+
+    const group = this.groupsState.customGroups.get(id);
+    if (!group) {
+      throw new Error(`Group "${id}" not found`);
+    }
+
+    this.groupsState.customGroups.delete(id);
+    this.groupsState.disabledGroups.delete(id);
+    this.saveGroupsState();
+
+    logger.info(`[SkillsService] Deleted group: ${id}`);
+  }
+
+  /**
+   * Add a skill to a custom group
+   */
+  async addSkillToGroup(groupId: string, skillId: string): Promise<void> {
+    const group = this.groupsState.customGroups.get(groupId);
+    if (!group) throw new Error(`Group "${groupId}" not found or is built-in`);
+    if (!group.memberIds.includes(skillId)) {
+      group.memberIds.push(skillId);
+      group.updatedAt = new Date();
+      this.saveGroupsState();
+    }
+  }
+
+  /**
+   * Remove a skill from a custom group
+   */
+  async removeSkillFromGroup(groupId: string, skillId: string): Promise<void> {
+    const group = this.groupsState.customGroups.get(groupId);
+    if (!group) throw new Error(`Group "${groupId}" not found or is built-in`);
+    const idx = group.memberIds.indexOf(skillId);
+    if (idx !== -1) {
+      group.memberIds.splice(idx, 1);
+      group.updatedAt = new Date();
+      this.saveGroupsState();
+    }
+  }
+
+  /**
+   * Convert a name into a slug usable as a group ID
+   */
+  private slugify(name: string): string {
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   // ============================================

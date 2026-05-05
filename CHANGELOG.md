@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.62.0 - 2026-05-05
+
+### Built-in Skills
+
+- **Frontend design skill expansion**: Sub-skill catalog grew from 4 to 12 aesthetic directions — added `brutalist`, `retro-futuristic`, `art-deco`, `maximalist`, `playful`, `industrial`, `luxury`, and `terminal`. Wider taxonomy reduces convergence between generations and covers design spaces the previous four couldn't reach.
+- **Sub-skills rewritten for variety**: Sub-skills now describe typography character, color logic, spatial principles, and motion intent rather than prescribing specific page sections. Outputs from the same sub-skill no longer look like siblings.
+
+### Skill Groups
+
+- **Skill groups for bulk enable/disable**: Skills can now be bundled into named groups that toggle together. Three built-in groups ship: `Frontend Design` (all 13 aesthetic skills), `Server Mode` (server, functions, database, secrets — disable for browser-only projects), and `Web Standards` (responsive, accessibility). Enabling a group activates all its members; disabling falls through to individual toggles.
+- **Multi-membership**: A skill can belong to any number of groups; enabling any one of them makes the skill available.
+- **Custom groups**: Create your own groups via the "New Group" dialog — pick a name, optional description, and select member skills. Edit and delete available on custom groups.
+- **Skills view redesign**: The Skills view is now tabbed (Skills / Groups) with member-count badges. Groups are collapsed by default; expanding shows member skills with individual toggles. "Enable all" / "Disable all" bulk actions added to the Skills tab.
+
+### Server Mode
+
+- **Account link in sidebar**: In managed mode, the sidebar now shows an "Account" link that navigates back to the managing provider's account page.
+- **Fixed stale workspace switcher path**: The "Switch workspace" link in the workspace header pointed to an outdated path.
+
 ## v1.61.1 - 2026-05-03
 
 ### Server Mode

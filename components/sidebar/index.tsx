@@ -10,7 +10,6 @@ import {
   FolderOpen,
   Globe,
   Users,
-  Building2,
   LayoutTemplate,
   Sparkles,
   Settings,
@@ -24,6 +23,7 @@ import {
   Cloud,
   LogOut,
   LayoutDashboard,
+  UserCircle,
 } from 'lucide-react';
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
@@ -89,8 +89,11 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'github', label: 'GitHub', icon: Github, href: 'https://github.com/o-stahl/osw-studio' },
 ];
 
+const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL;
+
 const SYSTEM_ACTIONS: SidebarItem[] = [
   { id: 'sync', label: 'Server Sync', icon: Cloud, action: 'server-sync' },
+  ...(GATEWAY_URL ? [{ id: 'account', label: 'Account', icon: UserCircle, href: `${GATEWAY_URL}/account` }] : []),
   { id: 'logout', label: 'Logout', icon: LogOut, action: 'logout' },
 ];
 
@@ -609,6 +612,24 @@ function SidebarContent({
             const isLogout = item.id === 'logout';
             const isSync = item.id === 'sync';
             const showSyncIndicator = isSync && syncStatus?.needsSync;
+
+            if (item.href) {
+              return (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  className={cn(
+                    'flex items-center w-full rounded-md text-sm font-medium h-8 px-3',
+                    collapsed ? 'justify-center px-2' : 'justify-start',
+                    'text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+                  )}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon className={cn('h-4 w-4', !collapsed && 'mr-2')} />
+                  {!collapsed && item.label}
+                </a>
+              );
+            }
 
             return (
               <Button

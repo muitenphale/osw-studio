@@ -14,7 +14,7 @@ description: Bold geometric aesthetic — massive type, high contrast, color blo
 
 High contrast. Massive type. Strong color blocks. Kinetic energy. This aesthetic makes things feel like an event — a product launch, a brand statement, something worth paying attention to. Think Nike campaigns, contemporary museum exhibitions, automotive reveals, festival branding.
 
-Every decision should feel deliberate and confident. Nothing tentative, nothing decorative for its own sake.
+Every decision should feel deliberate and confident. Nothing tentative, nothing decorative for its own sake. This sub-skill describes the *character* of the aesthetic; the page composition is yours to design — just keep every choice consistent with the energy below.
 
 ## Typography
 
@@ -24,7 +24,7 @@ Every decision should feel deliberate and confident. Nothing tentative, nothing 
 
 **Find fonts that vary from project to project.** Browse Google Fonts filtered to sans-serif, sort by trending or newest. Look at the uppercase specimen — does it command attention? Each project should use a different display font. Never reuse the same pairing across generations.
 
-**Scale:** Hero text should be uncomfortably large — it should feel like it's pushing against the edges of the viewport. Use \`clamp()\` with a minimum around 3rem and a maximum pushing 6–7rem. The gap between hero text and body text should be dramatic, not polite. Section titles somewhere in between. Labels/captions tiny, uppercase, letter-spaced wide — the contrast between massive headings and whispered labels creates tension.
+**Scale:** Hero text should be uncomfortably large — pushing against the edges of the viewport. Use \`clamp()\` with a minimum around 3rem and a maximum pushing 6–7rem. The gap between hero text and body text should be dramatic, not polite. Section titles somewhere in between. Labels/captions tiny, uppercase, letter-spaced wide — the contrast between massive headings and whispered labels creates tension.
 
 **Treatment:** Uppercase hero text. Tight or slightly negative letter-spacing on large sizes (the letters should feel packed with energy). Line-height near 1.0 — headlines shouldn't float, they should stack like bricks.
 
@@ -32,25 +32,23 @@ Every decision should feel deliberate and confident. Nothing tentative, nothing 
 
 **Build around tension.** A dark or very light neutral base with one saturated, electric accent that feels like it could vibrate off the screen. The accent should feel almost aggressive — not pastel, not muted, not friendly. Think neon signage, warning lights, highlighter ink.
 
-**Base construction:** Dark themes work best here. Start with an almost-black that has a very slight cast (warm, cool, or neutral — match the brand). Text in warm or cool off-white, never pure #fff. Three text tiers: bright for headings, muted for body, dim for metadata.
+**Base construction:** Dark themes work especially well here, but light themes work too if the accent does enough lifting. Start with an almost-black or near-white that has a very slight cast (warm, cool, or neutral — match the brand). Text in warm or cool off-tones, never pure #fff or #000. Three text tiers: bright for headings, muted for body, dim for metadata.
 
-**The accent does heavy lifting.** Use it for CTAs, key stats, one full-bleed color block section per page. The rest of the page is monochrome. The scarcity of color makes the accent hit harder.
+**The accent does heavy lifting.** Use it where you want the eye to land — CTAs, key numbers, one signature color event per page. The rest of the page is monochrome. Scarcity makes the accent hit harder.
 
-**Full-bleed accent blocks.** One section per page with the accent as background and contrasting text. This is a signature move — it creates a visual event that breaks the dark rhythm. Add a subtle radial gradient overlay for depth.
+**Vary the accent per project.** Hot orange one time, electric cyan the next, acid green after that, hazard yellow, magenta, ultramarine. The aesthetic isn't defined by *which* color — it's defined by intensity. Avoid converging on the same accent across generations.
 
-**Vary the accent per project.** Hot orange one time, electric cyan the next, acid green after that. The aesthetic isn't defined by the color — it's defined by the intensity.
+## Spatial Logic
 
-## Layout
+**Asymmetry creates momentum.** Symmetric layouts feel static, which fights this aesthetic's energy. Off-balance compositions, weight concentrated to one side, content that doesn't sit in the center — these create the forward motion that makes bold-geometric feel kinetic.
 
-**Hero:** Full-viewport. The hero should feel like it owns the entire screen. Either a split layout (text 50–55%, image/visual the rest) or a full-bleed image with text punched over it. The text IS the design element — let it dominate.
+**Scale contrast at every level.** Pair very large with very small. Massive heading next to tiny caption. Wide color block next to a single line of text. There should be no medium-sized elements floating in the middle.
 
-**Stats strip:** A horizontal band of 3–4 large numbers with tiny labels below them. Contrasting background (dark on light pages, accent or dark on dark pages). The numbers should be nearly as large as section headings. This is a signature bold-geometric element — raw data presented as visual impact.
-
-**Feature rows:** Alternating two-column sections, image + text, flipping direction each row. Asymmetric grid (60/40 or 55/45, never 50/50). The asymmetry creates forward momentum.
+**Content width variation creates rhythm.** Tight body text, full-bleed color, wide images. The shifts in width as you scroll are part of the experience.
 
 **Section padding:** Aggressively generous. 5–8rem vertical. The whitespace between sections should feel like a breath between punches.
 
-**Content width variation:** Body text constrained, images and color blocks full-bleed, stat strips edge-to-edge. The contrast between tight and wide creates rhythm.
+**Color-block sections.** When a section needs to be a visual event, fill its full width with the accent color and put contrasting text on top. Use this scarcely — once or twice per page maximum. Frequency dilutes impact.
 
 ## Backgrounds & Depth
 
@@ -64,29 +62,31 @@ Shadows: minimal or none. Let contrast and bold color do the work. If you use sh
 
 **Controlled intensity.** Motion should feel like things arriving with purpose, not floating or bouncing.
 
-**Hero entrance:** Stagger elements on page load with short delays (0.08–0.15s between items). Headline first, then subtitle, then CTA. Start from \`opacity: 0; translateY(20px)\`. The stagger creates a sense of unveiling.
+**Page entrance:** Stagger key elements on load with short delays (0.08–0.15s between items). Start from \`opacity: 0; translateY(20px)\`. The stagger creates a sense of unveiling. Keep the entrance to one orchestrated moment — don't sprinkle entrances throughout the page.
 
-**Scroll reveals:** IntersectionObserver, subtle translateY start, ease-out timing. Keep it simple — the content arrives, it doesn't perform.
+**Scroll reveals:** IntersectionObserver, subtle translateY start, ease-out timing. Keep it simple — content arrives, it doesn't perform.
 
-**Hero image:** A slow scale on the hero image (1.0 → 1.05 over several seconds on load via CSS transition) creates subtle life.
-
-**Hover:** Cards lift (translateY -4 to -6px). Buttons shift up slightly with an accent-colored shadow appearing. Images inside containers scale (1.03) with overflow hidden.
+**Hover:** Cards lift (translateY -4 to -6px). Buttons shift up slightly with an accent-colored shadow appearing. Images inside containers scale (1.03) with overflow hidden. Transitions 0.2–0.3s — sharper than soft aesthetics.
 
 **Avoid absolutely:** Bouncy easing, scroll hijacking, parallax (it fights geometric precision), anything that softens the hard edges. This aesthetic is confident and controlled.
 
-## Navigation
-
-Fixed top bar, transparent on load, gaining a backdrop-blur background on scroll. Logo in the display font, heavy weight, uppercase or small caps, with a geometric mark (a dot, a slash, a small shape in the accent color). Nav links small, clean, well-spaced. One CTA button in the accent color. On mobile: clean hamburger icon, three thin lines, no fancy animations beyond open/close.
-
 ## Components
 
-**Buttons:** Sharp corners (low border-radius, 0–4px). Generous horizontal padding. Display font or semi-bold body font. Primary buttons in accent color, outline buttons with a 2px border that fill on hover. No rounded pills — that's a different aesthetic.
+**Buttons:** Sharp corners (border-radius 0–4px). Generous horizontal padding. Display font or semi-bold body font. Primary buttons in accent color, outline buttons with a 2px border that fill on hover. No rounded pills — that's a different aesthetic.
 
-**Cards:** Low border-radius (2–4px). No visible borders — use background contrast or subtle shadow. Image top, content bottom. Hover lifts the card and deepens the shadow.
+**Cards:** Low border-radius (2–4px). No visible borders — use background contrast or subtle shadow. Hover lifts and deepens shadow.
 
-**Footer:** Dark, functional, not decorative. Logo + nav links + contact. Small text, muted colors. Horizontal layout on desktop.
+**Form inputs:** Minimal border, sharp corners, accent-colored focus state. Match the architectural feel of the buttons.
+
+## Anti-patterns Specific to This Aesthetic
+
+- Pastel or muted accent colors — kills the kinetic energy
+- Rounded corners above 4px — softens the architectural feel
+- Center-aligned everything — symmetry fights momentum
+- Multiple competing accent colors — dilutes scarcity
+- Heavy decorative shadows — fights the clean geometric feel
 
 ## What Makes This Aesthetic Work
 
-The tension between massive scale and controlled precision. Every element is either very large or very small — there's no medium. The hero text is enormous, the labels are tiny, the accent is intense, the base is muted. That contrast at every level is what makes bold-geometric feel energetic rather than loud.
+The tension between massive scale and controlled precision. Every element is either very large or very small — there's no medium. The hero text is enormous, the labels are tiny, the accent is intense, the base is muted. That contrast at every level is what makes bold-geometric feel energetic rather than loud. Asymmetry and width contrast give it forward motion. Restraint everywhere except the chosen moments of impact is what separates "designed" from "shouty."
 `;

@@ -48,3 +48,27 @@ export interface BuiltInSkillDefinition {
   id: string;
   content: string;       // Raw SKILL.md content
 }
+
+/**
+ * A skill group bundles multiple skills under one bulk-toggle.
+ * A skill is active if it is individually enabled OR belongs to at least one enabled group.
+ */
+export interface SkillGroup {
+  id: string;
+  name: string;
+  description?: string;
+  memberIds: string[];    // skill IDs
+  isBuiltIn: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Built-in group definition (before instantiation)
+ */
+export interface BuiltInGroupDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  memberIds: string[];
+}

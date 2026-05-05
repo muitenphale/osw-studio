@@ -352,7 +352,7 @@ Yes! **Scheduled Functions** let you run edge functions on a cron schedule. Use 
 
 AI guidance documents injected into the system prompt. They teach the AI how to approach specific tasks.
 
-**Built-in**: Workflow, Responsive, Frontend Design, Handlebars Advanced, Accessibility (plus server-specific skills in Server Mode)
+**Built-in**: Workflow, Responsive, Frontend Design (12 aesthetic sub-skills), Handlebars Advanced, Accessibility (plus server-specific skills in Server Mode). Skills can be organized into groups for bulk enable/disable.
 
 **See**: [Skills Guide](?doc=skills)
 

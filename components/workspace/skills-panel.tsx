@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Skill } from '@/lib/vfs/skills/types';
+import { Skill, SkillGroup } from '@/lib/vfs/skills/types';
 import { skillsService } from '@/lib/vfs/skills';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Plus } from 'lucide-react';
+import { Sparkles, Plus, FolderTree } from 'lucide-react';
 import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import {
   Dialog,
@@ -21,18 +21,22 @@ interface SkillsPanelProps {
 
 export function SkillsPanel({ onClose }: SkillsPanelProps) {
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [groups, setGroups] = useState<SkillGroup[]>([]);
   const [globalEnabled, setGlobalEnabled] = useState(true);
   const [enabledSkills, setEnabledSkills] = useState<Set<string>>(new Set());
+  const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const loadState = useCallback(async () => {
     try {
-      const [allSkills, global] = await Promise.all([
+      const [allSkills, allGroups, global] = await Promise.all([
         skillsService.getAllSkills(),
+        skillsService.getAllGroups(),
         skillsService.isGloballyEnabled(),
       ]);
       setSkills(allSkills);
+      setGroups(allGroups);
       setGlobalEnabled(global);
 
       const enabled = new Set<string>();
@@ -42,6 +46,14 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
         }
       }
       setEnabledSkills(enabled);
+
+      const enabledG = new Set<string>();
+      for (const g of allGroups) {
+        if (await skillsService.isGroupEnabled(g.id)) {
+          enabledG.add(g.id);
+        }
+      }
+      setEnabledGroups(enabledG);
     } catch (err) {
       logger.error('Failed to load skills:', err);
     } finally {
@@ -69,6 +81,19 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
       await skillsService.disableSkill(skillId);
     }
     setEnabledSkills(updated);
+    await vfs.reloadTransientSkills();
+  };
+
+  const handleGroupToggle = async (groupId: string, enabled: boolean) => {
+    const updated = new Set(enabledGroups);
+    if (enabled) {
+      updated.add(groupId);
+      await skillsService.enableGroup(groupId);
+    } else {
+      updated.delete(groupId);
+      await skillsService.disableGroup(groupId);
+    }
+    setEnabledGroups(updated);
     await vfs.reloadTransientSkills();
   };
 
@@ -114,6 +139,33 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
 
         {globalEnabled && !loading && (
           <>
+            {groups.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <FolderTree className="w-3 h-3 text-muted-foreground" />
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Groups
+                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  {groups.map(group => (
+                    <div key={group.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50">
+                      <div className="flex-1 min-w-0 mr-3">
+                        <div className="text-sm truncate">{group.name}</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {group.memberIds.length} {group.memberIds.length === 1 ? 'skill' : 'skills'}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={enabledGroups.has(group.id)}
+                        onCheckedChange={(checked) => handleGroupToggle(group.id, checked)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {builtInSkills.length > 0 && (
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">

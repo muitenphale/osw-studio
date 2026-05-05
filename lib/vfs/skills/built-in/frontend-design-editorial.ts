@@ -5,16 +5,16 @@
 
 export const FRONTEND_DESIGN_EDITORIAL_SKILL = `---
 name: frontend-design-editorial
-description: Editorial aesthetic — serif typography, magazine-like grids, content-dense layouts with elegant hierarchy. Use for blogs, publications, long-form portfolios, news sites, and any content-first design where reading is the primary activity.
+description: Editorial aesthetic — serif typography, magazine-like rhythm, content-dense layouts with elegant hierarchy. Use for blogs, publications, long-form portfolios, news sites, and any content-first design where reading is the primary activity.
 ---
 
 # Editorial Aesthetic
 
-> **Parent skill:** Read \`/.skills/frontend-design.md\` first for the required Design Intent block, universal principles (typography tiers, color construction, spacing, interaction, mobile, anti-patterns), and image/responsive guidance that apply to every aesthetic.
+> **Parent skill:** Read \`/.skills/frontend-design.md\` first for the required Design Intent block, universal principles, and image/responsive guidance.
 
-Serif typography. Magazine grids. Content density with elegant hierarchy. This aesthetic prioritizes reading and lets the content be the visual interest. Think well-designed newspapers, literary journals, museum exhibition catalogs, long-form journalism sites.
+Serif typography. Magazine rhythm. Content density with elegant hierarchy. This aesthetic prioritizes reading and lets the content be the visual interest. Think well-designed newspapers, literary journals, museum exhibition catalogs, long-form journalism sites.
 
-Every decision should serve the content. Decoration is restrained. The typography and layout do the work.
+Every decision should serve the content. Decoration is restrained. The typography and layout do the work. This sub-skill describes the *character* of editorial design; specific page composition is yours to design — keep every choice consistent with the print-oriented voice below.
 
 ## Typography
 
@@ -24,15 +24,15 @@ This is the most typographically complex aesthetic. Three distinct voices work t
 
 **Body font character:** A serif designed for screen reading at body sizes. Good x-height, open counters, comfortable at 16–18px across long paragraphs. Not the same as the display serif — a text serif has different priorities than a display serif.
 
-**UI/caption font:** A clean sans-serif for metadata, bylines, categories, navigation, and small functional text. This creates the third typographic layer that gives editorial design its magazine feel. The contrast between serif content and sans-serif chrome is the signature.
+**UI/caption font:** A clean sans-serif for metadata, bylines, categories, navigation, and small functional text. This third voice gives editorial design its magazine feel. The contrast between serif content and sans-serif chrome is the signature.
 
-**Find fonts that vary from project to project.** Browse Google Fonts filtered to serif. Look at the italic specimen — editorial design uses italic heavily for pull quotes and emphasis. Check readability at 16px for body serifs. Each project should feel like a different publication.
+**Find fonts that vary from project to project.** Browse Google Fonts filtered to serif. Look at the italic specimen — editorial design uses italic heavily. Check readability at 16px for body serifs. Each project should feel like a different publication.
 
 **Scale:** Hero headlines large but not screaming — let the letterforms speak. Body text slightly larger than other aesthetics (1.05–1.15rem) with generous line-height (1.7–1.8) because long-form text needs more breathing room. Captions and metadata in the sans-serif, small, sometimes uppercase with letter-spacing.
 
 **Treatment:** Mixed case (sentence or title case, never all-uppercase — serifs look best at natural case). Italic for subtitles, pull quotes, and emphasis. Letter-spacing: natural or very slightly positive — tight tracking hurts serif readability.
 
-**Pull quotes:** A signature editorial element. Display serif, italic, 1.5–2x body size. Offset to one side of the column or centered with generous vertical space. Bordered with a thin accent line on the left or top. These break up long text and pull the reader forward.
+**Pull quotes:** A signature editorial element. Display serif, italic, 1.5–2x body size. Bordered with a thin accent line. These break up long text and pull the reader forward.
 
 ## Color
 
@@ -42,26 +42,24 @@ This is the most typographically complex aesthetic. Three distinct voices work t
 
 **Accent character:** Brick red, deep blue, olive, dusty plum, dark teal — colors that feel like they came from a printer's ink well, not a screen. Desaturated enough to feel sophisticated, saturated enough to be noticeable. Used sparingly: category labels, links, occasional emphasis.
 
-**Rules and dividers.** Thin horizontal lines (1px) in a muted tone are a core visual element. Between articles, below headers, in the header and footer. They create structure without weight — like the ruled lines of a printed page.
+**Rules and dividers.** Thin horizontal lines (1px) in a muted tone are a core visual element. They create structure without weight — like the ruled lines of a printed page.
 
-**Dark variants:** Warm charcoal backgrounds with parchment-toned text. The same tinted-neutral approach as light, inverted. Rules in a slightly lighter tone.
+**Dark variants:** Warm charcoal backgrounds with parchment-toned text. Same tinted-neutral approach as light, inverted. Rules in a slightly lighter tone.
 
-**Vary per project.** Brick red and cream for a news publication, deep blue and warm white for a literary journal, olive and parchment for a nature magazine. The feel is always "printed matter" but the specific palette changes.
+**Vary per project.** Brick red and cream for one publication, deep blue and warm white for another, olive and parchment for a third. The feel is always "printed matter" but the specific palette changes.
 
-## Layout
+## Spatial Logic
 
-**Three content widths on the same page.** This is the signature editorial layout technique:
-1. Narrow (580–680px) for body text — optimal reading measure
-2. Medium (900–960px) for images, pull quotes, and wider content
-3. Full-bleed for hero photography and section dividers
+**Width variation is the rhythm.** Editorial design lives or dies by varying content widths as the reader scrolls:
+- Narrow (580–680px) for body text — optimal reading measure
+- Medium (900–960px) for images, pull quotes, and wider content
+- Full-bleed for hero photography and section dividers
 
-The shift between these widths as you scroll creates the magazine rhythm. Without it, the page feels like a blog post, not a publication.
+The shift between widths is what creates magazine feel. Without it, the page feels like a generic blog post.
 
-**Magazine grid for index/listing pages:** Asymmetric grids with one large feature item + smaller secondary items. A 12-column grid with the lead story spanning 7 columns and secondary stories in the remaining 5, or similar. Never a uniform grid of identical cards.
+**Asymmetric grids over uniform ones.** When laying out multiple items (article index, gallery, etc.), prefer asymmetric grids — one large feature with smaller supporting items, or columns of unequal width. Uniform grids of identical cards feel like a content management system, not a publication.
 
-**Hero for articles:** Full-bleed image with text BELOW (not overlaid) — editorial style presents the image as a photograph to be appreciated, not a background to be read over. Or: large serif headline centered above the fold with byline/date below and image after.
-
-**Section padding:** Moderate — 3–5rem vertical. Editorial is content-dense, which means less dramatic whitespace than other aesthetics, but still comfortable. The density should feel intentional, not cramped.
+**Section padding:** Moderate — 3–5rem vertical. Editorial is content-dense, less dramatic whitespace than other aesthetics, but still comfortable. Density should feel intentional, not cramped.
 
 ## Backgrounds & Depth
 
@@ -69,45 +67,44 @@ The shift between these widths as you scroll creates the magazine rhythm. Withou
 
 **No gradients.** Flat, honest backgrounds. Gradients feel digital; editorial aims to feel printed.
 
-**No shadows in article view.** Use rules (hairlines) and whitespace for separation instead. Shadows feel like a dashboard, not a magazine.
+**Shadows are mostly absent.** Use rules (hairlines) and whitespace for separation in article-reading contexts. Very subtle shadows acceptable on clickable cards in index/listing contexts only.
 
-**Shadows in grid/index view only:** Very subtle, barely there — just enough to lift clickable article cards.
-
-**Image treatments:** No border-radius on editorial images (or 2px max). Photographs are presented as photographs — sharp rectangles. An optional subtle border (1px in the rule color) frames them like a printed image.
+**Image treatments:** No border-radius on editorial images (or 2px max). Photographs are presented as photographs — sharp rectangles. An optional 1px border in the rule color frames them like a printed image.
 
 ## Motion
 
 **Restrained.** Editorial design trusts the content to be interesting. Animation should be nearly invisible.
 
-**Page load:** Simple opacity fade, 0.3–0.4s. No staggering — the content arrives as a complete page, like turning to a new page.
+**Page entrance:** Simple opacity fade, 0.3–0.4s. No staggering — content arrives as a complete page, like turning to a new page.
 
-**Scroll reveals:** Optional and very subtle. Opacity only, no transform. Or skip entirely — many editorial sites use no scroll animation at all, and that's fine.
+**Scroll reveals:** Optional and very subtle. Opacity only, no transform. Or skip entirely — many editorial sites use no scroll animation, and that's fine.
 
 **Hover on links:** Underline transitions. Color change to accent. The underline is the editorial interaction signature.
 
-**Hover on article cards (grid view):** Image scale 1.02, headline color shifts to accent. Minimal.
+**Hover on article cards:** Image scale 1.02, headline color shifts to accent. Minimal.
 
 **Avoid:** Elaborate entrance animations, parallax, anything that says "look at this animation" instead of "read this content."
 
-## Navigation
-
-Simple horizontal bar. Logo/masthead in the display serif, larger, with weight. Nav links in the sans-serif UI font, small, well-spaced. No prominent CTA button — editorial sites rarely hard-sell. A thin rule below the nav separating it from content.
-
-Optional: a secondary category strip below the main nav with category links in small uppercase sans-serif with wide letter-spacing. Rules above and below.
-
-On mobile: hamburger or simple text "Menu" link. Full-width dropdown with generous spacing.
-
 ## Components
 
-**Article cards (grid):** Image on top (sharp rectangle, no radius), category label in small uppercase sans-serif accent color, headline in display serif, metadata line (date, author, read time) in small sans-serif dim text. No background container — just content with whitespace.
+**Article cards:** Image on top (sharp rectangle, no radius), category label in small uppercase sans-serif accent color, headline in display serif, metadata line (date, author, read time) in small sans-serif dim text. No background container — just content with whitespace.
 
-**Blockquotes/pull quotes:** Display serif, italic, larger than body. Accent-colored thin border on the left or top. Generous vertical margin. These are editorial punctuation marks.
+**Blockquotes/pull quotes:** Display serif, italic, larger than body. Accent-colored thin border on the left or top. Generous vertical margin.
 
-**Bylines and metadata:** Sans-serif, small, sometimes uppercase with letter-spacing. Separated by middle dots or thin vertical rules. Date, author, reading time, category.
+**Bylines and metadata:** Sans-serif, small, sometimes uppercase with letter-spacing. Separated by middle dots or thin vertical rules.
 
-**Footer:** Multi-column: about/description, navigation, newsletter. Thin rule on top. Surface background. Publication name in the display serif, everything else in sans-serif.
+**Buttons:** Used sparingly. Editorial sites rarely hard-sell. When needed: simple, text-led, often just a styled link with an underline. Avoid prominent filled CTAs unless the publication is selling subscriptions or events.
+
+## Anti-patterns Specific to This Aesthetic
+
+- Geometric sans-serif headlines — kills the literary feel
+- Rounded corners on images or cards — feels like a tech product
+- Gradient backgrounds — feels digital, not printed
+- Dramatic entrance animations — distracts from reading
+- Heavy CTAs and sales-pitch language — wrong tone
+- Uniform grids of identical cards — feels like a CMS dump
 
 ## What Makes This Aesthetic Work
 
-The three-voice typographic system. Display serif for headings creates authorial weight. Body serif for text creates reading comfort. Sans-serif for UI/metadata creates functional contrast. Remove any one voice and the design feels flat. The combination — plus the three-width layout rhythm — is what makes a page feel like a designed publication rather than a generic blog.
+The three-voice typographic system. Display serif creates authorial weight. Body serif creates reading comfort. Sans-serif for chrome creates functional contrast. Remove any voice and the design feels flat. The combination — plus the width-variation rhythm — is what makes a page feel like a designed publication rather than a generic blog.
 `;
