@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.63.0 - 2026-05-08
+
+### Server Mode
+
+- **Auto-sync on project creation**: New projects are pushed to the server immediately after creation, so they appear on other devices without manual sync.
+- **Cross-device sync on load**: Opening the project gallery pulls server-side changes before displaying projects. Only projects with newer server timestamps are fetched.
+- **Per-project freshness check**: Opening a project in the editor checks the server for updates and pulls if newer.
+- **Optimistic concurrency on push**: Server rejects pushes when another device has made changes since the last sync. Conflicts are surfaced instead of silently overwriting.
+- **Checkpoint safety net**: A checkpoint is created before pulling server changes, so local work can be recovered if a pull overwrites in-progress edits.
+- **Workspace switcher removed from editor**: Workspace switching is handled at the account level.
+
+### Fixes
+
+- **Publish failure in server mode**: Publishing a deployment could fail with a database error ("SQLiteAdapter not initialized") when the build process closed a shared database connection mid-request. Adapter lifecycle is now handled correctly.
+- **Project ID mismatch on pull**: Pulling new projects from the server generated random local IDs instead of preserving the server's ID, breaking subsequent sync round-trips.
+
 ## v1.62.0 - 2026-05-05
 
 ### Built-in Skills

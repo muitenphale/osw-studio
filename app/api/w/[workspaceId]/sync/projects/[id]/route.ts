@@ -46,6 +46,15 @@ export async function POST(
     const existingProject = await adapter.getProject(id);
 
     if (existingProject) {
+      // Optimistic concurrency: reject if server has newer changes than client last saw
+      const clientLastSynced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : 0;
+      const serverUpdated = new Date(existingProject.updatedAt).getTime();
+      if (clientLastSynced > 0 && serverUpdated > clientLastSynced) {
+        return NextResponse.json(
+          { error: 'conflict', serverUpdatedAt: existingProject.updatedAt },
+          { status: 409 }
+        );
+      }
       await adapter.updateProject(syncedProject);
     } else {
       await adapter.createProject(syncedProject);

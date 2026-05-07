@@ -619,9 +619,9 @@ function SidebarContent({
                   key={item.id}
                   href={item.href}
                   className={cn(
-                    'flex items-center w-full rounded-md text-sm font-medium h-8 px-3',
+                    'flex items-center w-full rounded-full text-[13px] font-medium h-8 px-3',
                     collapsed ? 'justify-center px-2' : 'justify-start',
-                    'text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+                    'hover:bg-accent transition-colors'
                   )}
                   title={collapsed ? item.label : undefined}
                 >

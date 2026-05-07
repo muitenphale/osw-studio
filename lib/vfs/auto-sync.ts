@@ -7,6 +7,7 @@
 
 import { Project } from './types';
 import { vfs } from './index';
+import { saveManager } from './save-manager';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/backend-status';
@@ -164,10 +165,23 @@ export async function autoSyncProject(projectId: string, silent = true): Promise
     });
 
     if (response.status === 401) {
-      // Session expired — the auth-expired banner is surfaced by apiFetch.
-      // No point retrying; re-auth is required from the user.
       syncRetries.delete(projectId);
       logger.warn(`[AutoSync] Skipping ${projectId}: session expired`);
+      return;
+    }
+
+    if (response.status === 409) {
+      // Server has newer changes — pull first, mark conflict
+      logger.warn(`[AutoSync] Conflict for ${projectId}: server has newer changes`);
+      project.syncStatus = 'error';
+      await vfs.updateProject(project, { preserveUpdatedAt: true });
+      if (!silent) {
+        toast.error('Sync conflict: server has newer changes. Pull latest first.', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
+      }
+      syncRetries.delete(projectId);
       return;
     }
 
@@ -232,30 +246,26 @@ export async function checkServerUpdates(projectId: string): Promise<boolean> {
   }
 
   try {
-    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`));
-    if (!response.ok) {
-      if (response.status === 404) {
-        // Project doesn't exist on server
-        return false;
-      }
-      throw new Error(`Failed to check server updates: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const serverProject: Project = data.project;
-
     const localProject = await vfs.getProject(projectId);
     if (!localProject) {
       return false;
     }
 
-    // Server has updates if its updatedAt is newer than our last sync
-    if (localProject.lastSyncedAt) {
-      return new Date(serverProject.updatedAt) > localProject.lastSyncedAt;
+    // Use lightweight status endpoint instead of fetching full project + files
+    const response = await apiFetch(getAutoSyncApiUrl('/sync/status'));
+    if (!response.ok) {
+      return false;
     }
 
-    // If never synced, compare with local updatedAt
-    return new Date(serverProject.updatedAt) > localProject.updatedAt;
+    const data = await response.json();
+    const serverStatus = (data.projects || []).find((p: { id: string }) => p.id === projectId);
+    if (!serverStatus) {
+      return false;
+    }
+
+    const serverUpdatedAt = new Date(serverStatus.updatedAt);
+    const status = calculateSyncStatus(localProject, serverUpdatedAt);
+    return status.status === 'server-newer' || status.status === 'conflict';
   } catch (error) {
     logger.error(`[AutoSync] Failed to check server updates for ${projectId}:`, error);
     return false;
@@ -280,31 +290,45 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
     const serverProject: Project = data.project;
     const serverFiles = data.files;
 
-    // Update project
-    await vfs.updateProject(serverProject);
-
-    // Delete existing files and recreate
-    const existingFiles = await vfs.listFiles(projectId);
-    for (const file of existingFiles) {
-      await vfs.deleteFile(projectId, file.path);
+    // Save local state as checkpoint before overwriting (safety net)
+    const localFiles = await vfs.listFiles(projectId);
+    if (localFiles.length > 0) {
+      try {
+        const { checkpointManager } = await import('./checkpoint');
+        await checkpointManager.createCheckpoint(projectId, 'Pre-sync backup (before pull)', { kind: 'system' });
+      } catch (cpErr) {
+        logger.warn(`[AutoSync] Failed to create pre-pull checkpoint for ${projectId}:`, cpErr);
+      }
     }
 
-    for (const file of serverFiles) {
-      await vfs.createFile(projectId, file.path, file.content || '');
-    }
+    // Suppress dirty marking during pull — these are server state, not user edits
+    await saveManager.runWithSuppressedDirty(projectId, async () => {
+      // Update project
+      await vfs.updateProject(serverProject);
 
-    // Update sync metadata
-    const localProject = await vfs.getProject(projectId);
-    if (localProject) {
-      localProject.lastSyncedAt = new Date();
-      localProject.serverUpdatedAt = new Date(serverProject.updatedAt);
-      localProject.syncStatus = 'synced';
-      await vfs.updateProject(localProject);
-    }
+      // Delete existing files and recreate
+      const existingFiles = await vfs.listFiles(projectId);
+      for (const file of existingFiles) {
+        await vfs.deleteFile(projectId, file.path);
+      }
+
+      for (const file of serverFiles) {
+        await vfs.createFile(projectId, file.path, file.content || '');
+      }
+
+      // Update sync metadata
+      const localProject = await vfs.getProject(projectId);
+      if (localProject) {
+        localProject.lastSyncedAt = new Date();
+        localProject.serverUpdatedAt = new Date(serverProject.updatedAt);
+        localProject.syncStatus = 'synced';
+        await vfs.updateProject(localProject);
+      }
+    });
 
     logger.debug(`[AutoSync] Pulled updates for project ${projectId}`);
     if (showToast) {
-      toast.success('Project updated from server ✓');
+      toast.success('Project updated from server');
     }
 
     return true;
@@ -400,14 +424,16 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
 export async function autoPullAllProjects(): Promise<{
   pulled: number;
   skipped: number;
+  conflicts: string[];
   errors: number;
 }> {
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
-    return { pulled: 0, skipped: 0, errors: 0 };
+    return { pulled: 0, skipped: 0, conflicts: [], errors: 0 };
   }
 
   let pulled = 0;
   let skipped = 0;
+  const conflicts: string[] = [];
   let errors = 0;
 
   try {
@@ -415,7 +441,7 @@ export async function autoPullAllProjects(): Promise<{
     const response = await apiFetch(getAutoSyncApiUrl('/sync/status'));
     if (!response.ok) {
       logger.debug('[AutoSync] Server not available for pull');
-      return { pulled: 0, skipped: 0, errors: 0 };
+      return { pulled: 0, skipped: 0, conflicts: [], errors: 0 };
     }
 
     const data = await response.json();
@@ -424,7 +450,12 @@ export async function autoPullAllProjects(): Promise<{
     // Check each server project against local
     for (const serverStatus of serverStatuses) {
       try {
-        const localProject = await vfs.getProject(serverStatus.id);
+        let localProject: Project | null = null;
+        try {
+          localProject = await vfs.getProject(serverStatus.id);
+        } catch {
+          // getProject throws when project doesn't exist locally — that's expected
+        }
         const serverUpdatedAt = new Date(serverStatus.updatedAt);
 
         if (!localProject) {
@@ -439,22 +470,26 @@ export async function autoPullAllProjects(): Promise<{
           const serverProject: Project = pullData.project;
           const serverFiles = pullData.files;
 
-          // Create project
-          await vfs.createProject(serverProject.name, serverProject.description || '');
+          // Create project with the server's ID
+          await vfs.createProject(serverProject.name, serverProject.description || '', serverProject.id);
 
-          // Create all files
-          for (const file of serverFiles) {
-            await vfs.createFile(serverStatus.id, file.path, file.content || '');
-          }
+          // Suppress dirty marking — this is server state, not user edits
+          await saveManager.runWithSuppressedDirty(serverProject.id, async () => {
+            // Preserve server metadata (settings, timestamps)
+            const newProject = await vfs.getProject(serverProject.id);
+            if (newProject) {
+              newProject.settings = serverProject.settings || {};
+              newProject.lastSyncedAt = new Date();
+              newProject.serverUpdatedAt = serverUpdatedAt;
+              newProject.syncStatus = 'synced';
+              await vfs.updateProject(newProject, { preserveUpdatedAt: true });
+            }
 
-          // Update sync metadata (preserve updatedAt)
-          const newProject = await vfs.getProject(serverStatus.id);
-          if (newProject) {
-            newProject.lastSyncedAt = new Date();
-            newProject.serverUpdatedAt = serverUpdatedAt;
-            newProject.syncStatus = 'synced';
-            await vfs.updateProject(newProject, { preserveUpdatedAt: true });
-          }
+            // Create all files
+            for (const file of serverFiles) {
+              await vfs.createFile(serverProject.id, file.path, file.content || '');
+            }
+          });
 
           pulled++;
           logger.debug(`[AutoSync] Pulled new project: ${serverProject.name}`);
@@ -463,9 +498,11 @@ export async function autoPullAllProjects(): Promise<{
           const syncStatus = calculateSyncStatus(localProject, serverUpdatedAt);
 
           if (syncStatus.status === 'server-newer') {
-            // Server has updates - pull them (silently, no toast)
             await pullServerUpdates(serverStatus.id, false);
             pulled++;
+          } else if (syncStatus.status === 'conflict') {
+            conflicts.push(serverStatus.id);
+            logger.warn(`[AutoSync] Conflict detected for project ${serverStatus.id}: ${syncStatus.message}`);
           } else {
             skipped++;
           }
@@ -480,10 +517,10 @@ export async function autoPullAllProjects(): Promise<{
       logger.debug(`[AutoSync] Auto-pull complete: ${pulled} updated, ${skipped} skipped, ${errors} errors`);
     }
 
-    return { pulled, skipped, errors };
+    return { pulled, skipped, conflicts, errors };
   } catch (error) {
     logger.error('[AutoSync] Failed to auto-pull projects:', error);
-    return { pulled, skipped, errors };
+    return { pulled, skipped, conflicts, errors };
   }
 }
 

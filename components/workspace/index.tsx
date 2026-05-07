@@ -49,7 +49,6 @@ import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
 import { ProjectSettingsModal } from '@/components/project-backend';
 import { SkillsPanel } from '@/components/workspace/skills-panel';
-import { SwitchWorkspaceLink } from '@/components/workspace/switch-workspace';
 import { PanelDragProvider } from '@/components/ui/panel';
 import { ConsolePanel } from '@/components/console';
 import { getRuntimeConfig } from '@/lib/runtimes/registry';
@@ -818,6 +817,23 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
     const initializeWorkspace = async () => {
       try {
+        // In server mode, check if server has newer version before loading
+        if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
+          try {
+            const { checkServerUpdates, pullServerUpdates, setAutoSyncWorkspaceId } = await import('@/lib/vfs/auto-sync');
+            if (workspaceId) {
+              setAutoSyncWorkspaceId(workspaceId);
+            }
+            const hasUpdates = await checkServerUpdates(project.id);
+            if (hasUpdates) {
+              await pullServerUpdates(project.id, false);
+              logger.debug(`[Workspace] Pulled server updates for project ${project.id}`);
+            }
+          } catch (syncErr) {
+            logger.warn('[Workspace] Server check failed, using local state:', syncErr);
+          }
+        }
+
         await saveManager.syncProjectSaveState(project.id);
         let savedCheckpointId = saveManager.getSavedCheckpointId(project.id);
 
@@ -1642,9 +1658,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         onDeploymentChange={handleDeploymentChange}
         workspaceId={workspaceId}
       />
-
-      {/* Switch workspace link */}
-      <SwitchWorkspaceLink />
 
       {/* Project settings button */}
       <Button

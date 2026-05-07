@@ -59,7 +59,7 @@ export function ContentArea({
         />
       );
     case 'projects':
-      return <ProjectsView onProjectSelect={onProjectSelect} autoCreate={autoCreateProject} />;
+      return <ProjectsView onProjectSelect={onProjectSelect} autoCreate={autoCreateProject} workspaceId={workspaceId} />;
     case 'deployments':
       return <DeploymentsView onProjectSelect={onProjectSelect} workspaceId={workspaceId} />;
     case 'users':

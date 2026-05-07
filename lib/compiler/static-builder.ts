@@ -102,7 +102,6 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     // Get deployment
     const deployment = await adapter.getDeployment?.(deploymentId);
     if (!deployment) {
-      await adapter.close?.();
       logger.error(`[Static Builder] Deployment ${deploymentId} not found in database`);
       return {
         success: false,
@@ -117,7 +116,6 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     // Get project
     const project = await adapter.getProject(deployment.projectId);
     if (!project) {
-      await adapter.close?.();
       logger.error(`[Static Builder] Project ${deployment.projectId} not found in database`);
       return {
         success: false,
@@ -131,9 +129,6 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
 
     // Check if under construction - if so, replace entire deployment with construction page
     if (deployment.underConstruction) {
-
-      await adapter.close?.();
-
       // Output directory: public/deployments/[deploymentId]
       const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
 
@@ -177,8 +172,6 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     // Compile project using VirtualServer (renders Handlebars templates)
     const server = new VirtualServer(serverVfs as any, deployment.projectId, { runtime: project.settings?.runtime });
     const compiledProject = await server.compileProject();
-
-    await adapter.close?.();
 
     // Create reverse map: blobUrl -> filePath for replacements
     const blobUrlToPath = new Map<string, string>();
@@ -329,16 +322,13 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     }
 
     // Update lastPublishedVersion after successful build
-    const adapter2 = workspaceId ? getWorkspaceAdapter(workspaceId) : await createServerAdapter();
-    await adapter2.init();
-    if (adapter2.updateDeployment) {
-      await adapter2.updateDeployment({
+    if (adapter.updateDeployment) {
+      await adapter.updateDeployment({
         ...deployment,
         lastPublishedVersion: deployment.settingsVersion,
         publishedAt: new Date(),
       });
     }
-    await adapter2.close?.();
 
     // Clean up VirtualServer resources
     server.cleanupBlobUrls();
@@ -701,8 +691,6 @@ export async function getPrimaryPublishedDeploymentId(): Promise<string | null> 
     const deployments = await adapter.listDeployments?.() || [];
     // Find the first enabled deployment
     const enabledDeployment = deployments.find((s: Deployment) => s.enabled === true);
-
-    await adapter.close?.();
 
     return enabledDeployment?.id || null;
   } catch (error) {

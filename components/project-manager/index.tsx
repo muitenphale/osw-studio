@@ -87,12 +87,13 @@ interface ProjectManagerProps {
   hideHeader?: boolean; // Hide header when used in PageLayout
   hideFooter?: boolean; // Hide footer when used in PageLayout
   autoCreate?: boolean; // Auto-open create dialog when navigating from dashboard
+  workspaceId?: string;
 }
 
 type SortOption = 'updated' | 'created' | 'name';
 type ViewMode = 'grid' | 'list';
 
-export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false, autoCreate = false }: ProjectManagerProps) {
+export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false, autoCreate = false, workspaceId }: ProjectManagerProps) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +149,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [tourActionProjectId, setTourActionProjectId] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const demoCreationRef = useRef(false);
@@ -177,6 +179,27 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
 
     try {
       await vfs.init();
+
+      // In server mode, pull updates from server before loading local projects
+      if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
+        setSyncing(true);
+        try {
+          const { autoPullAllProjects, setAutoSyncWorkspaceId } = await import('@/lib/vfs/auto-sync');
+          if (workspaceId) {
+            setAutoSyncWorkspaceId(workspaceId);
+          }
+          const result = await autoPullAllProjects();
+          if (result.conflicts.length > 0) {
+            toast.warning(`${result.conflicts.length} project(s) have conflicting changes. Open them to resolve.`, {
+              duration: 6000,
+            });
+          }
+        } catch (syncErr) {
+          logger.warn('[ProjectManager] Auto-pull failed, showing local state:', syncErr);
+        } finally {
+          setSyncing(false);
+        }
+      }
 
       const projectList = await vfs.listProjects();
       const sorted = projectList.sort((a, b) =>
@@ -400,6 +423,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         }
       }
 
+      // Trigger auto-sync so new project is pushed to server immediately
+      (vfs as any).triggerAutoSync?.(finalProject.id);
+
       track('project_create', {
         method: 'quick',
         runtime: newProjectRuntime,
@@ -560,7 +586,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <Spinner size={48} className="mx-auto text-primary" />
-          <p className="mt-4">Loading projects...</p>
+          <p className="mt-4">{syncing ? 'Syncing workspace...' : 'Loading projects...'}</p>
         </div>
       </div>
     );

@@ -6,6 +6,23 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.63.0 - Cross-Device Sync (2026-05-08)
+
+Server Mode projects now sync seamlessly across devices. New projects push to the server right after creation, opening the gallery pulls in changes from other devices, and entering a project checks for the latest version. Conflicts are surfaced instead of silently overwriting, and a checkpoint is created before any pull so nothing local gets lost.
+
+### Server Mode
+- **Auto-sync on creation** — New projects are pushed to the server immediately after they're created, so they appear on other devices without manual sync
+- **Background pull on load** — Opening the project gallery pulls in changes from other devices before showing your projects
+- **Per-project freshness** — Opening a project checks the server and pulls if newer
+- **Conflict detection** — Pushes are rejected when another device has made newer changes; you'll see the conflict instead of overwriting
+- **Pre-pull checkpoint** — A checkpoint is created automatically before pulling, so anything you had locally can be restored
+
+### Fixes
+- **Publish failure in Server Mode** — Publishing a deployment could fail with a database error; fixed
+- **Project ID mismatch on pull** — Pulled projects no longer get random local IDs that broke subsequent sync round-trips
+
+---
+
 ## v1.62.0 - Skill Groups & Design Expansion (2026-05-05)
 
 The frontend design skill system expands from 4 to 12 aesthetic directions — brutalist, retro-futuristic, art deco, maximalist, playful, industrial, luxury, and terminal join the original four. Skills can now be organized into groups for bulk enable/disable, making it easy to activate an entire design family or disable server-mode skills for browser-only projects.

@@ -51,9 +51,7 @@ yarn-error.log*
 
 # env files
 .env
-.env.backup
-.env.local
-.env*.local
+.env.*
 !.env.example
 
 # vercel

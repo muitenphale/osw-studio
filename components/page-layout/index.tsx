@@ -82,8 +82,9 @@ export function PageLayout({
         if (status.isUninitialized && status.localProjectCount > 0) {
           // Server empty, local has projects → offer push
           setInitModalOpen(true);
-        } else if (status.localProjectCount === 0 && status.serverProjectCount > 0) {
-          // Local empty, server has projects → offer pull (new workspace-scoped IndexedDB)
+        } else if (status.localProjectCount === 0 && status.serverProjectCount > 0 && !workspaceId) {
+          // Local empty, server has projects → offer pull (non-workspace server mode only)
+          // In workspace mode, autoPullAllProjects in ProjectManager handles this automatically
           setNeedsPull(true);
           setInitModalOpen(true);
         }
