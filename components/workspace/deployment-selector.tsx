@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Deployment } from '@/lib/vfs/types';
-import { Server, Database, ChevronDown, Loader2, X } from 'lucide-react';
+import { Server, Loader2 } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -10,12 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface DeploymentSelectorProps {
@@ -106,24 +100,8 @@ export function DeploymentSelector({
     );
   }
 
-  const selectedDeployment = deployments.find(s => s.id === selectedDeploymentId);
-
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Database className="h-4 w-4" />
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p>Backend</p>
-          <p className="text-xs text-muted-foreground">
-            Connect to a deployment for database, edge functions, and secrets
-          </p>
-        </TooltipContent>
-      </Tooltip>
-
       <Select
         value={selectedDeploymentId || 'none'}
         onValueChange={(value) => {
@@ -136,7 +114,7 @@ export function DeploymentSelector({
         }}
       >
         <SelectTrigger size="sm" className="w-[180px] h-8">
-          <SelectValue placeholder="No deployment connected" />
+          <SelectValue placeholder="No deployment" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="none">
@@ -152,22 +130,6 @@ export function DeploymentSelector({
           ))}
         </SelectContent>
       </Select>
-
-      {selectedDeployment && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => onDeploymentChange(null, null)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Disconnect deployment</TooltipContent>
-        </Tooltip>
-      )}
     </div>
   );
 }

@@ -781,21 +781,21 @@ export function ConsolePanel({ projectId, runtime, onClose, bufferedMessages, on
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-5 px-2 gap-1.5 text-destructive hover:text-destructive"
+                  className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 text-destructive hover:text-destructive md:h-5 md:px-2 md:border-0 md:bg-transparent md:rounded-md"
                   onClick={stopScript}
                 >
-                  <Square className="h-3 w-3" />
+                  <Square className="h-2.5 w-2.5 md:h-3 md:w-3" />
                   <span className="text-xs">Stop</span>
                 </Button>
               ) : (
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-5 px-2 gap-1.5"
+                  className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:px-2 md:border-0 md:bg-transparent md:rounded-md"
                   onClick={handleRun}
                   disabled={!selectedEntryPoint && !defaultEntryPoint}
                 >
-                  <Play className="h-3 w-3" />
+                  <Play className="h-2.5 w-2.5 md:h-3 md:w-3" />
                   <span className="text-xs">Run</span>
                 </Button>
               )
@@ -803,10 +803,10 @@ export function ConsolePanel({ projectId, runtime, onClose, bufferedMessages, on
             <Button
               size="sm"
               variant="ghost"
-              className="h-5 px-2 gap-1.5"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:px-2 md:border-0 md:bg-transparent md:rounded-md"
               onClick={clearConsole}
             >
-              <Trash2 className="h-3 w-3" />
+              <Trash2 className="h-2.5 w-2.5 md:h-3 md:w-3" />
               <span className="text-xs">Clear</span>
             </Button>
           </>

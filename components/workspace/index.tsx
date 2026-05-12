@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon, Sparkles, ChevronDown, ChevronUp, EllipsisVertical } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
@@ -67,7 +67,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const [generating, setGenerating] = useState(false);
   const [currentOrchestrator, setCurrentOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
   const [persistedOrchestrator, setPersistedOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
-  const [activeMobilePanel, setActiveMobilePanel] = useState<'chat' | 'files' | 'editor' | 'preview' | 'console'>('preview');
+  const [activeMobilePanel, setActiveMobilePanel] = useState<'chat' | 'files' | 'editor' | 'preview' | 'checkpoints' | 'console' | 'skills' | 'debug'>('preview');
+  const [mobileOverflowOpen, setMobileOverflowOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
@@ -1098,8 +1099,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       setEntryPoint(newEntryPoint);
       setRefreshTrigger(prev => prev + 1);
     }
-    // If runtime changed, refresh preview
     if (updated.settings?.runtime !== projectRuntime) {
+      setProjectRuntime(updated.settings?.runtime);
       setRefreshTrigger(prev => prev + 1);
     }
   }, [entryPoint, projectRuntime]);
@@ -1737,6 +1738,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         {/* Header */}
         <AppHeader
           leftText={project.name}
+          leftSubtext={{ chat: 'Chat', files: 'Files', editor: 'Editor', preview: 'Preview', checkpoints: 'Checkpoints', console: 'Console', skills: 'Skills', debug: 'Debug' }[activeMobilePanel]}
           onLogoClick={guardedBack}
           actions={headerActions}
           mobileMenuContent={mobileMenuContent}
@@ -2148,7 +2150,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
               )};
 
               if (showDebugPanel) panelMap['debug'] = { minSize: 15, content: (
-                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} projectId={project.id} />
+                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} />
               )};
 
               if (showSkillsPanel) panelMap['skills'] = { minSize: 10, content: (
@@ -2263,7 +2265,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         {/* Mobile Workspace */}
         <div className="flex md:hidden flex-1 overflow-hidden bg-background flex-col">
           {/* Single active panel */}
-          <div className="flex-1 p-2 pb-16 overflow-hidden">
+          <div className="flex-1 pb-12 overflow-hidden">
             {activeMobilePanel === 'chat' && (
               <ChatPanel
                 events={debugEvents}
@@ -2295,7 +2297,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
             )}
 
             {activeMobilePanel === 'files' && (
-              <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-files-rgb), 0.01), rgba(var(--panel-files-rgb), 0.01)), var(--card)` }}>
+              <div className="h-full overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-files-rgb), 0.01), rgba(var(--panel-files-rgb), 0.01)), var(--card)` }}>
                 <FileExplorer
                   projectId={project.id}
                   onFileSelect={handleFileSelect}
@@ -2308,7 +2310,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
             )}
 
             {activeMobilePanel === 'editor' && (
-              <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)` }}>
+              <div className="h-full overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-editor-rgb), 0.01), rgba(var(--panel-editor-rgb), 0.01)), var(--card)` }}>
                 <MultiTabEditor
                   projectId={project.id}
                   runtime={projectRuntime}
@@ -2318,7 +2320,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
             )}
 
             {activeMobilePanel === 'preview' && (
-              <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-preview-rgb), 0.01), rgba(var(--panel-preview-rgb), 0.01)), var(--card)` }}>
+              <div className="h-full overflow-hidden relative" style={{ background: `linear-gradient(0deg, rgba(var(--panel-preview-rgb), 0.01), rgba(var(--panel-preview-rgb), 0.01)), var(--card)` }}>
                 <MultipagePreview
                   ref={previewRef}
                   projectId={project.id}
@@ -2337,14 +2339,40 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
               </div>
             )}
 
+            {activeMobilePanel === 'checkpoints' && (
+              <div className="h-full overflow-hidden relative">
+                <CheckpointPanel
+                  projectId={project.id}
+                  events={debugEvents}
+                  currentCheckpointId={checkpointManager.getCurrentCheckpoint()?.id}
+                  onRestore={handleRestoreCheckpoint}
+                  onScrollToTurn={handleScrollToCheckpoint}
+                  onClose={() => setActiveMobilePanel('chat')}
+                  refreshKey={checkpointRefreshKey}
+                />
+              </div>
+            )}
+
             {activeMobilePanel === 'console' && (
-              <div className="h-full border border-border rounded-lg shadow-sm overflow-hidden relative">
+              <div className="h-full overflow-hidden relative">
                 <ConsolePanel
                   projectId={project.id}
                   runtime={projectRuntime || 'handlebars'}
                   bufferedMessages={consoleBufferRef.current}
                   onBufferConsumed={() => { consoleBufferRef.current = []; }}
                 />
+              </div>
+            )}
+
+            {activeMobilePanel === 'skills' && (
+              <div className="h-full overflow-hidden relative">
+                <SkillsPanel onClose={() => setActiveMobilePanel('chat')} />
+              </div>
+            )}
+
+            {activeMobilePanel === 'debug' && (
+              <div className="h-full overflow-hidden relative">
+                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setActiveMobilePanel('chat')} />
               </div>
             )}
           </div>
@@ -2361,11 +2389,11 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'chat' ? 'var(--button-assistant-active)' : undefined,
                 }}
-                onClick={() => setActiveMobilePanel('chat')}
+                onClick={() => { setActiveMobilePanel('chat'); setMobileOverflowOpen(false); }}
               >
                 <MessageSquare className="h-4 w-4" />
               </button>
-              
+
               <button
                 className={`flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
                   activeMobilePanel === 'files'
@@ -2375,11 +2403,11 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'files' ? 'var(--button-files-active)' : undefined,
                 }}
-                onClick={() => setActiveMobilePanel('files')}
+                onClick={() => { setActiveMobilePanel('files'); setMobileOverflowOpen(false); }}
               >
                 <FolderTree className="h-4 w-4" />
               </button>
-              
+
               <button
                 className={`flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
                   activeMobilePanel === 'editor'
@@ -2389,11 +2417,11 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'editor' ? 'var(--button-editor-active)' : undefined,
                 }}
-                onClick={() => setActiveMobilePanel('editor')}
+                onClick={() => { setActiveMobilePanel('editor'); setMobileOverflowOpen(false); }}
               >
                 <Code2 className="h-4 w-4" />
               </button>
-              
+
               <button
                 className={`flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
                   activeMobilePanel === 'preview'
@@ -2403,27 +2431,86 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'preview' ? 'var(--button-preview-active)' : undefined,
                 }}
-                onClick={() => setActiveMobilePanel('preview')}
+                onClick={() => { setActiveMobilePanel('preview'); setMobileOverflowOpen(false); }}
               >
                 <Eye className="h-4 w-4" />
               </button>
 
-              <button
-                className={`relative flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
-                  activeMobilePanel === 'console'
-                    ? 'text-white'
-                    : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
-                }`}
-                style={{
-                  backgroundColor: activeMobilePanel === 'console' ? 'var(--button-terminal-active, #22c55e)' : undefined,
-                }}
-                onClick={() => setActiveMobilePanel('console')}
-              >
-                <TerminalIcon className="h-4 w-4" />
-                {hasUnreadConsole && activeMobilePanel !== 'console' && (
-                  <span className="absolute top-1 right-0.5 h-2 w-2 rounded-full bg-[var(--button-terminal-active,#22c55e)]" />
+              {/* Overflow menu */}
+              <div className="relative">
+                <button
+                  className={`relative flex items-center justify-center py-2 px-2 rounded-lg transition-all shadow-sm ${
+                    mobileOverflowOpen || ['checkpoints', 'console', 'skills', 'debug'].includes(activeMobilePanel)
+                      ? 'text-white bg-muted'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  onClick={() => setMobileOverflowOpen(!mobileOverflowOpen)}
+                >
+                  <EllipsisVertical className="h-4 w-4" />
+                  {hasUnreadConsole && activeMobilePanel !== 'console' && (
+                    <span className="absolute top-1 right-0.5 h-2 w-2 rounded-full bg-[var(--button-terminal-active,#22c55e)]" />
+                  )}
+                </button>
+
+                {mobileOverflowOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setMobileOverflowOpen(false)} />
+                    <div className="absolute bottom-full right-0 mb-2 z-40 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
+                      <button
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                          activeMobilePanel === 'checkpoints' ? 'text-white' : 'text-foreground hover:bg-muted'
+                        }`}
+                        style={{
+                          backgroundColor: activeMobilePanel === 'checkpoints' ? 'var(--button-checkpoint-active)' : undefined,
+                        }}
+                        onClick={() => { setActiveMobilePanel('checkpoints'); setMobileOverflowOpen(false); }}
+                      >
+                        <History className="h-4 w-4" />
+                        <span>Checkpoints</span>
+                      </button>
+                      <button
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                          activeMobilePanel === 'console' ? 'text-white' : 'text-foreground hover:bg-muted'
+                        }`}
+                        style={{
+                          backgroundColor: activeMobilePanel === 'console' ? 'var(--button-terminal-active, #22c55e)' : undefined,
+                        }}
+                        onClick={() => { setActiveMobilePanel('console'); setMobileOverflowOpen(false); }}
+                      >
+                        <TerminalIcon className="h-4 w-4" />
+                        <span>Console</span>
+                        {hasUnreadConsole && activeMobilePanel !== 'console' && (
+                          <span className="ml-auto h-2 w-2 rounded-full bg-[var(--button-terminal-active,#22c55e)]" />
+                        )}
+                      </button>
+                      <button
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                          activeMobilePanel === 'skills' ? 'text-white' : 'text-foreground hover:bg-muted'
+                        }`}
+                        style={{
+                          backgroundColor: activeMobilePanel === 'skills' ? 'var(--button-skills-active, #a855f7)' : undefined,
+                        }}
+                        onClick={() => { setActiveMobilePanel('skills'); setMobileOverflowOpen(false); }}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        <span>Skills</span>
+                      </button>
+                      <button
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                          activeMobilePanel === 'debug' ? 'text-white' : 'text-foreground hover:bg-muted'
+                        }`}
+                        style={{
+                          backgroundColor: activeMobilePanel === 'debug' ? 'var(--button-debug-active, #ef4444)' : undefined,
+                        }}
+                        onClick={() => { setActiveMobilePanel('debug'); setMobileOverflowOpen(false); }}
+                      >
+                        <Bug className="h-4 w-4" />
+                        <span>Debug</span>
+                      </button>
+                    </div>
+                  </>
                 )}
-              </button>
+              </div>
             </div>
           </div>
         </div>

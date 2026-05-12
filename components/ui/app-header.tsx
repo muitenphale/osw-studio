@@ -34,6 +34,7 @@ interface AppHeaderProps {
   desktopOnlyContent?: React.ReactNode; // Content shown only on desktop
   className?: string;
   leftText?: string; // Text to show next to logo on desktop, centered on mobile
+  leftSubtext?: string; // Secondary line below leftText on mobile (e.g. active panel name)
   mobileVisibleActions?: string[]; // Action IDs to show outside dropdown on mobile
   viewTabs?: ViewTab[]; // View tabs for switching between sections
   activeViewTab?: string; // Currently active view tab
@@ -55,6 +56,7 @@ export function AppHeader({
   desktopOnlyContent,
   className = '',
   leftText,
+  leftSubtext,
   mobileVisibleActions = [],
   viewTabs,
   activeViewTab,
@@ -90,8 +92,12 @@ export function AppHeader({
             className="flex items-center gap-2 p-1 pr-2 hover:ring-1 hover:ring-border rounded-sm transition-all"
           >
             <Logo width={24} height={24} />
-            {/* Show leftText next to logo on desktop only */}
-            {leftText && <span className="font-semibold text-lg hidden md:inline">{leftText}</span>}
+            {leftText && (
+              <div className="flex flex-col items-start min-w-0">
+                <span className="font-semibold text-sm md:text-lg truncate max-w-[160px] md:max-w-none">{leftText}</span>
+                {leftSubtext && <span className="text-xs text-muted-foreground md:hidden">{leftSubtext}</span>}
+              </div>
+            )}
           </button>
         )}
 
@@ -117,9 +123,6 @@ export function AppHeader({
                 </Button>
               ))}
             </div>
-          ) : leftText && !showMobileMenu ? (
-            /* Show leftText in center on mobile (only when not using sidebar) */
-            <h1 className="text-lg font-semibold md:hidden">{leftText}</h1>
           ) : title ? (
             <>
               {title && <h1 className="text-lg md:text-xl font-semibold">{title}</h1>}

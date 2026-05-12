@@ -20,7 +20,7 @@ interface PanelContainerProps {
 export function PanelContainer({ children, className, dataTourId }: PanelContainerProps) {
   return (
     <div
-      className={`h-full flex flex-col bg-card border border-border rounded-lg overflow-hidden ${className || ''}`}
+      className={`h-full flex flex-col bg-card border border-border md:rounded-lg overflow-hidden ${className || ''}`}
       {...(dataTourId ? { 'data-tour-id': dataTourId } : {})}
     >
       {children}
@@ -46,43 +46,44 @@ export function PanelHeader({ icon: Icon, title, color, onClose, children, actio
   const isDragging = dragCtx && panelKey ? dragCtx.draggingPanel === panelKey : false;
   const canDrag = dragCtx && panelKey;
 
+  const hasActions = Boolean(actions) || Boolean(children);
+
   return (
-    <div className={`flex items-center justify-between px-3 py-2 border-b border-border bg-muted/30 shrink-0 ${isDragging ? 'opacity-50' : ''}`}>
-      <div className="flex items-center gap-2">
+    <div className={`flex items-center justify-end md:justify-between px-3 py-1.5 md:py-2 border-b border-border bg-muted/30 shrink-0 ${isDragging ? 'opacity-50' : ''} ${!hasActions ? 'md:flex hidden' : ''}`}>
+      <div className="hidden md:flex items-center gap-2">
         <Icon className="h-4 w-4" style={color ? { color } : undefined} />
         <span className="font-semibold text-sm">{title}</span>
         {children}
       </div>
-      <div className="flex items-center gap-1">
+      {children && <div className="flex md:hidden items-center gap-2">{children}</div>}
+      <div className="flex items-center gap-1.5 md:gap-1">
         {actions}
-        {(canDrag || onClose) && (
-          <div className="flex items-center gap-0.5 ml-1 pl-1 border-l border-border/50">
-            {canDrag && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 cursor-grab active:cursor-grabbing"
-                title="Drag to reorder"
-                onMouseDown={() => {
-                  dragCtx.onDragStart(panelKey);
-                }}
-              >
-                <GripVertical className="h-3 w-3" />
-              </Button>
-            )}
-            {onClose && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="h-5 w-5"
-                title={`Close ${title.toLowerCase()} panel`}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="hidden md:flex items-center gap-0.5 ml-1 pl-1 border-l border-border/50">
+          {canDrag && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 cursor-grab active:cursor-grabbing"
+              title="Drag to reorder"
+              onMouseDown={() => {
+                dragCtx.onDragStart(panelKey);
+              }}
+            >
+              <GripVertical className="h-3 w-3" />
+            </Button>
+          )}
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="h-5 w-5"
+              title={`Close ${title.toLowerCase()} panel`}
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

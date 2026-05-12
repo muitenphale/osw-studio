@@ -615,19 +615,22 @@ function SidebarContent({
 
             if (item.href) {
               return (
-                <a
+                <Button
                   key={item.id}
-                  href={item.href}
+                  asChild
+                  variant="ghost"
+                  size="sm"
                   className={cn(
-                    'flex items-center w-full rounded-full text-[13px] font-medium h-8 px-3',
-                    collapsed ? 'justify-center px-2' : 'justify-start',
-                    'hover:bg-accent transition-colors'
+                    'w-full',
+                    collapsed ? 'justify-center px-2' : 'justify-start'
                   )}
                   title={collapsed ? item.label : undefined}
                 >
-                  <Icon className={cn('h-4 w-4', !collapsed && 'mr-2')} />
-                  {!collapsed && item.label}
-                </a>
+                  <a href={item.href}>
+                    <Icon className={cn('h-4 w-4', !collapsed && 'mr-2')} />
+                    {!collapsed && item.label}
+                  </a>
+                </Button>
               );
             }
 

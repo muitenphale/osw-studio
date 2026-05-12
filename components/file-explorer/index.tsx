@@ -895,31 +895,34 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         actions={
           <>
             <Button
-              size="icon"
+              size="sm"
               variant="ghost"
-              className="h-5 w-5"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:w-5 md:px-0 md:border-0 md:bg-transparent md:rounded-md"
               onClick={() => fileInputRef.current?.click()}
               title="Upload files"
             >
-              <Upload className="h-3 w-3" />
+              <Upload className="h-2.5 w-2.5 md:h-3 md:w-3" />
+              <span className="text-xs md:hidden">Upload</span>
             </Button>
             <Button
-              size="icon"
+              size="sm"
               variant="ghost"
-              className="h-5 w-5"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:w-5 md:px-0 md:border-0 md:bg-transparent md:rounded-md"
               onClick={() => handleCreateFile('/')}
               title="New file"
             >
-              <File className="h-3 w-3" />
+              <File className="h-2.5 w-2.5 md:h-3 md:w-3" />
+              <span className="text-xs md:hidden">New file</span>
             </Button>
             <Button
-              size="icon"
+              size="sm"
               variant="ghost"
-              className="h-5 w-5"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:w-5 md:px-0 md:border-0 md:bg-transparent md:rounded-md"
               onClick={() => handleCreateDirectory('/')}
               title="New folder"
             >
-              <Folder className="h-3 w-3" />
+              <Folder className="h-2.5 w-2.5 md:h-3 md:w-3" />
+              <span className="text-xs md:hidden">New folder</span>
             </Button>
           </>
         }

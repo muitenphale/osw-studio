@@ -21,7 +21,6 @@ interface DebugPanelProps {
   events: DebugEvent[];
   onClear?: () => void;
   onClose?: () => void;
-  projectId?: string;
 }
 
 export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
@@ -119,18 +118,19 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
           <>
             <Button
               variant="ghost"
-              size="icon"
+              size="sm"
               onClick={handleClear}
-              className="h-5 w-5"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:w-5 md:px-0 md:border-0 md:bg-transparent md:rounded-md"
               title="Clear all events"
             >
-              <Trash2 className="h-3 w-3" />
+              <Trash2 className="h-2.5 w-2.5 md:h-3 md:w-3" />
+              <span className="text-xs md:hidden">Clear</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={handleExport}
-              className="h-5 px-1.5 text-xs"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 text-xs md:h-5 md:px-1.5 md:border-0 md:bg-transparent md:rounded-md"
               title="Export to JSON"
             >
               Export

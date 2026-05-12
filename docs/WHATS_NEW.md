@@ -6,6 +6,25 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.64.0 - Mobile Editor UX (2026-05-13)
+
+The mobile workspace gets a major usability pass. A new overflow menu in the bottom bar gives you access to all panels without cluttering the primary navigation. Panel headers slim down on mobile — titles and chrome disappear, leaving only action buttons styled as labeled pills so you can see what each one does at a glance. Panels now fill the full viewport width, and the header shows your project name with the active panel name below it.
+
+### Mobile UX
+- **Bottom bar overflow menu** — Chat, Files, and Preview stay in the primary bar; Editor, Checkpoints, Console, Skills, and Debug are in a three-dot overflow menu
+- **Compact panel headers** — On mobile, panel headers show only action buttons as labeled pills (e.g. "Clear chat", "Upload", "Add skill") — no title bar, close button, or drag handle
+- **Edge-to-edge panels** — Panels fill the full viewport width on mobile with no borders or rounded corners
+- **Project name in header** — The workspace header shows your project name with the active panel below it
+
+### Server Mode
+- **Auto-pull fix** — Projects on the server are now correctly pulled to new devices; previously the pull silently failed
+- **Workspace ID race condition** — Sync API calls no longer fire before the workspace ID is set
+
+### Fixes
+- **Runtime switch** — Changing a project's runtime in settings (e.g. React → Static) no longer reverts immediately
+
+---
+
 ## v1.63.0 - Cross-Device Sync (2026-05-08)
 
 Server Mode projects now sync seamlessly across devices. New projects push to the server right after creation, opening the gallery pulls in changes from other devices, and entering a project checks for the latest version. Conflicts are surfaced instead of silently overwriting, and a checkpoint is created before any pull so nothing local gets lost.

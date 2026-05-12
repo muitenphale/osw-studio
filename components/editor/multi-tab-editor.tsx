@@ -327,10 +327,10 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
           <Button
             size="sm"
             variant="ghost"
-            className="h-5 px-2 gap-1.5"
+            className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:px-2 md:border-0 md:bg-transparent md:rounded-md"
             onClick={() => saveFile(activeFilePath!)}
           >
-            <Save className="h-3 w-3" />
+            <Save className="h-2.5 w-2.5 md:h-3 md:w-3" />
             <span className="text-xs">Save</span>
           </Button>
         )}

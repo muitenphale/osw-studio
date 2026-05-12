@@ -58,11 +58,7 @@ export function CheckpointPanel({
 
   return (
     <PanelContainer>
-      <PanelHeader icon={History} title="Checkpoints" color="var(--button-checkpoint-active)" onClose={onClose} panelKey="checkpoints">
-        {checkpoints.length > 0 && (
-          <span className="text-xs text-muted-foreground">({checkpoints.length})</span>
-        )}
-      </PanelHeader>
+      <PanelHeader icon={History} title="Checkpoints" color="var(--button-checkpoint-active)" onClose={onClose} panelKey="checkpoints" />
 
       {/* Checkpoint list */}
       <div className="flex-1 overflow-y-auto">

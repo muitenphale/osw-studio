@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.64.0 - 2026-05-13
+
+### Server Mode
+
+- **Auto-pull fix**: Projects on the server were never pulled to new devices because the VFS lookup threw on missing projects instead of returning null, causing every pull attempt to silently fail.
+- **Workspace ID race condition**: Auto-sync API calls could fire before the workspace ID was set, hitting unscoped endpoints that returned 404. The workspace ID is now set explicitly before any sync operation.
+- **Sync dialog suppressed in workspace mode**: The manual "Sync Your Projects" dialog no longer appears when auto-pull handles the sync automatically. Non-workspace server mode setups still show it.
+- **Pulled projects no longer marked dirty**: Pulling files from the server triggered the save-dirty tracker, making every synced project appear as needing a save immediately on open. File operations during pull are now suppressed from dirty tracking.
+
+### UI
+
+- **Deployment selector cleanup**: Removed the standalone database icon and "Disconnect deployment" button from the workspace header. The deployment dropdown now shows a plain select with "No deployment" as the default.
+
+### Fixes
+
+- **Runtime switch ignored**: Changing a project's runtime in Project Settings (e.g. React → Static) visually reverted immediately because the workspace didn't update its local runtime state after the settings modal saved.
+
+### Mobile UX
+
+- **Bottom bar overflow menu**: Mobile bottom bar now shows Chat, Files, Preview, and a three-dot overflow menu. Overflow contains Editor, Checkpoints, Console, Skills, and Debug panels with labeled entries.
+- **Panel headers slimmed on mobile**: Panel headers hide the title, icon, close button, and drag handle on mobile. Only action buttons remain, rendered as pill-shaped buttons with labels (e.g. "Clear chat", "Upload", "Add skill").
+- **Panels edge-to-edge on mobile**: Removed border, border-radius, padding, and shadow from mobile panel wrappers so panels fill the viewport.
+- **Project name in header**: Mobile workspace header shows the project name left-aligned with the active panel name as a subtitle below it.
+
 ## v1.63.0 - 2026-05-08
 
 ### Server Mode
