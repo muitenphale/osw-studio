@@ -106,7 +106,7 @@ export async function runGuidedDemoEdit({
   const preCheckpoint = await checkpointManager.createCheckpoint(
     projectId,
     'Tour: before button color change',
-    { kind: 'system' }
+    { kind: 'auto' }
   );
   result.preChangeCheckpointId = preCheckpoint.id;
 

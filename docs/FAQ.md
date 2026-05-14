@@ -84,20 +84,19 @@ The application itself is **free and open source** (MIT license). However:
 
 ### How do checkpoints work?
 
-**Starting point**:
-- Created automatically when you open a project (if no prior save exists)
-- "Discard Changes" reverts to the state when you opened the project — your last manual save if one exists, or the Starting Point otherwise
-
 **Auto-checkpoints**:
 - Created after every AI operation
-- Last 10 kept per project (50 global limit across all projects)
-- Only auto-checkpoints are evicted — manual saves and the Starting Point are protected
+- Last 5 kept per project — older ones are automatically pruned
 
 **Manual save** (Cmd/Ctrl+S):
 - Permanent save that persists across refreshes
 - All saves are kept in the **Checkpoints Panel** so you can browse and restore any of them
 
-**Best practice**: Save often, especially before major changes
+**Pinned checkpoints**:
+- Pin any checkpoint to prevent it from being pruned
+- Useful for bookmarking a known-good state before experimenting
+
+**Best practice**: Pin a checkpoint before trying something risky, and save often
 
 ### Can I work offline?
 

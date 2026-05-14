@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.65.0 - 2026-05-14
+
+### AI Generation Survives Navigation
+
+- **Background generation**: Starting a task and navigating to the project gallery no longer kills the generation. The orchestrator continues running and the full conversation — including checkpoints — is intact when you return.
+- **Generation shelf**: A floating indicator appears in the bottom-right corner when you navigate away from an active task. Shows the project name, prompt, elapsed time, model, and live activity. Click to jump back to the project.
+### Checkpoints
+
+- **Pinned checkpoints**: Pin any checkpoint to prevent it from being pruned. Pinned checkpoints survive indefinitely as full project snapshots — useful for bookmarking a known-good state before experimenting.
+- **Per-project pruning**: Each project keeps its 5 most recent unpinned checkpoints. Older ones are automatically deleted when new checkpoints are created.
+- **Reliable loading on project entry**: Checkpoints now load correctly on first workspace mount regardless of which project was viewed previously.
+
+### Internal
+
+- **Zustand state management**: Workspace state migrated from 40+ React `useState` calls to a zustand store with three slices (orchestrator, project, layout). Enables generation survival and future SharedWorker execution.
+
 ## v1.64.0 - 2026-05-13
 
 ### Server Mode

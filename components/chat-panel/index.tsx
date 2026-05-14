@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback, DragEvent, ClipboardEvent } from 'react';
 import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, X, Brain, Image as ImageIcon } from 'lucide-react';
-import { DebugEvent } from '@/components/debug-panel';
+import type { DebugEvent } from '@/lib/stores/types';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { ChipsBlock } from './chips';
 import { PanelContainer, PanelHeader } from '@/components/ui/panel';
@@ -17,6 +17,7 @@ import { ContentBlock } from '@/lib/llm/types';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
 import { MessageContext } from '@/components/message-context';
 import { track } from '@/lib/telemetry';
+import { useWorkspaceStore } from '@/lib/stores/workspace';
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
@@ -87,6 +88,8 @@ interface ChatPanelProps {
   supportsVision?: boolean;
   // Provider has credentials configured
   providerReady?: boolean;
+  // Another project is generating — block input
+  blockedByProject?: string | null;
   // Runtime errors
   runtimeErrors?: string[];
   onSendRuntimeErrors?: () => void;
@@ -204,6 +207,7 @@ export function ChatPanel({
   onClose,
   supportsVision = false,
   providerReady = true,
+  blockedByProject = null,
   runtimeErrors = [],
   onSendRuntimeErrors,
   onClearRuntimeErrors,
@@ -215,6 +219,7 @@ export function ChatPanel({
   composerOverlay,
   systemNote,
 }: ChatPanelProps) {
+  const workspaceReady = useWorkspaceStore(s => s.workspaceReady);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
@@ -1007,7 +1012,12 @@ export function ChatPanel({
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {turns.length === 0 ? (
+        {!workspaceReady && turns.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2 p-4">
+            <Loader2 className="h-5 w-5 animate-spin opacity-40" />
+            <span className="text-xs">Loading conversation…</span>
+          </div>
+        ) : turns.length === 0 ? (
           <div className="text-xs text-muted-foreground text-center p-4">
             No messages yet. Start a conversation to see it here.
           </div>
@@ -1102,46 +1112,53 @@ export function ChatPanel({
             </div>
           )}
 
-          <div className="relative flex bg-card rounded-lg transition-all">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (isTourLockingInput) {
-                  return;
-                }
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              onPaste={handlePaste}
-              placeholder={!providerReady ? "Select a provider to start..." : supportsVision ? "Describe what you want to build... (paste or drop images)" : "Describe what you want to build..."}
-              className="flex-1 px-3 py-2 bg-transparent border-0 resize-none focus:outline-none text-sm placeholder:text-muted-foreground text-foreground"
-              rows={3}
-              disabled={generating || isTourLockingInput || !providerReady}
-            />
-            <div className="flex flex-col p-2 gap-2">
-              <Button
-                onClick={generating ? onStop : handleSend}
-                disabled={isTourLockingInput ? !generating : (!generating && (!prompt.trim() && pendingImages.length === 0 || !providerReady))}
-                size="sm"
-                className="flex items-center gap-2"
-              >
-                {generating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Stop
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    Send
-                  </>
-                )}
-              </Button>
+          {blockedByProject ? (
+            <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-3 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+              <span>A task is running on <span className="font-medium text-foreground">{blockedByProject}</span></span>
             </div>
-          </div>
+          ) : (
+            <div className="relative flex bg-card rounded-lg transition-all">
+              <Textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (isTourLockingInput) {
+                    return;
+                  }
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                onPaste={handlePaste}
+                placeholder={!providerReady ? "Select a provider to start..." : supportsVision ? "Describe what you want to build... (paste or drop images)" : "Describe what you want to build..."}
+                className="flex-1 px-3 py-2 bg-transparent border-0 resize-none focus:outline-none text-sm placeholder:text-muted-foreground text-foreground"
+                rows={3}
+                disabled={generating || isTourLockingInput || !providerReady}
+              />
+              <div className="flex flex-col p-2 gap-2">
+                <Button
+                  onClick={generating ? onStop : handleSend}
+                  disabled={isTourLockingInput ? !generating : (!generating && (!prompt.trim() && pendingImages.length === 0 || !providerReady))}
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Stop
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Send
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Footer */}
           <div className="border-t border-border bg-muted/50 px-2 py-2">
@@ -1232,7 +1249,7 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             return (
               <ReasoningDisplay
                 key={item.id}
-                itemId={item.id}
+
                 content={item.data}
                 isComplete={item.complete === true}
                 isExpanded={expandedItems.has(item.id)}
@@ -1244,7 +1261,7 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             return (
               <PlanDisplay
                 key={item.id}
-                itemId={item.id}
+
                 content={item.data}
                 isExpanded={expandedItems.has(item.id)}
                 onToggle={() => onToggleExpanded(item.id)}
@@ -1255,7 +1272,7 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             return (
               <AgentDisplay
                 key={item.id}
-                itemId={item.id}
+
                 content={item.data}
                 isExpanded={expandedItems.has(item.id)}
                 onToggle={() => onToggleExpanded(item.id)}
@@ -1266,7 +1283,7 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             return (
               <ProgressDisplay
                 key={item.id}
-                itemId={item.id}
+
                 content={item.data}
                 isExpanded={expandedItems.has(item.id)}
                 onToggle={() => onToggleExpanded(item.id)}
@@ -1277,7 +1294,7 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             return (
               <ToolDisplay
                 key={item.id}
-                itemId={item.id}
+
                 tool={item.data as ToolCall}
                 isExpanded={expandedItems.has(item.id)}
                 onToggle={() => onToggleExpanded(item.id)}
@@ -1369,7 +1386,6 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             return (
               <SyntheticErrorDisplay
                 key={item.id}
-                itemId={item.id}
                 content={item.data}
                 isExpanded={expandedItems.has(item.id)}
                 onToggle={() => onToggleExpanded(item.id)}
@@ -1492,13 +1508,12 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
 }
 
 interface ToolDisplayProps {
-  itemId: string;
   tool: ToolCall;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function ToolDisplay({ itemId, tool, isExpanded, onToggle }: ToolDisplayProps) {
+function ToolDisplay({ tool, isExpanded, onToggle }: ToolDisplayProps) {
   const category = tool.name === 'shell' ? classifyShellCommand(tool.parameters?.cmd) : tool.name;
   return (
     <div
@@ -1579,13 +1594,12 @@ function ToolDisplay({ itemId, tool, isExpanded, onToggle }: ToolDisplayProps) {
 }
 
 interface SyntheticErrorDisplayProps {
-  itemId: string;
   content: string;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function SyntheticErrorDisplay({ itemId, content, isExpanded, onToggle }: SyntheticErrorDisplayProps) {
+function SyntheticErrorDisplay({ content, isExpanded, onToggle }: SyntheticErrorDisplayProps) {
   return (
     <div className={`bg-amber-500/10 rounded-md transition-all ${isExpanded ? 'p-2' : 'p-1.5'}`}>
       <button
@@ -1614,14 +1628,13 @@ function SyntheticErrorDisplay({ itemId, content, isExpanded, onToggle }: Synthe
 }
 
 interface ReasoningDisplayProps {
-  itemId: string;
   content: string;
   isComplete: boolean;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function ReasoningDisplay({ itemId, content, isComplete, isExpanded, onToggle }: ReasoningDisplayProps) {
+function ReasoningDisplay({ content, isComplete, isExpanded, onToggle }: ReasoningDisplayProps) {
   const lines = (content || '').split('\n').filter(l => l.trim());
   const headPreview = lines[0]?.substring(0, 60) || 'Reasoning...';
   const tailPreview = lines.length > 0 ? lines[lines.length - 1].slice(-120) : '';
@@ -1662,13 +1675,12 @@ function ReasoningDisplay({ itemId, content, isComplete, isExpanded, onToggle }:
 }
 
 interface PlanDisplayProps {
-  itemId: string;
   content: string;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function PlanDisplay({ itemId, content, isExpanded, onToggle }: PlanDisplayProps) {
+function PlanDisplay({ content, isExpanded, onToggle }: PlanDisplayProps) {
   // Extract first line for preview
   const lines = content.split('\n');
   const preview = lines[0]?.replace(/^\*\*|\*\*$/g, '').substring(0, 50) || 'Plan';
@@ -1703,13 +1715,12 @@ function PlanDisplay({ itemId, content, isExpanded, onToggle }: PlanDisplayProps
 }
 
 interface AgentDisplayProps {
-  itemId: string;
   content: string;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function AgentDisplay({ itemId, content, isExpanded, onToggle }: AgentDisplayProps) {
+function AgentDisplay({ content, isExpanded, onToggle }: AgentDisplayProps) {
   // Extract first line for preview
   const lines = content.split('\n');
   const preview = lines[0]?.replace(/^\*\*|\*\*$/g, '').replace(/^🤖\s*/, '').substring(0, 50) || 'Agent';
@@ -1744,13 +1755,12 @@ function AgentDisplay({ itemId, content, isExpanded, onToggle }: AgentDisplayPro
 }
 
 interface ProgressDisplayProps {
-  itemId: string;
   content: string;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function ProgressDisplay({ itemId, content, isExpanded, onToggle }: ProgressDisplayProps) {
+function ProgressDisplay({ content, isExpanded, onToggle }: ProgressDisplayProps) {
   // Detect if this is a completion (✅) or in progress (🔄)
   const isCompleted = content.includes('✅');
   const preview = content.replace(/^[✅🔄]\s*/, '').substring(0, 50);

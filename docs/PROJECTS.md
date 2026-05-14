@@ -141,14 +141,13 @@ Press `Ctrl+S` (Windows/Linux) or `Cmd+S` (Mac) to save your project.
 
 OSW Studio creates checkpoints automatically after AI makes changes:
 
-- **Starting point** is created when you open a project (if no prior save exists)
-- **Auto-checkpoints** are created during AI operations (last 10 kept per project)
+- **Auto-checkpoints** are created during AI operations (last 5 kept per project)
 - **Manual saves** (Cmd/Ctrl+S) persist across refreshes and are never evicted
-- **"Discard Changes"** reverts to the state when you opened the project — your last manual save if one exists, or the Starting Point otherwise
+- **Pinned checkpoints** — pin any checkpoint to prevent it from being pruned. Great for bookmarking a known-good state before experimenting
 
 **How to restore:**
 1. Open the **Checkpoints Panel** in the workspace
-2. Browse starting point, auto-checkpoints, and manual saves
+2. Browse auto-checkpoints, manual saves, and pinned checkpoints
 3. Click any checkpoint to restore your project to that state
 
 ---

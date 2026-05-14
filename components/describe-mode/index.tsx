@@ -8,7 +8,7 @@ import { createEmptyBriefState, isBriefReady } from '@/lib/describe/types';
 import { createProjectFromBrief } from '@/lib/describe/create-from-brief';
 import { configManager } from '@/lib/config/storage';
 import { getProvider } from '@/lib/llm/providers/registry';
-import type { DebugEvent } from '@/components/debug-panel';
+import type { DebugEvent } from '@/lib/stores/types';
 import type { Project } from '@/lib/vfs/types';
 import { toast } from 'sonner';
 import { BriefSidebar } from './brief-sidebar';

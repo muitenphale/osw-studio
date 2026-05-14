@@ -1,6 +1,6 @@
 {
   "name": "osw-studio-v1",
-  "version": "1.64.0",
+  "version": "1.65.0",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "cp node_modules/esbuild-wasm/esbuild.wasm public/esbuild.wasm 2>/dev/null || true"
   },
   "dependencies": {
@@ -61,7 +63,8 @@
     "tailwind-merge": "^3.3.0",
     "tailwindcss": "^4",
     "typescript": "5.9.2",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -72,6 +75,7 @@
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
     "eslint": "^9.39.2",
-    "eslint-config-next": "^16.1.3"
+    "eslint-config-next": "^16.1.3",
+    "vitest": "^3.2.4"
   }
 }

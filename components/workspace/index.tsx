@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Project, VirtualFile, ProjectRuntime } from '@/lib/vfs/types';
+import React, { useCallback, useEffect, useRef, useMemo } from 'react';
+import { Project, VirtualFile } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { FileExplorer } from '@/components/file-explorer';
@@ -10,8 +10,10 @@ import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/m
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Settings2, Terminal as TerminalIcon, Sparkles, ChevronDown, ChevronUp, EllipsisVertical } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
-import { MultiAgentOrchestrator, PendingImage } from '@/lib/llm/multi-agent-orchestrator';
+import { PendingImage } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
+import { useWorkspaceStore } from '@/lib/stores/workspace';
+import { PANEL_MAP } from '@/lib/stores/slices/layout';
 import { useCostSettings } from '@/lib/hooks/use-cost-settings';
 import { getProvider, modelSupportsVision } from '@/lib/llm/providers/registry';
 import { toast } from 'sonner';
@@ -38,12 +40,11 @@ import { SettingsPanel } from '@/components/settings';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
-import { track } from '@/lib/telemetry';
 import { FocusContextPayload } from '@/lib/preview/types';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
 import type { PlacementResult } from '@/lib/preview/types';
 import { getBlockById } from '@/lib/semantic-blocks/registry';
-import { DebugPanel, DebugEvent } from '@/components/debug-panel';
+import { DebugPanel } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
 import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
@@ -63,36 +64,37 @@ interface WorkspaceProps {
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
 export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [generating, setGenerating] = useState(false);
-  const [currentOrchestrator, setCurrentOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
-  const [persistedOrchestrator, setPersistedOrchestrator] = useState<MultiAgentOrchestrator | null>(null);
-  const [activeMobilePanel, setActiveMobilePanel] = useState<'chat' | 'files' | 'editor' | 'preview' | 'checkpoints' | 'console' | 'skills' | 'debug'>('preview');
-  const [mobileOverflowOpen, setMobileOverflowOpen] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [saveInProgress, setSaveInProgress] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(project.lastSavedAt ?? null);
-  const [entryPoint, setEntryPoint] = useState<string | undefined>(project.settings?.previewEntryPoint);
-  const [projectRuntime, setProjectRuntime] = useState<ProjectRuntime | undefined>(project.settings?.runtime);
-  const [focusContext, setFocusContext] = useState<FocusTarget | null>(null);
-  const [placedBlocks, setPlacedBlocks] = useState<PlacedBlock[]>([]);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [chatMode, setChatMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('osw-studio-chat-mode');
-      return stored ? stored === 'true' : false;
-    }
-    return false;
-  });
+  const refreshTrigger = useWorkspaceStore(s => s.refreshTrigger);
+  const generating = useWorkspaceStore(s => s.generating);
+  const debugEvents = useWorkspaceStore(s => s.debugEvents);
+  const currentModel = useWorkspaceStore(s => s.currentModel);
+  const projectCost = useWorkspaceStore(s => s.projectCost);
+  const addDebugEvent = useWorkspaceStore(s => s.addDebugEvent);
+  const isDirty = useWorkspaceStore(s => s.isDirty);
+  const saveInProgress = useWorkspaceStore(s => s.saveInProgress);
+  const entryPoint = useWorkspaceStore(s => s.entryPoint);
+  const projectRuntime = useWorkspaceStore(s => s.projectRuntime);
+  const focusContext = useWorkspaceStore(s => s.focusContext);
+  const chatMode = useWorkspaceStore(s => s.chatMode);
+  const runtimeErrors = useWorkspaceStore(s => s.runtimeErrors);
+  const initialCheckpointId = useWorkspaceStore(s => s.initialCheckpointId);
+  const checkpointRefreshKey = useWorkspaceStore(s => s.checkpointRefreshKey);
+  const backendEnabled = useWorkspaceStore(s => s.backendEnabled);
+  const selectedDeploymentId = useWorkspaceStore(s => s.selectedDeploymentId);
+  const activeMobilePanel = useWorkspaceStore(s => s.activeMobilePanel);
+  const mobileOverflowOpen = useWorkspaceStore(s => s.mobileOverflowOpen);
+  const placedBlocks = useWorkspaceStore(s => s.placedBlocks);
+  const paletteOpen = useWorkspaceStore(s => s.paletteOpen);
+  const generatingProjectId = useWorkspaceStore(s => s.generatingProjectId);
+  const generatingProjectName = useWorkspaceStore(s => s.generatingProjectName);
+  const blockedByProject = generating && generatingProjectId !== project.id ? generatingProjectName : null;
   const lastFocusSignatureRef = useRef<{ signature: string; timestamp: number } | null>(null);
   const previewRef = useRef<MultipagePreviewHandle>(null);
-  const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
   const generatingRef = useRef(false);
   const handleGenerateRef = useRef<((promptText?: string, images?: PendingImage[]) => Promise<void>) | null>(null);
-  const [initialCheckpointId, setInitialCheckpointId] = useState<string | null>(null);
-  const [checkpointRefreshKey, setCheckpointRefreshKey] = useState(0);
-  const [currentModel, setCurrentModel] = useState(configManager.getDefaultModel());
-  const [projectCost, setProjectCost] = useState(0);
+  const setCurrentModel = useWorkspaceStore(s => s.setCurrentModel);
+  const storeChatMode = useWorkspaceStore(s => s.setChatMode);
+  const storeFocusContext = useWorkspaceStore(s => s.setFocusContext);
   const { state: tourState, start: startTour, setWorkspaceHandler } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
@@ -101,16 +103,14 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   // Keep generatingRef in sync for runtime error listener
   useEffect(() => { generatingRef.current = generating; }, [generating]);
 
-  // Guard against accidental navigation away with unsaved changes or active generation
+  // Guard against accidental navigation away with unsaved changes
+  // During generation, let the user leave freely — the generation shelf handles status
   const guardedBack = useCallback(() => {
-    if (generating) {
-      if (!window.confirm('The AI is still generating. Leave anyway?')) return;
-      currentOrchestrator?.stop();
-    } else if (isDirty) {
+    if (!generating && isDirty) {
       if (!window.confirm('You have unsaved changes. Leave anyway?')) return;
     }
     onBack();
-  }, [generating, isDirty, currentOrchestrator, onBack]);
+  }, [generating, isDirty, onBack]);
 
   // Browser beforeunload — warn when dirty or generating
   useEffect(() => {
@@ -127,7 +127,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   useEffect(() => {
     const handler = () => {
       if (!generatingRef.current) {
-        setRuntimeErrors(peekRuntimeErrors());
+        useWorkspaceStore.getState().setRuntimeErrors(peekRuntimeErrors());
       }
     };
     window.addEventListener('runtimeErrorsChanged', handler);
@@ -138,7 +138,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   useEffect(() => {
     const handler = (e: Event) => {
       const runtime = (e as CustomEvent).detail?.runtime;
-      if (runtime) setProjectRuntime(runtime);
+      if (runtime) useWorkspaceStore.getState().updateProjectSettings({ runtime });
     };
     window.addEventListener('runtimeChanged', handler);
     return () => window.removeEventListener('runtimeChanged', handler);
@@ -178,65 +178,25 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   // Console panel — visible by default for terminal-mode runtimes (Python, Lua), togglable for all
   const isTerminalRuntime = getRuntimeConfig(projectRuntime || 'handlebars').previewMode === 'terminal';
 
-  // Load persisted panel visibility from localStorage, with runtime-aware defaults
-  const savedPanels = useMemo(() => {
-    try {
-      const stored = localStorage.getItem('osw-workspace-panels');
-      return stored ? JSON.parse(stored) : null;
-    } catch { return null; }
-  }, []);
-
-  const [showChat, setShowChat] = useState(savedPanels?.chat ?? true);
-  const [showFiles, setShowFiles] = useState(savedPanels?.files ?? true);
-  const [showEditor, setShowEditor] = useState(savedPanels?.editor ?? false);
-  const [showPreview, setShowPreview] = useState(savedPanels?.preview ?? !isTerminalRuntime);
-  const [showCheckpoints, setShowCheckpoints] = useState(savedPanels?.checkpoints ?? false);
-  const [showDebugPanel, setShowDebugPanel] = useState(savedPanels?.debug ?? false);
-  const [showProjectSettingsModal, setShowProjectSettingsModal] = useState(false);
-  const [showSkillsPanel, setShowSkillsPanel] = useState(savedPanels?.skills ?? false);
-
-  const [showConsole, setShowConsole] = useState(savedPanels?.console ?? isTerminalRuntime);
-  const [fullscreenPreview, setFullscreenPreview] = useState(false);
-
-  // Persist panel visibility when it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('osw-workspace-panels', JSON.stringify({
-        chat: showChat, files: showFiles, editor: showEditor, preview: showPreview,
-        checkpoints: showCheckpoints, debug: showDebugPanel, skills: showSkillsPanel,
-        console: showConsole,
-      }));
-    } catch { /* localStorage full or unavailable */ }
-  }, [showChat, showFiles, showEditor, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel, showConsole]);
+  const showChat = useWorkspaceStore(s => s.showChat);
+  const showFiles = useWorkspaceStore(s => s.showFiles);
+  const showEditor = useWorkspaceStore(s => s.showEditor);
+  const showPreview = useWorkspaceStore(s => s.showPreview);
+  const showCheckpoints = useWorkspaceStore(s => s.showCheckpoints);
+  const showDebugPanel = useWorkspaceStore(s => s.showDebugPanel);
+  const showProjectSettingsModal = useWorkspaceStore(s => s.showProjectSettingsModal);
+  const showSkillsPanel = useWorkspaceStore(s => s.showSkillsPanel);
+  const showConsole = useWorkspaceStore(s => s.showConsole);
+  const fullscreenPreview = useWorkspaceStore(s => s.fullscreenPreview);
+  const panelReplacePreview = useWorkspaceStore(s => s.panelReplacePreview);
+  const panelInsertPreview = useWorkspaceStore(s => s.panelInsertPreview);
+  const hasUnreadConsole = useWorkspaceStore(s => s.hasUnreadConsole);
   // Ref to imperatively reset panel sizes after reorder
   const panelGroupRef = useRef<import('react-resizable-panels').ImperativePanelGroupHandle | null>(null);
 
-  // Panel ordering — persisted to localStorage, controls left-to-right rendering
-  const DEFAULT_PANEL_ORDER = ['chat', 'files', 'editor', 'skills', 'console', 'preview', 'checkpoints', 'debug'];
-  const [panelOrder, setPanelOrder] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem('osw-workspace-panel-order');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Merge: keep stored order but ensure all panels are present
-        const all = new Set(DEFAULT_PANEL_ORDER);
-        const ordered = parsed.filter((k: string) => all.has(k));
-        for (const k of DEFAULT_PANEL_ORDER) {
-          if (!ordered.includes(k)) ordered.push(k);
-        }
-        return ordered;
-      }
-    } catch {}
-    return DEFAULT_PANEL_ORDER;
-  });
-
-  useEffect(() => {
-    try { localStorage.setItem('osw-workspace-panel-order', JSON.stringify(panelOrder)); } catch {}
-  }, [panelOrder]);
-
-  // Drag-to-reorder state
-  const [draggingPanel, setDraggingPanel] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<number | null>(null); // index in visible panels where the drop zone is highlighted
+  const panelOrder = useWorkspaceStore(s => s.panelOrder);
+  const draggingPanel = useWorkspaceStore(s => s.draggingPanel);
+  const dropTarget = useWorkspaceStore(s => s.dropTarget);
 
   const handlePanelDragStart = useCallback((panelKey: string) => {
     // Capture the dragged panel's center X for "stay put" distance comparison
@@ -249,7 +209,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       }
     }
     document.body.style.cursor = 'grabbing';
-    setDraggingPanel(panelKey);
+    useWorkspaceStore.getState().startDrag(panelKey);
   }, []);
 
   const handlePanelDragEnd = useCallback(() => {
@@ -272,8 +232,9 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         if (i < currentLayout.length) sizeByKey[key] = currentLayout[i];
       });
 
-      setPanelOrder(prev => {
-        const newOrder = prev.filter(k => k !== draggingPanel);
+      {
+        const prevOrder = panelOrder;
+        const newOrder = prevOrder.filter(k => k !== draggingPanel);
         const targetKey = visibleBefore[dropTarget];
         if (targetKey) {
           const insertIdx = newOrder.indexOf(targetKey);
@@ -281,8 +242,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         } else {
           newOrder.push(draggingPanel);
         }
-        return newOrder;
-      });
+        useWorkspaceStore.getState().setPanelOrder(newOrder);
+      }
 
       // Restore sizes in the new order after React re-renders
       requestAnimationFrame(() => {
@@ -305,8 +266,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         }
       });
     }
-    setDraggingPanel(null);
-    setDropTarget(null);
+    useWorkspaceStore.getState().endDrag();
     draggedPanelCenter.current = null;
     document.body.style.cursor = '';
   }, [draggingPanel, dropTarget, panelOrder, showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
@@ -318,14 +278,11 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     if (!draggingPanel) return;
     const handleDocumentMouseUp = () => {
       // Only cancel if still dragging — the container's onMouseUp may have already handled it
-      setDraggingPanel(prev => {
-        if (prev) {
-          setDropTarget(null);
-          draggedPanelCenter.current = null;
-          document.body.style.cursor = '';
-        }
-        return null;
-      });
+      if (useWorkspaceStore.getState().draggingPanel) {
+        useWorkspaceStore.getState().endDrag();
+        draggedPanelCenter.current = null;
+        document.body.style.cursor = '';
+      }
     };
     document.addEventListener('mouseup', handleDocumentMouseUp);
     return () => document.removeEventListener('mouseup', handleDocumentMouseUp);
@@ -365,107 +322,41 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     if (draggedPanelCenter.current !== null) {
       const distToSelf = Math.abs(e.clientX - draggedPanelCenter.current);
       if (distToSelf <= closestDist) {
-        setDropTarget(null);
+        useWorkspaceStore.getState().setDropTarget(null);
         return;
       }
     }
 
-    setDropTarget(closest);
+    useWorkspaceStore.getState().setDropTarget(closest);
   }, [draggingPanel]);
 
-  // Panel toggle with max 3 visible constraint.
-  // When opening a panel would exceed 3, close the rightmost visible panel.
-  const MAX_VISIBLE_PANELS = 3;
-
-  // Panel definitions ordered by current panelOrder (for rightmost-close logic)
-  const panelDefsMap: Record<string, { get: boolean; set: (v: boolean) => void }> = useMemo(() => ({
-    chat: { get: showChat, set: setShowChat },
-    files: { get: showFiles, set: setShowFiles },
-    editor: { get: showEditor, set: setShowEditor },
-    console: { get: showConsole, set: setShowConsole },
-    preview: { get: showPreview, set: setShowPreview },
-    checkpoints: { get: showCheckpoints, set: setShowCheckpoints },
-    debug: { get: showDebugPanel, set: setShowDebugPanel },
-    skills: { get: showSkillsPanel, set: setShowSkillsPanel },
-  }), [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
-
-  const panelDefs = useMemo(() =>
-    panelOrder.map(key => ({ key, ...panelDefsMap[key] })).filter(p => p.get !== undefined),
-    [panelOrder, panelDefsMap]
-  );
-
-  const togglePanel = useCallback((key: string) => {
-    setPanelReplacePreview(null);
-    setPanelInsertPreview(null);
-    const panel = panelDefs.find(p => p.key === key);
-    if (!panel) return;
-
-    if (panel.get) {
-      // Closing — always allowed
-      panel.set(false);
-      return;
-    }
-
-    // Opening — check if we'd exceed the limit
-    const visibleCount = panelDefs.filter(p => p.get).length;
-    if (visibleCount >= MAX_VISIBLE_PANELS) {
-      // Close the rightmost visible panel and insert the new panel at its position
-      for (let i = panelDefs.length - 1; i >= 0; i--) {
-        if (panelDefs[i].get && panelDefs[i].key !== key) {
-          const closedKey = panelDefs[i].key;
-          panelDefs[i].set(false);
-          // Move the new panel to the closed panel's position in the order
-          setPanelOrder(prev => {
-            const newOrder = prev.filter(k => k !== key);
-            const insertIdx = newOrder.indexOf(closedKey);
-            if (insertIdx >= 0) {
-              newOrder.splice(insertIdx, 0, key);
-            } else {
-              newOrder.push(key);
-            }
-            return newOrder;
-          });
-          break;
-        }
-      }
-    } else {
-      // Room available — always open as the rightmost panel
-      setPanelOrder(prev => {
-        const newOrder = prev.filter(k => k !== key);
-        newOrder.push(key);
-        return newOrder;
-      });
-    }
-    panel.set(true);
-  }, [panelDefs]);
-
-  // Track which panel would be replaced when hovering a sidebar button
-  const [panelReplacePreview, setPanelReplacePreview] = useState<string | null>(null);
-  const [panelInsertPreview, setPanelInsertPreview] = useState<number | null>(null); // index where new panel would appear
+  const togglePanel = useWorkspaceStore(s => s.togglePanel);
 
   const handleSidebarHover = useCallback((key: string | null) => {
-    if (!key) { setPanelReplacePreview(null); setPanelInsertPreview(null); return; }
-    const panel = panelDefs.find(p => p.key === key);
-    if (!panel || panel.get) { setPanelReplacePreview(null); setPanelInsertPreview(null); return; } // already open or not found
-    const visibleCount = panelDefs.filter(p => p.get).length;
+    const store = useWorkspaceStore.getState();
+    if (!key) { store.setPanelReplacePreview(null); store.setPanelInsertPreview(null); return; }
+    const panelStateKey = PANEL_MAP[key];
+    if (!panelStateKey || store[panelStateKey]) { store.setPanelReplacePreview(null); store.setPanelInsertPreview(null); return; }
+    const allPanels = store.panelOrder
+      .filter(k => PANEL_MAP[k] !== undefined)
+      .map(k => ({ key: k, open: !!store[PANEL_MAP[k]] }));
+    const visibleCount = allPanels.filter(p => p.open).length;
+    const MAX_VISIBLE_PANELS = 3;
     if (visibleCount < MAX_VISIBLE_PANELS) {
-      // New panels always open as the rightmost panel
-      setPanelInsertPreview(visibleCount);
-      setPanelReplacePreview(null);
+      store.setPanelInsertPreview(visibleCount);
+      store.setPanelReplacePreview(null);
       return;
     }
-    // At max panels — show which panel would be replaced
-    setPanelInsertPreview(null);
-    for (let i = panelDefs.length - 1; i >= 0; i--) {
-      if (panelDefs[i].get && panelDefs[i].key !== key) {
-        setPanelReplacePreview(panelDefs[i].key);
+    store.setPanelInsertPreview(null);
+    for (let i = allPanels.length - 1; i >= 0; i--) {
+      if (allPanels[i].open && allPanels[i].key !== key) {
+        store.setPanelReplacePreview(allPanels[i].key);
         return;
       }
     }
-    setPanelReplacePreview(null);
-  }, [panelDefs, panelOrder]);
+    store.setPanelReplacePreview(null);
+  }, []);
 
-  const [hasUnreadConsole, setHasUnreadConsole] = useState(false);
   const consoleBufferRef = useRef<{ level: string; text: string }[]>([]);
   const showConsoleRef = useRef(showConsole);
 
@@ -480,7 +371,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       if (!showConsoleRef.current) {
         const { level, args } = (e as CustomEvent<{ level: string; args: string[] }>).detail;
         consoleBufferRef.current.push({ level, text: args.join(' ') });
-        setHasUnreadConsole(true);
+        useWorkspaceStore.getState().setHasUnreadConsole(true);
       }
     };
     window.addEventListener('previewConsole', handler);
@@ -490,100 +381,14 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   // Clear unread flag when console opens (desktop or mobile)
   useEffect(() => {
     if (showConsole || activeMobilePanel === 'console') {
-      setHasUnreadConsole(false);
+      useWorkspaceStore.getState().setHasUnreadConsole(false);
     }
   }, [showConsole, activeMobilePanel]);
 
-  // Backend enabled state (persisted per-project in localStorage)
-  const [backendEnabled, setBackendEnabled] = useState<boolean>(() => {
-    return migrateBackendKey(project.id);
-  });
-
-  // Backend context state (deployment selection for backend features)
-  const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
-
-  // Debug events state
-  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
-  const debugIdCounter = useRef(0);
-  const saveDebounceTimer = useRef<NodeJS.Timeout | null>(null);
-
-  // Maximum debug events to keep in memory to prevent unbounded growth
-  const MAX_DEBUG_EVENTS = 2000;
-
-  // Debounced save function to persist events array to IndexedDB
-  const debouncedSaveEvents = useCallback((events: DebugEvent[]) => {
-    if (saveDebounceTimer.current) {
-      clearTimeout(saveDebounceTimer.current);
-    }
-    saveDebounceTimer.current = setTimeout(() => {
-      debugEventsState.saveEvents(project.id, events).catch(error => {
-        logger.error('Failed to persist debug events:', error);
-      });
-    }, 500); // Save after 500ms of inactivity
-  }, [project.id]);
-
-  const addDebugEvent = useCallback(async (event: string, data: any) => {
-    setDebugEvents(prev => {
-      const shouldCoalesce = event === 'assistant_delta' || event === 'tool_param_delta' || event === 'reasoning_delta';
-
-      let newEvents: DebugEvent[];
-
-      // Check if we can coalesce with a recent event of the same type.
-      // Search backward through the last few events to handle interleaved
-      // streaming (e.g. tool_param_delta / toolCalls / tool_param_delta).
-      if (shouldCoalesce && prev.length > 0) {
-        const searchLimit = Math.max(0, prev.length - 4);
-        for (let i = prev.length - 1; i >= searchLimit; i--) {
-          if (prev[i].event === event) {
-            const target = prev[i];
-            const updatedEvent = {
-              ...target,
-              timestamp: Date.now(),
-              version: (target.version || 1) + 1,
-              count: (target.count || 1) + 1,
-              data: {
-                all: target.data.all
-                  ? [...target.data.all, data]
-                  : [target.data, data]
-              }
-            };
-
-            newEvents = [...prev.slice(0, i), updatedEvent, ...prev.slice(i + 1)];
-            debouncedSaveEvents(newEvents);
-            return newEvents;
-          }
-        }
-      }
-
-      // Different event type or first event - add new
-      const debugEvent = {
-        id: `${Date.now()}-${debugIdCounter.current++}`,
-        timestamp: Date.now(),
-        event,
-        data,
-        count: 1,
-        version: 1
-      };
-
-      newEvents = [...prev, debugEvent];
-
-      // Prune old events if exceeding limit to prevent memory growth
-      if (newEvents.length > MAX_DEBUG_EVENTS) {
-        newEvents = newEvents.slice(-MAX_DEBUG_EVENTS);
-      }
-
-      debouncedSaveEvents(newEvents);
-      return newEvents;
-    });
-  }, [project.id, debouncedSaveEvents, MAX_DEBUG_EVENTS]);
-
   const clearDebugEvents = useCallback(async () => {
-    setDebugEvents([]);
-    await debugEventsState.clearEvents(project.id);
+    await useWorkspaceStore.getState().clearChat(project.id);
     // Clear auto-checkpoints when conversation is cleared (keep manual saves)
     await checkpointManager.clearAutoCheckpoints(project.id);
-    // Clear orchestrator to reset conversation history
-    setPersistedOrchestrator(null);
   }, [project.id]);
   
   const visiblePanelCount = [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel].filter(Boolean).length;
@@ -697,7 +502,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
   const handleFocusSelection = useCallback((selection: FocusContextPayload | null) => {
     if (!selection) {
-      setFocusContext(null);
+      useWorkspaceStore.getState().setFocusContext(null);
       lastFocusSignatureRef.current = null;
       return;
     }
@@ -710,7 +515,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       ...selection,
       timestamp: now
     };
-    setFocusContext(nextTarget);
+    useWorkspaceStore.getState().setFocusContext(nextTarget);
     toast.info('Focus context set', {
       description: describeFocusTarget(nextTarget)
     });
@@ -718,41 +523,41 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   }, [describeFocusTarget]);
 
   const handlePlacementToggle = useCallback(() => {
-    setPaletteOpen(prev => !prev);
+    useWorkspaceStore.getState().setPaletteOpen(!useWorkspaceStore.getState().paletteOpen);
   }, []);
 
   const handlePlacementComplete = useCallback((payload: PlacementResult) => {
     const currentPage = previewRef.current?.getActivePath?.() || '/';
-    setPlacedBlocks(prev => [...prev, {
+    useWorkspaceStore.setState(s => ({ placedBlocks: [...s.placedBlocks, {
       blockId: payload.blockId,
       placementId: payload.placementId,
       domPath: payload.domPath,
       position: payload.position,
       page: currentPage,
       htmlContext: payload.htmlContext,
-    }]);
+    }] }));
   }, []);
 
   const handleRemovePlacedBlock = useCallback((placementId: string) => {
-    setPlacedBlocks(prev => prev.filter(b => b.placementId !== placementId));
+    useWorkspaceStore.setState(s => ({ placedBlocks: s.placedBlocks.filter(b => b.placementId !== placementId) }));
     previewRef.current?.removePlaceholder(placementId);
   }, []);
 
   const handleClearPlacedBlocks = useCallback(() => {
     placedBlocks.forEach(b => previewRef.current?.removePlaceholder(b.placementId));
-    setPlacedBlocks([]);
+    useWorkspaceStore.setState({ placedBlocks: [] });
   }, [placedBlocks]);
 
   const handleClosePreview = useCallback(() => {
-    setShowPreview(false);
+    useWorkspaceStore.getState().togglePanel('preview');
   }, []);
 
   const handleEnterFullscreen = useCallback(() => {
-    setFullscreenPreview(true);
+    useWorkspaceStore.getState().setFullscreenPreview(true);
   }, []);
 
   const handleExitFullscreen = useCallback(() => {
-    setFullscreenPreview(false);
+    useWorkspaceStore.getState().setFullscreenPreview(false);
   }, []);
 
   // Listen for showPreview event (dispatched by AI preview command).
@@ -772,8 +577,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       const proj = await vfs.getProject(project.id);
       proj.settings = { ...proj.settings, previewEntryPoint: path };
       await vfs.updateProject(proj);
-      setEntryPoint(path);
-      setRefreshTrigger(prev => prev + 1);
+      useWorkspaceStore.getState().updateProjectSettings({ previewEntryPoint: path });
       toast.success(`Entry point set to ${path}`);
     } catch (err) {
       logger.error('Failed to set entry point:', err);
@@ -797,21 +601,17 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const focusPreviewSnippet = focusContext ? truncateHtmlSnippet(focusContext.outerHTML, 240) : '';
 
   useEffect(() => {
-    setIsDirty(saveManager.isDirty(project.id));
-    const unsubscribe = saveManager.subscribe(({ projectId, dirty }) => {
+    const dirty = saveManager.isDirty(project.id);
+    if (dirty) useWorkspaceStore.getState().markDirty();
+    else useWorkspaceStore.getState().markClean();
+    const unsubscribe = saveManager.subscribe(({ projectId, dirty: d }) => {
       if (projectId === project.id) {
-        setIsDirty(dirty);
+        if (d) useWorkspaceStore.getState().markDirty();
+        else useWorkspaceStore.getState().markClean();
       }
     });
     return () => unsubscribe();
   }, [project.id]);
-
-  // Persist chat mode to localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('osw-studio-chat-mode', String(chatMode));
-    }
-  }, [chatMode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -835,53 +635,66 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
           }
         }
 
-        await saveManager.syncProjectSaveState(project.id);
-        let savedCheckpointId = saveManager.getSavedCheckpointId(project.id);
+        // Skip checkpoint restore if an orchestrator session is active
+        // (generation ran or is running while the workspace was unmounted)
+        if (!useWorkspaceStore.getState().persistedInstance) {
+          await saveManager.syncProjectSaveState(project.id);
+          const savedCheckpointId = saveManager.getSavedCheckpointId(project.id);
 
-        if (savedCheckpointId) {
-          const restored = await saveManager.restoreLastSaved(project.id);
-          if (!restored) {
-            logger.warn('[Workspace] Saved checkpoint missing or failed to restore, creating new baseline');
-            savedCheckpointId = null;
+          if (savedCheckpointId) {
+            const exists = await checkpointManager.checkpointExists(savedCheckpointId);
+            if (exists) {
+              const restored = await saveManager.restoreLastSaved(project.id);
+              if (restored) {
+                if (!isMounted) return;
+                useWorkspaceStore.setState({ initialCheckpointId: savedCheckpointId });
+              }
+            } else {
+              // Stale reference — checkpoint was pruned or deleted
+              const proj = await vfs.getProject(project.id);
+              proj.lastSavedCheckpointId = null;
+              await vfs.updateProject(proj);
+            }
           }
-        }
 
-        // Create a "Starting point" system checkpoint (dedup handled inside createCheckpoint)
-        if (!savedCheckpointId) {
-          const checkpoint = await checkpointManager.createCheckpoint(project.id, 'Starting point', { kind: 'system' });
-          savedCheckpointId = checkpoint.id;
-        }
-
-        if (!isMounted) return;
-
-        if (savedCheckpointId) {
-          setInitialCheckpointId(savedCheckpointId);
+          if (!isMounted) return;
         }
 
         const latestProject = await vfs.getProject(project.id);
         if (!isMounted) return;
-        setLastSavedAt(latestProject.lastSavedAt ?? null);
-        setIsDirty(saveManager.isDirty(project.id));
+        useWorkspaceStore.getState().initProject(latestProject);
+        if (saveManager.isDirty(project.id)) useWorkspaceStore.getState().markDirty();
+        // Initialize chatMode from localStorage
+        if (typeof window !== 'undefined') {
+          const stored = localStorage.getItem('osw-studio-chat-mode');
+          if (stored === 'true') useWorkspaceStore.setState({ chatMode: true });
+        }
+        // Initialize backendEnabled from localStorage
+        if (migrateBackendKey(project.id)) {
+          useWorkspaceStore.getState().setBackendEnabled(true);
+        }
 
         logger.debug(`[Workspace] Initializing workspace for project: ${project.id}`);
 
-        // Load debug events from IndexedDB
+        // Initialize store persistence and load debug events
+        useWorkspaceStore.getState().initPersistence(project.id);
+        if (useWorkspaceStore.getState().generatingProjectId === project.id) {
+          useWorkspaceStore.getState().dismissGenerationResult();
+        }
+        useWorkspaceStore.getState().initLayout();
+        useWorkspaceStore.getState().setCurrentModel(configManager.getDefaultModel());
         try {
-          const savedEvents = await debugEventsState.loadEvents(project.id);
+          await useWorkspaceStore.getState().loadDebugEvents(project.id);
           if (!isMounted) return;
-          if (savedEvents.length > 0) {
-            setDebugEvents(savedEvents);
-            logger.debug(`[Workspace] Restored ${savedEvents.length} debug events`);
-          } else {
-            logger.debug(`[Workspace] No saved debug events found`);
-          }
         } catch (error) {
           if (!isMounted) return;
           logger.error('Failed to load debug events:', error);
         }
+        useWorkspaceStore.setState({ workspaceReady: true });
       } catch (error) {
         if (!isMounted) return;
         logger.error('Failed to initialize workspace:', error);
+        useWorkspaceStore.setState({ workspaceReady: true });
       }
     };
 
@@ -892,13 +705,13 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         const currentProject = await vfs.getProject(project.id);
         if (!isMounted) return;
         if (currentProject?.costTracking?.totalCost) {
-          setProjectCost(currentProject.costTracking.totalCost);
+          useWorkspaceStore.getState().setProjectCost(currentProject.costTracking.totalCost);
         } else {
-          setProjectCost(0);
+          useWorkspaceStore.getState().setProjectCost(0);
         }
       } catch (error) {
         if (!isMounted) return;
-        setProjectCost(0);
+        useWorkspaceStore.getState().setProjectCost(0);
       }
     };
 
@@ -924,12 +737,15 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   useEffect(() => {
     if (!tourRunning) {
       setWorkspaceHandler(null);
-      setGenerating(false);
+      // Only clear generating if no real generation is active (tour may have set it)
+      if (!useWorkspaceStore.getState().orchestratorInstance && !useWorkspaceStore.getState().persistedInstance) {
+        useWorkspaceStore.setState({ generating: false });
+      }
       return;
     }
 
     // Set generating state based on tour busy state
-    setGenerating(tourStep === 'workspace-edit' && tourState.isBusy);
+    useWorkspaceStore.setState({ generating: tourStep === 'workspace-edit' && tourState.isBusy });
 
     const handler = async (event: GuidedTourTranscriptEvent) => {
       // Convert tour events to debug events for ChatPanel display
@@ -1017,10 +833,12 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     };
   }, [tourRunning, tourStep, tourState.isBusy, setWorkspaceHandler, clearDebugEvents, addDebugEvent]);
 
-  // Clear orchestrator when project or chat mode changes
+  // Clear orchestrator when project changes (chatMode changes handled inside setChatMode action)
   useEffect(() => {
-    setPersistedOrchestrator(null);
-  }, [project.id, chatMode]);
+    if (!useWorkspaceStore.getState().generating) {
+      useWorkspaceStore.getState().resetOrchestrator();
+    }
+  }, [project.id]);
 
   // Auto-mount/unmount project backend context based on enabled toggle
   useEffect(() => {
@@ -1028,12 +846,12 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true' && backendEnabled) {
       vfs.mountProjectBackendContext(project.id).then(() => {
         if (!cancelled) {
-          setRefreshTrigger(prev => prev + 1);
+          useWorkspaceStore.getState().bumpRefreshTrigger();
         }
       });
     } else {
       vfs.unmountBackendContext();
-      setRefreshTrigger(prev => prev + 1);
+      useWorkspaceStore.getState().bumpRefreshTrigger();
     }
     return () => { cancelled = true; };
   }, [project.id, backendEnabled]);
@@ -1044,17 +862,21 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     const projectId = project.id;
 
     return () => {
-      // Unload checkpoint data from memory (they stay in IndexedDB)
-      checkpointManager.unloadProject(projectId);
+      const isGenerating = useWorkspaceStore.getState().generating;
 
-      // Clear debug events cache
-      debugEventsState.unloadProject(projectId);
-
-      // Clear any pending debounce timer for debug events
-      if (saveDebounceTimer.current) {
-        clearTimeout(saveDebounceTimer.current);
-        saveDebounceTimer.current = null;
+      // Clear caches only if not generating (data still needed for active generation)
+      if (!isGenerating) {
+        checkpointManager.unloadProject(projectId);
+        debugEventsState.unloadProject(projectId);
       }
+
+      // Clean up store persistence only if not generating (debounce timer still needed)
+      if (!isGenerating) {
+        useWorkspaceStore.getState().cleanupPersistence();
+        useWorkspaceStore.getState().resetOrchestrator();
+        useWorkspaceStore.getState().clearDebugEvents();
+      }
+      useWorkspaceStore.getState().resetLayout();
 
       // Flush any pending sync for this project before leaving
       vfs.flushSyncTimeout(projectId);
@@ -1062,16 +884,24 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       // Unmount backend context when leaving workspace
       vfs.unmountBackendContext();
 
+      // Reset project slice state
+      if (!isGenerating) {
+        useWorkspaceStore.getState().resetProject();
+      } else {
+        // During generation, still reset workspaceReady so the next project shows loading spinners
+        useWorkspaceStore.setState({ workspaceReady: false });
+      }
+
       logger.debug(`[Workspace] Cleaned up memory for project ${projectId}`);
     };
   }, [project.id]);
 
   // Handle deployment selection change - mount/unmount backend context
   const handleDeploymentChange = useCallback(async (deploymentId: string | null, deploymentName: string | null) => {
-    setSelectedDeploymentId(deploymentId);
+    useWorkspaceStore.getState().setDeployment(deploymentId);
 
     // Reset orchestrator so it picks up new backend context on next message
-    setPersistedOrchestrator(null);
+    useWorkspaceStore.getState().resetOrchestrator();
 
     if (deploymentId && deploymentName) {
       await vfs.mountDeploymentRuntimeContext(deploymentId);
@@ -1082,43 +912,36 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     }
 
     // Refresh file tree
-    setRefreshTrigger(prev => prev + 1);
+    useWorkspaceStore.getState().bumpRefreshTrigger();
   }, []);
 
   // Handle backend toggle
   const handleBackendToggle = useCallback((enabled: boolean) => {
-    setBackendEnabled(enabled);
-    localStorage.setItem(`osw-backend-${project.id}`, String(enabled));
-  }, [project.id]);
+    useWorkspaceStore.getState().setBackendEnabled(enabled);
+  }, []);
 
   // Handle project settings updates (runtime, entry point)
   const handleProjectSettingsUpdate = useCallback((updated: Project) => {
-    // If entry point changed, update local state and refresh preview
-    const newEntryPoint = updated.settings?.previewEntryPoint;
-    if (newEntryPoint !== entryPoint) {
-      setEntryPoint(newEntryPoint);
-      setRefreshTrigger(prev => prev + 1);
-    }
-    if (updated.settings?.runtime !== projectRuntime) {
-      setProjectRuntime(updated.settings?.runtime);
-      setRefreshTrigger(prev => prev + 1);
-    }
-  }, [entryPoint, projectRuntime]);
+    useWorkspaceStore.getState().updateProjectSettings({
+      runtime: updated.settings?.runtime,
+      previewEntryPoint: updated.settings?.previewEntryPoint,
+    });
+  }, []);
 
   const handleFileSelect = useCallback((file: VirtualFile) => {
     // Check if we're on mobile (matches Tailwind's md breakpoint)
     const isMobile = window.innerWidth < 768;
-    
+
     if (isMobile) {
       // On mobile, switch to editor panel and open file
-      setActiveMobilePanel('editor');
+      useWorkspaceStore.getState().setActiveMobilePanel('editor');
       setTimeout(() => {
         openFileInEditor(file);
       }, 0);
     } else {
       // Desktop behavior remains the same
-      if (!showEditor) {
-        togglePanel('editor');
+      if (!useWorkspaceStore.getState().showEditor) {
+        useWorkspaceStore.getState().togglePanel('editor');
         setTimeout(() => {
           openFileInEditor(file);
         }, 0);
@@ -1126,33 +949,33 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         openFileInEditor(file);
       }
     }
-  }, [showEditor]);
+  }, []);
 
   const handleFilesChange = useCallback(() => {
-    setRefreshTrigger(prev => prev + 1);
+    useWorkspaceStore.getState().bumpRefreshTrigger();
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (saveInProgress) {
+    if (useWorkspaceStore.getState().saveInProgress) {
       return;
     }
 
-    setSaveInProgress(true);
+    useWorkspaceStore.setState({ saveInProgress: true });
     try {
       const checkpoint = await saveManager.save(project.id);
       const latestProject = await vfs.getProject(project.id);
 
-      setLastSavedAt(latestProject.lastSavedAt ?? new Date(checkpoint.timestamp));
-      setCheckpointRefreshKey(prev => prev + 1);
+      useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? new Date(checkpoint.timestamp) });
+      useWorkspaceStore.getState().incrementCheckpointRefresh();
       toast.success('Project saved');
     } catch (error) {
       logger.error('Failed to save project', error);
       toast.error('Failed to save project');
     } finally {
-      setSaveInProgress(false);
+      useWorkspaceStore.setState({ saveInProgress: false });
     }
 
-  }, [project.id, saveInProgress]);
+  }, [project.id]);
 
   const handleCaptureScreenshot = useCallback(async (screenshot: string) => {
     try {
@@ -1214,7 +1037,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         if (savedId && savedId === checkpointId) {
           saveManager.markClean(project.id);
           const latestProject = await vfs.getProject(project.id);
-          setLastSavedAt(latestProject.lastSavedAt ?? null);
+          useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
         } else {
           saveManager.markDirty(project.id);
         }
@@ -1228,7 +1051,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   }, [handleFilesChange, project.id]);
 
   const handleScrollToCheckpoint = useCallback((checkpointId: string) => {
-    if (!showChat) setShowChat(true);
+    if (!useWorkspaceStore.getState().showChat) useWorkspaceStore.getState().togglePanel('chat');
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-checkpoint-id="${checkpointId}"]`);
       if (el) {
@@ -1237,7 +1060,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         setTimeout(() => el.classList.remove('ring-2', 'ring-primary/50'), 2000);
       }
     });
-  }, [showChat]);
+  }, []);
 
   const handleRetry = useCallback(async (checkpointId: string) => {
     try {
@@ -1303,7 +1126,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       if (savedId && savedId === checkpointId) {
         saveManager.markClean(project.id);
         const latestProject = await vfs.getProject(project.id);
-        setLastSavedAt(latestProject.lastSavedAt ?? null);
+        useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
       } else {
         saveManager.markDirty(project.id);
       }
@@ -1311,11 +1134,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       // Truncate debug events to remove the user message and all subsequent events
       // The user message will be re-added by the orchestrator when generation runs
       const truncatedEvents = debugEvents.slice(0, userMessageIndex);
-      setDebugEvents(truncatedEvents);
+      useWorkspaceStore.setState({ debugEvents: truncatedEvents, persistedInstance: null });
       await debugEventsState.truncateEvents(project.id, truncatedEvents);
-
-      // Clear the persisted orchestrator to force fresh conversation rebuild
-      setPersistedOrchestrator(null);
 
       toast.success('Restored checkpoint and retrying...');
       handleFilesChange();
@@ -1330,253 +1150,58 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     }
   }, [handleFilesChange, project.id, debugEvents]);
 
-  const handleGenerate = async (promptText?: string, images?: PendingImage[]) => {
-    if (isTourLockingInput) {
-      return;
-    }
+  const storeStartGeneration = useWorkspaceStore(s => s.startGeneration);
 
-    // Clear any pending runtime errors when starting a new generation
-    drainRuntimeErrors();
-    setRuntimeErrors([]);
+  const handleGenerate = useCallback(async (promptText?: string, images?: PendingImage[]) => {
+    // Clear runtime errors
+    useWorkspaceStore.getState().setRuntimeErrors([]);
 
-    const trimmedPrompt = (promptText ?? '').trim();
-
-    if (!trimmedPrompt && (!images || images.length === 0)) {
-      toast.error('Please enter a prompt');
-      return;
-    }
-
-    const currentProvider = configManager.getSelectedProvider();
-    const providerConfig = getProvider(currentProvider);
-    const apiKey = configManager.getApiKey();
-
-    // Only require API key for providers that need it
-    if (providerConfig.apiKeyRequired && !apiKey) {
-      toast.error(`Please set your ${providerConfig.name} API key in settings`);
-      return;
-    }
-
-    // For local providers, check if they have models available
-    if (providerConfig.isLocal) {
-      const localModel = configManager.getProviderModel(currentProvider);
-      if (!localModel) {
-        toast.error(`No model selected for ${providerConfig.name}. Please select a model in settings.`);
-        return;
-      }
-    }
-
-    // Determine which model to use based on chat mode
-    let modelToUse = configManager.getProviderModel(currentProvider) || configManager.getDefaultModel();
-    if (typeof window !== 'undefined') {
-      const useSeparateChatModel = localStorage.getItem(`osw-studio-use-separate-chat-model-${currentProvider}`) === 'true';
-      if (useSeparateChatModel) {
-        if (chatMode) {
-          const chatModel = localStorage.getItem(`osw-studio-chat-model-${currentProvider}`);
-          if (chatModel) modelToUse = chatModel;
-        } else {
-          const codeModel = localStorage.getItem(`osw-studio-code-model-${currentProvider}`);
-          if (codeModel) modelToUse = codeModel;
-        }
-      }
-    }
-
-    // Validate that we have a model selected
-    if (!modelToUse) {
-      toast.error(`No model selected for ${chatMode ? 'chat' : 'code'} mode. Please select a model in settings.`);
-      return;
-    }
-
-    setGenerating(true);
-    window.dispatchEvent(new CustomEvent('generationStateChanged', { detail: { generating: true } }));
-    const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    track('task_started', { provider: currentProvider, model: modelToUse, task_id: taskId });
-    const taskStartTime = Date.now();
-    let messageContent = trimmedPrompt;
+    let messageContent = (promptText ?? '').trim();
     const contextParts: string[] = [];
-    if (focusContext) {
-      contextParts.push(formatFocusContextBlock(focusContext));
-    }
+    if (focusContext) contextParts.push(formatFocusContextBlock(focusContext));
+    if (placedBlocks.length > 0) contextParts.push(formatPlacedBlocksContext(placedBlocks));
+    if (contextParts.length > 0) messageContent = contextParts.join('\n\n') + '\n\n' + messageContent;
+
+    await storeStartGeneration(messageContent, images, {
+      chatMode,
+      projectId: project.id,
+      focusContext,
+      placedBlocks,
+      isTourLockingInput,
+    });
+
+    // Post-generation UI cleanup
+    handleFilesChange();
+    if (focusContext) useWorkspaceStore.getState().setFocusContext(null);
     if (placedBlocks.length > 0) {
-      contextParts.push(formatPlacedBlocksContext(placedBlocks));
+      placedBlocks.forEach(b => previewRef.current?.removePlaceholder(b.placementId));
+      useWorkspaceStore.setState({ placedBlocks: [] });
     }
-    if (contextParts.length > 0) {
-      messageContent = contextParts.join('\n\n') + '\n\n' + messageContent;
-    }
-
-    // Note: User message will be added by orchestrator via conversation_message event
-    // No need to manually add user_message event here to avoid duplication
-
-    try {
-      // Reuse existing orchestrator or create new one
-      let orchestrator = persistedOrchestrator;
-
-      if (!orchestrator) {
-        orchestrator = new MultiAgentOrchestrator(
-          project.id,
-          'orchestrator',
-          addDebugEvent,
-          { chatMode, model: modelToUse }
-        );
-
-        // Extract and restore conversation history from debug events
-        const conversationMessages = debugEvents
-          .filter(event => event.event === 'conversation_message')
-          .map(event => event.data.message);
-
-        if (conversationMessages.length > 0) {
-          orchestrator.importConversation(conversationMessages);
-          logger.debug(`[Workspace] Restored ${conversationMessages.length} conversation messages from debug events`);
-        }
-
-        setPersistedOrchestrator(orchestrator);
-      }
-
-      // Store orchestrator reference for stop functionality
-      setCurrentOrchestrator(orchestrator);
-
-      // Build images array for orchestrator
-      const imageData = images?.map(img => ({
-        data: img.data,
-        mediaType: img.mediaType
-      }));
-
-      // Build context metadata for UI display (collapsed cards in user message)
-      const executeOptions: Parameters<typeof orchestrator.execute>[1] = {};
-      // Pass clean prompt for display (without prepended focus/semantic context)
-      if (focusContext || placedBlocks.length > 0) {
-        executeOptions.displayPrompt = trimmedPrompt;
-      }
-      if (imageData?.length) {
-        executeOptions.images = imageData;
-      }
-      if (focusContext) {
-        executeOptions.focusContext = {
-          domPath: focusContext.domPath,
-          snippet: truncateHtmlSnippet(focusContext.outerHTML, 240),
-        };
-      }
-      if (placedBlocks.length > 0) {
-        executeOptions.semanticBlocks = placedBlocks.map(pb => {
-          const block = getBlockById(pb.blockId);
-          return {
-            name: block?.name || pb.blockId,
-            domPath: pb.domPath,
-            position: pb.position,
-            description: block?.description || '',
-          };
-        });
-      }
-
-      // Execute - orchestrator handles conversation history internally
-      const result = await orchestrator.execute(messageContent, Object.keys(executeOptions).length > 0 ? executeOptions : undefined);
-
-      logger.debug('[Workspace] Orchestrator result:', {
-        success: result.success,
-        summary: result.summary,
-        totalCost: result.totalCost
-      });
-
-      if (result.success) {
-        handleFilesChange();
-
-        // Re-fetch backend context to ensure file explorer shows latest state
-        if (vfs.hasServerContext()) {
-          await vfs.refreshServerContext();
-        }
-
-        track('task_complete', {
-          provider: currentProvider,
-          model: modelToUse,
-          duration_ms: Date.now() - taskStartTime,
-          task_id: taskId,
-          tool_count: result.toolCount ?? 0,
-          turn_count: result.turnCount ?? 0,
-          api_error_count: result.apiErrorCount ?? 0,
-        });
-        toast.success('Task completed');
-      } else {
-        track('task_fail', {
-          provider: currentProvider,
-          model: modelToUse,
-          reason: 'api_error',
-          duration_ms: Date.now() - taskStartTime,
-          task_id: taskId,
-          tool_count: result.toolCount ?? 0,
-          turn_count: result.turnCount ?? 0,
-          api_error_count: result.apiErrorCount ?? 0,
-        });
-        toast.error(result.summary || 'Generation failed', {
-          duration: 5000,
-          position: 'bottom-center'
-        });
-      }
-
-      if (focusContext) {
-        setFocusContext(null);
-      }
-      if (placedBlocks.length > 0) {
-        placedBlocks.forEach(b => previewRef.current?.removePlaceholder(b.placementId));
-        setPlacedBlocks([]);
-      }
-    } catch (error) {
-      logger.error('Generation error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to generate';
-
-      track('task_fail', {
-        provider: currentProvider,
-        model: modelToUse,
-        reason: 'api_error',
-        duration_ms: Date.now() - taskStartTime,
-        task_id: taskId,
-      });
-
-      // Emit error event to clear thinking indicator in chat panel
-      addDebugEvent('error', { message: errorMessage });
-
-      toast.error(errorMessage, {
-        duration: 5000,
-        position: 'bottom-center'
-      });
-    } finally {
-      setGenerating(false);
-      window.dispatchEvent(new CustomEvent('generationStateChanged', { detail: { generating: false } }));
-      // Don't clear currentOrchestrator - only used for stop functionality
-      // The persisted orchestrator maintains conversation history
-      setCurrentOrchestrator(null);
-    }
-  };
+  }, [storeStartGeneration, chatMode, project.id, focusContext, placedBlocks, isTourLockingInput, handleFilesChange, formatFocusContextBlock, formatPlacedBlocksContext]);
 
   handleGenerateRef.current = handleGenerate;
 
+  const stopGeneration = useWorkspaceStore(s => s.stopGeneration);
+  const continueGeneration = useWorkspaceStore(s => s.continueGeneration);
+
   const handleStop = useCallback(() => {
-    if (currentOrchestrator) {
-      currentOrchestrator.stop();
-      track('task_fail', {
-        provider: configManager.getSelectedProvider(),
-        model: configManager.getDefaultModel(),
-        reason: 'stopped',
-      });
-      toast.info('Generation stopped');
-    }
-  }, [currentOrchestrator]);
+    stopGeneration();
+  }, [stopGeneration]);
 
   const handleContinue = useCallback(() => {
-    if (currentOrchestrator) {
-      currentOrchestrator.continue();
-      toast.info('Resuming task...');
-    }
-  }, [currentOrchestrator]);
+    continueGeneration();
+  }, [continueGeneration]);
 
   const handleSendRuntimeErrors = useCallback(() => {
     const errors = drainRuntimeErrors();
     if (errors.length === 0) return;
-    setRuntimeErrors([]);
+    useWorkspaceStore.getState().setRuntimeErrors([]);
     handleGenerate(formatRuntimeErrors(errors));
   }, [handleGenerate]);
 
   const handleClearRuntimeErrors = useCallback(() => {
     drainRuntimeErrors();
-    setRuntimeErrors([]);
+    useWorkspaceStore.getState().setRuntimeErrors([]);
   }, []);
 
   const headerActions: HeaderAction[] = [
@@ -1624,14 +1249,14 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 onClick={() => togglePanel('checkpoints')}
                 onMouseEnter={() => {
                   if (showCheckpoints) {
-                    setPanelReplacePreview('checkpoints');
+                    useWorkspaceStore.getState().setPanelReplacePreview('checkpoints');
                   } else {
                     handleSidebarHover('checkpoints');
                   }
                 }}
                 onMouseLeave={() => {
-                  setPanelReplacePreview(null);
-                  setPanelInsertPreview(null);
+                  useWorkspaceStore.getState().setPanelReplacePreview(null);
+                  useWorkspaceStore.getState().setPanelInsertPreview(null);
                 }}
                 disabled={saveInProgress}
                 className="rounded-l-none px-2"
@@ -1665,7 +1290,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         variant="outline"
         size="sm"
         className="h-8 px-3 flex items-center gap-2"
-        onClick={() => setShowProjectSettingsModal(true)}
+        onClick={() => useWorkspaceStore.getState().setShowProjectSettingsModal(true)}
         title="Project Settings"
       >
         <Settings2 className="h-4 w-4" />
@@ -1709,7 +1334,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         variant="outline"
         size="sm"
         className="w-full justify-start"
-        onClick={() => setShowProjectSettingsModal(true)}
+        onClick={() => useWorkspaceStore.getState().setShowProjectSettingsModal(true)}
       >
         <Settings2 className="h-4 w-4 mr-2" />
         Project Settings
@@ -2054,18 +1679,19 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   onStop={handleStop}
                   onContinue={handleContinue}
                   focusContext={focusContext}
-                  setFocusContext={setFocusContext}
+                  setFocusContext={storeFocusContext}
                   focusPreviewSnippet={focusPreviewSnippet}
                   chatMode={chatMode}
-                  setChatMode={setChatMode}
+                  setChatMode={storeChatMode}
                   currentModel={currentModel}
                   setCurrentModel={setCurrentModel}
                   getModelDisplayName={getModelDisplayName}
                   isTourLockingInput={isTourLockingInput}
                   onClearChat={clearDebugEvents}
-                  onClose={() => setShowChat(false)}
+                  onClose={() => useWorkspaceStore.getState().togglePanel('chat')}
                   supportsVision={supportsVision}
                   providerReady={providerReady}
+                  blockedByProject={blockedByProject}
                   runtimeErrors={runtimeErrors}
                   onSendRuntimeErrors={handleSendRuntimeErrors}
                   onClearRuntimeErrors={handleClearRuntimeErrors}
@@ -2080,7 +1706,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   <FileExplorer
                     projectId={project.id}
                     onFileSelect={handleFileSelect}
-                    onClose={() => setShowFiles(false)}
+                    onClose={() => useWorkspaceStore.getState().togglePanel('files')}
                     entryPoint={entryPoint}
                     onSetEntryPoint={handleSetEntryPoint}
                     onAddPromptFile={handleAddPromptFile}
@@ -2093,7 +1719,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   <MultiTabEditor
                     projectId={project.id}
                     runtime={projectRuntime}
-                    onClose={() => setShowEditor(false)}
+                    onClose={() => useWorkspaceStore.getState().togglePanel('editor')}
                   />
                 </div>
               )};
@@ -2105,7 +1731,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     runtime={projectRuntime || 'handlebars'}
                     bufferedMessages={consoleBufferRef.current}
                     onBufferConsumed={() => { consoleBufferRef.current = []; }}
-                    onClose={() => setShowConsole(false)}
+                    onClose={() => useWorkspaceStore.getState().togglePanel('console')}
                   />
                 </div>
               )};
@@ -2144,17 +1770,17 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   currentCheckpointId={checkpointManager.getCurrentCheckpoint()?.id}
                   onRestore={handleRestoreCheckpoint}
                   onScrollToTurn={handleScrollToCheckpoint}
-                  onClose={() => setShowCheckpoints(false)}
+                  onClose={() => useWorkspaceStore.getState().togglePanel('checkpoints')}
                   refreshKey={checkpointRefreshKey}
                 />
               )};
 
               if (showDebugPanel) panelMap['debug'] = { minSize: 15, content: (
-                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setShowDebugPanel(false)} />
+                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => useWorkspaceStore.getState().togglePanel('debug')} />
               )};
 
               if (showSkillsPanel) panelMap['skills'] = { minSize: 10, content: (
-                <SkillsPanel onClose={() => setShowSkillsPanel(false)} />
+                <SkillsPanel onClose={() => useWorkspaceStore.getState().togglePanel('skills')} />
               )};
 
               // Order visible panels by panelOrder
@@ -2276,10 +1902,10 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 onStop={handleStop}
                 onContinue={handleContinue}
                 focusContext={focusContext}
-                setFocusContext={setFocusContext}
+                setFocusContext={storeFocusContext}
                 focusPreviewSnippet={focusPreviewSnippet}
                 chatMode={chatMode}
-                setChatMode={setChatMode}
+                setChatMode={storeChatMode}
                 currentModel={currentModel}
                 setCurrentModel={setCurrentModel}
                 getModelDisplayName={getModelDisplayName}
@@ -2287,6 +1913,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 onClearChat={clearDebugEvents}
                 supportsVision={supportsVision}
                 providerReady={providerReady}
+                blockedByProject={blockedByProject}
                 runtimeErrors={runtimeErrors}
                 onSendRuntimeErrors={handleSendRuntimeErrors}
                 onClearRuntimeErrors={handleClearRuntimeErrors}
@@ -2301,7 +1928,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 <FileExplorer
                   projectId={project.id}
                   onFileSelect={handleFileSelect}
-                  onClose={() => setShowFiles(false)}
+                  onClose={() => useWorkspaceStore.getState().togglePanel('files')}
                   entryPoint={entryPoint}
                   onSetEntryPoint={handleSetEntryPoint}
                   onAddPromptFile={handleAddPromptFile}
@@ -2314,7 +1941,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 <MultiTabEditor
                   projectId={project.id}
                   runtime={projectRuntime}
-                  onClose={() => setShowEditor(false)}
+                  onClose={() => useWorkspaceStore.getState().togglePanel('editor')}
                 />
               </div>
             )}
@@ -2347,7 +1974,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   currentCheckpointId={checkpointManager.getCurrentCheckpoint()?.id}
                   onRestore={handleRestoreCheckpoint}
                   onScrollToTurn={handleScrollToCheckpoint}
-                  onClose={() => setActiveMobilePanel('chat')}
+                  onClose={() => useWorkspaceStore.getState().setActiveMobilePanel('chat')}
                   refreshKey={checkpointRefreshKey}
                 />
               </div>
@@ -2366,13 +1993,13 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
             {activeMobilePanel === 'skills' && (
               <div className="h-full overflow-hidden relative">
-                <SkillsPanel onClose={() => setActiveMobilePanel('chat')} />
+                <SkillsPanel onClose={() => useWorkspaceStore.getState().setActiveMobilePanel('chat')} />
               </div>
             )}
 
             {activeMobilePanel === 'debug' && (
               <div className="h-full overflow-hidden relative">
-                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => setActiveMobilePanel('chat')} />
+                <DebugPanel events={debugEvents} onClear={clearDebugEvents} onClose={() => useWorkspaceStore.getState().setActiveMobilePanel('chat')} />
               </div>
             )}
           </div>
@@ -2389,7 +2016,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'chat' ? 'var(--button-assistant-active)' : undefined,
                 }}
-                onClick={() => { setActiveMobilePanel('chat'); setMobileOverflowOpen(false); }}
+                onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('chat'); }}
               >
                 <MessageSquare className="h-4 w-4" />
               </button>
@@ -2403,7 +2030,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'files' ? 'var(--button-files-active)' : undefined,
                 }}
-                onClick={() => { setActiveMobilePanel('files'); setMobileOverflowOpen(false); }}
+                onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('files'); }}
               >
                 <FolderTree className="h-4 w-4" />
               </button>
@@ -2417,7 +2044,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'editor' ? 'var(--button-editor-active)' : undefined,
                 }}
-                onClick={() => { setActiveMobilePanel('editor'); setMobileOverflowOpen(false); }}
+                onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('editor'); }}
               >
                 <Code2 className="h-4 w-4" />
               </button>
@@ -2431,7 +2058,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 style={{
                   backgroundColor: activeMobilePanel === 'preview' ? 'var(--button-preview-active)' : undefined,
                 }}
-                onClick={() => { setActiveMobilePanel('preview'); setMobileOverflowOpen(false); }}
+                onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('preview'); }}
               >
                 <Eye className="h-4 w-4" />
               </button>
@@ -2444,7 +2071,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                       ? 'text-white bg-muted'
                       : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
                   }`}
-                  onClick={() => setMobileOverflowOpen(!mobileOverflowOpen)}
+                  onClick={() => useWorkspaceStore.getState().setMobileOverflowOpen(!mobileOverflowOpen)}
                 >
                   <EllipsisVertical className="h-4 w-4" />
                   {hasUnreadConsole && activeMobilePanel !== 'console' && (
@@ -2454,7 +2081,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
                 {mobileOverflowOpen && (
                   <>
-                    <div className="fixed inset-0 z-30" onClick={() => setMobileOverflowOpen(false)} />
+                    <div className="fixed inset-0 z-30" onClick={() => useWorkspaceStore.getState().setMobileOverflowOpen(false)} />
                     <div className="absolute bottom-full right-0 mb-2 z-40 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
                       <button
                         className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
@@ -2463,7 +2090,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                         style={{
                           backgroundColor: activeMobilePanel === 'checkpoints' ? 'var(--button-checkpoint-active)' : undefined,
                         }}
-                        onClick={() => { setActiveMobilePanel('checkpoints'); setMobileOverflowOpen(false); }}
+                        onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('checkpoints'); }}
                       >
                         <History className="h-4 w-4" />
                         <span>Checkpoints</span>
@@ -2475,7 +2102,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                         style={{
                           backgroundColor: activeMobilePanel === 'console' ? 'var(--button-terminal-active, #22c55e)' : undefined,
                         }}
-                        onClick={() => { setActiveMobilePanel('console'); setMobileOverflowOpen(false); }}
+                        onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('console'); }}
                       >
                         <TerminalIcon className="h-4 w-4" />
                         <span>Console</span>
@@ -2490,7 +2117,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                         style={{
                           backgroundColor: activeMobilePanel === 'skills' ? 'var(--button-skills-active, #a855f7)' : undefined,
                         }}
-                        onClick={() => { setActiveMobilePanel('skills'); setMobileOverflowOpen(false); }}
+                        onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('skills'); }}
                       >
                         <Sparkles className="h-4 w-4" />
                         <span>Skills</span>
@@ -2502,7 +2129,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                         style={{
                           backgroundColor: activeMobilePanel === 'debug' ? 'var(--button-debug-active, #ef4444)' : undefined,
                         }}
-                        onClick={() => { setActiveMobilePanel('debug'); setMobileOverflowOpen(false); }}
+                        onClick={() => { useWorkspaceStore.getState().setActiveMobilePanel('debug'); }}
                       >
                         <Bug className="h-4 w-4" />
                         <span>Debug</span>
@@ -2522,7 +2149,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       <ProjectSettingsModal
         project={project}
         isOpen={showProjectSettingsModal}
-        onClose={() => setShowProjectSettingsModal(false)}
+        onClose={() => useWorkspaceStore.getState().setShowProjectSettingsModal(false)}
         onProjectUpdate={handleProjectSettingsUpdate}
         enabled={backendEnabled}
         onToggleEnabled={handleBackendToggle}

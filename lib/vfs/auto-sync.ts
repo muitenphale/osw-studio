@@ -50,7 +50,6 @@ interface SyncStatusResult {
  */
 export interface SyncOverviewStatus {
   serverProjectCount: number;
-  serverDeploymentCount: number;
   serverLastUpdated: Date | null;
   localProjectCount: number;
   isUninitialized: boolean;  // Server has no projects
@@ -295,7 +294,7 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
     if (localFiles.length > 0) {
       try {
         const { checkpointManager } = await import('./checkpoint');
-        await checkpointManager.createCheckpoint(projectId, 'Pre-sync backup (before pull)', { kind: 'system' });
+        await checkpointManager.createCheckpoint(projectId, 'Pre-sync backup (before pull)', { kind: 'auto' });
       } catch (cpErr) {
         logger.warn(`[AutoSync] Failed to create pre-pull checkpoint for ${projectId}:`, cpErr);
       }
@@ -350,7 +349,6 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
     return {
       serverProjectCount: 0,
-      serverDeploymentCount: 0,
       serverLastUpdated: null,
       localProjectCount: 0,
       isUninitialized: false,
@@ -368,7 +366,7 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
       // Return empty status instead of throwing
       if (response.status === 404 || response.status === 401) {
         return {
-          serverProjectCount: 0, serverDeploymentCount: 0, serverLastUpdated: null,
+          serverProjectCount: 0, serverLastUpdated: null,
           localProjectCount: 0, isUninitialized: false, needsSync: false, loading: false, error: null,
         };
       }
@@ -394,7 +392,6 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
 
     return {
       serverProjectCount: summary.projectCount,
-      serverDeploymentCount: summary.deploymentCount,
       serverLastUpdated: summary.lastUpdated ? new Date(summary.lastUpdated) : null,
       localProjectCount,
       isUninitialized,
@@ -406,7 +403,6 @@ export async function getSyncOverviewStatus(): Promise<SyncOverviewStatus> {
     logger.error('[AutoSync] Failed to get sync overview status:', error);
     return {
       serverProjectCount: 0,
-      serverDeploymentCount: 0,
       serverLastUpdated: null,
       localProjectCount: 0,
       isUninitialized: true,

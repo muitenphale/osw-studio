@@ -8,14 +8,7 @@ import { PanelContainer, PanelHeader } from '@/components/ui/panel';
 import { MemoryMonitor } from './memory-monitor';
 import { configManager } from '@/lib/config/storage';
 
-export interface DebugEvent {
-  id: string;
-  timestamp: number;
-  event: string;
-  data: any;
-  count?: number; // For compressed events
-  version?: number; // Increments when event is updated (for coalesced streaming)
-}
+import type { DebugEvent } from '@/lib/stores/types';
 
 interface DebugPanelProps {
   events: DebugEvent[];
@@ -25,7 +18,6 @@ interface DebugPanelProps {
 
 export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
   const [filter, setFilter] = useState<string>('');
-  const [isExpanded, setIsExpanded] = useState(true);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [streamDebug, setStreamDebug] = useState<boolean>(() => configManager.getDebugStreamEnabled());

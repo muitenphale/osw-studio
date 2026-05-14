@@ -15,6 +15,7 @@ import { configManager } from '@/lib/config/storage';
 import { toast } from 'sonner';
 import { initTelemetry, track } from '@/lib/telemetry';
 import { TelemetryDisclosure } from '@/components/telemetry-disclosure';
+import { GenerationShelf } from '@/components/generation-shelf';
 
 // Module-level guard: prevents double token exchange when React strict mode
 // re-runs the effect, or if the component remounts before URL cleanup.
@@ -201,6 +202,17 @@ function StudioInner() {
     setShowTelemetryDisclosure(false);
   }, []);
 
+  const handleShelfNavigate = useCallback(async (info: { id: string; name: string }) => {
+    try {
+      const project = await vfs.getProject(info.id);
+      if (project) {
+        setSelectedProject(project);
+      }
+    } catch {
+      toast.error('Could not open project');
+    }
+  }, []);
+
   const content = useMemo(() => {
     if (selectedProject) {
       return (
@@ -244,6 +256,10 @@ function StudioInner() {
       <TelemetryDisclosure
         open={showTelemetryDisclosure}
         onDismiss={handleDismissTelemetryDisclosure}
+      />
+      <GenerationShelf
+        selectedProject={selectedProject}
+        onNavigateToProject={handleShelfNavigate}
       />
     </>
   );

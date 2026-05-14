@@ -6,6 +6,20 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.65.0 - Background Generation & Pinned Checkpoints (2026-05-14)
+
+You can now start a task and browse other projects within OSW Studio without losing it. The orchestrator keeps running while you review other work — come back and your conversation, checkpoints, and generated files are all there. Checkpoints also got an upgrade: pin any checkpoint to keep it permanently, and per-project pruning keeps storage tidy automatically.
+
+### AI Orchestration
+- **Tasks survive in-app navigation** — Start a generation, switch to another project to review it, and return to find the completed work waiting for you. The task runs as long as the browser tab stays open
+- **Generation shelf** — A floating indicator in the bottom-right shows your running task's project name, prompt, elapsed time, and model while you're elsewhere in the app. Click it to jump back
+
+### Checkpoints
+- **Pinned checkpoints** — Pin any checkpoint to keep it forever. Great for bookmarking a known-good state before experimenting with something risky
+- **Per-project pruning** — Each project automatically keeps its 5 most recent unpinned checkpoints. Pinned checkpoints are never pruned
+
+---
+
 ## v1.64.0 - Mobile Editor UX (2026-05-13)
 
 The mobile workspace gets a major usability pass. A new overflow menu in the bottom bar gives you access to all panels without cluttering the primary navigation. Panel headers slim down on mobile — titles and chrome disappear, leaving only action buttons styled as labeled pills so you can see what each one does at a glance. Panels now fill the full viewport width, and the header shows your project name with the active panel name below it.
