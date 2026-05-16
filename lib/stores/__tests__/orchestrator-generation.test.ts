@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestStore, setupOrchestratorMocks } from './test-helpers';
+import type { GenerationTask } from '../types';
 
 const mockExecute = vi.fn().mockResolvedValue({
   success: true,
@@ -23,6 +24,28 @@ vi.mock('@/lib/llm/multi-agent-orchestrator', () => ({
 }));
 
 setupOrchestratorMocks();
+
+function setActiveTask(
+  store: ReturnType<typeof createTestStore>,
+  projectId: string,
+  overrides?: Partial<GenerationTask>,
+) {
+  const tasks = new Map(store.getState().generationTasks);
+  tasks.set(projectId, {
+    projectId,
+    projectName: 'Test',
+    prompt: 'test',
+    model: 'gpt-4',
+    startedAt: Date.now(),
+    result: null,
+    paused: false,
+    pausedMessage: null,
+    orchestratorInstance: null,
+    persistedInstance: null,
+    ...overrides,
+  });
+  store.setState({ generationTasks: tasks, generating: true });
+}
 
 describe('orchestrator slice — generation lifecycle', () => {
   let store: ReturnType<typeof createTestStore>;
@@ -54,6 +77,7 @@ describe('orchestrator slice — generation lifecycle', () => {
     const promise = store.getState().startGeneration('task');
     store.getState().stopGeneration();
     expect(mockStop).toHaveBeenCalled();
+    // After stop, the task transitions to result: 'failed', so generating becomes false
     expect(store.getState().generating).toBe(false);
     await promise;
   });
@@ -66,16 +90,31 @@ describe('orchestrator slice — generation lifecycle', () => {
   });
 
   it('resetOrchestrator clears instances when not generating', () => {
-    store.setState({ persistedInstance: { fake: true } as any });
+    // Set up a completed task with a fake persistedInstance
+    const projectId = store.getState().projectId || '';
+    setActiveTask(store, projectId, {
+      result: 'completed',
+      persistedInstance: { fake: true } as any,
+    });
+    store.setState({ generating: false });
+
     store.getState().resetOrchestrator();
-    expect(store.getState().persistedInstance).toBeNull();
-    expect(store.getState().orchestratorInstance).toBeNull();
+
+    const task = store.getState().generationTasks.get(projectId);
+    expect(task?.persistedInstance).toBeNull();
+    expect(task?.orchestratorInstance).toBeNull();
   });
 
   it('resetOrchestrator is a no-op when generating', () => {
-    store.setState({ generating: true, persistedInstance: { fake: true } as any });
+    const projectId = store.getState().projectId || '';
+    setActiveTask(store, projectId, {
+      persistedInstance: { fake: true } as any,
+    });
+
     store.getState().resetOrchestrator();
-    expect(store.getState().persistedInstance).not.toBeNull();
+
+    const task = store.getState().generationTasks.get(projectId);
+    expect(task?.persistedInstance).not.toBeNull();
   });
 
   it('dispatches generationStateChanged window events', async () => {
@@ -86,11 +125,79 @@ describe('orchestrator slice — generation lifecycle', () => {
 
     const generationEvents = dispatched
       .filter(e => e.type === 'generationStateChanged')
-      .map(e => e.detail.generating);
+      .map(e => e.detail);
 
-    expect(generationEvents).toContain(true);
-    expect(generationEvents).toContain(false);
+    // Should have both a true and a false event
+    expect(generationEvents.some(d => d.generating === true)).toBe(true);
+    expect(generationEvents.some(d => d.generating === false)).toBe(true);
+    // Events include projectId
+    expect(generationEvents.every(d => 'projectId' in d)).toBe(true);
 
     vi.unstubAllGlobals();
+  });
+});
+
+describe('orchestrator slice — concurrent generation', () => {
+  let store: ReturnType<typeof createTestStore>;
+
+  beforeEach(() => {
+    store = createTestStore();
+    vi.clearAllMocks();
+  });
+
+  it('isProjectGenerating returns true only for active tasks', () => {
+    setActiveTask(store, 'proj-a');
+    setActiveTask(store, 'proj-b', { result: 'completed' });
+
+    expect(store.getState().isProjectGenerating('proj-a')).toBe(true);
+    expect(store.getState().isProjectGenerating('proj-b')).toBe(false);
+    expect(store.getState().isProjectGenerating('proj-c')).toBe(false);
+  });
+
+  it('isAnyGenerating returns true when at least one task is active', () => {
+    expect(store.getState().isAnyGenerating()).toBe(false);
+
+    setActiveTask(store, 'proj-a');
+    expect(store.getState().isAnyGenerating()).toBe(true);
+
+    // Mark it as completed
+    const tasks = new Map(store.getState().generationTasks);
+    const task = tasks.get('proj-a')!;
+    tasks.set('proj-a', { ...task, result: 'completed' });
+    store.setState({ generationTasks: tasks });
+
+    expect(store.getState().isAnyGenerating()).toBe(false);
+  });
+
+  it('stopGeneration(projectId) only stops that project', () => {
+    const fakeOrch = { stop: vi.fn() } as any;
+    setActiveTask(store, 'proj-a', { orchestratorInstance: fakeOrch });
+    setActiveTask(store, 'proj-b');
+
+    store.getState().stopGeneration('proj-a');
+
+    expect(fakeOrch.stop).toHaveBeenCalled();
+    const taskA = store.getState().generationTasks.get('proj-a');
+    expect(taskA?.result).toBe('failed');
+    // proj-b should still be active
+    expect(store.getState().isProjectGenerating('proj-b')).toBe(true);
+  });
+
+  it('dismissGenerationResult removes only that project task', () => {
+    setActiveTask(store, 'proj-a', { result: 'completed' });
+    setActiveTask(store, 'proj-b', { result: 'failed' });
+
+    store.getState().dismissGenerationResult('proj-a');
+
+    expect(store.getState().generationTasks.has('proj-a')).toBe(false);
+    expect(store.getState().generationTasks.has('proj-b')).toBe(true);
+  });
+
+  it('dismissGenerationResult is a no-op for active tasks', () => {
+    setActiveTask(store, 'proj-a'); // result: null (active)
+
+    store.getState().dismissGenerationResult('proj-a');
+
+    expect(store.getState().generationTasks.has('proj-a')).toBe(true);
   });
 });

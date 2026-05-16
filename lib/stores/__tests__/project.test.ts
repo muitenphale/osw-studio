@@ -1,8 +1,31 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestStore, setupOrchestratorMocks } from './test-helpers';
+import type { GenerationTask } from '../types';
 
 vi.mock('@/lib/llm/multi-agent-orchestrator', () => ({ MultiAgentOrchestrator: vi.fn() }));
 setupOrchestratorMocks();
+
+function setActiveTask(
+  store: ReturnType<typeof createTestStore>,
+  projectId: string,
+  overrides?: Partial<GenerationTask>,
+) {
+  const tasks = new Map(store.getState().generationTasks);
+  tasks.set(projectId, {
+    projectId,
+    projectName: 'Test',
+    prompt: 'test',
+    model: 'gpt-4',
+    startedAt: Date.now(),
+    result: null,
+    paused: false,
+    pausedMessage: null,
+    orchestratorInstance: null,
+    persistedInstance: null,
+    ...overrides,
+  });
+  store.setState({ generationTasks: tasks, generating: true });
+}
 
 describe('project slice', () => {
   let store: ReturnType<typeof createTestStore>;
@@ -47,19 +70,29 @@ describe('project slice', () => {
   });
 
   it('setChatMode defers reset when generating', () => {
-    store.setState({ generating: true });
     store.getState().initProject({ id: 'p', name: 'P' });
-    store.setState({ persistedInstance: { fake: true } as any });
+    // Create an active task for the viewed project to make generating=true
+    setActiveTask(store, 'p', { persistedInstance: { fake: true } as any });
     store.getState().setChatMode(true);
-    expect(store.getState().persistedInstance).not.toBeNull();
+    // persistedInstance should not be cleared because generation is active
+    const task = store.getState().generationTasks.get('p');
+    expect(task?.persistedInstance).not.toBeNull();
     expect(store.getState().chatMode).toBe(true);
   });
 
   it('setChatMode resets orchestrator when not generating', () => {
     store.getState().initProject({ id: 'p', name: 'P' });
-    store.setState({ persistedInstance: { fake: true } as any });
+    // Create a completed task with a fake persistedInstance
+    setActiveTask(store, 'p', {
+      result: 'completed',
+      persistedInstance: { fake: true } as any,
+    });
+    store.setState({ generating: false });
+
     store.getState().setChatMode(true);
-    expect(store.getState().persistedInstance).toBeNull();
+
+    const task = store.getState().generationTasks.get('p');
+    expect(task?.persistedInstance).toBeNull();
   });
 
   it('resetProject clears all project state', () => {
@@ -73,7 +106,8 @@ describe('project slice', () => {
 
   it('resetProject is a no-op when generating', () => {
     store.getState().initProject({ id: 'p', name: 'P' });
-    store.setState({ generating: true });
+    // Create an active task to make generating=true
+    setActiveTask(store, 'p');
     store.getState().resetProject();
     expect(store.getState().projectId).toBe('p');
   });

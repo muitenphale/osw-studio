@@ -6,6 +6,19 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.66.0 - Multi-Generation (2026-05-16)
+
+You can now run multiple generations at the same time. Start a task on one project, switch to another, and kick off a second task — both run independently. The generation shelf tracks all background tasks with live activity, elapsed time, and controls to stop or jump back in.
+
+### Agent Orchestration
+- **Concurrent generation** — Run tasks on multiple projects simultaneously. Each project gets its own orchestrator instance that runs independently
+- **Paused task alerts** — Background tasks that hit API errors (like upstream timeouts) show a yellow "Paused" indicator on the shelf with Continue/Cancel — no need to navigate back to handle them
+
+### Fixes
+- **Chat history preserved on navigation** — Leaving and returning to a generating project now correctly restores the full conversation and activity log
+
+---
+
 ## v1.65.0 - Background Generation & Pinned Checkpoints (2026-05-14)
 
 You can now start a task and browse other projects within OSW Studio without losing it. The orchestrator keeps running while you review other work — come back and your conversation, checkpoints, and generated files are all there. Checkpoints also got an upgrade: pin any checkpoint to keep it permanently, and per-project pruning keeps storage tidy automatically.

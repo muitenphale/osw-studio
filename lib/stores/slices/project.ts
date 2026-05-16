@@ -36,7 +36,7 @@ export interface ProjectSlice {
   resetProject: () => void;
 }
 
-type CombinedState = ProjectSlice & { generating: boolean; persistedInstance: any; resetOrchestrator: () => void };
+type CombinedState = ProjectSlice & { generating: boolean; isProjectGenerating: (id: string) => boolean; resetOrchestrator: () => void };
 
 export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlice> = (set, get) => ({
   projectId: '',

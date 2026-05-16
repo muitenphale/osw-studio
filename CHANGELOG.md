@@ -1,11 +1,24 @@
 # Changelog
 
+## v1.66.0 - 2026-05-16
+
+### Multi-Generation
+
+- **Concurrent project generation**: Multiple projects can now generate simultaneously. Start a task on one project, navigate to another, and start a second task — each runs independently with its own orchestrator instance.
+- **Generation shelf upgrade**: The shelf now shows all background tasks with per-card stop, dismiss, and navigation controls.
+- **Paused task visibility**: When a background generation hits an API error (e.g. upstream timeout), the shelf turns yellow with "Paused — needs attention" and shows Continue/Cancel buttons directly — no need to navigate back to the project.
+
+### Fixes
+
+- **Chat history lost on navigation**: Leaving a generating project and returning now correctly preserves the full conversation and shelf activity.
+
 ## v1.65.0 - 2026-05-14
 
 ### AI Generation Survives Navigation
 
 - **Background generation**: Starting a task and navigating to the project gallery no longer kills the generation. The orchestrator continues running and the full conversation — including checkpoints — is intact when you return.
 - **Generation shelf**: A floating indicator appears in the bottom-right corner when you navigate away from an active task. Shows the project name, prompt, elapsed time, model, and live activity. Click to jump back to the project.
+
 ### Checkpoints
 
 - **Pinned checkpoints**: Pin any checkpoint to prevent it from being pruned. Pinned checkpoints survive indefinitely as full project snapshots — useful for bookmarking a known-good state before experimenting.

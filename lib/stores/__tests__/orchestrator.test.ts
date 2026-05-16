@@ -1,17 +1,39 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestStore, setupOrchestratorMocks } from './test-helpers';
 import { debugEventsState } from '@/lib/llm/debug-events-state';
+import type { GenerationTask } from '../types';
 
 vi.mock('@/lib/llm/multi-agent-orchestrator', () => ({ MultiAgentOrchestrator: vi.fn() }));
 setupOrchestratorMocks();
 
+function setActiveTask(
+  store: ReturnType<typeof createTestStore>,
+  projectId: string,
+  overrides?: Partial<GenerationTask>,
+) {
+  const tasks = new Map(store.getState().generationTasks);
+  tasks.set(projectId, {
+    projectId,
+    projectName: 'Test',
+    prompt: 'test',
+    model: 'gpt-4',
+    startedAt: Date.now(),
+    result: null,
+    paused: false,
+    pausedMessage: null,
+    orchestratorInstance: null,
+    persistedInstance: null,
+    ...overrides,
+  });
+  store.setState({ generationTasks: tasks, generating: true });
+}
+
 describe('orchestrator slice — initial state', () => {
-  it('starts with generating=false and no orchestrator instance', () => {
+  it('starts with generating=false and no generation tasks', () => {
     const store = createTestStore();
     const state = store.getState();
     expect(state.generating).toBe(false);
-    expect(state.orchestratorInstance).toBeNull();
-    expect(state.persistedInstance).toBeNull();
+    expect(state.generationTasks.size).toBe(0);
     expect(state.debugEvents).toEqual([]);
     expect(state.currentModel).toBe('');
     expect(state.projectCost).toBe(0);
@@ -124,6 +146,7 @@ describe('orchestrator slice — IndexedDB persistence', () => {
   });
 
   it('debounce-persists events to IndexedDB after 500ms', async () => {
+    store.getState().initProject({ id: 'test-project-1', name: 'Test' });
     store.getState().initPersistence('test-project-1');
     store.getState().addDebugEvent('test', { x: 1 });
 
@@ -137,6 +160,7 @@ describe('orchestrator slice — IndexedDB persistence', () => {
   });
 
   it('resets debounce timer on rapid events', () => {
+    store.getState().initProject({ id: 'test-project-1', name: 'Test' });
     store.getState().initPersistence('test-project-1');
     store.getState().addDebugEvent('test', { x: 1 });
     vi.advanceTimersByTime(300);
@@ -145,5 +169,150 @@ describe('orchestrator slice — IndexedDB persistence', () => {
     expect(debugEventsState.saveEvents).not.toHaveBeenCalled();
     vi.advanceTimersByTime(200);
     expect(debugEventsState.saveEvents).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('orchestrator slice — background event routing', () => {
+  let store: ReturnType<typeof createTestStore>;
+
+  beforeEach(() => {
+    store = createTestStore();
+    store.getState().initProject({ id: 'viewed-project', name: 'Viewed' });
+  });
+
+  it('addDebugEvent with matching sourceProjectId goes to foreground', () => {
+    store.getState().addDebugEvent('test_event', { x: 1 }, 'viewed-project');
+    expect(store.getState().debugEvents).toHaveLength(1);
+    expect(store.getState().debugEvents[0].event).toBe('test_event');
+  });
+
+  it('addDebugEvent with different sourceProjectId does not appear in foreground', () => {
+    store.getState().addDebugEvent('test_event', { x: 1 }, 'other-project');
+    expect(store.getState().debugEvents).toHaveLength(0);
+  });
+
+  it('background events are persisted via debouncedSave', () => {
+    vi.useFakeTimers();
+    store.getState().initPersistence('other-project');
+    store.getState().addDebugEvent('test_event', { x: 1 }, 'other-project');
+    vi.advanceTimersByTime(500);
+    expect(debugEventsState.saveEvents).toHaveBeenCalledWith(
+      'other-project',
+      expect.arrayContaining([expect.objectContaining({ event: 'test_event' })]),
+    );
+    vi.useRealTimers();
+  });
+
+  it('background events coalesce assistant_delta', () => {
+    const bgProject = 'coalesce-test-project';
+    store.getState().initPersistence(bgProject);
+    store.getState().addDebugEvent('assistant_delta', { text: 'a' }, bgProject);
+    store.getState().addDebugEvent('assistant_delta', { text: 'b' }, bgProject);
+    const events = store.getState().getGenerationEvents(bgProject);
+    expect(events).toHaveLength(1);
+    expect(events[0].count).toBe(2);
+  });
+});
+
+describe('orchestrator slice — stashForegroundEvents', () => {
+  let store: ReturnType<typeof createTestStore>;
+
+  beforeEach(() => {
+    store = createTestStore();
+    store.getState().initProject({ id: 'proj-1', name: 'Project 1' });
+  });
+
+  it('copies foreground events to background buffer when project is generating', () => {
+    setActiveTask(store, 'proj-1');
+    store.getState().addDebugEvent('test', { x: 1 });
+    store.getState().addDebugEvent('test', { x: 2 });
+    expect(store.getState().debugEvents).toHaveLength(2);
+
+    store.getState().stashForegroundEvents('proj-1');
+
+    // Events are now in background buffer, retrievable via getGenerationEvents
+    const buffered = store.getState().getGenerationEvents('proj-1');
+    expect(buffered).toHaveLength(2);
+  });
+
+  it('is a no-op when project is not generating', () => {
+    store.getState().addDebugEvent('test', { x: 1 });
+    store.getState().stashForegroundEvents('proj-1');
+
+    // No buffer created for non-generating project
+    const buffered = store.getState().getGenerationEvents('proj-1');
+    // Should fall through to foreground events (still in debugEvents)
+    expect(buffered).toHaveLength(1);
+  });
+
+  it('is a no-op when debugEvents is empty', () => {
+    setActiveTask(store, 'proj-1');
+    store.getState().stashForegroundEvents('proj-1');
+    const buffered = store.getState().getGenerationEvents('proj-1');
+    expect(buffered).toHaveLength(0);
+  });
+});
+
+describe('orchestrator slice — loadDebugEvents', () => {
+  let store: ReturnType<typeof createTestStore>;
+
+  beforeEach(() => {
+    store = createTestStore();
+    vi.clearAllMocks();
+  });
+
+  it('restores events from background buffer for a generating project', async () => {
+    const bgId = 'load-bg-test';
+    store.getState().initProject({ id: bgId, name: 'BG' });
+    setActiveTask(store, bgId);
+    // Switch to another project first so events route to background
+    store.getState().initProject({ id: 'proj-other', name: 'Other' });
+    store.getState().clearDebugEvents();
+    // Now add event with sourceProjectId — it routes to background buffer
+    store.getState().addDebugEvent('bg_event', { x: 1 }, bgId);
+    expect(store.getState().debugEvents).toHaveLength(0);
+
+    // Load events for the generating project (simulating navigation back)
+    await store.getState().loadDebugEvents(bgId);
+    expect(store.getState().debugEvents).toHaveLength(1);
+    expect(store.getState().debugEvents[0].event).toBe('bg_event');
+  });
+
+  it('loads from IndexedDB for a non-generating project', async () => {
+    vi.mocked(debugEventsState.loadEvents).mockResolvedValueOnce([
+      { id: '1', timestamp: 1000, event: 'saved_event', data: {}, count: 1, version: 1 } as any,
+    ]);
+
+    store.getState().initProject({ id: 'proj-1', name: 'P1' });
+    await store.getState().loadDebugEvents('proj-1');
+
+    expect(debugEventsState.loadEvents).toHaveBeenCalledWith('proj-1');
+    expect(store.getState().debugEvents).toHaveLength(1);
+    expect(store.getState().debugEvents[0].event).toBe('saved_event');
+  });
+
+  it('sets empty array when IndexedDB has no events', async () => {
+    vi.mocked(debugEventsState.loadEvents).mockResolvedValueOnce([]);
+    store.getState().initProject({ id: 'proj-1', name: 'P1' });
+    // Put something in foreground first
+    store.getState().addDebugEvent('leftover', {});
+
+    await store.getState().loadDebugEvents('proj-1');
+    expect(store.getState().debugEvents).toEqual([]);
+  });
+
+  it('derives generating scalar for the loaded project', async () => {
+    store.getState().initProject({ id: 'proj-1', name: 'P1' });
+    setActiveTask(store, 'proj-1');
+    // Switch away — generating stays true from setState, but loadDebugEvents re-derives it
+    store.getState().initProject({ id: 'proj-2', name: 'P2' });
+
+    // loadDebugEvents for proj-2 (no task) should derive generating=false
+    await store.getState().loadDebugEvents('proj-2');
+    expect(store.getState().generating).toBe(false);
+
+    // loadDebugEvents for proj-1 (active task) should derive generating=true
+    await store.getState().loadDebugEvents('proj-1');
+    expect(store.getState().generating).toBe(true);
   });
 });

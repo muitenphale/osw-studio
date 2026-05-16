@@ -78,3 +78,6 @@ next-env.d.ts
 project_dump.txt
 *.dump
 analysis.md
+
+# Development planning docs
+docs/superpowers/

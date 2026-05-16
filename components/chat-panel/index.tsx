@@ -88,8 +88,6 @@ interface ChatPanelProps {
   supportsVision?: boolean;
   // Provider has credentials configured
   providerReady?: boolean;
-  // Another project is generating — block input
-  blockedByProject?: string | null;
   // Runtime errors
   runtimeErrors?: string[];
   onSendRuntimeErrors?: () => void;
@@ -207,7 +205,6 @@ export function ChatPanel({
   onClose,
   supportsVision = false,
   providerReady = true,
-  blockedByProject = null,
   runtimeErrors = [],
   onSendRuntimeErrors,
   onClearRuntimeErrors,
@@ -1112,13 +1109,7 @@ export function ChatPanel({
             </div>
           )}
 
-          {blockedByProject ? (
-            <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-3 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-              <span>A task is running on <span className="font-medium text-foreground">{blockedByProject}</span></span>
-            </div>
-          ) : (
-            <div className="relative flex bg-card rounded-lg transition-all">
+          <div className="relative flex bg-card rounded-lg transition-all">
               <Textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
@@ -1158,7 +1149,6 @@ export function ChatPanel({
                 </Button>
               </div>
             </div>
-          )}
 
           {/* Footer */}
           <div className="border-t border-border bg-muted/50 px-2 py-2">

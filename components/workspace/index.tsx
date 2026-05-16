@@ -85,9 +85,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const mobileOverflowOpen = useWorkspaceStore(s => s.mobileOverflowOpen);
   const placedBlocks = useWorkspaceStore(s => s.placedBlocks);
   const paletteOpen = useWorkspaceStore(s => s.paletteOpen);
-  const generatingProjectId = useWorkspaceStore(s => s.generatingProjectId);
-  const generatingProjectName = useWorkspaceStore(s => s.generatingProjectName);
-  const blockedByProject = generating && generatingProjectId !== project.id ? generatingProjectName : null;
   const lastFocusSignatureRef = useRef<{ signature: string; timestamp: number } | null>(null);
   const previewRef = useRef<MultipagePreviewHandle>(null);
   const generatingRef = useRef(false);
@@ -115,13 +112,13 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   // Browser beforeunload — warn when dirty or generating
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (generating || isDirty) {
+      if (useWorkspaceStore.getState().isAnyGenerating() || isDirty) {
         e.preventDefault();
       }
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [generating, isDirty]);
+  }, [isDirty]);
 
   // Subscribe to runtime errors that arrive after generation completes
   useEffect(() => {
@@ -637,7 +634,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
         // Skip checkpoint restore if an orchestrator session is active
         // (generation ran or is running while the workspace was unmounted)
-        if (!useWorkspaceStore.getState().persistedInstance) {
+        if (!useWorkspaceStore.getState().isProjectGenerating(project.id)) {
           await saveManager.syncProjectSaveState(project.id);
           const savedCheckpointId = saveManager.getSavedCheckpointId(project.id);
 
@@ -678,9 +675,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
         // Initialize store persistence and load debug events
         useWorkspaceStore.getState().initPersistence(project.id);
-        if (useWorkspaceStore.getState().generatingProjectId === project.id) {
-          useWorkspaceStore.getState().dismissGenerationResult();
-        }
+        useWorkspaceStore.getState().dismissGenerationResult(project.id);
         useWorkspaceStore.getState().initLayout();
         useWorkspaceStore.getState().setCurrentModel(configManager.getDefaultModel());
         try {
@@ -737,15 +732,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   useEffect(() => {
     if (!tourRunning) {
       setWorkspaceHandler(null);
-      // Only clear generating if no real generation is active (tour may have set it)
-      if (!useWorkspaceStore.getState().orchestratorInstance && !useWorkspaceStore.getState().persistedInstance) {
-        useWorkspaceStore.setState({ generating: false });
-      }
       return;
     }
-
-    // Set generating state based on tour busy state
-    useWorkspaceStore.setState({ generating: tourStep === 'workspace-edit' && tourState.isBusy });
 
     const handler = async (event: GuidedTourTranscriptEvent) => {
       // Convert tour events to debug events for ChatPanel display
@@ -862,16 +850,22 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     const projectId = project.id;
 
     return () => {
-      const isGenerating = useWorkspaceStore.getState().generating;
+      const thisProjectGenerating = useWorkspaceStore.getState().isProjectGenerating(projectId);
+
+      // Stash foreground events to background buffer before clearing, so the
+      // generation shelf and re-entry can access them.
+      if (thisProjectGenerating) {
+        useWorkspaceStore.getState().stashForegroundEvents(projectId);
+      }
 
       // Clear caches only if not generating (data still needed for active generation)
-      if (!isGenerating) {
+      if (!thisProjectGenerating) {
         checkpointManager.unloadProject(projectId);
         debugEventsState.unloadProject(projectId);
       }
 
       // Clean up store persistence only if not generating (debounce timer still needed)
-      if (!isGenerating) {
+      if (!thisProjectGenerating) {
         useWorkspaceStore.getState().cleanupPersistence();
         useWorkspaceStore.getState().resetOrchestrator();
         useWorkspaceStore.getState().clearDebugEvents();
@@ -885,7 +879,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       vfs.unmountBackendContext();
 
       // Reset project slice state
-      if (!isGenerating) {
+      if (!thisProjectGenerating) {
         useWorkspaceStore.getState().resetProject();
       } else {
         // During generation, still reset workspaceReady so the next project shows loading spinners
@@ -1134,7 +1128,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       // Truncate debug events to remove the user message and all subsequent events
       // The user message will be re-added by the orchestrator when generation runs
       const truncatedEvents = debugEvents.slice(0, userMessageIndex);
-      useWorkspaceStore.setState({ debugEvents: truncatedEvents, persistedInstance: null });
+      useWorkspaceStore.setState({ debugEvents: truncatedEvents });
+      useWorkspaceStore.getState().resetOrchestrator();
       await debugEventsState.truncateEvents(project.id, truncatedEvents);
 
       toast.success('Restored checkpoint and retrying...');
@@ -1691,7 +1686,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   onClose={() => useWorkspaceStore.getState().togglePanel('chat')}
                   supportsVision={supportsVision}
                   providerReady={providerReady}
-                  blockedByProject={blockedByProject}
                   runtimeErrors={runtimeErrors}
                   onSendRuntimeErrors={handleSendRuntimeErrors}
                   onClearRuntimeErrors={handleClearRuntimeErrors}
@@ -1913,7 +1907,6 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 onClearChat={clearDebugEvents}
                 supportsVision={supportsVision}
                 providerReady={providerReady}
-                blockedByProject={blockedByProject}
                 runtimeErrors={runtimeErrors}
                 onSendRuntimeErrors={handleSendRuntimeErrors}
                 onClearRuntimeErrors={handleClearRuntimeErrors}
