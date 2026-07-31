@@ -350,9 +350,18 @@ export class SyncManager {
   }
 
   /**
-   * Push single project to server (new API endpoint)
+   * Push a single project and all of its files to the server.
+   *
+   * `force` overwrites the server copy even when it has moved on since this client last synced.
+   * Reserved for an explicit push from Server Sync: the user is looking at the conflict and
+   * choosing to keep the local copy. Background syncs omit it so conflicts still surface.
    */
-  async pushSingleProject(projectId: string, project: Project, files: VirtualFile[]): Promise<ProjectSyncResult> {
+  async pushSingleProject(
+    projectId: string,
+    project: Project,
+    files: VirtualFile[],
+    options?: { force?: boolean }
+  ): Promise<ProjectSyncResult> {
     try {
       const serializedFiles = files.map(serializeFileContent);
 
@@ -361,7 +370,7 @@ export class SyncManager {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ project, files: serializedFiles }),
+        body: JSON.stringify({ project, files: serializedFiles, force: options?.force ?? false }),
       });
 
       if (!response.ok) {
@@ -411,6 +420,9 @@ export class SyncManager {
       const serverProject = manifestData.project;
       const clientLastSynced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : 0;
       const serverUpdated = new Date(serverProject.updatedAt).getTime();
+      // No force option here on purpose. A delta sends only the files that differ from the server's
+      // manifest, so forcing one would leave whatever the server gained meanwhile in place — the
+      // opposite of "keep my copy". Resolving a conflict goes through the full push instead.
       if (clientLastSynced > 0 && serverUpdated > clientLastSynced) {
         return { success: false, error: 'conflict' };
       }

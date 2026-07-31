@@ -43,6 +43,7 @@ import {
 
 import { vfs } from '../index';
 import { BackupService } from '../backup-service';
+import { getSyncManager } from '../sync-manager';
 import { saveManager } from '../save-manager';
 import { calculateItemSyncStatus } from '../sync-types';
 import {
@@ -254,6 +255,72 @@ describe('a project restored from an .osws backup', () => {
     await reconcileProjectsToServer(WORKSPACE);
 
     expect(await serverSyncSays(id)).toBe('synced');
+  });
+});
+
+describe('a project both sides have changed', () => {
+  /**
+   * Server Sync is the place a conflict gets resolved, and Push there means "keep my copy". It used
+   * to be refused by the same optimistic-concurrency check that protects background syncs, so a
+   * conflict could only ever be resolved in the server's favour, by pulling.
+   */
+  async function makeConflicted(name: string) {
+    const id = await createAndPush(name);
+
+    // Local moves on.
+    vi.setSystemTime(EDITED_AT);
+    const local = await vfs.getProject(id);
+    local!.name = `${name} (local)`;
+    await vfs.updateProject(local!);
+    saveManager.markClean(id);
+
+    // ...and so does the server, from another device.
+    const onServer = await adapter.getProject(id);
+    await adapter.updateProject({
+      ...onServer,
+      name: `${name} (server)`,
+      updatedAt: new Date('2026-07-31T10:00:15.000Z'),
+    } as never);
+
+    return id;
+  }
+
+  it('is reported as a conflict', async () => {
+    const id = await makeConflicted('Contested');
+
+    expect(await serverSyncSays(id)).toBe('conflict');
+  });
+
+  it('still refuses a background push, which must not pick a side', async () => {
+    const id = await makeConflicted('Contested');
+    const project = await vfs.getProject(id);
+    const files = await vfs.listFiles(id);
+
+    const result = await getSyncManager(WORKSPACE).pushSingleProject(id, project!, files);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('conflict');
+  });
+
+  it('settles as synced when the user pushes from Server Sync', async () => {
+    const id = await makeConflicted('Contested');
+    const project = await vfs.getProject(id);
+    const files = await vfs.listFiles(id);
+
+    // Exactly what components/project-manager/sync-tabs/projects-tab.tsx does on Push.
+    const result = await getSyncManager(WORKSPACE).pushSingleProject(id, project!, files, {
+      force: true,
+    });
+    expect(result.success).toBe(true);
+    project!.lastSyncedAt = new Date();
+    project!.serverUpdatedAt = result.project?.updatedAt
+      ? new Date(result.project.updatedAt)
+      : new Date();
+    await vfs.updateProject(project!, { preserveUpdatedAt: true });
+
+    expect(await serverSyncSays(id)).toBe('synced');
+    // The local copy is the one that survived.
+    expect((await adapter.getProject(id))!.name).toBe('Contested (local)');
   });
 });
 

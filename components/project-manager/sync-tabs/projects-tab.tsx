@@ -65,7 +65,10 @@ export function ProjectsTab({
       }
 
       const files = await vfs.listFiles(item.id);
-      const result = await syncManager.pushSingleProject(item.id, project, files);
+      // An explicit push from this dialog means "make the server match my copy", including when
+      // both sides have changed — the row says Conflict and the tooltip offers exactly this. Only
+      // background syncs leave the server's newer copy alone and report the conflict instead.
+      const result = await syncManager.pushSingleProject(item.id, project, files, { force: true });
 
       if (result.success) {
         // Update local sync metadata to prevent conflict on refresh

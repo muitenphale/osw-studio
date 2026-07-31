@@ -17,6 +17,14 @@ interface PushRequestBody {
   files: (VirtualFile & { _isBinaryBase64?: boolean })[];
   deletedPaths?: string[];
   partial?: boolean;
+  /**
+   * Push anyway when the server has moved on since this client last synced.
+   *
+   * Only ever set by an explicit push from Server Sync, where the user is looking at the conflict
+   * and choosing to keep the local copy. Background syncs leave it unset so a conflict is still
+   * reported rather than resolved behind the user's back.
+   */
+  force?: boolean;
 }
 
 export async function POST(
@@ -27,7 +35,7 @@ export async function POST(
     const { adapter } = await getWorkspaceContext(params);
     const { id } = await params;
     const body: PushRequestBody = await request.json();
-    const { project, files, deletedPaths = [], partial = false } = body;
+    const { project, files, deletedPaths = [], partial = false, force = false } = body;
 
     if (!project || project.id !== id || !Array.isArray(files) || !Array.isArray(deletedPaths)) {
       return NextResponse.json(
@@ -49,10 +57,11 @@ export async function POST(
     const existingProject = await adapter.getProject(id);
 
     if (existingProject) {
-      // Optimistic concurrency: reject if server has newer changes than client last saw
+      // Optimistic concurrency: reject if server has newer changes than client last saw, unless the
+      // user has explicitly chosen to keep the local copy.
       const clientLastSynced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : 0;
       const serverUpdated = new Date(existingProject.updatedAt).getTime();
-      if (clientLastSynced > 0 && serverUpdated > clientLastSynced) {
+      if (!force && clientLastSynced > 0 && serverUpdated > clientLastSynced) {
         return NextResponse.json(
           { error: 'conflict', serverUpdatedAt: existingProject.updatedAt },
           { status: 409 }

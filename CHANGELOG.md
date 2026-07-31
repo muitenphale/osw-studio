@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.90.2 - 2026-08-01
+
+### Fixes
+- **A conflict can be resolved by keeping your copy (Server Mode)**: When a project had changed both locally and on the server, Server Sync offered Push and then refused it with a bare "conflict", so the only way out was to pull and discard the local work. Pushing from Server Sync now overwrites the server copy, which is what the button has always said it does. Background syncs still leave a conflicted project alone and report it rather than picking a side for you.
+
 ## v1.90.1 - 2026-07-31
 
 ### Fixes
