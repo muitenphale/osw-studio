@@ -98,6 +98,52 @@ describe('.osws import', () => {
     expect(await databaseExists(DEFAULT_DB)).toBe(false);
   });
 
+  // The stamps in a backup describe a sync to whichever instance it was taken from. Kept, they are
+  // read as this server's history and the record reports drift that cannot be resolved.
+  it('drops the sync stamps a backup carries in, for every store that tracks them', async () => {
+    const stamped = {
+      lastSyncedAt: new Date('2026-06-30T21:09:25.571Z'),
+      serverUpdatedAt: new Date('2026-06-30T21:09:25.571Z'),
+    };
+    const file = await makeBackupFile({
+      projects: [{ ...project('p1', 'Restored'), ...stamped, syncStatus: 'synced' }],
+      skills: [{ id: 's1', name: 'Restored skill', updatedAt: new Date(), ...stamped }],
+      files: [],
+      fileTree: [],
+    });
+
+    await BackupService.importAllData(file, { mode: 'merge' });
+
+    for (const store of ['projects', 'skills']) {
+      const [record] = await readStore(adapter.getDatabase(), store);
+      expect(record, `${store} record was not restored`).toBeDefined();
+      expect(record.lastSyncedAt, `${store}.lastSyncedAt`).toBeUndefined();
+      expect(record.serverUpdatedAt, `${store}.serverUpdatedAt`).toBeUndefined();
+      expect(record.syncStatus, `${store}.syncStatus`).toBeUndefined();
+    }
+  });
+
+  it('keeps everything else on the restored record', async () => {
+    const file = await makeBackupFile({
+      projects: [
+        {
+          ...project('p1', 'Restored'),
+          lastSyncedAt: new Date('2026-06-30T21:09:25.571Z'),
+          description: 'kept',
+        },
+      ],
+      files: [],
+      fileTree: [],
+    });
+
+    await BackupService.importAllData(file, { mode: 'merge' });
+
+    const [restored] = await readStore(adapter.getDatabase(), 'projects');
+    expect(restored.id).toBe('p1');
+    expect(restored.name).toBe('Restored');
+    expect(restored.description).toBe('kept');
+  });
+
   it('merges into existing data without dropping it', async () => {
     await put(adapter.getDatabase(), 'projects', project('existing', 'Existing'));
     const file = await makeBackupFile({ projects: [project('p1', 'Restored')], files: [], fileTree: [] });

@@ -61,6 +61,8 @@ export class BackupService {
   private static readonly BACKUP_VERSION = '1.9.0';
   private static readonly FILE_EXTENSION = '.osws';
   private static readonly MAX_IMPORT_SIZE = 100 * 1024 * 1024; // 100MB
+  /** Stores whose records track when they last synced with a server. */
+  private static readonly SYNC_TRACKED_STORES = ['projects', 'skills'];
 
   /**
    * Export all IndexedDB data to a downloadable backup file
@@ -154,6 +156,12 @@ export class BackupService {
           || backupData.databases.checkpoints
           || [],
       };
+
+      for (const name of this.SYNC_TRACKED_STORES) {
+        if (Array.isArray(stores[name])) {
+          stores[name] = this.stripForeignSyncState(stores[name]);
+        }
+      }
 
       const db = await this.getLiveDatabase();
 
@@ -257,6 +265,38 @@ export class BackupService {
       fileTree: [],
       ...result,
     } as BackupData['databases']['vfs'];
+  }
+
+  /**
+   * Drop the sync stamps a restored record carries in from the backup.
+   *
+   * lastSyncedAt and serverUpdatedAt describe a sync to whichever instance the backup was taken
+   * from. Restored verbatim, every later comparison is made against that foreign history. For a
+   * project that means it can never settle:
+   *
+   *  - if this server also has the project, both sides look changed since that stamp, so it reads
+   *    'conflict' — and a conflicting push is rejected outright, so it cannot be resolved by
+   *    pushing;
+   *  - if this server has never seen it, the reconcile's "the local record says this was pushed,
+   *    yet the server does not have it" guard vetoes the upload, leaving it on 'Local only' until
+   *    it is pushed by hand.
+   *
+   * Skills carry the same two stamps and so report the same false drift, though nothing blocks
+   * pushing one by hand. syncStatus is a project-only field; deleting it from a record that has
+   * none is a no-op.
+   *
+   * A restored record has not synced to this server, whatever the backup claims. Saying so lets
+   * the ordinary reconcile push it, which is the behaviour the restore path was built for.
+   */
+  private static stripForeignSyncState(records: unknown[]): unknown[] {
+    return records.map((record) => {
+      if (!record || typeof record !== 'object') return record;
+      const copy = { ...(record as Record<string, unknown>) };
+      delete copy.lastSyncedAt;
+      delete copy.serverUpdatedAt;
+      delete copy.syncStatus;
+      return copy;
+    });
   }
 
   /**

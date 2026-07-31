@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.90.1 - 2026-07-31
+
+### Fixes
+- **Projects restored from an `.osws` backup sync on their own (Server Mode)**: A restore also brought back the timestamps recording when each project last synced, and those referred to whichever instance the backup was taken from. Measured against a different server they never settled, so a restored project stayed marked as out of step (as a conflict, which pushing cannot resolve, or as local only) until it was pushed by hand in Server Sync. A restored project now counts as not yet synced, so the automatic push picks it up. Restored skills carried the same timestamps and reported the same false drift.
+
 ## v1.90.0 - 2026-07-31
 
 ### Files
