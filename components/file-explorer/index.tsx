@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { VirtualFile, isFileSupported, FILE_SIZE_LIMITS, getFileTypeFromPath } from '@/lib/vfs/types';
+import { VirtualFile, FILE_SIZE_LIMITS, getFileTypeFromPath, isTextExtension } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { logger, cn } from '@/lib/utils';
 import {
@@ -491,7 +491,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
             skipReload: true,
           });
           if (result === 'ok') uploaded++;
-          else if (result === 'unsupported' || result === 'too-large') skipped++;
+          else if (result === 'too-large') skipped++;
           else failed++;
           toast.loading(renderProgress(uploaded + skipped + failed, dirsDone), { id: toastId });
         }
@@ -525,13 +525,9 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     file: File,
     targetDir: string | undefined,
     options?: { explicitPath?: string; silent?: boolean; skipReload?: boolean }
-  ): Promise<'ok' | 'unsupported' | 'too-large' | 'error'> => {
+  ): Promise<'ok' | 'too-large' | 'error'> => {
     const silent = options?.silent === true;
     const skipReload = options?.skipReload === true;
-    if (!isFileSupported(file.name)) {
-      if (!silent) toast.error(`File type not supported: ${file.name}`);
-      return 'unsupported';
-    }
 
     const fileType = getFileTypeFromPath(file.name);
     const sizeLimit = FILE_SIZE_LIMITS[fileType];
@@ -545,13 +541,11 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     const isLarge = file.size > 512 * 1024; // 512KB threshold
 
     const doUpload = async () => {
-      let content: string | ArrayBuffer;
-
-      if (fileType === 'image' || fileType === 'video' || fileType === 'binary') {
-        content = await file.arrayBuffer();
-      } else {
-        content = await file.text();
-      }
+      // Bytes unless this is a known text format. Reading an unrecognised file as text would
+      // silently corrupt it, so anything not positively identified as text keeps its bytes.
+      const content: string | ArrayBuffer = isTextExtension(file.name)
+        ? await file.text()
+        : await file.arrayBuffer();
 
       await ensureAncestorDirs(filePath);
       await vfs.createFile(projectId, filePath, content);

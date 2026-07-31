@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 import { Cloud, CloudOff, RefreshCw, AlertTriangle, CheckSquare, ArrowUp, ArrowDown } from 'lucide-react';
 import { SyncTabs, BulkActionState } from './sync-tabs';
 import { useSyncStatus } from './hooks/use-sync-status';
+import { notifyServerProjectsChanged } from '@/lib/vfs/sync-events';
+import { invalidateSyncStatusCache } from '@/lib/vfs/auto-sync';
 
 interface SyncDialogProps {
   open: boolean;
@@ -48,7 +50,15 @@ export function SyncDialog({ open, onOpenChange, onSyncComplete }: SyncDialogPro
   };
 
   const handleSyncComplete = () => {
+    // A manual push or pull changes what the server holds, so the shared status snapshot has to go
+    // before anyone is told to re-read — otherwise the badges recompute from a pre-sync snapshot.
+    invalidateSyncStatusCache();
     refresh();
+    // This dialog is mounted by PageLayout, a sibling of whatever view is on screen, so the view's
+    // server-backed lists (the deployment project pickers, the project gallery) can only learn
+    // about a completed sync by listening. Without this they stayed on their mount-time snapshot
+    // until a full page reload.
+    notifyServerProjectsChanged();
     onSyncComplete?.();
   };
 

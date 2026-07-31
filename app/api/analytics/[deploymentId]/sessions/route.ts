@@ -9,8 +9,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth/session';
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { requireDeploymentAccess } from '@/lib/api/deployment-access';
+import { readIntParam } from '@/lib/api/query-params';
 
 interface SessionJourney {
   sessionId: string;
@@ -38,32 +38,17 @@ export async function GET(
   { params }: { params: Promise<{ deploymentId: string }> }
 ) {
   try {
-    // Require authentication
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const { deploymentId } = await params;
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 1000);
+    const limit = readIntParam(searchParams, 'limit', { fallback: 100, min: 1, max: 1000 });
 
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-
-    // Verify deployment exists (from core database)
-    const deployment = await adapter.getDeployment(deploymentId);
-    if (!deployment) {
-      return NextResponse.json(
-        { error: 'Deployment not found' },
-        { status: 404 }
-      );
-    }
+    // Authenticates, resolves the deployment to its owning workspace database, and
+    // verifies the caller has access to that workspace.
+    const access = await requireDeploymentAccess(deploymentId, 'viewer');
+    if (!access.ok) return access.response;
+    const { adapter } = access.context;
 
     // Get deployment database for analytics
     const deploymentDb = adapter.getAnalyticsDatabaseInstance(deploymentId);

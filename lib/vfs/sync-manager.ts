@@ -10,6 +10,7 @@ import { Skill } from './skills/types';
 import type { ModelTemplate } from '@/lib/llm/models/assignment';
 import type { CustomConnection } from '@/lib/llm/providers/connection-record';
 import { EnhancedSyncStatusResponse } from './sync-types';
+import { encodeTemplateFiles, decodeTemplateFiles } from './binary-encoding';
 
 export interface SyncResult {
   success: boolean;
@@ -90,8 +91,11 @@ export interface ConnectionsListSyncResult extends SyncResult {
   connections?: CustomConnection[];
 }
 
-// Helper: Convert ArrayBuffer to base64 for JSON transport
-function serializeFileContent(file: VirtualFile): VirtualFile & { _isBinaryBase64?: boolean } {
+// Helper: Convert ArrayBuffer to base64 for JSON transport.
+// Exported because auto-sync pushes over its own transport: JSON.stringify turns an ArrayBuffer
+// into {}, and the push route recreates the server's files from what it receives, so skipping this
+// silently blanks every binary asset in the project.
+export function serializeFileContent(file: VirtualFile): VirtualFile & { _isBinaryBase64?: boolean } {
   if (file.content instanceof ArrayBuffer) {
     const bytes = new Uint8Array(file.content);
     let binary = '';
@@ -103,8 +107,10 @@ function serializeFileContent(file: VirtualFile): VirtualFile & { _isBinaryBase6
   return file;
 }
 
-// Helper: Convert base64 back to ArrayBuffer after JSON transport
-function deserializeFileContent(file: VirtualFile & { _isBinaryBase64?: boolean }): VirtualFile {
+// Helper: Convert base64 back to ArrayBuffer after JSON transport.
+// Exported for the same reason as serializeFileContent: auto-sync pulls over its own transport,
+// and writing the base64 string straight to the VFS turns every image and font into a text file.
+export function deserializeFileContent(file: VirtualFile & { _isBinaryBase64?: boolean }): VirtualFile {
   if (file._isBinaryBase64 && typeof file.content === 'string') {
     const binaryString = atob(file.content);
     const bytes = new Uint8Array(binaryString.length);
@@ -929,7 +935,7 @@ export class SyncManager {
       const data = await response.json();
       return {
         success: true,
-        templates: data.templates || [],
+        templates: (data.templates || []).map((t: CustomTemplate) => ({ ...t, files: decodeTemplateFiles(t.files) })),
       };
     } catch (error) {
       return {
@@ -949,7 +955,10 @@ export class SyncManager {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ templates }),
+        // Binary template files must be encoded: JSON.stringify turns an ArrayBuffer into {}.
+        body: JSON.stringify({
+          templates: templates.map((t) => ({ ...t, files: encodeTemplateFiles(t.files) })),
+        }),
       });
 
       if (!response.ok) {
@@ -995,7 +1004,7 @@ export class SyncManager {
       const data = await response.json();
       return {
         success: true,
-        template: data.template,
+        template: data.template && { ...data.template, files: decodeTemplateFiles(data.template.files) },
       };
     } catch (error) {
       return {
@@ -1015,7 +1024,9 @@ export class SyncManager {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ template }),
+        body: JSON.stringify({
+          template: { ...template, files: encodeTemplateFiles(template.files) },
+        }),
       });
 
       if (!response.ok) {
@@ -1029,7 +1040,7 @@ export class SyncManager {
       const data = await response.json();
       return {
         success: true,
-        template: data.template,
+        template: data.template && { ...data.template, files: decodeTemplateFiles(data.template.files) },
         action: data.action,
       };
     } catch (error) {

@@ -7,6 +7,8 @@ import { vfs } from '@/lib/vfs';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SyncStatusBadge } from './sync-status-badge';
+import { useProjectSyncState } from '@/lib/hooks/use-project-sync-state';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -123,6 +125,9 @@ export const ProjectCard = React.memo(function ProjectCard({
       project.name = editedName.trim();
       project.description = editedDescription.trim() || undefined;
       await vfs.updateProject(project);
+      // The name and description are stored server-side too. Nothing else on the gallery pushes,
+      // so without this a rename left the project reading as "Local newer" forever.
+      vfs.scheduleAutoSync(project.id);
       onUpdate(project);
       setIsEditing(false);
       toast.success('Project updated');
@@ -178,6 +183,12 @@ export const ProjectCard = React.memo(function ProjectCard({
   // Runtime badge display
   const runtime = project.settings?.runtime || 'handlebars';
   const runtimeBadge = getRuntimeBadge(runtime);
+  // Server mode only: tells the user at a glance that a project has drifted from the server,
+  // which previously required opening the Server Sync dialog to discover.
+  const { statuses } = useProjectSyncState();
+  const syncStatus = process.env.NEXT_PUBLIC_SERVER_MODE === 'true'
+    ? statuses.get(project.id)
+    : undefined;
 
   // Format cost display
   const formatCost = (cost?: number) => {
@@ -255,6 +266,9 @@ export const ProjectCard = React.memo(function ProjectCard({
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold truncate">{project.name}</h3>
                     <Badge className={`text-xs px-1.5 py-0 h-auto shrink-0 ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
+                    {syncStatus && syncStatus !== 'synced' && (
+                      <SyncStatusBadge status={syncStatus} showLabel={false} />
+                    )}
                     <Button
                       size="icon"
                       variant="ghost"
@@ -416,8 +430,11 @@ export const ProjectCard = React.memo(function ProjectCard({
           onImageChange={(img) => onUpdate({ ...project, previewImage: img, previewUpdatedAt: img ? new Date() : undefined })}
           size="md"
         />
-        <div className="absolute bottom-2 left-2">
+        <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
           <Badge className={`text-xs px-1.5 py-0.5 shadow-sm ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
+          {syncStatus && syncStatus !== 'synced' && (
+            <SyncStatusBadge status={syncStatus} showLabel={false} className="shadow-sm" />
+          )}
         </div>
       </div>
 

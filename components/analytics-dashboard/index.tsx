@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { HeatmapViewer } from '@/components/heatmap-viewer';
 import { SessionViewer } from '@/components/session-viewer';
 import { EngagementMetrics } from '@/components/engagement-metrics';
-import { X, BarChart3, MousePointerClick, Users, Activity, Download, Trash2 } from 'lucide-react';
+import { BarChart3, MousePointerClick, Users, Activity, Download, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AnalyticsDashboardProps {
@@ -55,6 +55,11 @@ export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDas
   useEffect(() => {
     if (!deployment) return;
 
+    // The parent keeps this mounted for any selected deployment, so the settings and server-settings
+    // dialogs mount it too. Without this guard it fetched — and toasted on failure — from behind
+    // those dialogs. A null render is not enough: effects run regardless of what render returns.
+    if (!isOpen) return;
+
     // Check if deployment has been published (database enabled)
     if (!deployment.databaseEnabled) {
       setNotPublished(true);
@@ -65,7 +70,7 @@ export function AnalyticsDashboard({ deployment, isOpen, onClose }: AnalyticsDas
     setNotPublished(false);
     fetchOverview();
     fetchStorage();
-  }, [deployment?.id, deployment?.databaseEnabled]);
+  }, [isOpen, deployment?.id, deployment?.databaseEnabled]);
 
   const fetchOverview = async () => {
     if (!deployment) return;

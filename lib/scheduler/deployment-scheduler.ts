@@ -36,11 +36,14 @@ async function executeDeploymentScheduledFunctions(): Promise<void> {
 }
 
 async function processDeployment(deploymentId: string): Promise<void> {
-  const { getSQLiteAdapter } = await import('@/lib/vfs/adapters/server');
-  const adapter = getSQLiteAdapter();
-  await adapter.init();
+  // Per-deployment runtime databases live in one global directory, but the deployment record that
+  // gates them lives in the owning workspace's database. Reading the default database here meant
+  // scheduled functions never fired on any install with real workspaces.
+  const { resolveDeployment } = await import('@/lib/vfs/adapters/deployment-adapter');
+  const resolved = await resolveDeployment(deploymentId);
+  if (!resolved) return;
 
-  const deploymentDb = adapter.getDeploymentDatabaseForAnalytics(deploymentId);
+  const deploymentDb = resolved.adapter.getDeploymentDatabaseForAnalytics(deploymentId);
   if (!deploymentDb) return;
 
   const dueFunctions = deploymentDb.listDueScheduledFunctions();

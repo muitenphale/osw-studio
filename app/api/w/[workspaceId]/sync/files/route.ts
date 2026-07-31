@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { getWorkspaceById } from '@/lib/auth/system-database';
 import { VirtualFile } from '@/lib/vfs/types';
-import { serializeFilesForResponse } from '@/lib/vfs/sync-utils';
+import { serializeFilesForResponse, deserializeFilesFromRequest } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
 import fs from 'fs';
 import path from 'path';
@@ -100,8 +100,7 @@ export async function POST(
     await adapter.deleteProjectFiles(projectId);
 
     // Create all files
-    for (const file of files) {
-      const { _isBinaryBase64, ...fileData } = file as VirtualFile & { _isBinaryBase64?: boolean };
+    for (const fileData of deserializeFilesFromRequest(files)) {
       await adapter.createFile(fileData);
     }
 

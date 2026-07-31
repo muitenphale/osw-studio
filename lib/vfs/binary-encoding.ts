@@ -26,3 +26,41 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   }
   return bytes.buffer;
 }
+
+/**
+ * A file inside a template. `encoding: 'base64'` means content holds encoded bytes rather than
+ * text — the same marker project export uses.
+ */
+interface EncodableFile {
+  path: string;
+  content: string | ArrayBuffer;
+  encoding?: 'base64';
+}
+
+/**
+ * Encode template file contents for JSON transport or storage.
+ *
+ * Template files carry `string | ArrayBuffer`, and JSON.stringify turns an ArrayBuffer into `{}`.
+ * Anywhere a template crosses into JSON — the .oswt archive, the sync wire, the server's database —
+ * has to go through this or its binary files arrive empty.
+ *
+ * A tag check rather than `instanceof`: content read back out of IndexedDB is a structured clone
+ * and can carry a constructor from another realm.
+ */
+export function encodeTemplateFiles(files: EncodableFile[]): EncodableFile[] {
+  return (files ?? []).map((file) =>
+    Object.prototype.toString.call(file.content) === '[object ArrayBuffer]'
+      ? { path: file.path, content: arrayBufferToBase64(file.content as ArrayBuffer), encoding: 'base64' as const }
+      : { path: file.path, content: file.content }
+  );
+}
+
+/** Inverse of encodeTemplateFiles. Files stored before encoding existed pass through untouched. */
+export function decodeTemplateFiles(files: EncodableFile[]): EncodableFile[] {
+  return (files ?? []).map((file) =>
+    file.encoding === 'base64' && typeof file.content === 'string'
+      ? { path: file.path, content: base64ToArrayBuffer(file.content) }
+      : file
+  );
+}
+

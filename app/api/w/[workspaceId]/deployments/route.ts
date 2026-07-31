@@ -8,6 +8,7 @@
 import { logger } from '@/lib/utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
+import { ensureDeploymentRoute } from '@/lib/auth/system-database';
 import { Deployment } from '@/lib/vfs/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -41,7 +42,7 @@ export async function POST(
   { params }: { params: Promise<{ workspaceId: string }> }
 ) {
   try {
-    const { adapter } = await getWorkspaceContext(params);
+    const { adapter, workspaceId } = await getWorkspaceContext(params);
 
     const body = await request.json();
     const { projectId, name, slug } = body;
@@ -96,6 +97,15 @@ export async function POST(
 
     if (adapter.createDeployment) {
       await adapter.createDeployment(deployment);
+    }
+
+    // Register the routing row now rather than only on publish, so routes addressed by deployment
+    // id alone (analytics, edge functions, the scheduler) can find the owning workspace database
+    // from the moment the deployment exists. Never overwrites an existing slug or custom domain.
+    try {
+      ensureDeploymentRoute(deployment.id, workspaceId);
+    } catch (routeError) {
+      logger.warn('[Deployments API] Failed to register deployment route:', routeError);
     }
 
     return NextResponse.json(deployment, { status: 201 });

@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { Project, VirtualFile } from '@/lib/vfs/types';
-import { serializeFilesForResponse } from '@/lib/vfs/sync-utils';
+import { serializeFilesForResponse, deserializeFilesFromRequest } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
 
 interface PushRequestBody {
@@ -67,9 +67,8 @@ export async function POST(
       for (const filePath of deletedPaths) {
         await adapter.deleteFile(id, filePath);
       }
-      for (const file of files) {
-        const { _isBinaryBase64, ...rest } = file;
-        const fileData = { ...rest, projectId: id };
+      for (const file of deserializeFilesFromRequest(files)) {
+        const fileData = { ...file, projectId: id };
         const existing = await adapter.getFile(id, fileData.path);
         if (existing) await adapter.updateFile(fileData);
         else await adapter.createFile(fileData);
@@ -81,10 +80,8 @@ export async function POST(
         await adapter.deleteFile(id, file.path);
       }
 
-      for (const file of files) {
-        const { _isBinaryBase64, ...rest } = file;
-        const fileData = { ...rest, projectId: id };
-        await adapter.createFile(fileData);
+      for (const file of deserializeFilesFromRequest(files)) {
+        await adapter.createFile({ ...file, projectId: id });
       }
     }
 

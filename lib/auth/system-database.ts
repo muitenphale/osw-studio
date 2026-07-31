@@ -472,6 +472,22 @@ export function registerDeploymentRoute(deploymentId: string, workspaceId: strin
 }
 
 /**
+ * Register a deployment for routing only if it is not registered yet.
+ *
+ * Unlike registerDeploymentRoute this never rewrites an existing row, so it is safe to call from
+ * paths that do not know the deployment's slug or custom domain — INSERT OR REPLACE with a null
+ * slug would otherwise erase them. Used to make sure a deployment is resolvable to its workspace
+ * from the moment it exists, not only once it has been published.
+ */
+export function ensureDeploymentRoute(deploymentId: string, workspaceId: string): void {
+  const db = getSystemDatabase();
+  db.prepare(`
+    INSERT OR IGNORE INTO deployment_routing (deployment_id, workspace_id)
+    VALUES (?, ?)
+  `).run(deploymentId, workspaceId);
+}
+
+/**
  * Remove a deployment route
  */
 export function removeDeploymentRoute(deploymentId: string): void {

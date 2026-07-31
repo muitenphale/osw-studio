@@ -611,6 +611,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       const proj = await vfs.getProject(project.id);
       proj.settings = { ...proj.settings, previewEntryPoint: path };
       await vfs.updateProject(proj);
+      vfs.scheduleAutoSync(proj.id);
       useWorkspaceStore.getState().updateProjectSettings({ previewEntryPoint: path });
       toast.success(`Entry point set to ${path}`);
     } catch (err) {
@@ -687,10 +688,12 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 useWorkspaceStore.setState({ initialCheckpointId: savedCheckpointId });
               }
             } else {
-              // Stale reference — checkpoint was pruned or deleted
+              // Stale reference — checkpoint was pruned or deleted.
+              // preserveUpdatedAt: checkpoint bookkeeping is local-only and is not pushed, so
+              // bumping updatedAt would leave the project permanently reading as "Local newer".
               const proj = await vfs.getProject(project.id);
               proj.lastSavedCheckpointId = null;
-              await vfs.updateProject(proj);
+              await vfs.updateProject(proj, { preserveUpdatedAt: true });
             }
           }
 
@@ -702,12 +705,15 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         useWorkspaceStore.getState().initProject(latestProject);
         if (saveManager.isDirty(project.id)) useWorkspaceStore.getState().markDirty();
 
-        // Ensure a starting-point checkpoint exists so the user can always roll back
+        // Ensure a starting-point checkpoint exists so the user can always roll back.
+        // preserveUpdatedAt: this fires on the first open of every project, including one that
+        // was just imported and pushed. Bumping updatedAt here is a local write nothing pushes,
+        // so it left freshly imported projects stuck on "Local newer" in Server Sync.
         if (!latestProject.lastSavedCheckpointId) {
           try {
             const cp = await checkpointManager.createCheckpoint(project.id, 'Project opened', { kind: 'auto' });
             latestProject.lastSavedCheckpointId = cp.id;
-            await vfs.updateProject(latestProject);
+            await vfs.updateProject(latestProject, { preserveUpdatedAt: true });
             useWorkspaceStore.setState({ initialCheckpointId: cp.id });
           } catch { /* non-fatal */ }
         }
@@ -1045,6 +1051,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       proj.previewImage = screenshot;
       proj.previewUpdatedAt = new Date();
       await vfs.updateProject(proj);
+      // preview_image is a synced column, so the thumbnail has to reach the server too.
+      vfs.scheduleAutoSync(proj.id);
       toast.success('Thumbnail updated');
     } catch (err) {
       logger.error('Failed to save screenshot:', err);

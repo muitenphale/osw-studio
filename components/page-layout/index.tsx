@@ -7,9 +7,9 @@ import { AppHeader } from '@/components/ui/app-header';
 import { X } from 'lucide-react';
 import { SyncDialog } from '@/components/project-manager/sync-dialog';
 import { cn } from '@/lib/utils';
-import { useRouter } from 'next/navigation';
 import { setAutoSyncWorkspaceId, fetchSyncStatus, pullConnectionsIntoCache } from '@/lib/vfs/auto-sync';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
+import { refreshProjectSyncState } from '@/lib/vfs/project-sync-state';
 
 interface PageLayoutProps {
   children: React.ReactNode;
@@ -34,7 +34,6 @@ export function PageLayout({
   onOpenSettings,
   showSidebar = true,
 }: PageLayoutProps) {
-  const router = useRouter();
   const [sidebarPinned, setSidebarPinned] = useState(true);
   const [sidebarHovering, setSidebarHovering] = useState(false);
   const [, setSidebarCollapsed] = useState(false);
@@ -54,6 +53,12 @@ export function PageLayout({
     }
 
     if (!isServerMode || !showSidebar || !workspaceId) return;
+
+    // Compute sync state here rather than in the sidebar: child effects run before parent effects,
+    // so a sidebar-owned refresh would fire before setAutoSyncWorkspaceId above and request the
+    // unscoped /api/sync/status, which does not exist. This also means the "not synced" count is
+    // populated on every workspace page, not only after visiting Projects.
+    void refreshProjectSyncState();
 
     async function checkQuota() {
       if (!isManagedMode) return;
@@ -87,7 +92,6 @@ export function PageLayout({
         onOpenAbout={onOpenAbout}
         onOpenSettings={onOpenSettings}
         onServerSync={() => setSyncDialogOpen(true)}
-        onLogoClick={() => router.push(workspaceId ? `/w/${workspaceId}/projects` : '/admin')}
         onPinnedChange={setSidebarPinned}
         onHoverChange={setSidebarHovering}
         onCollapsedChange={setSidebarCollapsed}

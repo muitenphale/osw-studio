@@ -176,26 +176,17 @@ export class VirtualServer {
     
     // First pass: Create blob URLs for all non-HTML files (images, JS, etc.)
     for (const file of files) {
-      let processedFile: ProcessedFile;
-      
       // Skip template files and HTML files in first pass
       if (file.type === 'template' || file.type === 'html' || file.type === 'css') {
         continue;
       }
-      
-      if (file.type === 'image' || file.type === 'video') {
-        processedFile = {
-          path: file.path,
-          content: file.content,
-          mimeType: file.mimeType
-        };
-      } else {
-        processedFile = {
-          path: file.path,
-          content: file.content as string,
-          mimeType: file.mimeType
-        };
-      }
+
+      // Content is passed through as-is, bytes or text alike.
+      const processedFile: ProcessedFile = {
+        path: file.path,
+        content: file.content,
+        mimeType: file.mimeType
+      };
       
       const contentHash = this.hashContent(processedFile.content);
       const previousHash = this.fileHashes.get(processedFile.path);

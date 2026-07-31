@@ -6,6 +6,35 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.90.0 - Sync and File Handling (2026-07-31)
+
+Most of this release went into Server Mode sync. An imported project no longer sits there marked "Local newer" after it has already been pushed, and edits that only touch the project itself (a rename, a runtime change, a new thumbnail) now actually reach the server instead of quietly staying local. Project cards carry a badge when they're out of step, so you don't have to open Server Sync to find out. Projects can also hold any kind of file now, rather than the short list of types the app used to recognise. Three things that were broken on every Server Mode install are fixed too: built-in analytics, edge functions and scheduled functions were all looking in the wrong place. A security hole in the analytics endpoints is closed, and `.osws` backup and restore works again, which is worth reading the note on below if you keep backups.
+
+### Files
+- **Any file can live in a project**: Drop in audio, a web font, a PDF, a 3D model for three.js, a WASM module; the preview and published site serve them properly. Anything outside the recognised list used to be refused, and whatever got in by another route was treated as text and corrupted. Whether a file is text or bytes now follows what it contains rather than what it's called; anything already corrupted that way needs adding again
+
+### Backup & restore
+- **Restore works again**: The backup tool was reading and writing the wrong local database, so outside browser mode a restore reported success and did nothing, and export failed. Your data was never overwritten by this, but a backup file taken before this release is missing custom templates, skills, backend functions, secrets, and every image and font, so it's worth taking a fresh one
+- **Backups cover everything**: They follow the database's own contents now, rather than a fixed list that had fallen behind by seven data types. That includes your project secrets, which are stored unencrypted, so an `.osws` file can contain API keys. Treat one as sensitive and keep it to yourself
+
+### Templates
+- **Templates keep their images and fonts**: A template's binary files were written out empty, so they were gone when the template was imported, shared or used to create a project. Existing `.oswt` files and saved templates are missing that content and need re-creating from a project
+
+### Sync
+- **You can see when something is out of sync**: A badge on the project card and a count on the Server Sync entry, instead of having to open the dialog and check
+- **Imports stay synced**: An imported project that has been pushed no longer flips straight back to "Local newer"; opening a project is no longer treated as a change to it, so it also no longer jumps to the top of Recent Projects
+- **Catches up on what it used to miss**: Renaming a project, or changing its runtime, entry point or thumbnail, now reaches the server, and projects the server has fallen behind on are pushed on load, sending only the files that changed. Unsaved work and real conflicts are still left for you to resolve in Server Sync
+- **Images and fonts survive**: Background sync was sending binary files unencoded, replacing images and fonts on the server with empty files and storing them locally as text
+
+### Deployments
+- **Analytics, edge functions and scheduled functions work again**: All three are reached by deployment ID alone and were reading the wrong database, so settings raised "Deployment not found", published sites recorded nothing, edge functions 404'd and scheduled functions never ran
+- **The project picker stays current**: A project pushed through Server Sync shows up in deployment settings without reloading the page
+
+### Security
+- **Analytics endpoints check access**: They required a sign-in but never checked it was your deployment, and deployment IDs appear in every published page, so any signed-in user could read, export or delete another workspace's analytics
+
+---
+
 ## v1.89.0 - Free Web Search (2026-07-20)
 
 The agent can now search the web with no setup: DuckDuckGo is a built-in provider that needs no account or API key. For ChatGPT subscription users, the model picker also keeps itself current — it pulls the available GPT-5.5 and GPT-5.6 models straight from Codex instead of a fixed list.

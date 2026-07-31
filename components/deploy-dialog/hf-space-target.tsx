@@ -175,6 +175,7 @@ export function HFSpaceTarget({ projectId, onClose }: { projectId: string; onClo
           },
         };
         await vfs.updateProject(proj);
+        vfs.scheduleAutoSync(proj.id);
       }
 
       setResultUrl(res.url);

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import JSZip from 'jszip';
 import { CustomTemplate, BackendFeatures, EdgeFunction, ServerFunction, Secret } from './types';
 import { StorageAdapter } from './adapters/types';
+import { encodeTemplateFiles, decodeTemplateFiles } from './binary-encoding';
 import { logger } from '@/lib/utils';
 
 const MAX_TEMPLATE_SIZE = 25 * 1024 * 1024; // 25MB
@@ -127,10 +128,7 @@ export class TemplateService {
         downloadUrl: metadata.downloadUrl,
         runtime,
         directories,
-        files: files.map((file: any) => ({
-          path: file.path,
-          content: file.content
-        })),
+        files: encodeTemplateFiles(files),
         assets: [],
         backendFeatures,
       };
@@ -282,7 +280,7 @@ export class TemplateService {
         name: templateData.name,
         description: templateData.description,
         version: templateData.templateVersion || '1.0.0',
-        files: templateData.files || [],
+        files: decodeTemplateFiles(templateData.files || []),
         directories: templateData.directories || [],
         assets: templateData.assets,
         metadata: {
@@ -374,19 +372,50 @@ export class TemplateService {
 
       const zip = new JSZip();
 
-      // Add template.json
-      zip.file('template.json', JSON.stringify(template, null, 2));
+      // Serialise to the SAME shape exportProjectAsTemplate writes, rather than dumping the
+      // CustomTemplate verbatim. A CustomTemplate holds the template's semver in `version`
+      // and nests its metadata, whereas the .oswt format reserves `version` for the FORMAT
+      // version and keeps metadata flat. Writing the object as-is produced an archive that
+      // importTemplateFile could not read back (it looks for flat fields), silently losing
+      // author, license, tags and thumbnail, and that external validators reject outright.
+      const hasFunctions = !!template.backendFeatures && (
+        (template.backendFeatures.edgeFunctions?.length ?? 0) +
+        (template.backendFeatures.serverFunctions?.length ?? 0) +
+        (template.backendFeatures.scheduledFunctions?.length ?? 0)
+      ) > 0;
+      const templateData = {
+        version: hasFunctions ? '2.0.0' : '1.0.0', // Template FORMAT version
+        name: template.name,
+        description: template.description,
+        templateVersion: template.version,
+        author: template.metadata?.author,
+        authorUrl: template.metadata?.authorUrl,
+        license: template.metadata?.license,
+        licenseLabel: template.metadata?.licenseLabel,
+        licenseDescription: template.metadata?.licenseDescription,
+        tags: template.metadata?.tags || [],
+        thumbnail: template.metadata?.thumbnail,
+        previewImages: template.metadata?.previewImages || [],
+        downloadUrl: template.metadata?.downloadUrl,
+        runtime: template.runtime,
+        directories: template.directories,
+        files: encodeTemplateFiles(template.files),
+        assets: template.assets ?? [],
+        backendFeatures: template.backendFeatures,
+      };
 
-      // Add files
-      for (const file of template.files) {
-        if (file.content instanceof ArrayBuffer) {
-          zip.file(file.path, file.content);
-        } else {
-          zip.file(file.path, file.content);
-        }
-      }
+      // template.json holds the file contents and is the only entry any reader looks at, here or
+      // on the marketplace. Writing each file as its own entry as well just doubled the archive.
+      zip.file('template.json', JSON.stringify(templateData, null, 2));
 
-      return await zip.generateAsync({ type: 'blob' });
+      // DEFLATE, matching exportProjectAsTemplate: file content now travels base64-encoded inside
+      // template.json (+33%), so an uncompressed archive can exceed the import size cap that the
+      // same template passed before.
+      return await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
     } catch (error) {
       logger.error('[TemplateService] Failed to re-export template:', error);
       throw new Error(`Failed to export template: ${error instanceof Error ? error.message : 'Unknown error'}`);

@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { resolveDeployment } from '@/lib/vfs/adapters/deployment-adapter';
 import {
   pageviewRateLimiter,
   RATE_LIMIT_CONFIG,
@@ -93,17 +93,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-
-    // 5. Verify deployment exists (from core database)
-    const deployment = await adapter.getDeployment(deploymentId);
-    if (!deployment) {
+    // 5. Verify deployment exists. Resolved through deployment_routing so the lookup reaches the
+    // workspace database that owns it — this endpoint is public and has no workspace in its URL.
+    // Deliberately placed after the rate-limit and bot checks so junk traffic never reaches it.
+    const resolved = await resolveDeployment(deploymentId);
+    if (!resolved) {
       return NextResponse.json(
         { error: 'Deployment not found' },
         { status: 404 }
       );
     }
+    const { adapter, deployment } = resolved;
 
     // 6. Check if analytics is enabled for this deployment
     if (!deployment.analytics.enabled || deployment.analytics.provider !== 'builtin') {

@@ -398,11 +398,79 @@ const MIGRATIONS: Migration[] = [
       `);
     }
   },
+  {
+    id: 'add_file_encoding_v10',
+    up: (db) => {
+      // Records HOW a file's content was stored, so reading it back does not have to guess from
+      // the extension. Writes were already content-driven (an ArrayBuffer became base64) while
+      // reads only decoded 'image' and 'video', so audio, fonts, PDFs and anything else came back
+      // as a base64 string instead of bytes.
+      //
+      // The type CHECK constraint is dropped in the same pass: it hardcoded the file-type list
+      // into the schema, so adding a category meant a migration. Valid types are the app's concern.
+      // SQLite cannot alter a CHECK in place, hence the table rebuild.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS files_v10 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL,
+          content TEXT,
+          encoding TEXT,
+          mime_type TEXT,
+          size INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          metadata TEXT DEFAULT '{}',
+          UNIQUE(project_id, path),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+      `);
+
+      // Existing image/video rows are base64 — label them so the legacy type test is no longer
+      // needed for anything written from here on.
+      db.exec(`
+        INSERT INTO files_v10 (
+          id, project_id, path, name, type, content, encoding,
+          mime_type, size, created_at, updated_at, metadata
+        )
+        SELECT
+          id, project_id, path, name, type, content,
+          CASE WHEN type IN ('image', 'video') AND content IS NOT NULL AND content != ''
+               THEN 'base64' ELSE NULL END,
+          mime_type, size, created_at, updated_at, metadata
+        FROM files
+      `);
+
+      db.exec(`DROP TABLE files`);
+      db.exec(`ALTER TABLE files_v10 RENAME TO files`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id)`);
+    }
+  },
 ];
 
 /**
  * Helper to parse JSON safely with a fallback
  */
+/**
+ * Encode file content for storage, recording how it was encoded.
+ *
+ * Driven by the content itself, never by the file's extension: the extension is a guess, and it was
+ * wrong for every binary type outside the image/video list. The returned encoding is stored
+ * alongside the content so reading back needs no guess either.
+ */
+function encodeFileContent(raw: unknown): { content: string; encoding: string | null } {
+  // Tag check rather than instanceof: content can arrive as a structured clone from another realm.
+  if (Object.prototype.toString.call(raw) === '[object ArrayBuffer]') {
+    return { content: Buffer.from(raw as ArrayBuffer).toString('base64'), encoding: 'base64' };
+  }
+  if (typeof raw === 'string') {
+    return { content: raw, encoding: null };
+  }
+  return { content: '', encoding: null };
+}
+
 function parseJSON<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -975,20 +1043,13 @@ export class SQLiteAdapter implements StorageAdapter {
 
     // Handle ArrayBuffer content (binary files)
     // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
-    let content: string;
-    if (file.content instanceof ArrayBuffer) {
-      content = Buffer.from(file.content).toString('base64');
-    } else if (typeof file.content === 'string') {
-      content = file.content;
-    } else {
-      content = '';
-    }
+    const { content, encoding } = encodeFileContent(file.content);
 
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO files (
-        id, project_id, path, name, type, content,
+        id, project_id, path, name, type, content, encoding,
         mime_type, size, created_at, updated_at, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -998,6 +1059,7 @@ export class SQLiteAdapter implements StorageAdapter {
       file.name,
       file.type,
       content,
+      encoding,
       file.mimeType ?? null,
       file.size ?? 0,
       toISOStringRequired(file.createdAt),
@@ -1021,18 +1083,11 @@ export class SQLiteAdapter implements StorageAdapter {
 
     // Handle ArrayBuffer content
     // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
-    let content: string;
-    if (file.content instanceof ArrayBuffer) {
-      content = Buffer.from(file.content).toString('base64');
-    } else if (typeof file.content === 'string') {
-      content = file.content;
-    } else {
-      content = '';
-    }
+    const { content, encoding } = encodeFileContent(file.content);
 
     const stmt = db.prepare(`
       UPDATE files SET
-        name = ?, type = ?, content = ?, mime_type = ?,
+        name = ?, type = ?, content = ?, encoding = ?, mime_type = ?,
         size = ?, updated_at = ?, metadata = ?
       WHERE project_id = ? AND path = ?
     `);
@@ -1041,6 +1096,7 @@ export class SQLiteAdapter implements StorageAdapter {
       file.name,
       file.type,
       content,
+      encoding,
       file.mimeType ?? null,
       file.size ?? 0,
       toISOStringRequired(file.updatedAt),
@@ -1073,9 +1129,11 @@ export class SQLiteAdapter implements StorageAdapter {
     const type = row.type as VirtualFile['type'];
     const rawContent = row.content as string;
 
-    // Binary file types (image, video) are stored as base64 - convert back to ArrayBuffer
+    // Decode based on how the content was STORED. The file's type is not consulted: guessing from
+    // the extension is what lost audio, fonts and PDFs. Rows predating the encoding column were
+    // labelled by the add_file_encoding_v10 migration, so there is nothing left to guess about.
     let content: string | ArrayBuffer = rawContent;
-    if ((type === 'image' || type === 'video') && rawContent) {
+    if (row.encoding === 'base64' && rawContent) {
       try {
         // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,")
         let base64Data = rawContent;

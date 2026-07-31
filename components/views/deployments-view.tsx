@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Deployment, Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { getLoginUrl } from '@/lib/config/storage';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
+import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
 import { DeploymentCard } from '../deployment-card';
 import { DeploymentSettingsModal } from '../deployment-settings';
 import { ServerSettingsModal } from '../server-settings';
@@ -43,7 +44,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showTemplateExportModal, setShowTemplateExportModal] = useState(false);
-  const [templateExportDeployment, setTemplateExportDeployment] = useState<Deployment | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [swapDialogState, setSwapDialogState] = useState<{
@@ -101,14 +101,11 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     }
   };
 
-  // Refresh just the project list from the server, reconciling any local-only projects (imports,
-  // or an earlier failed push) up first so a freshly imported project appears in the "New
-  // deployment" picker without a full page reload. Runs when the Create modal is opened.
-  const refreshProjectList = async () => {
+  // Re-read the server's project list. Cheap and side-effect free, so anything that opens a
+  // project picker can call it.
+  const fetchProjects = useCallback(async () => {
     if (!isServerMode) return;
     try {
-      const { pushLocalOnlyProjects } = await import('@/lib/vfs/auto-sync');
-      await pushLocalOnlyProjects(workspaceId);
       const res = await fetch(`${apiBase}/projects?fields=id,name`);
       if (res.status === 401) {
         window.location.href = getLoginUrl();
@@ -119,13 +116,38 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     } catch (error) {
       logger.error('[DeploymentsView] Failed to refresh project list:', error);
     }
-  };
+  }, [apiBase, isServerMode]);
+
+  // Reconcile any project that has drifted from the server (imports, or an earlier failed push)
+  // before re-reading the list, so a freshly imported project is deployable straight away.
+  // Kept separate from fetchProjects: this pushes data, and running it on every picker open would
+  // be a heavy, quota-consuming side effect. It also must not be able to skip the re-read, which
+  // is why the reconcile has its own catch.
+  const refreshProjectList = useCallback(async () => {
+    if (!isServerMode) return;
+    try {
+      const { reconcileProjectsToServer } = await import('@/lib/vfs/auto-sync');
+      await reconcileProjectsToServer(workspaceId);
+    } catch (error) {
+      logger.error('[DeploymentsView] Failed to reconcile projects before refresh:', error);
+    }
+    await fetchProjects();
+  }, [isServerMode, workspaceId, fetchProjects]);
 
   const handleOpenCreate = () => {
     setShowCreateModal(true);
     // Refresh in the background; the dropdown updates reactively when it resolves.
     void refreshProjectList();
   };
+
+  // A push from the Server Sync dialog happens in a sibling subtree (it is mounted by PageLayout),
+  // so it cannot reach this view through props. It broadcasts instead.
+  useEffect(() => {
+    if (!isServerMode) return;
+    const handler = () => { void fetchProjects(); };
+    window.addEventListener(SERVER_PROJECTS_CHANGED, handler);
+    return () => window.removeEventListener(SERVER_PROJECTS_CHANGED, handler);
+  }, [isServerMode, fetchProjects]);
 
   // Helper function to update a single deployment in state (optimistic updates)
   const updateDeploymentInState = (deploymentId: string, updates: Partial<Deployment>) => {
@@ -139,6 +161,9 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
   const handleOpenSettings = (deployment: Deployment) => {
     setSelectedDeployment(deployment);
     setShowSettingsModal(true);
+    // The General tab lets you point the deployment at a different project, so its picker needs the
+    // current list — not the snapshot taken when the page mounted.
+    void fetchProjects();
   };
 
   const handleOpenServerSettings = (deployment: Deployment) => {
@@ -176,7 +201,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         toast.error('Project not found in local storage');
         return;
       }
-      setTemplateExportDeployment(deployment);
       setTemplateExportProject(project);
       setShowTemplateExportModal(true);
     } catch (error) {
@@ -792,7 +816,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         onOpenChange={(open) => {
           setShowTemplateExportModal(open);
           if (!open) {
-            setTemplateExportDeployment(null);
             setTemplateExportProject(null);
           }
         }}

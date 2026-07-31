@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CustomTemplate, BackendFeatures } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
-import { createProjectFromTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
+import { createProjectFromTemplate, customTemplateToProjectTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
 import { BAREBONES_PROJECT_TEMPLATE, HANDLEBARS_STARTER_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -213,16 +213,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       } else {
         // Custom template
         const customTemplate = template as CustomTemplate;
-        await createProjectFromTemplate(vfs, project.id, {
-          name: customTemplate.name,
-          description: customTemplate.description,
-          files: customTemplate.files.map(f => ({
-            path: f.path,
-            content: typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content as ArrayBuffer)
-          })),
-          directories: customTemplate.directories,
-          assets: customTemplate.assets
-        });
+        await createProjectFromTemplate(vfs, project.id, customTemplateToProjectTemplate(customTemplate));
 
         backendFeatures = customTemplate.backendFeatures;
       }

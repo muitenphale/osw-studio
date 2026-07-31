@@ -7,6 +7,7 @@
 import { logger } from '@/lib/utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
+import { ensureDeploymentRoute } from '@/lib/auth/system-database';
 import { BackendFeatures } from '@/lib/vfs/types';
 import cronParser from 'cron-parser';
 
@@ -15,7 +16,7 @@ export async function POST(
   { params }: { params: Promise<{ workspaceId: string; id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { adapter } = await getWorkspaceContext(params);
+    const { adapter, workspaceId } = await getWorkspaceContext(params);
     const { id: deploymentId } = await params;
     const body = await request.json();
 
@@ -33,6 +34,9 @@ export async function POST(
     if (!deployment.databaseEnabled) {
       deployment.databaseEnabled = true;
       await adapter.enableDeploymentDatabase(deploymentId);
+      // Enabling the database outside the publish flow still has to make the deployment
+      // resolvable from routes addressed by id alone.
+      try { ensureDeploymentRoute(deploymentId, workspaceId); } catch { /* non-fatal */ }
       await adapter.updateDeployment?.(deployment);
     }
 

@@ -7,7 +7,7 @@ import { getProvider } from '@/lib/llm/providers/registry';
 import { toast } from 'sonner';
 import { track } from '@/lib/telemetry';
 import { vfs } from '@/lib/vfs';
-import type { ProjectRuntime } from '@/lib/vfs/types';
+import type { Project, ProjectRuntime } from '@/lib/vfs/types';
 import type { WorkspaceMode } from './project';
 import { debugEventsState } from '@/lib/llm/debug-events-state';
 import { drainRuntimeErrors } from '@/lib/preview/runtime-errors';
@@ -55,7 +55,31 @@ async function pullAndCheckpointServerFiles(
   const pullResult = await syncMgr.pullProjectWithFiles(projectId);
   if (!pullResult.success || !pullResult.project || !pullResult.files) return;
 
-  await vfs.updateProject(pullResult.project);
+  // Merge the server's fields into the local record instead of writing the JSON response straight
+  // back: that response carries ISO strings, and a string lastSyncedAt makes every later status
+  // comparison read 'synced' regardless of how far the copies have drifted.
+  const serverProject = pullResult.project;
+  const serverUpdatedAt = serverProject.updatedAt ? new Date(serverProject.updatedAt) : new Date();
+  // getProject throws when the record is gone — the project can be deleted while a server
+  // generation is still running. Fall back to the server's copy so the pulled files still land
+  // somewhere instead of the whole sync being skipped.
+  let target: Project;
+  try {
+    target = await vfs.getProject(projectId);
+  } catch {
+    target = {
+      ...serverProject,
+      createdAt: serverProject.createdAt ? new Date(serverProject.createdAt) : serverUpdatedAt,
+    };
+  }
+  target.name = serverProject.name;
+  target.description = serverProject.description;
+  if (serverProject.settings) target.settings = serverProject.settings;
+  target.updatedAt = serverUpdatedAt;
+  target.lastSyncedAt = new Date();
+  target.serverUpdatedAt = serverUpdatedAt;
+  target.syncStatus = 'synced';
+  await vfs.updateProject(target, { preserveUpdatedAt: true });
   const existingFiles = await vfs.getAllFilesAndDirectories(projectId);
   const existingFilePaths = new Set(
     existingFiles

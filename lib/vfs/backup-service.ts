@@ -1,19 +1,25 @@
 import JSZip from 'jszip';
 import { Project, VirtualFile } from './types';
 import { Checkpoint } from './checkpoint';
+import { arrayBufferToBase64, base64ToArrayBuffer } from './binary-encoding';
 import { logger } from '@/lib/utils';
 
 export interface BackupData {
   version: string;
   exportDate: string;
   databases: {
-    vfs: {
+    /**
+     * One key per IndexedDB object store. Older backups carry only projects/files/fileTree
+     * (+ conversations/checkpoints at the top level); anything present is restored, anything
+     * missing is skipped, so both directions stay compatible.
+     */
+    vfs: Record<string, unknown[]> & {
       projects: Project[];
       files: VirtualFile[];
       fileTree: unknown[];
     };
-    conversations: any[]; // Legacy field for backward compat
-    checkpoints: Checkpoint[];
+    conversations: any[]; // Legacy field, kept so older builds can still read this file
+    checkpoints: Checkpoint[]; // Legacy field, kept for the same reason
   };
   metadata: {
     projectCount: number;
@@ -25,6 +31,30 @@ export interface BackupData {
 export interface ImportOptions {
   mode: 'replace' | 'merge';
   onProgress?: (progress: number, message: string) => void;
+}
+
+/** Marker for a value that was an ArrayBuffer before JSON encoding. */
+interface EncodedBinary {
+  _isBinaryBase64: true;
+  data: string;
+}
+
+function isEncodedBinary(value: unknown): value is EncodedBinary {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && (value as EncodedBinary)._isBinaryBase64 === true
+    && typeof (value as EncodedBinary).data === 'string'
+  );
+}
+
+/**
+ * A tag check rather than `instanceof`: IndexedDB hands back structured clones, which can carry a
+ * constructor from another realm. `value instanceof ArrayBuffer` is then false for something that
+ * is unmistakably an ArrayBuffer, and the content would be silently written out as `{}`.
+ */
+function isArrayBuffer(value: unknown): value is ArrayBuffer {
+  return Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 }
 
 export class BackupService {
@@ -39,23 +69,23 @@ export class BackupService {
     try {
       logger.info('Starting data export...');
 
+      const vfs = await this.readLiveDatabase();
+
       const backupData: BackupData = {
         version: this.BACKUP_VERSION,
         exportDate: new Date().toISOString(),
         databases: {
-          vfs: await this.exportUnifiedData(),
-          conversations: [], // Legacy field, now part of unified export
-          checkpoints: [], // Legacy field, now part of unified export
+          vfs,
+          conversations: [], // Legacy field, now part of the unified export
+          checkpoints: [], // Legacy field, now part of the unified export
         },
         metadata: {
-          projectCount: 0,
+          projectCount: vfs.projects.length,
           totalSize: 0,
           exportedFrom: 'oswstudio',
         },
       };
 
-      // Calculate metadata
-      backupData.metadata.projectCount = backupData.databases.vfs.projects.length;
       backupData.metadata.totalSize = this.calculateDataSize(backupData);
 
       // Create compressed backup file
@@ -99,7 +129,7 @@ export class BackupService {
       const zip = new JSZip();
       const zipData = await zip.loadAsync(file);
       const backupFile = zipData.file('backup.json');
-      
+
       if (!backupFile) {
         throw new Error('Invalid backup file format.');
       }
@@ -112,41 +142,34 @@ export class BackupService {
 
       options.onProgress?.(30, 'Validating backup data...');
 
-      // Clear existing data if replace mode
-      if (options.mode === 'replace') {
-        options.onProgress?.(40, 'Clearing existing data...');
-
-        // Close VFS database connection before deletion
-        try {
-          const { vfs } = await import('@/lib/vfs');
-          if ((vfs as any).db?.db) {
-            logger.info('[Backup] Closing VFS database before deletion');
-            (vfs as any).db.db.close();
-          }
-        } catch (e) {
-          logger.warn('[Backup] Could not close VFS database', e);
-        }
-
-        await this.clearAllData();
-        // Wait for database deletion and browser cleanup
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      // Import data - handle both legacy (separate conversations/checkpoints) and new format
-      options.onProgress?.(50, 'Importing all data...');
-
-      // Merge conversations and checkpoints into vfsData if they exist separately (legacy format)
-      const vfsDataWithAll = {
+      // Older backups keep conversations and checkpoints beside vfs rather than inside it.
+      const stores: Record<string, unknown[]> = {
         ...backupData.databases.vfs,
-        conversations: (backupData.databases.vfs as any).conversations || backupData.databases.conversations || [],
-        checkpoints: (backupData.databases.vfs as any).checkpoints || backupData.databases.checkpoints || []
+        conversations:
+          (backupData.databases.vfs as Record<string, unknown[]>).conversations
+          || backupData.databases.conversations
+          || [],
+        checkpoints:
+          (backupData.databases.vfs as Record<string, unknown[]>).checkpoints
+          || backupData.databases.checkpoints
+          || [],
       };
 
-      await this.importUnifiedData(vfsDataWithAll);
+      const db = await this.getLiveDatabase();
+
+      if (options.mode === 'replace') {
+        options.onProgress?.(40, 'Clearing existing data...');
+        await this.clearLiveDatabase(db);
+      }
+
+      options.onProgress?.(50, 'Importing all data...');
+      const written = await this.writeStores(db, stores);
 
       options.onProgress?.(100, 'Import completed successfully!');
-      
-      logger.info(`Import completed: ${backupData.metadata.projectCount} projects restored`);
+
+      logger.info(
+        `Import completed: ${(stores.projects || []).length} projects restored into ${db.name} (${written.join(', ')})`
+      );
     } catch (error) {
       logger.error('Import failed:', error);
       throw new Error(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -169,7 +192,7 @@ export class BackupService {
       const zip = new JSZip();
       const zipData = await zip.loadAsync(file);
       const backupFile = zipData.file('backup.json');
-      
+
       if (!backupFile) {
         return { valid: false, reason: 'Invalid backup file format' };
       }
@@ -178,7 +201,7 @@ export class BackupService {
       const backupData: BackupData = JSON.parse(backupJson);
 
       this.validateBackupData(backupData);
-      
+
       return { valid: true, metadata: backupData.metadata };
     } catch (error) {
       return { valid: false, reason: error instanceof Error ? error.message : 'Unknown error' };
@@ -188,339 +211,153 @@ export class BackupService {
   // Private helper methods
 
   /**
-   * Export all data from unified database
+   * The database the app is actually using.
+   *
+   * Never open one by name here: outside browser mode the live database is named after the
+   * workspace, and its schema version moves with the app. Opening a hardcoded name and version
+   * meant export failed outright and import wrote into an unrelated database while reporting
+   * success. The adapter owns both, so ask it.
    */
-  private static async exportUnifiedData() {
-    const vfsData = {
-      projects: [] as Project[],
-      files: [] as VirtualFile[],
-      fileTree: [] as unknown[],
-      conversations: [] as any[],
-      checkpoints: [] as any[]
-    };
-
-    return new Promise<typeof vfsData>((resolve, reject) => {
-      const request = indexedDB.open('osw-studio-db', 1);
-      
-      request.onsuccess = async () => {
-        try {
-          const db = request.result;
-          
-          // Export projects
-          const projectTx = db.transaction(['projects'], 'readonly');
-          const projectStore = projectTx.objectStore('projects');
-          const projectsRequest = projectStore.getAll();
-          projectsRequest.onsuccess = () => {
-            vfsData.projects = projectsRequest.result || [];
-          };
-          
-          // Export files
-          const fileTx = db.transaction(['files'], 'readonly');
-          const fileStore = fileTx.objectStore('files');
-          const filesRequest = fileStore.getAll();
-          filesRequest.onsuccess = () => {
-            vfsData.files = filesRequest.result || [];
-          };
-          
-          // Export file tree
-          const treeTx = db.transaction(['fileTree'], 'readonly');
-          const treeStore = treeTx.objectStore('fileTree');
-          const treeRequest = treeStore.getAll();
-          treeRequest.onsuccess = () => {
-            vfsData.fileTree = treeRequest.result || [];
-          };
-
-          // Export conversations
-          const convTx = db.transaction(['conversations'], 'readonly');
-          const convStore = convTx.objectStore('conversations');
-          const convRequest = convStore.getAll();
-          convRequest.onsuccess = () => {
-            vfsData.conversations = convRequest.result || [];
-          };
-
-          // Export checkpoints
-          const checkTx = db.transaction(['checkpoints'], 'readonly');
-          const checkStore = checkTx.objectStore('checkpoints');
-          const checkRequest = checkStore.getAll();
-          checkRequest.onsuccess = () => {
-            vfsData.checkpoints = checkRequest.result || [];
-          };
-
-          // Wait for all transactions to complete
-          await Promise.all([
-            new Promise(res => projectTx.oncomplete = () => res(undefined)),
-            new Promise(res => fileTx.oncomplete = () => res(undefined)),
-            new Promise(res => treeTx.oncomplete = () => res(undefined)),
-            new Promise(res => convTx.oncomplete = () => res(undefined)),
-            new Promise(res => checkTx.oncomplete = () => res(undefined))
-          ]);
-
-          resolve(vfsData);
-        } catch (error) {
-          reject(error);
-        }
-      };
-      
-      request.onerror = () => reject(request.error);
-    });
+  private static async getLiveDatabase(): Promise<IDBDatabase> {
+    const { vfs } = await import('@/lib/vfs');
+    await vfs.init();
+    return vfs.getDatabase();
   }
 
   /**
-   * Legacy export functions for importing old DeepStudio backups
+   * Read every object store in the live schema.
+   *
+   * Driven by the database's own store list rather than a hardcoded one, so a store added later
+   * is backed up automatically instead of being silently missing from every backup.
    */
-  private static async importLegacyConversations(): Promise<any[]> {
-    return new Promise((resolve) => {
-      const request = indexedDB.open('DeepStudioConversations', 1);
+  private static async readLiveDatabase(): Promise<BackupData['databases']['vfs']> {
+    const db = await this.getLiveDatabase();
+    const storeNames = Array.from(db.objectStoreNames);
+    const result: Record<string, unknown[]> = {};
 
-      request.onsuccess = () => {
-        const db = request.result;
-        const tx = db.transaction(['conversations'], 'readonly');
-        const store = tx.objectStore('conversations');
-        const getRequest = store.getAll();
-
-        getRequest.onsuccess = () => {
-          resolve(getRequest.result || []);
-        };
-
-        getRequest.onerror = () => resolve([]);
-      };
-
-      request.onerror = () => resolve([]);
-    });
-  }
-
-  private static async importLegacyCheckpoints(): Promise<any[]> {
-    return new Promise((resolve) => {
-      const request = indexedDB.open('DeepStudioCheckpoints', 1);
-
-      request.onsuccess = () => {
-        const db = request.result;
-        const tx = db.transaction(['checkpoints'], 'readonly');
-        const store = tx.objectStore('checkpoints');
-        const getRequest = store.getAll();
-
-        getRequest.onsuccess = () => {
-          resolve(getRequest.result || []);
-        };
-
-        getRequest.onerror = () => resolve([]);
-      };
-
-      request.onerror = () => resolve([]);
-    });
-  }
-
-  private static async importUnifiedData(vfsData: any): Promise<void> {
-    return new Promise((resolve, reject) => {
-      logger.info('[Import] Opening database for import...');
-
-      // Timeout to prevent hanging
-      const timeout = setTimeout(() => {
-        logger.error('[Import] Database open timeout after 10s');
-        reject(new Error('Database open timeout'));
-      }, 10000);
-
-      const request = indexedDB.open('osw-studio-db', 1);
-
-      request.onerror = () => {
-        clearTimeout(timeout);
-        logger.error('[Import] Failed to open database for import', request.error);
-        reject(request.error);
-      };
-
-      request.onblocked = () => {
-        logger.warn('[Import] Database open is blocked - waiting for connections to close');
-      };
-
-      // Ensure schema is created if database was deleted
-      request.onupgradeneeded = (event) => {
-        logger.info('[Import] Creating database schema...');
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        // Create all object stores if they don't exist
-        if (!db.objectStoreNames.contains('projects')) {
-          const projectStore = db.createObjectStore('projects', { keyPath: 'id' });
-          projectStore.createIndex('name', 'name', { unique: false });
-          projectStore.createIndex('createdAt', 'createdAt', { unique: false });
+    if (storeNames.length > 0) {
+      await new Promise<void>((resolve, reject) => {
+        // One transaction for the whole read, so the backup is a consistent snapshot.
+        const tx = db.transaction(storeNames, 'readonly');
+        for (const name of storeNames) {
+          const request = tx.objectStore(name).getAll();
+          request.onsuccess = () => {
+            result[name] = (request.result || []).map((record) => this.encodeBinary(record)) as unknown[];
+          };
         }
-
-        if (!db.objectStoreNames.contains('files')) {
-          const fileStore = db.createObjectStore('files', { keyPath: 'id' });
-          fileStore.createIndex('projectId', 'projectId', { unique: false });
-          fileStore.createIndex('path', ['projectId', 'path'], { unique: true });
-          fileStore.createIndex('type', 'type', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('fileTree')) {
-          const treeStore = db.createObjectStore('fileTree', { keyPath: 'id' });
-          treeStore.createIndex('projectId', 'projectId', { unique: false });
-          treeStore.createIndex('path', ['projectId', 'path'], { unique: true });
-          treeStore.createIndex('parentPath', ['projectId', 'parentPath'], { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('conversations')) {
-          const conversationStore = db.createObjectStore('conversations', { keyPath: 'id' });
-          conversationStore.createIndex('projectId', 'projectId', { unique: false });
-          conversationStore.createIndex('lastUpdated', 'lastUpdated', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('checkpoints')) {
-          const checkpointStore = db.createObjectStore('checkpoints', { keyPath: 'id' });
-          checkpointStore.createIndex('projectId', 'projectId', { unique: false });
-          checkpointStore.createIndex('timestamp', 'timestamp', { unique: false });
-        }
-      };
-
-      request.onsuccess = async () => {
-        try {
-          clearTimeout(timeout);
-          const db = request.result;
-
-          logger.info('[Import] Database opened successfully');
-          logger.info('[Import] Starting data import...', {
-            projects: vfsData.projects?.length || 0,
-            files: vfsData.files?.length || 0,
-            fileTree: vfsData.fileTree?.length || 0,
-            conversations: vfsData.conversations?.length || 0,
-            checkpoints: vfsData.checkpoints?.length || 0
-          });
-
-          // Import projects
-          const projectTx = db.transaction(['projects'], 'readwrite');
-          const projectStore = projectTx.objectStore('projects');
-          for (const project of vfsData.projects || []) {
-            await new Promise<void>((res, rej) => {
-              const req = projectStore.put(project);
-              req.onsuccess = () => res();
-              req.onerror = () => {
-                logger.error('[Import] Failed to import project:', project.id, req.error);
-                rej(req.error);
-              };
-            });
-          }
-          logger.info('[Import] Projects imported');
-          
-          // Import files
-          const fileTx = db.transaction(['files'], 'readwrite');
-          const fileStore = fileTx.objectStore('files');
-          for (const file of vfsData.files || []) {
-            await new Promise<void>((res, rej) => {
-              const req = fileStore.put(file);
-              req.onsuccess = () => res();
-              req.onerror = () => {
-                logger.error('[Import] Failed to import file:', file.path, req.error);
-                rej(req.error);
-              };
-            });
-          }
-          logger.info('[Import] Files imported');
-          
-          // Import file tree
-          const treeTx = db.transaction(['fileTree'], 'readwrite');
-          const treeStore = treeTx.objectStore('fileTree');
-          for (const node of vfsData.fileTree || []) {
-            await new Promise<void>((res, rej) => {
-              const req = treeStore.put(node);
-              req.onsuccess = () => res();
-              req.onerror = () => {
-                logger.error('[Import] Failed to import tree node:', node.path, req.error);
-                rej(req.error);
-              };
-            });
-          }
-          logger.info('[Import] File tree imported');
-
-          // Import conversations (from vfsData or legacy backup format)
-          const conversations = vfsData.conversations || [];
-          if (conversations.length > 0) {
-            logger.info('[Import] Importing conversations:', conversations.length);
-            const convTx = db.transaction(['conversations'], 'readwrite');
-            const convStore = convTx.objectStore('conversations');
-            for (const conversation of conversations) {
-              await new Promise<void>((res, rej) => {
-                const req = convStore.put(conversation);
-                req.onsuccess = () => res();
-                req.onerror = () => {
-                  logger.error('[Import] Failed to import conversation:', conversation.id, req.error);
-                  rej(req.error);
-                };
-              });
-            }
-            logger.info('[Import] Conversations imported');
-          }
-
-          // Import checkpoints (from vfsData or legacy backup format)
-          const checkpoints = vfsData.checkpoints || [];
-          if (checkpoints.length > 0) {
-            logger.info('[Import] Importing checkpoints:', checkpoints.length);
-            const checkTx = db.transaction(['checkpoints'], 'readwrite');
-            const checkStore = checkTx.objectStore('checkpoints');
-            for (const checkpoint of checkpoints) {
-              await new Promise<void>((res, rej) => {
-                const req = checkStore.put(checkpoint);
-                req.onsuccess = () => res();
-                req.onerror = () => {
-                  logger.error('[Import] Failed to import checkpoint:', checkpoint.id, req.error);
-                  rej(req.error);
-                };
-              });
-            }
-            logger.info('[Import] Checkpoints imported');
-          }
-
-          logger.info('[Import] All data imported successfully');
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      };
-      
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-
-  private static async clearAllData(): Promise<void> {
-    const allDbs = [
-      'osw-studio-db',
-      'osw-studio-vfs',
-      'OSWStudioConversations',
-      'OSWStudioCheckpoints',
-      'deepstudio-vfs',
-      'DeepStudioConversations',
-      'DeepStudioCheckpoints'
-    ];
-
-    for (const dbName of allDbs) {
-      await new Promise<void>((resolve) => {
-        // Set a timeout to prevent hanging
-        const timeout = setTimeout(() => {
-          logger.warn(`[Backup] Database deletion timeout for: ${dbName}`);
-          resolve();
-        }, 2000);
-
-        const deleteRequest = indexedDB.deleteDatabase(dbName);
-
-        deleteRequest.onsuccess = () => {
-          clearTimeout(timeout);
-          logger.info(`[Backup] Deleted database: ${dbName}`);
-          resolve();
-        };
-
-        deleteRequest.onerror = () => {
-          clearTimeout(timeout);
-          logger.warn(`[Backup] Error deleting database: ${dbName}`, deleteRequest.error);
-          resolve(); // Continue anyway
-        };
-
-        deleteRequest.onblocked = () => {
-          logger.warn(`[Backup] Database deletion blocked: ${dbName}`);
-          // Don't resolve yet, wait for unblock or timeout
-        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Export transaction aborted'));
       });
     }
 
-    logger.info('[Backup] All databases cleared');
+    return {
+      projects: [],
+      files: [],
+      fileTree: [],
+      ...result,
+    } as BackupData['databases']['vfs'];
+  }
+
+  /**
+   * Write the backup's records into the live database.
+   *
+   * Keys with no matching object store are skipped rather than failing the whole import, so a
+   * backup taken on a newer build still restores everything this build understands.
+   * Returns the store names that were written.
+   */
+  private static async writeStores(db: IDBDatabase, stores: Record<string, unknown[]>): Promise<string[]> {
+    const targets = Object.keys(stores).filter(
+      (name) => db.objectStoreNames.contains(name) && Array.isArray(stores[name]) && stores[name].length > 0
+    );
+    const skipped = Object.keys(stores).filter(
+      (name) => !db.objectStoreNames.contains(name) && Array.isArray(stores[name]) && stores[name].length > 0
+    );
+    if (skipped.length > 0) {
+      logger.warn(`[Backup] Backup contains unknown stores, skipped: ${skipped.join(', ')}`);
+    }
+    if (targets.length === 0) return [];
+
+    await new Promise<void>((resolve, reject) => {
+      // A single transaction so a failure part-way through rolls the whole restore back rather
+      // than leaving half the data in place. Every put is issued synchronously: awaiting between
+      // them would let the transaction auto-commit before the rest were queued.
+      const tx = db.transaction(targets, 'readwrite');
+      for (const name of targets) {
+        const store = tx.objectStore(name);
+        for (const record of stores[name]) {
+          store.put(this.decodeBinary(record));
+        }
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Import transaction aborted'));
+    });
+
+    return targets;
+  }
+
+  /**
+   * Empty every store in the live database for a replace-mode import.
+   *
+   * Clears in place rather than deleting the database. Deleting meant closing every open
+   * connection first (which never actually happened, so deletion blocked and timed out), and
+   * recreating the database from the backup service left it on an outdated schema version.
+   */
+  private static async clearLiveDatabase(db: IDBDatabase): Promise<void> {
+    const storeNames = Array.from(db.objectStoreNames);
+    if (storeNames.length === 0) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(storeNames, 'readwrite');
+      for (const name of storeNames) {
+        tx.objectStore(name).clear();
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Clear transaction aborted'));
+    });
+
+    logger.info('[Backup] Existing data cleared');
+  }
+
+  /**
+   * Replace ArrayBuffers with a base64 marker so binary file content survives JSON.
+   * Without this every image and font in a backup was written out as `{}`.
+   */
+  private static encodeBinary(value: unknown): unknown {
+    if (isArrayBuffer(value)) {
+      return { _isBinaryBase64: true, data: arrayBufferToBase64(value) };
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => this.encodeBinary(entry));
+    }
+    if (value instanceof Date || value === null || typeof value !== 'object') {
+      return value;
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = this.encodeBinary(entry);
+    }
+    return out;
+  }
+
+  /** Inverse of encodeBinary. Records from older backups pass through untouched. */
+  private static decodeBinary(value: unknown): unknown {
+    if (isEncodedBinary(value)) {
+      return base64ToArrayBuffer(value.data);
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => this.decodeBinary(entry));
+    }
+    if (value === null || typeof value !== 'object') {
+      return value;
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = this.decodeBinary(entry);
+    }
+    return out;
   }
 
   private static validateBackupData(data: BackupData): void {
@@ -535,7 +372,7 @@ export class BackupService {
     // Version compatibility check (for future versions)
     const backupVersion = data.version.split('.').map(Number);
     const currentVersion = this.BACKUP_VERSION.split('.').map(Number);
-    
+
     if (backupVersion[0] > currentVersion[0]) {
       throw new Error(`Backup version ${data.version} is not compatible with current version ${this.BACKUP_VERSION}`);
     }

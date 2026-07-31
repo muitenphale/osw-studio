@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listFiles: vi.fn(),
   updateProject: vi.fn(),
   pushSingleProject: vi.fn(),
+  pushProjectDelta: vi.fn(),
   getSyncManager: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -18,7 +19,10 @@ vi.mock('@/lib/vfs', () => ({
   },
 }));
 vi.mock('@/lib/vfs/sync-manager', () => ({
-  getSyncManager: mocks.getSyncManager.mockReturnValue({ pushSingleProject: mocks.pushSingleProject }),
+  getSyncManager: mocks.getSyncManager.mockReturnValue({
+    pushSingleProject: mocks.pushSingleProject,
+    pushProjectDelta: mocks.pushProjectDelta,
+  }),
 }));
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }));
 vi.mock('@/lib/utils', () => ({
@@ -30,7 +34,10 @@ import { pushProjectToServer } from '../push-project-to-server';
 describe('pushProjectToServer (issue #13)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getSyncManager.mockReturnValue({ pushSingleProject: mocks.pushSingleProject });
+    mocks.getSyncManager.mockReturnValue({
+      pushSingleProject: mocks.pushSingleProject,
+      pushProjectDelta: mocks.pushProjectDelta,
+    });
     vi.stubEnv('NEXT_PUBLIC_SERVER_MODE', 'true');
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -91,5 +98,48 @@ describe('pushProjectToServer (issue #13)', () => {
 
     await expect(pushProjectToServer('p1')).resolves.toBeUndefined();
     expect(mocks.updateProject).not.toHaveBeenCalled();
+  });
+
+  // The reconcile pushes routinely; a full push deletes and recreates every file on the server,
+  // so it has to take the delta path instead.
+  it('uses the delta push when asked, not the full one', async () => {
+    mocks.getProject.mockResolvedValue({ id: 'p1', settings: {} });
+    mocks.listFiles.mockResolvedValue([{ path: '/index.html' }]);
+    mocks.pushProjectDelta.mockResolvedValue({
+      success: true,
+      project: { updatedAt: '2026-07-01T00:00:00.000Z' },
+    });
+
+    await pushProjectToServer('p1', 'w1', { delta: true });
+
+    expect(mocks.pushProjectDelta).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({ id: 'p1' }),
+      [{ path: '/index.html' }]
+    );
+    expect(mocks.pushSingleProject).not.toHaveBeenCalled();
+    expect(mocks.updateProject).toHaveBeenCalled();
+  });
+
+  it('stays silent on failure when the caller asks it to', async () => {
+    mocks.getProject.mockResolvedValue({ id: 'p1', settings: {} });
+    mocks.listFiles.mockResolvedValue([]);
+    mocks.pushProjectDelta.mockResolvedValue({ success: false, error: 'conflict' });
+
+    await pushProjectToServer('p1', 'w1', { delta: true, silent: true });
+
+    // A background reconcile must not interrupt with a toast; a conflict is resolved in Server Sync.
+    expect(mocks.toastError).not.toHaveBeenCalled();
+    expect(mocks.updateProject).not.toHaveBeenCalled();
+  });
+
+  it('still toasts on failure by default', async () => {
+    mocks.getProject.mockResolvedValue({ id: 'p1', settings: {} });
+    mocks.listFiles.mockResolvedValue([]);
+    mocks.pushSingleProject.mockResolvedValue({ success: false, error: 'server down' });
+
+    await pushProjectToServer('p1', 'w1');
+
+    expect(mocks.toastError).toHaveBeenCalled();
   });
 });

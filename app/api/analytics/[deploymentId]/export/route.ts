@@ -8,8 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth/session';
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { requireDeploymentAccess } from '@/lib/api/deployment-access';
 
 interface ExportRequest {
   format?: 'csv' | 'json';
@@ -21,30 +20,20 @@ export async function POST(
   { params }: { params: Promise<{ deploymentId: string }> }
 ) {
   try {
-    // Require authentication
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const { deploymentId } = await params;
+
+    // Authenticates, resolves the deployment to its owning workspace database, and verifies the
+    // caller has access to that workspace. Ahead of reading the body: parsing an unauthenticated
+    // request's payload turned a 401 into a 500 whenever that payload was malformed.
+    // 'viewer', not 'editor': export is a read. It returns the same records the overview and
+    // sessions views already show a viewer, just as CSV, so gating it higher would lock viewers out
+    // of a download without protecting anything.
+    const access = await requireDeploymentAccess(deploymentId, 'viewer');
+    if (!access.ok) return access.response;
+    const { adapter } = access.context;
+
     const body: ExportRequest = await request.json();
     const { format = 'csv', type = 'all' } = body;
-
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-
-    // Verify deployment exists (from core database)
-    const deployment = await adapter.getDeployment(deploymentId);
-    if (!deployment) {
-      return NextResponse.json(
-        { error: 'Deployment not found' },
-        { status: 404 }
-      );
-    }
 
     // Get deployment database for analytics
     const deploymentDb = adapter.getAnalyticsDatabaseInstance(deploymentId);

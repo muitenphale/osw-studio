@@ -1,13 +1,13 @@
 {
   "name": "osw-studio-desktop",
-  "version": "1.83.0",
+  "version": "0.0.0",
   "private": true,
   "description": "OSW Studio Desktop — Electron shell around the Next.js standalone server. The version is set at build time from the repo root package.json; 0.0.0 is a placeholder.",
   "main": "app/main.js",
   "homepage": "https://github.com/o-stahl/osw-studio",
   "author": {
     "name": "OSW Studio",
-    "email": "otst@oswstudio.com"
+    "email": "hello@oswstudio.com"
   },
   "scripts": {
     "compile": "tsup",

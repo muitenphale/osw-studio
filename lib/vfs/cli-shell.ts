@@ -2908,6 +2908,7 @@ Alternative: Use edge functions for database access via db.query() and db.run()`
           const runtime = requested as import('@/lib/vfs/types').ProjectRuntime;
           proj.settings = { ...proj.settings, runtime };
           await vfs.updateProject(proj);
+          vfs.scheduleAutoSync(proj.id);
 
           // Update .PROMPT.md to match the new runtime's domain prompt.
           // Retried once — HMR can invalidate the webpack chunk for the lazy

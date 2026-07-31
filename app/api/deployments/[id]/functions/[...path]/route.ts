@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { resolveDeploymentByIdOrSlug } from '@/lib/vfs/adapters/deployment-adapter';
 import { executeFunction } from '@/lib/edge-functions/executor';
 import { FunctionRequest } from '@/lib/edge-functions/types';
 import { logger } from '@/lib/utils';
@@ -41,21 +41,17 @@ async function handleRequest(
       );
     }
 
-    // Get adapter and initialize
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-
-    // Check if deployment exists — try UUID first, then slug
-    let deployment = await adapter.getDeployment?.(deploymentId) ?? null;
-    if (!deployment && adapter.getDeploymentBySlug) {
-      deployment = await adapter.getDeploymentBySlug(deploymentId);
-    }
-    if (!deployment) {
+    // Check if deployment exists — try UUID first, then slug. Resolved through deployment_routing
+    // so the lookup reaches the workspace database that owns it; this endpoint is called by
+    // published sites and has no workspace in its URL.
+    const resolved = await resolveDeploymentByIdOrSlug(deploymentId);
+    if (!resolved) {
       return NextResponse.json(
         { error: 'Deployment not found' },
         { status: 404 }
       );
     }
+    const { adapter, deployment } = resolved;
 
     // Use the actual deployment ID for subsequent lookups (in case we matched by slug)
     const resolvedDeploymentId = deployment.id;

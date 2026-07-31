@@ -15,7 +15,7 @@
 
 import type { Database } from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
-import { VirtualFile, FileTreeNode, Deployment, EdgeFunction, FunctionLog, TableInfo, ServerFunction, Secret, ScheduledFunction } from '../types';
+import { FileTreeNode, Deployment, EdgeFunction, FunctionLog, TableInfo, ServerFunction, Secret, ScheduledFunction } from '../types';
 import { encryptSecret, isEncryptionConfigured } from '../../edge-functions/secrets-crypto';
 import { getRuntimeDatabaseConnection, closeRuntimeDatabase } from './sqlite-connection';
 
@@ -338,125 +338,9 @@ export class RuntimeDatabase {
     this.db.prepare(sql).run(...values);
   }
 
-  // ============================================
-  // Files
-  // ============================================
-
-  createFile(file: VirtualFile): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO files (
-        id, path, name, type, content, mime_type, size,
-        created_at, updated_at, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    let content: string;
-    if (file.content instanceof ArrayBuffer) {
-      content = Buffer.from(file.content).toString('base64');
-    } else if (typeof file.content === 'string') {
-      content = file.content;
-    } else {
-      content = '';
-    }
-
-    stmt.run(
-      file.id,
-      file.path,
-      file.name,
-      file.type,
-      content,
-      file.mimeType ?? null,
-      file.size ?? 0,
-      toISOStringRequired(file.createdAt),
-      toISOStringRequired(file.updatedAt),
-      JSON.stringify(file.metadata ?? {})
-    );
-  }
-
-  getFile(path: string): VirtualFile | null {
-    const row = this.db.prepare('SELECT * FROM files WHERE path = ?').get(path) as Record<string, unknown> | undefined;
-
-    if (!row) return null;
-
-    return this.rowToFile(row);
-  }
-
-  updateFile(file: VirtualFile): void {
-    const stmt = this.db.prepare(`
-      UPDATE files SET
-        name = ?, type = ?, content = ?, mime_type = ?,
-        size = ?, updated_at = ?, metadata = ?
-      WHERE path = ?
-    `);
-
-    let content: string;
-    if (file.content instanceof ArrayBuffer) {
-      content = Buffer.from(file.content).toString('base64');
-    } else if (typeof file.content === 'string') {
-      content = file.content;
-    } else {
-      content = '';
-    }
-
-    stmt.run(
-      file.name,
-      file.type,
-      content,
-      file.mimeType ?? null,
-      file.size ?? 0,
-      toISOStringRequired(file.updatedAt),
-      JSON.stringify(file.metadata ?? {}),
-      file.path
-    );
-  }
-
-  deleteFile(path: string): void {
-    this.db.prepare('DELETE FROM files WHERE path = ?').run(path);
-  }
-
-  listFiles(): VirtualFile[] {
-    const rows = this.db.prepare('SELECT * FROM files ORDER BY path').all() as Record<string, unknown>[];
-    return rows.map(row => this.rowToFile(row));
-  }
-
-  deleteAllFiles(): void {
-    this.db.prepare('DELETE FROM files').run();
-  }
-
-  private rowToFile(row: Record<string, unknown>): VirtualFile {
-    const metadata = parseJSON(row.metadata as string, {});
-    const type = row.type as VirtualFile['type'];
-
-    let content: string | ArrayBuffer = row.content as string;
-    if (type === 'image' || type === 'video' || type === 'binary') {
-      try {
-        let base64Data = content as string;
-        if (base64Data.startsWith('data:')) {
-          const commaIndex = base64Data.indexOf(',');
-          if (commaIndex !== -1) {
-            base64Data = base64Data.slice(commaIndex + 1);
-          }
-        }
-        content = Buffer.from(base64Data, 'base64').buffer;
-      } catch {
-        // Keep as string if conversion fails
-      }
-    }
-
-    return {
-      id: row.id as string,
-      projectId: this.deploymentId,
-      path: row.path as string,
-      name: row.name as string,
-      type,
-      content,
-      mimeType: row.mime_type as string,
-      size: row.size as number,
-      createdAt: parseDate(row.created_at as string),
-      updatedAt: parseDate(row.updated_at as string),
-      metadata,
-    };
-  }
+  // This class exposes no file accessors: published sites are served from disk, and the runtime
+  // database is used only for edge functions, scheduled functions, secrets and user queries. Its
+  // files table is kept because user SQL can reach it.
 
   // ============================================
   // File Tree Nodes

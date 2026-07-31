@@ -195,7 +195,7 @@ export interface VirtualFile {
   projectId: string;
   path: string;
   name: string;
-  type: 'html' | 'css' | 'js' | 'json' | 'text' | 'template' | 'image' | 'video' | 'binary';
+  type: 'html' | 'css' | 'js' | 'json' | 'text' | 'template' | 'image' | 'video' | 'audio' | 'font' | 'binary';
   content: string | ArrayBuffer;
   mimeType: string;
   size: number;
@@ -242,6 +242,8 @@ export const MIME_TYPES: Record<FileType, string> = {
   template: 'text/x-handlebars-template',
   image: 'image/*',
   video: 'video/*',
+  audio: 'audio/*',
+  font: 'font/*',
   binary: 'application/octet-stream'
 };
 
@@ -253,7 +255,10 @@ export const SUPPORTED_EXTENSIONS = {
   text: ['txt', 'md', 'xml', 'svg'],
   template: ['hbs', 'handlebars'],
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp'],
-  video: ['mp4', 'webm', 'ogg']
+  video: ['mp4', 'webm', 'ogv'],
+  audio: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga', 'ogg', 'opus'],
+  font: ['woff', 'woff2', 'ttf', 'otf', 'eot'],
+  binary: ['pdf', 'zip', 'wasm']
 };
 
 export const FILE_SIZE_LIMITS = {
@@ -265,19 +270,38 @@ export const FILE_SIZE_LIMITS = {
   template: 5 * 1024 * 1024,
   image: 10 * 1024 * 1024,
   video: 50 * 1024 * 1024,
+  audio: 25 * 1024 * 1024,
+  font: 5 * 1024 * 1024,
   binary: 10 * 1024 * 1024
 };
 
+/**
+ * Coarse category for a path, used for presentation: which icon to show, which viewer to open,
+ * which size cap to apply. It does NOT decide how content is stored or transported — that follows
+ * the content itself, because an extension is a guess and a wrong guess corrupted the file.
+ *
+ * Unknown extensions are 'binary', not 'text'. Reading unknown bytes as text destroys them;
+ * treating text as bytes only costs you the editor. The safe default is the one that preserves
+ * data, and it means a format nobody enumerated — .glb, .wasm, whatever comes next — just works.
+ */
 export function getFileTypeFromPath(path: string): FileType {
-  const ext = path.split('.').pop()?.toLowerCase();
-  
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+
   for (const [type, extensions] of Object.entries(SUPPORTED_EXTENSIONS)) {
-    if (extensions.includes(ext || '')) {
+    if (extensions.includes(ext)) {
       return type as FileType;
     }
   }
-  
-  return 'text';
+
+  return 'binary';
+}
+
+/**
+ * Whether a path should be read and held as text. The inverse of the old allow-list: a short,
+ * closed set of genuinely-textual formats, with everything else treated as bytes.
+ */
+export function isTextExtension(path: string): boolean {
+  return !isBinaryFileType(getFileTypeFromPath(path));
 }
 
 export function getSpecificMimeType(path: string): string {
@@ -319,20 +343,44 @@ export function getSpecificMimeType(path: string): string {
     
     'mp4': 'video/mp4',
     'webm': 'video/webm',
-    'ogg': 'video/ogg'
+    'ogv': 'video/ogg',
+
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'm4a': 'audio/mp4',
+    'aac': 'audio/aac',
+    'flac': 'audio/flac',
+    'oga': 'audio/ogg',
+    'ogg': 'audio/ogg',
+    'opus': 'audio/opus',
+
+    'woff': 'font/woff',
+    'woff2': 'font/woff2',
+    'ttf': 'font/ttf',
+    'otf': 'font/otf',
+    'eot': 'application/vnd.ms-fontobject',
+
+    'pdf': 'application/pdf',
+    'zip': 'application/zip',
+    'wasm': 'application/wasm'
   };
   
   return mimeMap[ext || ''] || 'application/octet-stream';
 }
 
-export function isFileSupported(fileName: string): boolean {
-  const ext = fileName.split('.').pop()?.toLowerCase();
-  for (const extensions of Object.values(SUPPORTED_EXTENSIONS)) {
-    if (extensions.includes(ext || '')) {
-      return true;
-    }
-  }
-  return false;
+/**
+ * Whether a file of this type holds bytes rather than text.
+ *
+ * One place to ask, so a new binary category cannot be added and then silently mishandled by a
+ * caller that happened to enumerate types by hand — which is how audio, fonts and PDFs ended up
+ * being treated as text everywhere.
+ */
+const BINARY_FILE_TYPES: ReadonlySet<FileType> = new Set<FileType>([
+  'image', 'video', 'audio', 'font', 'binary',
+]);
+
+function isBinaryFileType(type: FileType): boolean {
+  return BINARY_FILE_TYPES.has(type);
 }
 
 export function getMimeType(type: FileType): string {

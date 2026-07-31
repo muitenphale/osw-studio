@@ -280,6 +280,9 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
       const proj = await vfs.getProject(project.id);
       proj.settings = { ...proj.settings, runtime: value };
       await vfs.updateProject(proj);
+      // Project settings are stored server-side; opened from the gallery there is no save
+      // that would otherwise push this.
+      vfs.scheduleAutoSync(proj.id);
       onProjectUpdate(proj);
       const label = getProjectRuntimes().find(r => r.value === value)?.label || value;
       toast.success(`Runtime changed to ${label}`);
@@ -299,6 +302,7 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
       const proj = await vfs.getProject(project.id);
       proj.settings = { ...proj.settings, previewEntryPoint: trimmed };
       await vfs.updateProject(proj);
+      vfs.scheduleAutoSync(proj.id);
       onProjectUpdate(proj);
       toast.success(`Entry point set to ${trimmed}`);
     } catch (err) {

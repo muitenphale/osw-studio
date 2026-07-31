@@ -10,24 +10,20 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth/session';
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { requireDeploymentAccess } from '@/lib/api/deployment-access';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ deploymentId: string }> }
 ) {
   try {
-    // Require authentication
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const { deploymentId } = await params;
+
+    // Authenticates, resolves the deployment to its owning workspace database, and
+    // verifies the caller has access to that workspace.
+    const access = await requireDeploymentAccess(deploymentId, 'viewer');
+    if (!access.ok) return access.response;
+    const { adapter } = access.context;
     const { searchParams } = new URL(request.url);
     const page = searchParams.get('page');
     const type = searchParams.get('type') || 'click';
@@ -39,18 +35,6 @@ export async function GET(
       return NextResponse.json(
         { error: 'Missing required parameter: page' },
         { status: 400 }
-      );
-    }
-
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-
-    // Verify deployment exists (from core database)
-    const deployment = await adapter.getDeployment(deploymentId);
-    if (!deployment) {
-      return NextResponse.json(
-        { error: 'Deployment not found' },
-        { status: 404 }
       );
     }
 

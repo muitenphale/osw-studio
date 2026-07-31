@@ -28,6 +28,7 @@ import {
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
 import { cn } from '@/lib/utils';
+import { useProjectSyncState } from '@/lib/hooks/use-project-sync-state';
 import { useRouter, useSearchParams } from 'next/navigation';
 import pkg from '@/package.json';
 import { WorkspaceSwitcher } from '@/components/workspace-switcher';
@@ -108,7 +109,6 @@ interface SidebarProps {
   onOpenAbout?: () => void;
   onOpenSettings?: () => void;
   onServerSync?: () => void;
-  onLogoClick?: () => void;
   onPinnedChange?: (pinned: boolean) => void;
   onHoverChange?: (hovering: boolean) => void;
   onCollapsedChange?: (collapsed: boolean) => void;
@@ -125,7 +125,6 @@ function SidebarContent({
   onOpenAbout,
   onOpenSettings,
   onServerSync,
-  onLogoClick,
   onPinnedChange,
   onHoverChange,
   onCollapsedChange,
@@ -152,6 +151,8 @@ function SidebarContent({
   const [logoHover, setLogoHover] = useState(false);
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+  // Read-only: the gallery owns refreshing this, so the sidebar adds no extra request.
+  const { pendingCount } = useProjectSyncState();
   const isDesktop = process.env.NEXT_PUBLIC_DESKTOP === 'true';
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -627,6 +628,10 @@ function SidebarContent({
               );
             }
 
+            // Projects the server is missing or behind on. Shown here because Server Sync is
+            // where the user resolves them, and nothing else made drift visible.
+            const pendingBadge = item.id === 'sync' && pendingCount > 0;
+
             return (
               <Button
                 key={item.id}
@@ -638,10 +643,23 @@ function SidebarContent({
                   isLogout && 'text-destructive hover:text-destructive hover:bg-destructive/10'
                 )}
                 onClick={() => handleItemAction(item)}
-                title={collapsed ? item.label : undefined}
+                title={collapsed ? (pendingBadge ? `${item.label} (${pendingCount} not synced)` : item.label) : undefined}
               >
                 <Icon className={cn('h-4 w-4', !collapsed && 'mr-2')} />
                 {!collapsed && item.label}
+                {pendingBadge && (
+                  <span
+                    className={cn(
+                      'flex items-center justify-center rounded-full bg-primary/15 text-primary text-[10px] font-medium',
+                      collapsed
+                        ? 'absolute top-1 right-1 h-4 min-w-4 px-1'
+                        : 'ml-auto h-4 min-w-4 px-1'
+                    )}
+                    aria-label={`${pendingCount} project(s) not synced to the server`}
+                  >
+                    {pendingCount}
+                  </span>
+                )}
               </Button>
             );
           })}

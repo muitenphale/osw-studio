@@ -96,9 +96,7 @@ class SaveManager {
     project.lastSavedAt = new Date(checkpoint.timestamp);
     await activeVFS.updateProject(project);
 
-    // Trigger auto-sync after save (only place that should trigger sync)
-    // Use the internal triggerAutoSync method which has debouncing
-    (activeVFS as any).triggerAutoSync?.(projectId);
+    activeVFS.scheduleAutoSync(projectId);
 
     this.manualCheckpoints.set(projectId, checkpoint.id);
     this.markClean(projectId);

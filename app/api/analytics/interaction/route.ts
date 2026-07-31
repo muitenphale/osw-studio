@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSQLiteAdapter } from '@/lib/vfs/adapters/server';
+import { resolveDeployment } from '@/lib/vfs/adapters/deployment-adapter';
 import {
   interactionRateLimiter,
   RATE_LIMIT_CONFIG,
@@ -124,17 +124,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const adapter = getSQLiteAdapter();
-    await adapter.init();
-
-    // 5. Verify deployment exists (from core database)
-    const deployment = await adapter.getDeployment(deploymentId);
-    if (!deployment) {
+    // 5. Verify deployment exists. Resolved through deployment_routing so the lookup reaches the
+    // workspace database that owns it — this endpoint is public and has no workspace in its URL.
+    const resolved = await resolveDeployment(deploymentId);
+    if (!resolved) {
       return NextResponse.json(
         { error: 'Deployment not found' },
         { status: 404 }
       );
     }
+    const { adapter, deployment } = resolved;
 
     // 6. Check if analytics is enabled
     if (!deployment.analytics.enabled || deployment.analytics.provider !== 'builtin') {
@@ -342,18 +341,17 @@ async function handleBatchInteractions(
     return NextResponse.json({ success: true });
   }
 
-  const adapter = getSQLiteAdapter();
-  await adapter.init();
-
   try {
-    // 4. Verify deployment exists (from core database)
-    const deployment = await adapter.getDeployment(deploymentId);
-    if (!deployment) {
+    // 4. Verify deployment exists. Resolved through deployment_routing so the lookup reaches the
+    // workspace database that owns it — this endpoint is public and has no workspace in its URL.
+    const resolved = await resolveDeployment(deploymentId);
+    if (!resolved) {
       return NextResponse.json(
         { error: 'Deployment not found' },
         { status: 404 }
       );
     }
+    const { adapter, deployment } = resolved;
 
     // 5. Check if analytics is enabled
     if (!deployment.analytics.enabled || deployment.analytics.provider !== 'builtin') {

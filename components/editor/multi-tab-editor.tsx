@@ -281,7 +281,10 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
     return `data:${mime};base64,${content}`;
   };
 
-  const getFileType = (path: string) => {
+  // Content decides whether a file is editable, the extension only decides how to present it.
+  // A path-only guess meant any format nobody had listed fell through to the text editor, which
+  // now renders an ArrayBuffer as garbage.
+  const getFileType = (path: string, content?: string | ArrayBuffer) => {
     const ext = path.split('.').pop()?.toLowerCase();
     
     if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'ico'].includes(ext || '')) {
@@ -315,11 +318,11 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
       return { type: 'text', language: textExtensions[ext || ''] };
     }
     
-    const binaryExtensions = ['zip', 'tar', 'gz', 'exe', 'bin', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
-    if (binaryExtensions.includes(ext || '')) {
+    // Anything whose content is not text cannot be edited, whatever its extension says.
+    if (content !== undefined && typeof content !== 'string') {
       return { type: 'unsupported', language: 'plaintext' };
     }
-    
+
     return { type: 'text', language: 'plaintext' };
   };
   
@@ -395,7 +398,7 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
           {activeFile && (
             <div className="flex-1 border-t">
               {(() => {
-                const fileType = getFileType(activeFile.file.path);
+                const fileType = getFileType(activeFile.file.path, activeFile.file.content);
                 
                 if (fileType.type === 'image') {
                   return (

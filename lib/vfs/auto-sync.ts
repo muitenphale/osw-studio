@@ -5,7 +5,10 @@
  * Provides sync status calculation and conflict detection.
  */
 
-import { Project } from './types';
+import { Project, VirtualFile } from './types';
+import { calculateItemSyncStatus, toTime } from './sync-types';
+import { serializeFileContent, deserializeFileContent } from './sync-manager';
+import { notifyServerProjectsChanged } from './sync-events';
 import { vfs } from './index';
 import { saveManager } from './save-manager';
 import { logger } from '@/lib/utils';
@@ -42,20 +45,35 @@ export function getAutoSyncApiUrl(path: string): string {
 // quota check, autoPullAllProjects) request it within the same tick.
 
 let _pendingSyncStatus: Promise<any | null> | null = null;
-let _cachedSyncData: { data: any; ts: number } | null = null;
+// Keyed by workspace: switching workspace within the TTL must not be served the previous
+// workspace's project list, which would misreport every project's sync status.
+let _cachedSyncData: { workspaceId: string | undefined; data: any; ts: number } | null = null;
+// Bumped on every invalidation. A request that was already in flight carries data from before the
+// change, so it captures the epoch at its start and declines to populate the cache if it no longer
+// matches — otherwise it would quietly undo the invalidation and serve the stale snapshot for the
+// rest of the TTL, which is precisely the window just after a push.
+let _syncStatusEpoch = 0;
 const SYNC_STATUS_CACHE_TTL = 5_000;
 
 export async function fetchSyncStatus(): Promise<any | null> {
-  if (_cachedSyncData && Date.now() - _cachedSyncData.ts < SYNC_STATUS_CACHE_TTL) {
+  const workspaceId = _autoSyncWorkspaceId;
+  if (
+    _cachedSyncData
+    && _cachedSyncData.workspaceId === workspaceId
+    && Date.now() - _cachedSyncData.ts < SYNC_STATUS_CACHE_TTL
+  ) {
     return _cachedSyncData.data;
   }
   if (!_pendingSyncStatus) {
+    const epoch = _syncStatusEpoch;
     _pendingSyncStatus = (async () => {
       try {
         const res = await apiFetch(getAutoSyncApiUrl('/sync/status'));
         if (!res.ok) return null;
         const data = await res.json();
-        _cachedSyncData = { data, ts: Date.now() };
+        if (epoch === _syncStatusEpoch) {
+          _cachedSyncData = { workspaceId, data, ts: Date.now() };
+        }
         return data;
       } catch {
         return null;
@@ -65,6 +83,18 @@ export async function fetchSyncStatus(): Promise<any | null> {
     })();
   }
   return _pendingSyncStatus;
+}
+
+/**
+ * Drop the cached server status.
+ *
+ * Must be called after anything that changes what the server holds, otherwise the next read is
+ * served a snapshot taken before the change — which showed freshly pushed projects as "Local only"
+ * and let a second reconcile inside the TTL re-upload a project that was already in sync.
+ */
+export function invalidateSyncStatusCache(): void {
+  _cachedSyncData = null;
+  _syncStatusEpoch++;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,77 +107,75 @@ interface SyncStatusResult {
 }
 
 
+const SYNC_STATUS_MESSAGES: Record<SyncStatus, string> = {
+  synced: 'In sync with server',
+  'local-newer': 'Local changes not yet synced',
+  'server-newer': 'Server has updates',
+  conflict: 'Both local and server have changes',
+  'never-synced': 'Never synced with server',
+  'local-only': 'Project exists only locally',
+  'server-only': 'Project exists only on the server',
+};
+
 /**
- * Calculate sync status using three-way timestamp comparison
+ * Calculate sync status using three-way timestamp comparison.
+ *
+ * Delegates to calculateItemSyncStatus so projects, skills and templates cannot drift apart on
+ * how drift is defined — there used to be two copies of this comparison and only one got fixed.
  */
 export function calculateSyncStatus(
   localProject: Project,
   serverUpdatedAt?: Date
 ): SyncStatusResult {
-  const { updatedAt, lastSyncedAt } = localProject;
+  const status = calculateItemSyncStatus(
+    localProject.updatedAt,
+    serverUpdatedAt ?? null,
+    localProject.lastSyncedAt ?? null
+  ) as SyncStatus;
 
-  // If no server timestamp available, it's local-only
-  if (!serverUpdatedAt) {
-    return {
-      status: 'local-only',
-      message: 'Project exists only locally'
-    };
-  }
-
-  // If never synced before
-  if (!lastSyncedAt) {
-    // Compare local and server times
-    if (updatedAt > serverUpdatedAt) {
-      return {
-        status: 'local-newer',
-        message: 'Local changes not yet synced'
-      };
-    } else if (serverUpdatedAt > updatedAt) {
-      return {
-        status: 'server-newer',
-        message: 'Server has updates'
-      };
-    } else {
-      return {
-        status: 'synced',
-        message: 'In sync with server'
-      };
-    }
-  }
-
-  // Three-way comparison
-  const localChanged = updatedAt > lastSyncedAt;
-  const serverChanged = serverUpdatedAt > lastSyncedAt;
-
-  if (localChanged && serverChanged) {
-    return {
-      status: 'conflict',
-      message: 'Both local and server have changes'
-    };
-  }
-
-  if (localChanged) {
-    return {
-      status: 'local-newer',
-      message: 'Local changes not yet synced'
-    };
-  }
-
-  if (serverChanged) {
-    return {
-      status: 'server-newer',
-      message: 'Server has updates'
-    };
-  }
-
-  return {
-    status: 'synced',
-    message: 'In sync with server'
-  };
+  return { status, message: SYNC_STATUS_MESSAGES[status] ?? '' };
 }
 
 const syncRetries = new Map<string, number>();
 const MAX_RETRIES = 3;
+
+/**
+ * Work out which files actually need sending.
+ *
+ * Falls back to a full push whenever the server's manifest can't be read (including the first
+ * push, where there is nothing on the server yet) — a full push is correct, just expensive.
+ */
+async function buildFileDelta(
+  projectId: string,
+  files: VirtualFile[]
+): Promise<{ files: VirtualFile[]; deletedPaths: string[]; partial: boolean }> {
+  const full = { files, deletedPaths: [] as string[], partial: false };
+  try {
+    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}?manifest=1`));
+    if (!response.ok) return full;
+
+    const manifest = await response.json() as {
+      files?: Array<{ path: string; updatedAt: string; size?: number }>;
+    };
+    if (!Array.isArray(manifest.files)) return full;
+
+    const serverFiles = new Map(manifest.files.map((file) => [file.path, file]));
+    const changed = files.filter((file) => {
+      const serverFile = serverFiles.get(file.path);
+      if (!serverFile) return true;
+      return new Date(serverFile.updatedAt).getTime() !== new Date(file.updatedAt).getTime()
+        || (serverFile.size ?? 0) !== (file.size ?? 0);
+    });
+    const localPaths = new Set(files.map((file) => file.path));
+    const deletedPaths = manifest.files
+      .filter((file) => !localPaths.has(file.path))
+      .map((file) => file.path);
+
+    return { files: changed, deletedPaths, partial: true };
+  } catch {
+    return full;
+  }
+}
 
 /**
  * Auto-sync a project to the server (non-blocking, silent by default)
@@ -173,13 +201,24 @@ export async function autoSyncProject(projectId: string, silent = true): Promise
     // Get all files
     const files = await vfs.listFiles(projectId);
 
-    // Push to server
+    // Ask the server what it already has, so an unchanged file is not re-uploaded and, more
+    // importantly, so the push does not have to be a full delete-and-recreate of every file.
+    const delta = await buildFileDelta(projectId, files);
+
+    // Push to server. Binary content MUST go through serializeFileContent: JSON.stringify turns an
+    // ArrayBuffer into {}, and the route rebuilds the server's copy from this payload, so sending
+    // raw files silently replaced every image and font with an empty object.
     const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ project, files }),
+      body: JSON.stringify({
+        project,
+        files: delta.files.map(serializeFileContent),
+        deletedPaths: delta.deletedPaths,
+        partial: delta.partial,
+      }),
     });
 
     if (response.status === 401) {
@@ -214,6 +253,7 @@ export async function autoSyncProject(projectId: string, silent = true): Promise
     await vfs.updateProject(project, { preserveUpdatedAt: true });
 
     syncRetries.delete(projectId);
+    invalidateSyncStatusCache();
     logger.debug(`[AutoSync] Project ${projectId} synced successfully`);
 
     if (!silent) {
@@ -289,13 +329,18 @@ export async function checkServerUpdates(projectId: string): Promise<boolean> {
 }
 
 /**
- * Pull updates from server for a project
+ * Pull a project down from the server, creating it locally if it is not there yet.
+ *
+ * Handles both cases deliberately: auto-pull used to carry a separate copy of this for projects
+ * that only existed on the server, and the two drifted — a fix applied here did not reach the
+ * other, which is how a premature commit survived in one of them.
  */
 export async function pullServerUpdates(projectId: string, showToast = true): Promise<boolean> {
   if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
     return false;
   }
 
+  let createdLocally = false;
   try {
     const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`));
     if (!response.ok) {
@@ -305,6 +350,23 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
     const data = await response.json();
     const serverProject: Project = data.project;
     const serverFiles = data.files;
+    // Captured before any write: vfs.updateProject mutates the object it is handed, so reading
+    // serverProject.updatedAt afterwards yields the local clock, not the server's timestamp.
+    const serverUpdatedAt = toTime(serverProject.updatedAt);
+
+    // The project may not exist locally at all. Create the shell first so files have somewhere to
+    // go; if anything below fails it is rolled back, because a shell with no files reads as local
+    // work and the reconcile would push it over the server's real copy.
+    let existsLocally = true;
+    try {
+      await vfs.getProject(projectId);
+    } catch {
+      existsLocally = false;
+    }
+    if (!existsLocally) {
+      await vfs.createProject(serverProject.name, serverProject.description || '', projectId);
+      createdLocally = true;
+    }
 
     // Save local state as checkpoint before overwriting (safety net)
     const localFiles = await vfs.listFiles(projectId);
@@ -319,15 +381,20 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
 
     // Suppress dirty marking during pull — these are server state, not user edits
     await saveManager.runWithSuppressedDirty(projectId, async () => {
-      // Update project
-      await vfs.updateProject(serverProject);
+      // The project record is written LAST, after the files have actually landed — see the end of
+      // this block. Committing the server's metadata first meant an interrupted pull left a record
+      // claiming to be up to date over a half-written file set: the pull would not be retried,
+      // because nothing looked out of date any more.
 
       // Sync files: update existing, create new, delete removed
       const existingFiles = await vfs.listFiles(projectId);
       const existingPaths = new Set(existingFiles.map(f => f.path));
       const serverPaths = new Set(serverFiles.map((f: any) => f.path));
 
-      for (const file of serverFiles) {
+      // Binary content arrives base64-encoded; writing the string through as-is would replace
+      // every image and font in the project with a text file.
+      for (const raw of serverFiles) {
+        const file = deserializeFileContent(raw);
         if (existingPaths.has(file.path)) {
           await vfs.updateFile(projectId, file.path, file.content || '');
         } else {
@@ -341,13 +408,20 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
         }
       }
 
-      // Update sync metadata
+      // Commit the project record now that the files are in place: the server's fields, plus the
+      // sync metadata. updatedAt takes the server's own timestamp rather than "now" — a pull
+      // produces no local change, and a locally-stamped updatedAt reads as local-newer against the
+      // copy it was just pulled from.
       const localProject = await vfs.getProject(projectId);
       if (localProject) {
+        localProject.name = serverProject.name;
+        localProject.description = serverProject.description;
+        if (serverProject.settings) localProject.settings = serverProject.settings;
+        if (serverUpdatedAt !== null) localProject.updatedAt = new Date(serverUpdatedAt);
         localProject.lastSyncedAt = new Date();
-        localProject.serverUpdatedAt = new Date(serverProject.updatedAt);
+        localProject.serverUpdatedAt = serverUpdatedAt !== null ? new Date(serverUpdatedAt) : new Date();
         localProject.syncStatus = 'synced';
-        await vfs.updateProject(localProject);
+        await vfs.updateProject(localProject, { preserveUpdatedAt: true });
       }
     });
 
@@ -360,6 +434,10 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
   } catch (error) {
     logger.error(`[AutoSync] Failed to pull updates for ${projectId}:`, error);
     track('sync_fail', { item_type: 'project', direction: 'pull' });
+    if (createdLocally) {
+      // Roll back the shell so a retry starts clean and nothing half-created is left to sync.
+      try { await vfs.deleteProject(projectId); } catch { /* best effort */ }
+    }
     if (showToast) {
       toast.error('Failed to pull server updates');
     }
@@ -415,19 +493,19 @@ export async function autoPullAllProjects(onProgress?: (current: number, total: 
     const localMap = new Map(localProjects.map(p => [p.id, p]));
 
     // Filter to only projects that need attention
-    const needsPull: { id: string; serverUpdatedAt: Date; isNew: boolean }[] = [];
+    const needsPull: { id: string }[] = [];
     for (const serverStatus of serverStatuses) {
       const serverUpdatedAt = new Date(serverStatus.updatedAt);
       const local = localMap.get(serverStatus.id);
 
       if (!local) {
-        needsPull.push({ id: serverStatus.id, serverUpdatedAt, isNew: true });
+        needsPull.push({ id: serverStatus.id });
         continue;
       }
 
       const syncStatus = calculateSyncStatus(local, serverUpdatedAt);
       if (syncStatus.status === 'server-newer') {
-        needsPull.push({ id: serverStatus.id, serverUpdatedAt, isNew: false });
+        needsPull.push({ id: serverStatus.id });
       } else if (syncStatus.status === 'conflict') {
         conflicts.push(serverStatus.id);
       } else {
@@ -447,37 +525,10 @@ export async function autoPullAllProjects(onProgress?: (current: number, total: 
 
     async function pullOne(item: typeof needsPull[number]) {
       try {
-        if (item.isNew) {
-          const pullResponse = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${item.id}`));
-          if (!pullResponse.ok) { errors++; return; }
-
-          const pullData = await pullResponse.json();
-          const serverProject: Project = pullData.project;
-          const serverFiles = pullData.files;
-
-          await vfs.createProject(serverProject.name, serverProject.description || '', serverProject.id);
-
-          await saveManager.runWithSuppressedDirty(serverProject.id, async () => {
-            const newProject = await vfs.getProject(serverProject.id);
-            if (newProject) {
-              newProject.settings = serverProject.settings || {};
-              newProject.lastSyncedAt = new Date();
-              newProject.serverUpdatedAt = item.serverUpdatedAt;
-              newProject.syncStatus = 'synced';
-              await vfs.updateProject(newProject, { preserveUpdatedAt: true });
-            }
-
-            for (const file of serverFiles) {
-              await vfs.createFile(serverProject.id, file.path, file.content || '');
-            }
-          });
-
-          pulled++;
-          logger.debug(`[AutoSync] Pulled new project: ${serverProject.name}`);
-        } else {
-          await pullServerUpdates(item.id, false);
-          pulled++;
-        }
+        // One path for both cases — pullServerUpdates creates the project when it is only on the
+        // server. This used to be a second, subtly different copy of the same pull.
+        if (await pullServerUpdates(item.id, false)) pulled++;
+        else errors++;
       } catch (error) {
         logger.error(`[AutoSync] Failed to process project ${item.id}:`, error);
         track('sync_fail', { item_type: 'project', direction: 'pull' });
@@ -507,47 +558,108 @@ export async function autoPullAllProjects(onProgress?: (current: number, total: 
 }
 
 /**
- * Push any project that exists only locally (never synced to the server) up to the server, so
- * imports and any earlier failed push self-heal on load. This is the load-time counterpart to
- * autoPullAllProjects (which only reconciles server→local): a project imported via .osws restore
- * (raw IndexedDB writes) or a .json import whose push threw would otherwise sit local-only forever,
- * invisible to the server-backed deployment picker.
+ * Push every project whose local copy is ahead of the server up to the server. This is the
+ * load-time counterpart to autoPullAllProjects (which only reconciles server→local).
  *
- * Local-only = neither serverUpdatedAt nor lastSyncedAt recorded. A project that was pushed and then
- * deleted server-side keeps those stamps, so it is NOT re-pushed here. Idempotent: pushProjectToServer
- * records the stamps on success, so a project is pushed at most once. No-op in browser mode.
+ * Two kinds of drift are repaired:
+ *  - 'local-only': never reached the server at all — a .osws restore (raw IndexedDB writes) or a
+ *    .json import whose push threw. Pushed in full.
+ *  - 'local-newer': pushed once, then changed locally by a write that does not itself sync
+ *    (renaming a project, recording a checkpoint id, capturing a thumbnail). Pushed as a delta,
+ *    so an unchanged file set costs one manifest request and no re-upload.
  *
- * Deliberately NOT gated by AUTO_PULL_SESSION_KEY: a .osws restore triggers a same-session reload, so a
- * session-once guard would skip the very reconcile the import needs.
+ * The earlier version only handled the first case, which is why an imported project that was
+ * pushed and then edited stayed stuck on "Local newer" through every subsequent load.
+ *
+ * Deliberately skipped:
+ *  - 'conflict' — both sides moved; only the user can choose, in Server Sync.
+ *  - projects with unsaved local edits — pushing a half-finished state behind the user's back is
+ *    worse than showing drift.
+ *
+ * Deliberately NOT gated by AUTO_PULL_SESSION_KEY: a .osws restore triggers a same-session reload,
+ * so a session-once guard would skip the very reconcile the import needs. No-op in browser mode.
  */
-export async function pushLocalOnlyProjects(workspaceId?: string): Promise<{ pushed: number; errors: number }> {
-  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return { pushed: 0, errors: 0 };
+export async function reconcileProjectsToServer(
+  workspaceId?: string
+): Promise<{ pushed: number; skipped: number; errors: number }> {
+  if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return { pushed: 0, skipped: 0, errors: 0 };
   let pushed = 0;
+  let skipped = 0;
   let errors = 0;
   try {
     await vfs.init();
     const localProjects = await vfs.listProjects();
-    const localOnly = localProjects.filter((p) => !p.serverUpdatedAt && !p.lastSyncedAt);
-    if (localOnly.length === 0) return { pushed: 0, errors: 0 };
+    if (localProjects.length === 0) return { pushed: 0, skipped: 0, errors: 0 };
+
+    // fetchSyncStatus returns null for any failure — an expired session, a 5xx, an unreachable
+    // backend. Treating that as "the server has no projects" would mark every project local-only
+    // and re-upload all of them, so a failure means do nothing at all (same guard as the pull).
+    const status = await fetchSyncStatus();
+    if (!status) {
+      logger.debug('[AutoSync] Server status unavailable, skipping reconcile');
+      return { pushed: 0, skipped, errors: 0 };
+    }
+    const serverUpdatedAt = new Map<string, string>(
+      (status.projects ?? []).map((p: { id: string; updatedAt: string }) => [p.id, p.updatedAt])
+    );
+
+    const drifted = localProjects.filter((project) => {
+      const onServer = serverUpdatedAt.get(project.id) ?? null;
+
+      // Contradictory evidence: the local record says this project was pushed, yet the server's
+      // list does not contain it. Either the list is not the one this project belongs to (a stale
+      // workspace-scoped VFS after switching workspaces) or it was deleted server-side on purpose.
+      // Neither is a reason to re-upload it, and treating it as never-pushed would do exactly that.
+      if (!onServer && (project.serverUpdatedAt || project.lastSyncedAt)) {
+        skipped++;
+        return false;
+      }
+
+      const state = calculateItemSyncStatus(
+        project.updatedAt,
+        onServer,
+        project.lastSyncedAt ?? null
+      );
+      if (state !== 'local-only' && state !== 'local-newer') return false;
+      if (saveManager.isDirty(project.id)) {
+        skipped++;
+        return false;
+      }
+      return true;
+    });
+    if (drifted.length === 0) return { pushed: 0, skipped, errors: 0 };
 
     const { pushProjectToServer } = await import('./push-project-to-server');
-    for (const project of localOnly) {
+    for (const project of drifted) {
       try {
-        await pushProjectToServer(project.id, workspaceId);
-        // pushProjectToServer stamps serverUpdatedAt on success; re-read to confirm it landed.
+        // Delta whenever the server already has the project. The full push deletes and recreates
+        // every server file, so it is reserved for a project the server has genuinely never seen —
+        // which the filter above has now established.
+        const known = serverUpdatedAt.has(project.id);
+        await pushProjectToServer(project.id, workspaceId, { delta: known, silent: true });
+        // pushProjectToServer stamps lastSyncedAt on success; re-read to confirm it landed.
         const updated = await vfs.getProject(project.id);
-        if (updated?.serverUpdatedAt) pushed++;
+        const settled =
+          updated &&
+          calculateItemSyncStatus(
+            updated.updatedAt,
+            updated.serverUpdatedAt ?? null,
+            updated.lastSyncedAt ?? null
+          ) === 'synced';
+        if (settled) pushed++;
         else errors++;
       } catch (error) {
-        logger.error(`[AutoSync] Failed to push local-only project ${project.id}:`, error);
+        logger.error(`[AutoSync] Failed to reconcile project ${project.id}:`, error);
         errors++;
       }
     }
-    if (pushed > 0) logger.debug(`[AutoSync] Reconciled ${pushed} local-only project(s) to server`);
-    return { pushed, errors };
+    if (pushed > 0) logger.debug(`[AutoSync] Reconciled ${pushed} project(s) to server`);
+    if (pushed > 0) invalidateSyncStatusCache();
+    if (pushed > 0 || errors > 0) notifyServerProjectsChanged();
+    return { pushed, skipped, errors };
   } catch (error) {
-    logger.error('[AutoSync] Failed to reconcile local-only projects:', error);
-    return { pushed, errors };
+    logger.error('[AutoSync] Failed to reconcile projects:', error);
+    return { pushed, skipped, errors };
   }
 }
 

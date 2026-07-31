@@ -40,6 +40,8 @@ import {
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { pushProjectToServer } from '@/lib/vfs/push-project-to-server';
+import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
+import { refreshProjectSyncState } from '@/lib/vfs/project-sync-state';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import {
   BAREBONES_PROJECT_TEMPLATE,
@@ -55,6 +57,7 @@ import {
   PYTHON_STARTER_PROJECT_TEMPLATE,
   LUA_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
+  customTemplateToProjectTemplate,
   BUILT_IN_TEMPLATES,
   getBuiltInTemplatesForRuntime,
   type BuiltInTemplateMetadata
@@ -209,14 +212,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     // In server mode, pull updates in the background and merge silently
     if (localLoadOk && process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
       try {
-        const { autoPullAllProjects, pushLocalOnlyProjects, setAutoSyncWorkspaceId } = await import('@/lib/vfs/auto-sync');
+        const { autoPullAllProjects, reconcileProjectsToServer, setAutoSyncWorkspaceId } = await import('@/lib/vfs/auto-sync');
         if (workspaceId) {
           setAutoSyncWorkspaceId(workspaceId);
         }
         const result = await autoPullAllProjects();
-        // Reconcile local-only projects (imports, or an earlier failed push) up to the server so
-        // they become deployable without a manual Server Sync. Self-heals every load.
-        const reconcile = await pushLocalOnlyProjects(workspaceId);
+        // Reconcile projects the server is behind on (imports, an earlier failed push, or a local
+        // edit that does not sync itself) so they stay deployable without a manual Server Sync.
+        // Self-heals every load.
+        const reconcile = await reconcileProjectsToServer(workspaceId);
         if (result.pulled > 0 || reconcile.pushed > 0) {
           // Silently refresh the project list with newly pulled/pushed data
           const updated = await vfs.listProjects();
@@ -232,6 +236,10 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
             { duration: 8000 }
           );
         }
+        // Compute sync status once for every project, after the pull and reconcile have settled,
+        // so the card badges and the sidebar count reflect the final state rather than the
+        // mid-reconcile one. This view owns the refresh; other consumers only subscribe.
+        await refreshProjectSyncState();
       } catch (syncErr) {
         logger.warn('[ProjectManager] Background sync failed:', syncErr);
       } finally {
@@ -321,6 +329,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     return () => window.removeEventListener('templatesChanged', handleTemplatesChanged);
   }, [loadCustomTemplates]);
 
+  // A push or pull from the Server Sync dialog changes the local projects it touched; re-read
+  // rather than leaving the gallery on the list it mounted with.
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') return;
+    const handleServerProjectsChanged = () => { void reloadProjects(); };
+    window.addEventListener(SERVER_PROJECTS_CHANGED, handleServerProjectsChanged);
+    return () => window.removeEventListener(SERVER_PROJECTS_CHANGED, handleServerProjectsChanged);
+  }, [reloadProjects]);
+
   useEffect(() => {
     if (tourRunning && tourStep !== 'create-project') {
       if (createDialogOpen) {
@@ -398,16 +415,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         const customTemplate = customTemplates.find(t => t.id === customTemplateId);
 
         if (customTemplate) {
-          await createProjectFromTemplate(vfs, finalProject.id, {
-            name: customTemplate.name,
-            description: customTemplate.description,
-            files: customTemplate.files.map(f => ({
-              path: f.path,
-              content: typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content as ArrayBuffer)
-            })),
-            directories: customTemplate.directories,
-            assets: customTemplate.assets
-          });
+          await createProjectFromTemplate(vfs, finalProject.id, customTemplateToProjectTemplate(customTemplate));
         }
       } else {
         // Built-in template
@@ -467,7 +475,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       }
 
       // Trigger auto-sync so new project is pushed to server immediately
-      (vfs as any).triggerAutoSync?.(finalProject.id);
+      vfs.scheduleAutoSync(finalProject.id);
 
       track('project_create', {
         method: 'quick',
@@ -613,6 +621,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
 
   const handleProjectUpdate = useCallback(async (updatedProject: Project) => {
     await vfs.updateProject(updatedProject);
+    vfs.scheduleAutoSync(updatedProject.id);
     setProjects(prev => prev.map(p =>
       p.id === updatedProject.id ? updatedProject : p
     ));

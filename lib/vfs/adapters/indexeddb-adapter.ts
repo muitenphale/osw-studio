@@ -607,11 +607,18 @@ export class IndexedDBAdapter implements StorageAdapter {
   }
 
   private hydrateProject(project: Project): Project {
+    // The sync timestamps are hydrated too: a project written back straight from a JSON API
+    // response stores them as ISO strings, and comparing a Date against a string silently reports
+    // 'synced'. Absent values stay null — a fabricated lastSyncedAt would misread as "already
+    // synced" on a project that never was.
     return {
       ...project,
       createdAt: project.createdAt ? new Date(project.createdAt) : new Date(),
       updatedAt: project.updatedAt ? new Date(project.updatedAt) : new Date(),
-      lastSavedAt: project.lastSavedAt ? new Date(project.lastSavedAt) : null
+      lastSavedAt: project.lastSavedAt ? new Date(project.lastSavedAt) : null,
+      previewUpdatedAt: project.previewUpdatedAt ? new Date(project.previewUpdatedAt) : undefined,
+      lastSyncedAt: project.lastSyncedAt ? new Date(project.lastSyncedAt) : null,
+      serverUpdatedAt: project.serverUpdatedAt ? new Date(project.serverUpdatedAt) : null
     };
   }
 

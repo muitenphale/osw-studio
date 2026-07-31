@@ -890,8 +890,15 @@ export class VirtualFileSystem {
   /**
    * Trigger auto-sync in background (debounced)
    * Only runs in Server Mode and in browser environment
+   *
+   * Call this after any write that changes something the server stores — file contents, the
+   * project name, its settings, its thumbnail. A bare updateProject() does not sync, so a change
+   * made without this leaves the project reading as "Local newer" indefinitely.
+   *
+   * Not for local-only bookkeeping (checkpoint ids, sync stamps); those use
+   * updateProject(project, { preserveUpdatedAt: true }) and need no push.
    */
-  private triggerAutoSync(projectId: string) {
+  scheduleAutoSync(projectId: string) {
     // Only sync in browser and Server Mode
     if (typeof window === 'undefined' || process.env.NEXT_PUBLIC_SERVER_MODE !== 'true') {
       return;

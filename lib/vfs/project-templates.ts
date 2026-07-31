@@ -28,6 +28,7 @@ export {
   PYTHON_STARTER_PROJECT_TEMPLATE,
   LUA_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
+  customTemplateToProjectTemplate,
   type AssetConfig,
   BUILT_IN_TEMPLATES,
   getBuiltInTemplatesForRuntime,
