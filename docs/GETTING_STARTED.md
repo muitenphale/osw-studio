@@ -22,6 +22,7 @@ Use a cloud AI service. You'll need an API key and will pay per usage (typically
 | **Google** | [Get Key](https://aistudio.google.com/apikey) |
 | **Groq** | [Get Key](https://console.groq.com/keys) |
 | **HuggingFace** | [Get Token](https://huggingface.co/settings/tokens) |
+| **DeepSeek** | [Get Key](https://platform.deepseek.com/api_keys) |
 | **SambaNova** | [Get Key](https://cloud.sambanova.ai/) |
 | **MiniMax** | [Get Key](https://www.minimax.io/platform/user-center/basic-information/interface-key) |
 | **Zhipu** | [Get Key](https://bigmodel.cn/usercenter/apikeys) |

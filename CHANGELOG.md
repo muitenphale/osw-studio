@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.91.0 - 2026-08-01
+
+### Project creation
+- **Templates are browsable**: Creating a project asked for a runtime first and then offered only the templates belonging to it, so you had to know what "Handlebars" or "Preact" meant before seeing what you could build. Every template now sits in one searchable list, built-in and your own together, with the runtime shown against each and available as a filter. Expanding a row shows the full description, author, license, tags, and a thumbnail if the template has one.
+- **The template sets the runtime**: The separate runtime picker is gone. Whichever template you pick decides the runtime, and you can still change it later in project settings.
+
+### Providers
+- **DeepSeek**: Added DeepSeek as a built-in provider. Add your key under Connections and its models appear like any other provider's, with tool calling and streaming.
+- **Providers are listed alphabetically**: Connections and the model settings picker followed the order providers happened to be declared in, which made a name hard to find as the list grew.
+
+### Agent shell
+- **`head` and `tail` accept `-c`**: Counting characters was unsupported, and the flag was skipped rather than refused, so `head -c 600 file` looked for a file named 600 and failed with a missing-file error that said nothing about the flag. Both commands now take `-c`, and an unrecognised flag is reported as one.
+- **Operators no longer need spaces around them**: `cmd; other` and `a|b` were only recognised when the operator stood alone, so a command written without spaces ran as one long argument list and produced errors that pointed at the wrong thing. Unquoted `;`, `&&`, `||` and `|` now separate commands wherever they appear, while quoted ones stay literal.
+
 ## v1.90.2 - 2026-08-01
 
 ### Fixes

@@ -54,3 +54,39 @@ describe('brace expansion respects quotes', () => {
     expect(args).toContain('file3.txt');
   });
 });
+
+describe('control operators written without spaces', () => {
+  // Everything downstream matches operators by whole-token equality, so `600;` hid the `;`
+  // and the pipe splitter then consumed the rest of the line.
+  it('splits a trailing semicolon off the preceding token', () => {
+    expect(parseBashCommand('head -c 600; echo hi')).toEqual([
+      'head', '-c', '600', ';', 'echo', 'hi',
+    ]);
+  });
+
+  it('splits pipes and chain operators written tight', () => {
+    expect(parseBashCommand('cat /a|head -3')).toEqual(['cat', '/a', '|', 'head', '-3']);
+    expect(parseBashCommand('ls&&pwd')).toEqual(['ls', '&&', 'pwd']);
+    expect(parseBashCommand('ls||pwd')).toEqual(['ls', '||', 'pwd']);
+  });
+
+  it('does not read || as two pipes', () => {
+    expect(parseBashCommand('a||b')).toEqual(['a', '||', 'b']);
+  });
+
+  it('leaves operators inside quoted arguments alone', () => {
+    expect(parseBashCommand('echo "a;b"')).toEqual(['echo', 'a;b']);
+    expect(parseBashCommand("rg 'foo|bar' /x")).toEqual(['rg', 'foo|bar', '/x']);
+  });
+
+  it('still splits operators that already had spaces', () => {
+    expect(parseBashCommand('ls ; pwd')).toEqual(['ls', ';', 'pwd']);
+  });
+
+  // The command from the failing session, end to end.
+  it('parses a mixed pipe + semicolon chain the way bash would', () => {
+    expect(parseBashCommand("curl -s localhost/ | head -c 600; echo done")).toEqual([
+      'curl', '-s', 'localhost/', '|', 'head', '-c', '600', ';', 'echo', 'done',
+    ]);
+  });
+});

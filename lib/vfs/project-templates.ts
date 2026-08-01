@@ -31,6 +31,5 @@ export {
   customTemplateToProjectTemplate,
   type AssetConfig,
   BUILT_IN_TEMPLATES,
-  getBuiltInTemplatesForRuntime,
   type BuiltInTemplateMetadata
 } from './templates';

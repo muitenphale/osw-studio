@@ -322,6 +322,18 @@ export const providers: Record<BuiltInProviderId, ProviderConfig> = {
     supportsFunctions: true,
     supportsStreaming: true
   },
+  deepseek: {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    description: 'DeepSeek models for coding and reasoning',
+    apiKeyRequired: true,
+    apiKeyPlaceholder: 'Your DeepSeek API Key',
+    apiKeyHelpUrl: 'https://platform.deepseek.com/api_keys',
+    baseUrl: 'https://api.deepseek.com/v1',
+    supportsModelDiscovery: true,
+    supportsFunctions: true,
+    supportsStreaming: true
+  },
   minimax: {
     id: 'minimax',
     name: 'MiniMax',
@@ -392,8 +404,17 @@ export function getProviderArchetype(id: ProviderId): ProviderArchetype {
   return 'cloud';
 }
 
+/**
+ * Every provider, built-in and custom, ordered by name.
+ *
+ * Sorted here rather than in each list so Connections, the model settings picker and anything
+ * else added later agree; registry declaration order is an implementation detail and not
+ * something to scan a list by.
+ */
 export function getAllProviders(): ProviderConfig[] {
-  return [...Object.values(providers), ...Object.values(getCustomProviders())];
+  return [...Object.values(providers), ...Object.values(getCustomProviders())].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 }
 
 /**

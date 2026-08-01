@@ -11,4 +11,4 @@ export { VUE_STARTER_PROJECT_TEMPLATE } from './vue-starter';
 export { PYTHON_STARTER_PROJECT_TEMPLATE } from './python-starter';
 export { LUA_STARTER_PROJECT_TEMPLATE } from './lua-starter';
 export { createProjectFromTemplate, customTemplateToProjectTemplate, type AssetConfig } from './utils';
-export { BUILT_IN_TEMPLATES, getBuiltInTemplatesForRuntime, type BuiltInTemplateMetadata } from './registry';
+export { BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from './registry';

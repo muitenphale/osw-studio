@@ -13,6 +13,7 @@ export type BuiltInProviderId =
   | 'ollama'
   | 'lmstudio'
   | 'sambanova'
+  | 'deepseek'
   | 'zhipu'
   | 'minimax'
   | 'llamacpp'

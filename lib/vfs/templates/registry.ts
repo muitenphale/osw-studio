@@ -240,7 +240,3 @@ export const BUILT_IN_TEMPLATES: BuiltInTemplateMetadata[] = [
     },
   },
 ];
-
-export function getBuiltInTemplatesForRuntime(runtime: ProjectRuntime): BuiltInTemplateMetadata[] {
-  return BUILT_IN_TEMPLATES.filter(t => t.runtime === runtime);
-}

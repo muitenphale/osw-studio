@@ -195,6 +195,7 @@ export class CostCalculator {
       provider === 'llamacpp' ||
       provider === 'meshllm' ||
       provider === 'sambanova' ||
+      provider === 'deepseek' ||
       provider === 'zhipu' ||
       provider === 'minimax' ||
       provider === 'opencode-go';

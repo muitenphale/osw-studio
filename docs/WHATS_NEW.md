@@ -6,6 +6,23 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.91.0 - Template Browser (2026-08-01)
+
+Creating a project now starts with the template rather than the runtime. Every template, built-in and your own, sits in one searchable list with the runtime shown against each, so you no longer have to know what "Handlebars" or "Preact" means before seeing what you can build. Expanding a row shows the full description, author, license, tags, and a thumbnail if the template has one. There's also a new provider, and two fixes to the shell the agent runs its commands in.
+
+### Project creation
+- **No separate runtime picker**: Whichever template you choose sets the project's runtime. You can still change it later in project settings
+- **Runtime as a filter, not a gate**: Narrow the list by runtime if you want to, rather than having to pick one before seeing any templates. Search covers names, descriptions and tags
+
+### Connections
+- **DeepSeek**: Add a DeepSeek key under Connections and its models show up like any other provider's
+- **Providers listed alphabetically**: The provider list followed no particular order, which made a name hard to find
+
+### Agent
+- **Fewer failed shell commands**: The agent's shell now accepts `head -c`/`tail -c`, reports an unknown flag instead of mistaking its value for a filename, and recognises `;`, `&&`, `||` and `|` written without spaces around them
+
+---
+
 ## v1.90.0 - Sync and File Handling (2026-07-31)
 
 Most of this release went into Server Mode sync. An imported project no longer sits there marked "Local newer" after it has already been pushed, and edits that only touch the project itself (a rename, a runtime change, a new thumbnail) now actually reach the server instead of quietly staying local. Project cards carry a badge when they're out of step, so you don't have to open Server Sync to find out. Projects can also hold any kind of file now, rather than the short list of types the app used to recognise. Three things that were broken on every Server Mode install are fixed too: built-in analytics, edge functions and scheduled functions were all looking in the wrong place. A security hole in the analytics endpoints is closed, and `.osws` backup and restore works again, which is worth reading the note on below if you keep backups.

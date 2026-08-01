@@ -39,6 +39,55 @@ function truncate(out: string): string {
   return out.slice(0, TRUNCATE_CHARS) + `\n\n… [${out.length - TRUNCATE_CHARS} chars truncated] …`;
 }
 
+interface HeadTailArgs {
+  count: number;
+  /** `-c` counts characters; otherwise lines. */
+  bytes: boolean;
+  filePath: string;
+}
+
+/**
+ * Shared argument parsing for head/tail: `-n N`, `-c N`, the `-N` shorthand, and their
+ * attached forms (`-n20`, `-c600`).
+ *
+ * An unrecognised flag is an error rather than something to skip. Skipping it left the flag's
+ * value looking like a filename — `head -c 600` read as "show the first 10 lines of /600" and
+ * reported a missing file, which says nothing about the flag that was actually unsupported.
+ */
+function parseHeadTailArgs(args: string[], cmd: string): HeadTailArgs | { error: string } {
+  let count: number | null = null;
+  let bytes = false;
+  let filePath = '';
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith('-')) {
+      filePath = a;
+      continue;
+    }
+    const flag = a === '-n' || a === '-c' ? a : a.slice(0, 2);
+    const attached = a === '-n' || a === '-c' ? '' : a.slice(2);
+
+    if (flag === '-n' || flag === '-c') {
+      const raw = attached || args[++i];
+      const parsed = parseInt(raw ?? '', 10);
+      if (!Number.isFinite(parsed)) {
+        return { error: `${cmd}: ${flag}: expected a number` };
+      }
+      count = parsed;
+      bytes = flag === '-c';
+      continue;
+    }
+    if (/^-\d+$/.test(a)) {
+      count = parseInt(a.slice(1), 10);
+      continue;
+    }
+    return { error: `${cmd}: unsupported option '${a}' (supported: -n, -c)` };
+  }
+
+  return { count: count ?? 10, bytes, filePath };
+}
+
 function normalizePath(p?: string): string | undefined {
   if (!p) return p;
   if (p.startsWith('/workspace')) {
@@ -1298,26 +1347,14 @@ async function vfsShellExecuteSingle(
         return catResult;
       }
       case 'head': {
-        // head [-n lines | -lines] <file>  (or stdin via pipe)
-        let numLines = 10;
-        let filePath = '';
-
-        for (let i = 0; i < args.length; i++) {
-          const a = args[i];
-          if (a === '-n' && args[i + 1]) {
-            numLines = parseInt(args[++i]) || 10;
-          } else if (/^-\d+$/.test(a)) {
-            // Shorthand: head -20 (same as head -n 20)
-            numLines = parseInt(a.slice(1)) || 10;
-          } else if (!a.startsWith('-')) {
-            filePath = a;
-          }
-        }
+        // head [-n lines | -c chars | -lines] <file>  (or stdin via pipe)
+        const parsed = parseHeadTailArgs(args, 'head');
+        if ('error' in parsed) return { stdout: '', stderr: parsed.error, exitCode: 2 };
+        const { count: numLines, bytes, filePath } = parsed;
 
         // Use stdin if no file path and stdin is available
         if (!filePath && stdin !== undefined) {
-          const lines = stdin.split(/\r?\n/);
-          const output = lines.slice(0, numLines).join('\n');
+          const output = bytes ? stdin.slice(0, numLines) : stdin.split(/\r?\n/).slice(0, numLines).join('\n');
           const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
           if (redirect) return applyRedirectGuarded(vfs, projectId, result.stdout, redirect, ctx);
           return result;
@@ -1332,8 +1369,9 @@ async function vfsShellExecuteSingle(
             return { stdout: '', stderr: `head: ${path}: binary file`, exitCode: 1 };
           }
 
-          const lines = file.content.split(/\r?\n/);
-          const output = lines.slice(0, numLines).join('\n');
+          const output = bytes
+            ? file.content.slice(0, numLines)
+            : file.content.split(/\r?\n/).slice(0, numLines).join('\n');
           const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
           if (redirect) return applyRedirectGuarded(vfs, projectId, result.stdout, redirect, ctx);
           return result;
@@ -1342,26 +1380,14 @@ async function vfsShellExecuteSingle(
         }
       }
       case 'tail': {
-        // tail [-n lines | -lines] <file>  (or stdin via pipe)
-        let numLines = 10;
-        let filePath = '';
-
-        for (let i = 0; i < args.length; i++) {
-          const a = args[i];
-          if (a === '-n' && args[i + 1]) {
-            numLines = parseInt(args[++i]) || 10;
-          } else if (/^-\d+$/.test(a)) {
-            // Shorthand: tail -20 (same as tail -n 20)
-            numLines = parseInt(a.slice(1)) || 10;
-          } else if (!a.startsWith('-')) {
-            filePath = a;
-          }
-        }
+        // tail [-n lines | -c chars | -lines] <file>  (or stdin via pipe)
+        const parsed = parseHeadTailArgs(args, 'tail');
+        if ('error' in parsed) return { stdout: '', stderr: parsed.error, exitCode: 2 };
+        const { count: numLines, bytes, filePath } = parsed;
 
         // Use stdin if no file path and stdin is available
         if (!filePath && stdin !== undefined) {
-          const lines = stdin.split(/\r?\n/);
-          const output = lines.slice(-numLines).join('\n');
+          const output = bytes ? stdin.slice(-numLines) : stdin.split(/\r?\n/).slice(-numLines).join('\n');
           const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
           if (redirect) return applyRedirectGuarded(vfs, projectId, result.stdout, redirect, ctx);
           return result;
@@ -1376,8 +1402,9 @@ async function vfsShellExecuteSingle(
             return { stdout: '', stderr: `tail: ${path}: binary file`, exitCode: 1 };
           }
 
-          const lines = file.content.split(/\r?\n/);
-          const output = lines.slice(-numLines).join('\n');
+          const output = bytes
+            ? file.content.slice(-numLines)
+            : file.content.split(/\r?\n/).slice(-numLines).join('\n');
           const result: ShellResult = { stdout: truncate(output), stderr: '', exitCode: 0 };
           if (redirect) return applyRedirectGuarded(vfs, projectId, result.stdout, redirect, ctx);
           return result;

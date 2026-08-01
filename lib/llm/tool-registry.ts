@@ -779,8 +779,46 @@ export function parseBashCommand(cmdStr: string): string[] {
     wasQuoted.push(argWasQuoted);
   }
 
+  const split = splitOperatorTokens(args, wasQuoted);
+
   // Expand brace patterns like {a,b,c} — but not inside quoted arguments (matches bash behavior)
-  return expandBraces(args, wasQuoted);
+  return expandBraces(split.args, split.wasQuoted);
+}
+
+/** `;`, `&&`, `||` and `|`, longest first so `||` is not read as two pipes. */
+const OPERATOR_SPLIT_RE = /(\|\||&&|;|\|)/;
+
+/**
+ * Separate control operators that were written without surrounding spaces.
+ *
+ * Everything downstream detects operators by whole-token equality, so `head -c 600; echo` left
+ * `600;` as one token and the `;` was never seen — the pipe splitter then swallowed the rest of
+ * the line and the last bare word became the command's file argument. Unquoted operators are
+ * separators in bash regardless of spacing, so splitting here matches the shell being imitated.
+ *
+ * Quoted arguments are left alone: `echo "a;b"` is one literal argument, as in bash.
+ */
+function splitOperatorTokens(
+  args: string[],
+  wasQuoted: boolean[]
+): { args: string[]; wasQuoted: boolean[] } {
+  const outArgs: string[] = [];
+  const outQuoted: boolean[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    if (wasQuoted[i] || !OPERATOR_SPLIT_RE.test(args[i])) {
+      outArgs.push(args[i]);
+      outQuoted.push(wasQuoted[i]);
+      continue;
+    }
+    for (const piece of args[i].split(OPERATOR_SPLIT_RE)) {
+      if (piece === '') continue;
+      outArgs.push(piece);
+      outQuoted.push(false);
+    }
+  }
+
+  return { args: outArgs, wasQuoted: outQuoted };
 }
 
 /**

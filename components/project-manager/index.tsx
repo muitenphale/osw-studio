@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, CustomTemplate, ProjectRuntime } from '@/lib/vfs/types';
-import { getProjectRuntimes } from '@/lib/runtimes/registry';
+import { Project, CustomTemplate } from '@/lib/vfs/types';
+import { getRuntimeBadge } from '@/lib/runtimes/registry';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
+import { TemplateBrowserPanel, runtimeForTemplate } from '@/components/template-browser';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -38,6 +39,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { pushProjectToServer } from '@/lib/vfs/push-project-to-server';
 import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
@@ -59,15 +61,12 @@ import {
   createProjectFromTemplate,
   customTemplateToProjectTemplate,
   BUILT_IN_TEMPLATES,
-  getBuiltInTemplatesForRuntime,
   type BuiltInTemplateMetadata
 } from '@/lib/vfs/project-templates';
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -106,14 +105,20 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [newProjectTemplate, setNewProjectTemplate] = useState<string>('blank');
-  const [newProjectRuntime, setNewProjectRuntime] = useState<ProjectRuntime>('static');
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
-  const [createMode, setCreateMode] = useState<'quick' | 'describe'>('quick');
+  const [createMode, setCreateMode] = useState<'quick' | 'describe' | 'template'>('quick');
+  const [templatePending, setTemplatePending] = useState<string | null>(null);
   const [describeDirty, setDescribeDirty] = useState(false);
 
-  const isQuickDirty = createMode === 'quick' && (
+  // The template owns the runtime now, so there is nothing separate to pick or reset.
+  const newProjectRuntime = useMemo(
+    () => runtimeForTemplate(newProjectTemplate, customTemplates),
+    [newProjectTemplate, customTemplates]
+  );
+
+  const isQuickDirty = createMode !== 'describe' && (
     newProjectName !== '' || newProjectDescription !== '' ||
-    newProjectTemplate !== 'blank' || newProjectRuntime !== 'static'
+    newProjectTemplate !== 'blank'
   );
   const isCreateDirty = createMode === 'describe' ? describeDirty : isQuickDirty;
 
@@ -141,8 +146,13 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     return builtIn?.name || 'Select a template';
   };
 
-  // Built-in templates filtered by the selected runtime
-  const filteredBuiltInTemplates = useMemo(() => getBuiltInTemplatesForRuntime(newProjectRuntime), [newProjectRuntime]);
+  const getTemplateDescription = (templateId: string): string => {
+    if (templateId.startsWith('custom:')) {
+      const customId = templateId.replace('custom:', '');
+      return customTemplates.find(t => t.id === customId)?.description || '';
+    }
+    return BUILT_IN_TEMPLATES.find(t => t.id === templateId)?.description || '';
+  };
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
@@ -489,7 +499,6 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       setNewProjectName('');
       setNewProjectDescription('');
       setNewProjectTemplate('blank');
-      setNewProjectRuntime('static');
       await reloadProjects();
       onProjectSelect(finalProject);
     } catch (error) {
@@ -878,9 +887,12 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         }
       }}>
         <DialogContent
-          className={createMode === 'describe'
-            ? "sm:max-w-5xl h-[80vh] flex flex-col p-0 gap-0"
-            : "sm:max-w-md"
+          className={
+            createMode === 'describe'
+              ? "sm:max-w-5xl h-[80vh] flex flex-col p-0 gap-0"
+              : createMode === 'template'
+                ? "sm:max-w-2xl h-[80vh] flex flex-col p-0 gap-0"
+                : "sm:max-w-md"
           }
           onInteractOutside={(e) => { if (isCreateDirty) e.preventDefault(); }}
           onEscapeKeyDown={(e) => {
@@ -903,6 +915,24 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                 </Button>
                 <DialogTitle className="text-sm">Describe your project</DialogTitle>
                 <DialogDescription className="sr-only">Conversational project setup with AI</DialogDescription>
+              </div>
+            </DialogHeader>
+          ) : createMode === 'template' ? (
+            /* ── Template mode header ── */
+            <DialogHeader className="px-4 py-3 border-b border-border shrink-0">
+              <div className="flex items-center gap-3">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCreateMode('quick')}>
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <div className="min-w-0 flex items-baseline gap-2">
+                  <DialogTitle className="text-sm shrink-0">Choose a template</DialogTitle>
+                  <span className="text-xs text-muted-foreground truncate">
+                    {getTemplateDisplayName(templatePending ?? newProjectTemplate)}
+                  </span>
+                </div>
+                <DialogDescription className="sr-only">
+                  Pick the template to start from. It sets the project runtime.
+                </DialogDescription>
               </div>
             </DialogHeader>
           ) : (
@@ -930,7 +960,10 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                 <ArrowRight className="h-4 w-4 text-primary/60 shrink-0 group-hover:translate-x-0.5 transition-transform" />
               </button>
 
-              <div className="space-y-4">
+              {/* min-w-0: this is a grid item of DialogContent, so its automatic minimum is its
+                  min-content — which the template row's nowrap description would otherwise push
+                  past the dialog's max width, stretching every sibling with it. */}
+              <div className="space-y-4 min-w-0">
                 <div>
                   <div className="flex justify-between items-center">
                     <Label htmlFor="name">Project name</Label>
@@ -948,91 +981,31 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                   />
                 </div>
                 <div>
-                  <Label htmlFor="runtime">Runtime</Label>
-                  <Select
-                    value={newProjectRuntime}
-                    onValueChange={(value) => {
-                      const runtime = value as ProjectRuntime;
-                      setNewProjectRuntime(runtime);
-                      // Reset template to first available for this runtime
-                      const templates = getBuiltInTemplatesForRuntime(runtime);
-                      setNewProjectTemplate(templates[0]?.id || 'blank');
-                    }}
-                  >
-                    <SelectTrigger id="runtime" className="mt-2 w-full">
-                      <div className="truncate flex-1 text-left">
-                        {getProjectRuntimes().find(r => r.value === newProjectRuntime)?.label}
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {getProjectRuntimes().map(rt => (
-                        <SelectItem key={rt.value} value={rt.value}>
-                          <div className="flex flex-col gap-0.5">
-                            <div className="font-medium">{rt.label}</div>
-                            <div className="text-xs text-muted-foreground">{rt.description}</div>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1.5">You can change this later in project settings.</p>
-                </div>
-                <div>
                   <Label htmlFor="template">Template</Label>
-                  <Select
-                    value={newProjectTemplate}
-                    onValueChange={(value) => setNewProjectTemplate(value)}
+                  <button
+                    id="template"
+                    type="button"
+                    onClick={() => { setTemplatePending(newProjectTemplate); setCreateMode('template'); }}
+                    className="mt-2 w-full flex items-center gap-3 rounded-md border border-input bg-background px-3 py-2 text-left hover:bg-muted/50 transition-colors"
                   >
-                    <SelectTrigger id="template" className="mt-2 w-full">
-                      <div className="truncate flex-1 text-left">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
                         {getTemplateDisplayName(newProjectTemplate)}
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredBuiltInTemplates.length > 0 && (
-                        <SelectGroup>
-                          {filteredBuiltInTemplates.map(template => (
-                            <SelectItem key={template.id} value={template.id}>
-                              <div className="flex flex-col gap-0.5">
-                                <div className="font-medium">{template.name}</div>
-                                <div className="text-xs text-muted-foreground">{template.description}</div>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )}
-                      {(() => {
-                        const filtered = customTemplates.filter(t => (t.runtime || 'handlebars') === newProjectRuntime);
-                        return filtered.length > 0 ? (
-                          <SelectGroup>
-                            <SelectLabel>Custom Templates</SelectLabel>
-                            {filtered.map(template => (
-                              <SelectItem key={template.id} value={`custom:${template.id}`}>
-                                <div className="flex flex-col gap-0.5">
-                                  <div className="font-medium">{template.name}</div>
-                                  <div className="text-xs text-muted-foreground">{template.description}</div>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ) : null;
-                      })()}
-                    </SelectContent>
-                  </Select>
-                  {(() => {
-                    const allTemplates = [
-                      ...BUILT_IN_TEMPLATES,
-                      ...customTemplates.map(t => ({ ...t, isBuiltIn: false as const }))
-                    ];
-                    const selected = allTemplates.find(
-                      t => t.id === newProjectTemplate || `custom:${t.id}` === newProjectTemplate
-                    );
-                    return selected?.description ? (
-                      <div className="mt-1.5 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-                        <p className="text-xs text-muted-foreground">{selected.description}</p>
-                      </div>
-                    ) : null;
-                  })()}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground mt-0.5">
+                        {getTemplateDescription(newProjectTemplate) || 'Browse templates'}
+                      </span>
+                    </span>
+                    <Badge
+                      className={`text-[10px] px-1.5 py-0 h-auto shrink-0 ${getRuntimeBadge(newProjectRuntime).className}`}
+                    >
+                      {getRuntimeBadge(newProjectRuntime).label}
+                    </Badge>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </button>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    The template sets the runtime. You can change it later in project settings.
+                  </p>
                 </div>
                 <div>
                   <div className="flex justify-between items-center">
@@ -1052,7 +1025,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                   />
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="sm:justify-between">
                 <Button variant="outline" onClick={() => confirmDiscard(() => { setCreateDialogOpen(false); setCreateMode('quick'); })}>
                   Cancel
                 </Button>
@@ -1061,6 +1034,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                 </Button>
               </DialogFooter>
             </>
+          ) : createMode === 'template' ? (
+            <TemplateBrowserPanel
+              customTemplates={customTemplates}
+              value={newProjectTemplate}
+              onConfirm={(value) => { setNewProjectTemplate(value); setCreateMode('quick'); }}
+              onCancel={() => setCreateMode('quick')}
+              onPendingChange={setTemplatePending}
+              workspaceId={workspaceId}
+            />
           ) : (
             <div className="flex-1 min-h-0">
               <DescribeMode
