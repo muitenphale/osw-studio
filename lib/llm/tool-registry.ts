@@ -789,6 +789,23 @@ export function parseBashCommand(cmdStr: string): string[] {
 const OPERATOR_SPLIT_RE = /(\|\||&&|;|\|)/;
 
 /**
+ * A glued output redirect: `ls>out.txt`, `cat a>>b`.
+ *
+ * The operator must be followed by something a filename can start with. That lookahead is what
+ * keeps `-->` intact — a trailing `>` with no target is not a redirect, and HTML written without
+ * quotes is far more common here than a redirect someone forgot to space out.
+ */
+const GLUED_REDIRECT_RE = /(>>|>)(?=[\w./~])/;
+
+/** `2>`, `1>>`, `&>`, `2>/dev/null`, `2>&1` — stripBashRedirects matches these whole, so leave them. */
+const FD_REDIRECT_RE = /^(?:0|1|2|&)>>?/;
+
+/** Tokens carrying a `<` are treated as content, not redirection: `<p>hi</p>` must survive intact. */
+function canSplitRedirect(token: string): boolean {
+  return !token.includes('<') && !FD_REDIRECT_RE.test(token) && GLUED_REDIRECT_RE.test(token);
+}
+
+/**
  * Separate control operators that were written without surrounding spaces.
  *
  * Everything downstream detects operators by whole-token equality, so `head -c 600; echo` left
@@ -806,15 +823,22 @@ function splitOperatorTokens(
   const outQuoted: boolean[] = [];
 
   for (let i = 0; i < args.length; i++) {
-    if (wasQuoted[i] || !OPERATOR_SPLIT_RE.test(args[i])) {
-      outArgs.push(args[i]);
+    const token = args[i];
+    const splittable =
+      !wasQuoted[i] && (OPERATOR_SPLIT_RE.test(token) || canSplitRedirect(token));
+    if (!splittable) {
+      outArgs.push(token);
       outQuoted.push(wasQuoted[i]);
       continue;
     }
-    for (const piece of args[i].split(OPERATOR_SPLIT_RE)) {
-      if (piece === '') continue;
-      outArgs.push(piece);
-      outQuoted.push(false);
+    for (const chained of token.split(OPERATOR_SPLIT_RE)) {
+      if (chained === '') continue;
+      const pieces = canSplitRedirect(chained) ? chained.split(GLUED_REDIRECT_RE) : [chained];
+      for (const piece of pieces) {
+        if (piece === '') continue;
+        outArgs.push(piece);
+        outQuoted.push(false);
+      }
     }
   }
 

@@ -3301,6 +3301,7 @@ Correct shell tool usage:
   {"cmd": ["cat", "/file.txt"]}               - Read entire file
   {"cmd": ["head", "-n", "20", "/file.txt"]}  - Read first 20 lines
   {"cmd": ["tail", "-n", "20", "/file.txt"]}  - Read last 20 lines
+  {"cmd": ["head", "-c", "600", "/file.txt"]} - Read first 600 characters
   {"cmd": ["rg", "-C", "3", "pattern", "/"]}  - Search with 3 lines context (recommended)
   {"cmd": ["rg", "-A", "2", "-B", "1", "pattern"]} - Search with custom context
   {"cmd": ["grep", "-n", "pattern", "/file.txt"]} - Search with line numbers

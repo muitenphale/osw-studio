@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.91.1 - 2026-08-02
+
+### Fixes
+- **The shell's command reference lists `head -c`/`tail -c`**: Character counting was supported but missing from the command list the agent is shown, including the one printed when a flag is rejected.
+- **Redirects written without spaces work**: `ls>out.txt` and `cat a>>b` were only recognised when the `>` stood alone, so the command ran without redirecting and silently wrote nothing. Markup (`<p>hi</p>`), quoted text and stderr redirects such as `2>/dev/null` are still left as they are.
+
 ## v1.91.0 - 2026-08-01
 
 ### Project creation

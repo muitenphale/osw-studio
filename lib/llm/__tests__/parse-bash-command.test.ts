@@ -90,3 +90,38 @@ describe('control operators written without spaces', () => {
     ]);
   });
 });
+
+describe('glued output redirects', () => {
+  it('splits > and >> written without spaces', () => {
+    expect(parseBashCommand('ls>out.txt')).toEqual(['ls', '>', 'out.txt']);
+    expect(parseBashCommand('cat /a>>/b')).toEqual(['cat', '/a', '>>', '/b']);
+    expect(parseBashCommand('echo hi>/f.txt')).toEqual(['echo', 'hi', '>', '/f.txt']);
+  });
+
+  // Unquoted markup is far commoner here than an unspaced redirect. Splitting it would hand
+  // extractRedirect a `>` and quietly create a file named after the next fragment.
+  it('leaves tokens containing < alone', () => {
+    expect(parseBashCommand('echo <p>hi</p>')).toEqual(['echo', '<p>hi</p>']);
+    expect(parseBashCommand('echo <br/>')).toEqual(['echo', '<br/>']);
+  });
+
+  it('leaves a trailing > with no target alone', () => {
+    expect(parseBashCommand('echo -->')).toEqual(['echo', '-->']);
+  });
+
+  // stripBashRedirects matches these as whole tokens; splitting would turn 2>/dev/null into a
+  // real redirect and write /dev/null into the VFS.
+  it('leaves fd redirects intact', () => {
+    expect(parseBashCommand('build 2>/dev/null')).toEqual(['build', '2>/dev/null']);
+    expect(parseBashCommand('build 2>&1')).toEqual(['build', '2>&1']);
+    expect(parseBashCommand('build 1>>/log')).toEqual(['build', '1>>/log']);
+  });
+
+  it('leaves quoted redirects alone', () => {
+    expect(parseBashCommand('echo "a>b"')).toEqual(['echo', 'a>b']);
+  });
+
+  it('handles a redirect glued onto a chained command', () => {
+    expect(parseBashCommand('ls;cat /a>/b')).toEqual(['ls', ';', 'cat', '/a', '>', '/b']);
+  });
+});

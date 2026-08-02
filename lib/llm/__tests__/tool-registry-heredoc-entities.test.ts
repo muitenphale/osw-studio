@@ -88,3 +88,34 @@ describe('bash tool — HTML entity handling around heredocs', () => {
     expect(cmdArray).not.toContain('&gt;');
   });
 });
+
+describe('bash tool — heredoc bodies vs control operators', () => {
+  let registry: any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockVfsShellExecute.mockResolvedValue({ success: true, stdout: '' });
+    const mod = await import('../tool-registry');
+    registry = new mod.ToolRegistry();
+  });
+
+  // The tokenizer splits unquoted ; && || | so operators written without spaces are recognised.
+  // The heredoc body must never reach it: splitting there would rewrite the file being written.
+  it('writes a body containing ; and | verbatim', async () => {
+    const body = [
+      'const parts = raw.split(";");',
+      'if (a || b) { run(a|b); }',
+      'const re = /foo|bar/;',
+    ].join('\n');
+
+    await registry.execute(
+      bashToolCall(`cat > /ops.js << 'EOF'\n${body}\nEOF`),
+      'test-project',
+      {},
+    );
+
+    const [, cmdArray, stdin] = mockVfsShellExecute.mock.calls[0];
+    expect(cmdArray.slice(0, 2)).toEqual(['cat', '>']);
+    expect(stdin).toBe(body);
+  });
+});
