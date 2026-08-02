@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ToolCall } from '../types';
+import { SHELL_COMMANDS } from '@/lib/vfs/shell-commands';
 
 const mockVfs = {
   init: vi.fn(),
@@ -8,6 +9,10 @@ const mockVfs = {
   readFile: vi.fn().mockResolvedValue({ content: '' }),
   listFiles: vi.fn().mockResolvedValue([]),
   getFile: vi.fn().mockResolvedValue(null),
+  getAllFilesAndDirectories: vi.fn().mockResolvedValue([]),
+  // Enough of the VFS for the shell to reach its unknown-command path: without this the
+  // shell throws first, and a test asserting "did not fall through" would pass on the crash.
+  getRuntimeDeploymentId: vi.fn().mockReturnValue(null),
 };
 
 vi.mock('@/lib/vfs', () => ({ getActiveVFS: () => mockVfs, vfs: mockVfs }));
@@ -49,5 +54,77 @@ describe('tool-registry write scope (interview agent end-to-end)', () => {
     const { toolRegistry } = await import('../tool-registry');
     const result = await toolRegistry.execute(bash('echo "x" > /index.html'), 'p', { agentType: 'orchestrator', isReadOnly: false });
     expect(result).not.toContain('may only write within');
+  });
+});
+
+const readOnlyCtx = { agentType: 'chat', isReadOnly: true, writeScope: undefined };
+
+/** A realistic invocation per writing command. The gate fires before argv is interpreted. */
+const WRITE_INVOCATIONS: Record<string, string> = {
+  ss: '/f.txt',
+  touch: '/f.txt',
+  mkdir: '/d',
+  rm: '-rf /d',
+  rmdir: '/d',
+  mv: '/a /b',
+  cp: '/a /b',
+  'generate-image': '"a cat"',
+  runtime: 'react',
+};
+
+describe('read-only mode blocks every writing command', () => {
+  // The read-only gate kept its own list of writing commands, which had fallen behind the shell:
+  // generate-image and runtime both write, so Chat mode could modify the project. Listing the
+  // cases here by hand would rebuild that drift in the test, so they come from the registry.
+  const alwaysWrite = SHELL_COMMANDS.filter((c) => c.writes === 'always').map((c) => c.name);
+
+  it('covers every writing command the registry declares', () => {
+    // Without this the loop below would silently run `undefined` arguments for a new command.
+    const missing = alwaysWrite.filter((name) => !(name in WRITE_INVOCATIONS));
+
+    expect(missing).toEqual([]);
+  });
+
+  it.each(alwaysWrite)('refuses %s', async (name) => {
+    const { toolRegistry } = await import('../tool-registry');
+
+    const result = await toolRegistry.execute(bash(`${name} ${WRITE_INVOCATIONS[name]}`), 'p', readOnlyCtx);
+
+    expect(result).toContain('read-only');
+  });
+
+  it('still allows reading', async () => {
+    const { toolRegistry } = await import('../tool-registry');
+
+    const result = await toolRegistry.execute(bash('ls /'), 'p', readOnlyCtx);
+
+    expect(result).not.toContain('read-only');
+  });
+});
+
+/**
+ * Commands the registry marks `handledBy: 'tool'` never reach the shell — the tool layer picks
+ * them off first. The registry test asserts they have no shell handler; this asserts the other
+ * half, that something still handles them. Without both, removing an interception would leave a
+ * command advertised to the agent that answers "command not found".
+ */
+describe('commands the tool layer intercepts', () => {
+  it.each([
+    ['cd /somewhere'],
+    ['preview /index.html'],
+    ['python script.py'],
+    ['lua script.lua'],
+    ['agent explore "look around"'],
+  ])('does not fall through to the shell for %s', async (command) => {
+    const { toolRegistry } = await import('../tool-registry');
+
+    const result = await toolRegistry.execute(bash(command), 'p', {
+      agentType: 'code',
+      isReadOnly: false,
+    });
+
+    // It may fail for its own reasons in a test environment; what it must not do is reach the
+    // shell's unknown-command path.
+    expect(result).not.toContain('command not found');
   });
 });

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supportedCommandList } from '@/lib/vfs/shell-commands';
 import { ProviderId } from '@/lib/llm/providers/types';
 import { getProvider, getDefaultModel } from '@/lib/llm/providers/registry';
 import { getApiEndpoint, buildHeaders, resolveTemperature } from '@/lib/llm/request-builder';
@@ -197,9 +198,9 @@ Guidelines:
 Capabilities:
 - One tool: bash({ command: string }) for commands and file editing.
 - Edit files with bash: cat > /file << 'EOF' for full rewrites, sed -i 's/old/new/g' for substitutions.
-- Supported commands: ls, cat, nl [-ba], grep (-n -i), find (-name), mkdir -p, rm [-rfv], rmdir [-v], mv, cp [-r], echo, sed [-i] 's/pat/repl/[g]'.
+- Supported commands: ${supportedCommandList()}.
 - Supports pipes (|), redirects (> >>), and && chaining.
-- No network; only /workspace paths exist.
+- Only /workspace paths exist; reach the network with curl.
   • Note: both '/path' and '/workspace/path' are accepted; '/workspace' is normalized to '/'.
 
 Habits:
@@ -233,7 +234,9 @@ Habits:
       { role: 'user', content: prompt }
     ];
     
-    if (messages && !messages.some((m: LLMMessage) => m.role === 'system')) {
+    // Only agent requests get the agent system prompt. Single-shot utility calls (transcription,
+    // skill evaluation) send no tools and carry their own instructions in the user message.
+    if (messages && tools?.length && !messages.some((m: LLMMessage) => m.role === 'system')) {
       chatMessages.unshift({ role: 'system', content: systemPrompt });
     }
 

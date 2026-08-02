@@ -114,3 +114,23 @@ describe('checkWriteScope', () => {
     expect(checkWriteScope(['generate-image', 'x', '--out', '/.interviews/x.png'], '/.interviews/').allowed).toBe(true);
   });
 });
+
+describe('commands that write outside argv', () => {
+  // `runtime` rewrites /.PROMPT.md when it changes the project runtime, but was classed as
+  // non-writing — so a scoped agent was allowed to run it and write outside its directory.
+  it('denies runtime changes for a scoped agent', () => {
+    const r = checkWriteScope(['runtime', 'react'], '/.interviews/');
+
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain('/.PROMPT.md');
+  });
+
+  it('leaves runtime alone when no scope is set', () => {
+    expect(checkWriteScope(['runtime', 'react'], undefined).allowed).toBe(true);
+  });
+
+  it('still allows reading commands within a scope', () => {
+    expect(checkWriteScope(['cat', '/index.html'], '/.interviews/').allowed).toBe(true);
+    expect(checkWriteScope(['runtime'], undefined).allowed).toBe(true);
+  });
+});

@@ -6,6 +6,7 @@
 import { ToolDefinition, ToolCall } from './types';
 import { getActiveVFS } from '@/lib/vfs';
 import { vfsShell } from '@/lib/vfs/cli-shell';
+import { alwaysWriteCommands } from '@/lib/vfs/shell-commands';
 import { logger } from '../utils';
 import { checkWriteScope } from './write-scope';
 import {
@@ -881,10 +882,8 @@ function expandBraces(args: string[], wasQuoted?: boolean[]): string[] {
 function isWriteOperation(cmd: string[]): boolean {
   if (!cmd || cmd.length === 0) return false;
 
-  const writeCommands = ['mkdir', 'rm', 'rmdir', 'mv', 'cp', 'touch', 'ss'];
-
-  // Check if the command is a known write operation
-  if (writeCommands.includes(cmd[0])) {
+  // From the command registry, so a new writing command is gated here without a second edit.
+  if (alwaysWriteCommands().has(cmd[0])) {
     return true;
   }
 

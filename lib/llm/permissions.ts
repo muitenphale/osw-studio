@@ -64,6 +64,10 @@ export const GATE_COMMANDS: GateCommand[] = [
 export const ALWAYS_ALLOWED_NOTES: { command: string; reason: string }[] = [
   { command: 'status', reason: 'the signal the agent uses to finish a run; gating it could stall generation.' },
   { command: 'agent', reason: 'spawning sub-agents is always allowed; the commands a sub-agent runs are gated individually, so control happens there.' },
+  { command: 'cd', reason: 'accepted and ignored — the VFS has no working directory, so there is nothing to gate.' },
+  { command: 'brief', reason: 'reaches only the setup agent during project intake, and reports back to the user rather than touching the project.' },
+  { command: 'spec', reason: 'reaches only the setup agent during project intake, and records the agreed plan rather than touching the project.' },
+  { command: 'propose-create', reason: 'reaches only the setup agent, and proposes a project for the user to accept — the creation itself is the user\'s action.' },
 ];
 
 const WRITE_SQL = /\b(insert|update|delete|create|drop|alter|replace|truncate)\b/i;

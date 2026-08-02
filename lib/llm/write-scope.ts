@@ -6,7 +6,10 @@
  * has no symlinks, so a plain reject is sufficient.
  */
 
-const WRITE_COMMANDS = new Set(['ss', 'touch', 'mkdir', 'rm', 'rmdir', 'mv', 'cp']);
+import { alwaysWriteCommands } from '@/lib/vfs/shell-commands';
+
+/** Derived from the command registry so a new writing command cannot be missed here. */
+const WRITE_COMMANDS = alwaysWriteCommands();
 
 function hasRedirect(cmd: string[]): boolean {
   return cmd.includes('>') || cmd.includes('>>');
@@ -16,7 +19,6 @@ function hasRedirect(cmd: string[]): boolean {
 function isWriteCommand(cmd: string[]): boolean {
   const c = cmd[0];
   if (WRITE_COMMANDS.has(c)) return true;
-  if (c === 'generate-image') return true;
   if (c === 'sed' && cmd.includes('-i')) return true;
   if (c === 'curl' && (cmd.includes('-o') || cmd.includes('--output'))) return true;
   if (hasRedirect(cmd)) return true;
@@ -64,6 +66,11 @@ export function writeTargets(cmd: string[]): string[] | null {
       return target ? [toAbsolute(target)] : null;
     }
     return ['/.generated/'];
+  }
+
+  if (c === 'runtime') {
+    // Changing the runtime rewrites the project's prompt file; the path is not in argv.
+    return ['/.PROMPT.md'];
   }
 
   if (c === 'sed') {

@@ -13,6 +13,7 @@
 import type { ToolExecutor, ToolCall, ToolResult, ToolExecContext, ToolDef, ProgressReporter } from './core/types';
 import { toolRegistry, ToolExecutionContext } from './tool-registry';
 import { Agent } from './agent';
+import { generalCommandNames, setupOnlyCommandNames } from '@/lib/vfs/shell-commands';
 import type { ApprovalRequest, ApprovalOutcome, PermissionMode, GateDecision } from './permissions';
 
 const HARMONY_TOKEN_STRIP_RE = /<\|[^|]*\|>/g;
@@ -281,14 +282,8 @@ export class OswsToolExecutor implements ToolExecutor {
    * Guides the model to use the correct tool invocation pattern.
    */
   private buildToolAccessError(toolId: string, agentType: string): string {
-    const knownBashCommands = new Set([
-      'ls', 'tree', 'cat', 'head', 'tail', 'rg', 'grep', 'find',
-      'mkdir', 'touch', 'rm', 'mv', 'cp', 'echo', 'sed', 'ss', 'wc',
-      'sort', 'uniq', 'tr', 'curl', 'sqlite3', 'python', 'python3',
-      'lua', 'preview', 'build', 'status', 'agent', 'delegate', 'runtime',
-      'ask', 'generate-image',
-    ]);
-    const setupOnlyCommands = new Set(['brief', 'spec', 'propose-create']);
+    const knownBashCommands = generalCommandNames();
+    const setupOnlyCommands = setupOnlyCommandNames();
     const isSetupCommand = setupOnlyCommands.has(toolId);
     const isBashCommand = knownBashCommands.has(toolId) || (isSetupCommand && agentType === 'setup');
 

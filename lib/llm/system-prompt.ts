@@ -134,7 +134,7 @@ When reading multiple files in one command, separate the outputs:
 
 Shell commands:
 - Search: rg [-C n] [-n] [-i] pattern path
-- Read: head [-n N] file, tail [-n N] file, cat file
+- Read: head [-n N|-c N] file, tail [-n N|-c N] file, cat file
 - List: ls [-R] path, tree [-L depth] path
 - Find: find path -name pattern
 - Count: wc [-l] [-w] [-c] file

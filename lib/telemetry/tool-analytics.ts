@@ -4,6 +4,7 @@
  */
 
 import { getBuiltInSkillIds } from '@/lib/vfs/skills/registry';
+import { allShellCommandNames } from '@/lib/vfs/shell-commands';
 import { isBuiltInInterviewTemplateId } from '@/lib/interview/templates';
 
 /** Built-in interview template ids may be reported; custom ones are anonymized. */
@@ -11,12 +12,8 @@ export function bucketInterviewTemplateId(id: string): string {
   return isBuiltInInterviewTemplateId(id) ? id : 'custom';
 }
 
-const BASH_COMMAND_WHITELIST = new Set([
-  'cat', 'head', 'tail', 'nl', 'ls', 'tree', 'grep', 'rg', 'find',
-  'mkdir', 'mv', 'cp', 'rm', 'rmdir', 'touch', 'sed', 'ss', 'echo', 'wc',
-  'sort', 'uniq', 'tr', 'curl', 'sleep', 'sqlite3', 'build', 'status', 'agent', 'delegate',
-  'preview', 'python', 'python3', 'lua', 'runtime', 'generate-image'
-]);
+/** Bucket telemetry by real command names; anything else is reported as 'other'. */
+const BASH_COMMAND_WHITELIST = new Set(allShellCommandNames());
 
 function extractShellAnalytics(args: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};

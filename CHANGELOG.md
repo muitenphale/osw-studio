@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.91.2 - 2026-08-03
+
+### AI Orchestration
+- **Transcription and skill checks stop receiving coding instructions**: Both send a single request with their own instructions, and the server was prepending a description of the file-editing agent including a list of shell commands written for an earlier version, naming two that have never existed. That description is now only added to requests that actually carry tools.
+
+### Agent shell
+- **`rmdir` works**: The permission settings offered a control for it and the delete permission was labelled "rm / rmdir", but running it reported an unknown command. It now removes a directory when it is empty and refuses when anything is still inside, leaving `rm -r` as the way to delete a folder along with its contents. `-p` clears the parents that empty out along with it.
+- **The agent is told about every command it can run**: Six commands the shell accepts were missing from the list it is shown, including the one printed when it uses an unknown command, so it had no way to learn they existed. The list is now generated from the commands themselves and cannot fall behind.
+- **The agent's instructions list `head -c`/`tail -c`**: The instructions described `head`/`tail` as taking a line count only. The shell's own reference was corrected in v1.91.1; this is the copy the agent is given up front.
+
+### Security
+- **Restricted agents can no longer change the project runtime**: An agent confined to one directory — the interview agent is confined to `/.interviews/` — was allowed to run `runtime`, which rewrites the project's prompt file outside that directory. Changing the runtime now counts as a write and is refused for a confined agent, while unrestricted use is unchanged.
+- **Chat mode no longer lets two commands through**: Chat is read-only, but the check for which commands write had fallen behind the shell, so generating an image or changing the runtime could still modify the project from Chat. Both are refused now, and the check is derived from the commands themselves rather than kept in step by hand.
+
 ## v1.91.1 - 2026-08-02
 
 ### Fixes
