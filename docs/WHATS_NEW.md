@@ -6,6 +6,22 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.92.0 - Project Download and Import (2026-08-06)
+
+Export as ZIP has always given you the compiled site, which is what a web host wants and not much use if you want to work on the project somewhere else. The File Explorer can now download the project itself: your files at their real paths, the runtime and entry point in a `project.json`, and each server function as an editable `.js` file. You can take that zip into any editor and bring it back, and importing shows you exactly what it would change before anything is written — what's new, what already exists, what's identical. Files that already exist are yours to keep, replace, or keep alongside the incoming copy.
+
+### Projects
+- **Download the project, not the build**: Every file at its real path, including `.PROMPT.md` and the other dot-files the deployable export leaves out. Secret values are never included; their names and descriptions are
+- **Import from a zip, a folder, or a `.json` backup**: As a new project from the Projects list, or into the project you have open from the File Explorer
+- **Nothing is written until you confirm**: The preview lists what would be added, what already exists, what is identical, and anything that can't be imported with the reason. Importing into an existing project takes a checkpoint first, so the file changes can be undone in one step
+- **Server functions come across as editable files**: Each one is a `.js` file next to a small `.json` holding its settings, so you can work on them in an ordinary editor. They import in Browser mode and travel with the project, but only run in Server Mode
+- **An archive carrying AI instructions is called out**: `.PROMPT.md` changes how the assistant works on a project, so it isn't listed as one file among many
+
+### Fixes
+- **Dropping a file onto a folder works**: Anything dragged in from outside the app and dropped on a folder row was discarded silently. It now lands at the top level of the project
+
+---
+
 ## v1.91.0 - Template Browser (2026-08-01)
 
 Creating a project now starts with the template rather than the runtime. Every template, built-in and your own, sits in one searchable list with the runtime shown against each, so you no longer have to know what "Handlebars" or "Preact" means before seeing what you can build. Expanding a row shows the full description, author, license, tags, and a thumbnail if the template has one. There's also a new provider, and two fixes to the shell the agent runs its commands in.

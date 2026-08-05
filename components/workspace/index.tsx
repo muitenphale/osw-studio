@@ -1809,6 +1809,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     entryPoint={entryPoint}
                     onSetEntryPoint={handleSetEntryPoint}
                     onAddPromptFile={handleAddPromptFile}
+                    onProjectUpdate={handleProjectSettingsUpdate}
                   />
                 </div>
               )};
@@ -2033,6 +2034,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   entryPoint={entryPoint}
                   onSetEntryPoint={handleSetEntryPoint}
                   onAddPromptFile={handleAddPromptFile}
+                  onProjectUpdate={handleProjectSettingsUpdate}
                 />
               </div>
             )}

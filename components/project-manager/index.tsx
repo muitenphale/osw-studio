@@ -17,6 +17,7 @@ import { MultipagePreview } from '@/components/preview/multipage-preview';
 import { AboutModal } from '@/components/about-modal';
 import {
   Plus,
+  FileArchive,
   FolderOpen,
   Upload,
   Search,
@@ -38,8 +39,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { ImportDialog, type ImportDialogSource } from '@/components/import-dialog';
+import { pickFolderSource } from '@/components/import-dialog/pick';
+import type { ApplyResult } from '@/lib/vfs/archive';
 import { toast } from 'sonner';
 import { pushProjectToServer } from '@/lib/vfs/push-project-to-server';
 import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
@@ -159,6 +169,8 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
   const [backendProject, setBackendProject] = useState<Project | null>(null);
+  const [importSource, setImportSource] = useState<ImportDialogSource | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const { state: tourState, setProjectList, start: startTour, setTourDemoProjectId } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
@@ -582,37 +594,73 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     }
   }, []);
 
-  const importProject = async () => {
+  // A fresh object every time, so the dialog re-analyses whenever the user picks something new.
+  const openImport = useCallback((source: ImportDialogSource) => {
+    setImportSource(source);
+    setImportOpen(true);
+  }, []);
+
+  /**
+   * The legacy format: a `.json` export parses and writes straight through, with no preview, as it
+   * always has. People have those files, so it stays exactly as it was.
+   */
+  const importProjectJson = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data.project || !data.files) {
+        throw new Error('Invalid project file');
+      }
+
+      const imported = await vfs.importProject(data);
+      await pushProjectToServer(imported.id, workspaceId);
+      toast.success('Project imported successfully');
+      track('project_import', { format: 'json' });
+      await reloadProjects();
+      onProjectSelect(imported);
+    } catch (error) {
+      logger.error('Failed to import project:', error);
+      toast.error('Failed to import project');
+    }
+  };
+
+  const importProjectFromFile = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
-    
+    input.accept = '.zip,.json';
+
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      
-      try {
-        const text = await file.text();
-        const data = JSON.parse(text);
-        
-        if (!data.project || !data.files) {
-          throw new Error('Invalid project file');
-        }
-        
-        const imported = await vfs.importProject(data);
-        await pushProjectToServer(imported.id, workspaceId);
-        toast.success('Project imported successfully');
-        track('project_import', { format: 'json' });
-        await reloadProjects();
-        onProjectSelect(imported);
-      } catch (error) {
-        logger.error('Failed to import project:', error);
-        toast.error('Failed to import project');
+      // `.json` is the one legacy format, and the only thing that may be handed to JSON.parse.
+      // Everything else goes to the preview, which reads the zip and says which importer a
+      // workspace backup or a template needs — `accept` is advisory, and this is exactly where
+      // someone reaching for a backup file starts.
+      if (/\.json$/i.test(file.name)) {
+        await importProjectJson(file);
+        return;
       }
+      openImport({ kind: 'zip', file });
     };
-    
+
     input.click();
   };
+
+  const handleImportComplete = useCallback(async (result: ApplyResult) => {
+    try {
+      // Throws rather than returning null when the project is not there.
+      const imported = await vfs.getProject(result.projectId);
+      await pushProjectToServer(imported.id, workspaceId);
+      track('project_import', { format: importSource?.kind === 'folder' ? 'folder' : 'archive' });
+      await reloadProjects();
+      onProjectSelect(imported);
+    } catch (error) {
+      logger.error('Failed to open the imported project:', error);
+      toast.error('The project was imported, but could not be opened');
+      await reloadProjects();
+    }
+  }, [importSource, workspaceId, reloadProjects, onProjectSelect]);
 
   const sortProjects = (projects: Project[], sortBy: SortOption): Project[] => {
     const sorted = [...projects];
@@ -732,11 +780,25 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                     <span>New</span>
                   </Button>
 
-                  {/* Import */}
-                  <Button onClick={importProject} variant="outline" size="sm" className="gap-2">
-                    <Upload className="h-4 w-4" />
-                    <span>Import</span>
-                  </Button>
+                  {/* Import — a file or a folder, since one input cannot offer both */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-2">
+                        <Upload className="h-4 w-4" />
+                        <span>Import</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={importProjectFromFile}>
+                        <FileArchive className="h-4 w-4 mr-2" />
+                        From a file
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => pickFolderSource(openImport)}>
+                        <FolderOpen className="h-4 w-4 mr-2" />
+                        From a folder
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </div>
@@ -1099,6 +1161,15 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
           }}
         />
       )}
+
+      {/* Import Dialog — a zip or a folder becomes a new project */}
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        source={importSource}
+        target={{ kind: 'new-project' }}
+        onComplete={handleImportComplete}
+      />
 
       {/* About Modal */}
       <AboutModal

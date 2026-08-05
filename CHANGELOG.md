@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.92.0 - 2026-08-06
+
+### Projects
+- **A project can be downloaded and brought back**: The existing ZIP export produces a compiled site — the pages a host serves, without the sources, the project's settings or its server functions. The File Explorer now also downloads the project itself: every file at its real path including `.PROMPT.md` and the rest, the runtime and entry point in a `project.json`, and each server function as an editable `.js` file next to a small `.json` holding its settings. Secret values are never included; their names and descriptions are. The result is a plain zip you can open in any editor, and downloading an unchanged project twice produces identical files.
+- **Importing shows what it will do before it does it**: Import accepts a downloaded zip, a folder, or the old `.json` backup, from the Projects list as a new project or from the File Explorer into the project you have open. Before anything is written you see what would be added, what already exists, what is identical, and anything that can't be imported along with the reason. Files that already exist can be kept, replaced, or both kept with the incoming copy renamed, decided in bulk or one at a time. Importing into an existing project takes a checkpoint first, so the file changes can be undone in one step from the Checkpoints panel — a replaced server function or a changed setting cannot, and the preview says so where you make that choice.
+- **An archive that carries AI instructions says so**: `.PROMPT.md` is read as standing instructions for the assistant, so an archive containing one changes how the assistant works on the project. It is called out separately rather than listed as one file among many.
+- **Server functions in an imported archive are kept in Browser mode**: they are stored with the project and travel with it, but only run in Server Mode. The preview says so rather than leaving it to be discovered after publishing.
+- **Settings from an import take effect immediately**: importing a runtime or entry point used to write it to storage while the open project kept building the old way until it was reopened.
+- **A dropped `.zip` opens the import preview** instead of being stored as a file, which it almost never was meant to be. The preview offers to keep it as a file instead, and uploading a zip as an asset still works from **Upload files** or by dropping it alongside other files.
+
+### Fixes
+- **Dropping a file onto a folder in the File Explorer no longer does nothing**: a file or folder dragged from outside the app onto a folder row was discarded with no upload and no message. Anything dropped now lands at the top level of the project, where it can be moved.
+
 ## v1.91.2 - 2026-08-03
 
 ### AI Orchestration

@@ -175,6 +175,29 @@ The ZIP contains:
 
 **[Deployment guide →](?doc=deploying-sites)**
 
+### Download the Project
+
+Export as ZIP gives you the compiled site, the pages a web host serves. Downloading gives you the project itself, so you can work on it in another editor and bring it back.
+
+1. Open the **File Explorer** panel
+2. Click the **Download** icon in the panel header
+3. Save the `.zip`
+
+Inside you get:
+- Every file at its real path, including `.PROMPT.md` and other dot-files
+- `project.json`, holding the runtime, entry point and other settings
+- `.server/`, with each edge and server function as an editable `.js` file next to a small `.json` holding its settings — its description and whether it's enabled, plus the method and timeout for an edge function — and a `README.md` explaining the layout
+
+Secret **values** are never included. Their names and descriptions are, so you can see what the project expects.
+
+**Which one do I want?**
+
+| | Use |
+|---|---|
+| **Export as ZIP** | Publishing to a web host |
+| **Download** | Editing elsewhere, or keeping a copy of the project |
+| **Export as JSON** | A backup with chat history and checkpoints |
+
 ### Export as JSON (Backup)
 
 Save your entire project including chat history and checkpoints:
@@ -190,14 +213,35 @@ Use this to:
 - Share projects with others
 - Keep complete history
 
-### Import JSON Files
+### Importing
 
-Restore a backed-up project:
+You can bring in a downloaded `.zip`, a folder of files, or a `.json` backup.
 
-1. Click **Projects** in sidebar
-2. Click **Import Project**
-3. Select your `.json` backup file
-4. Project loads with full history
+**As a new project:**
+
+1. Click **Projects** in the sidebar
+2. Click **Import** and choose **From a file** or **From a folder**
+3. Review what will be created, then confirm
+
+**Into the project you have open:**
+
+1. Open the **File Explorer** panel
+2. Click the **Import** icon in the panel header
+3. Review what will change, then confirm
+
+Nothing is written until you confirm. Before that you see what will be added, what already exists, what is identical, and anything that can't be imported along with the reason.
+
+**When a file already exists**, choose per file, or set one choice for all of them:
+
+- **Keep mine** - leave the project's copy alone
+- **Replace** - take the version from the archive
+- **Keep both** - bring the new one in under a different name, like `logo (2).svg`
+
+Importing into an existing project takes a checkpoint first, so the file changes can be undone in one step from **Checkpoints**. A replaced server function or a changed runtime is not recoverable, so those are called out separately while you're deciding.
+
+A `.json` backup imports the old way, without a preview.
+
+**Note:** an archive may carry server functions, secrets and schedules. They come across and stay with the project, but they only run in Server Mode.
 
 ---
 

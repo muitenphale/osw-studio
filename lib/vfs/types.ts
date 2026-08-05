@@ -212,6 +212,22 @@ export interface VirtualFile {
   };
 }
 
+/**
+ * Whether a record is build output injected into a listing rather than a file in storage.
+ *
+ * `VirtualFileSystem.getAllFilesAndDirectories` adds the records `setGeneratedFile` holds —
+ * the bundler's `bundle.js` / `bundle.css` — to its own results whatever it was asked for, so every
+ * caller that walks a project's files has to screen them out. `checkpointManager.createCheckpoint`
+ * already does exactly this.
+ *
+ * Test the record, never the path. The injection is skipped when the project genuinely owns that
+ * path, so a path test — `vfs.isGeneratedPath(file.path)` — discards the project's real source file
+ * instead, and only in a session where the bundler happened to have run.
+ */
+export function isInjectedGeneratedFile(file: { metadata?: { isGenerated?: boolean } }): boolean {
+  return file.metadata?.isGenerated === true;
+}
+
 export interface FileTreeNode {
   id: string;
   projectId: string;

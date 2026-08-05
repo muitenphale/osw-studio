@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { VirtualFile, FILE_SIZE_LIMITS, getFileTypeFromPath, isTextExtension } from '@/lib/vfs/types';
+import { VirtualFile, Project, FILE_SIZE_LIMITS, getFileTypeFromPath, isTextExtension } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
+import { collectEntryFiles, ensureAncestorDirs } from '@/lib/vfs/archive/read-folder';
 import { logger, cn } from '@/lib/utils';
 import {
   ChevronRight,
@@ -12,6 +13,9 @@ import {
   FolderOpen,
   FolderTree,
   Upload,
+  Download,
+  Import,
+  FileArchive,
   Image,
   Video,
   Eye,
@@ -32,6 +36,14 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
+import { ImportDialog, type ImportDialogSource } from '@/components/import-dialog';
+import { pickFolderSource } from '@/components/import-dialog/pick';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 
 interface FileExplorerProps {
@@ -41,6 +53,14 @@ interface FileExplorerProps {
   entryPoint?: string;
   onSetEntryPoint?: (path: string) => void;
   onAddPromptFile?: () => void;
+  /**
+   * The project row changed underneath the workspace — currently only an import can do that from
+   * in here. `vfs.updateProject` dispatches no event, so nothing else finds out: the runtime and
+   * the entry point the preview compiles with live in the workspace store, and an import that
+   * writes them to storage alone leaves the preview building the project the old way until it is
+   * reopened. The workspace hands its own settings handler down for this.
+   */
+  onProjectUpdate?: (project: Project) => void;
 }
 
 interface FileTreeItem {
@@ -50,7 +70,7 @@ interface FileTreeItem {
   children?: FileTreeItem[];
 }
 
-export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onSetEntryPoint, onAddPromptFile }: FileExplorerProps) {
+export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onSetEntryPoint, onAddPromptFile, onProjectUpdate }: FileExplorerProps) {
   const [files, setFiles] = useState<VirtualFile[]>([]);
   const [fileTree, setFileTree] = useState<FileTreeItem[]>([]);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['/']));
@@ -66,8 +86,18 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     if (typeof window === 'undefined') return false;
     return localStorage.getItem(`osw-prompt-dismissed-${projectId}`) === 'true';
   });
+  const [importSource, setImportSource] = useState<ImportDialogSource | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [projectName, setProjectName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const loadFilesVersionRef = useRef(0);
+
+  // A fresh object every time, so the dialog re-analyses whenever the user picks something new.
+  const openImport = useCallback((source: ImportDialogSource) => {
+    setImportSource(source);
+    setImportOpen(true);
+  }, []);
 
   // Check if a path is a transient/read-only path (skills or server context)
   const isTransientPath = (path: string): boolean => {
@@ -185,6 +215,24 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
       window.removeEventListener('filesChanged', handleFilesChanged);
     };
   }, [projectId, loadFiles]);
+
+  // Only the import dialog's title uses this, so a failed read costs the name and nothing else —
+  // the dialog says 'this project' instead. getProject throws rather than returning null.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await vfs.init();
+        const project = await vfs.getProject(projectId);
+        if (!cancelled) setProjectName(project.name);
+      } catch (error) {
+        logger.error('Failed to read the project name:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const buildFileTree = (items: Array<VirtualFile | { path: string; name: string; type: 'directory' }>, includeHidden: boolean): FileTreeItem[] => {
     // Filter out hidden files/directories unless includeHidden is true
@@ -331,6 +379,52 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
   };
 
+  const handleDownloadProject = async () => {
+    const toastId = toast.loading('Preparing download…');
+
+    try {
+      const { exportProjectArchive } = await import('@/lib/vfs/archive/export');
+      const project = await vfs.getProject(projectId);
+      const { blob, warnings } = await exportProjectArchive(vfs, projectId);
+
+      const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+      const date = new Date().toISOString().split('T')[0];
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${slug}-${date}.zip`;
+      // Firefox ignores click() on a detached anchor
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      if (warnings.length > 0) {
+        // Each warning names the thing that was left out and why. A bare count would tell the
+        // user something is missing without telling them what, which is the half that matters —
+        // and the messages are written for exactly this, so showing only the number throws them
+        // away. Held longer than a success toast because there is something here to read.
+        logger.warn('Archive export warnings:', warnings);
+        toast.warning(
+          warnings.length === 1
+            ? 'Downloaded, with one thing left out'
+            : `Downloaded, with ${warnings.length} things left out`,
+          {
+            id: toastId,
+            description: warnings.map((warning) => warning.message).join('\n\n'),
+            duration: 15000,
+          }
+        );
+      } else {
+        toast.success('Project downloaded', { id: toastId });
+      }
+    } catch (error) {
+      logger.error('Failed to download project:', error);
+      toast.error('Could not prepare the download', { id: toastId });
+    }
+  };
+
   const handleDelete = async (path: string, type: 'file' | 'directory') => {
     if (!confirm(`Delete ${type} "${path}"?`)) return;
 
@@ -367,58 +461,6 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
   };
 
-  // Walk a dropped DataTransfer entry, yielding a flat list of {file, path}
-  // pairs where `path` preserves the dropped folder structure under parentPath.
-  // Uses the webkit entry API (FileSystemEntry) which is the only way to
-  // recurse into dropped directories — item.getAsFile() on a folder returns a
-  // zero-byte File with the folder's name (which is what caused the
-  // "file type not supported: background" error when dropping a folder).
-  const collectEntryFiles = async (
-    entry: any,
-    parentPath: string
-  ): Promise<Array<{ file: File; path: string }>> => {
-    const joinPath = (dir: string, name: string) =>
-      dir === '/' ? `/${name}` : `${dir}/${name}`;
-
-    if (entry?.isFile) {
-      const file: File = await new Promise((resolve, reject) =>
-        entry.file(resolve, reject)
-      );
-      return [{ file, path: joinPath(parentPath, entry.name) }];
-    }
-    if (entry?.isDirectory) {
-      const myPath = joinPath(parentPath, entry.name);
-      const reader = entry.createReader();
-      const results: Array<{ file: File; path: string }> = [];
-      // readEntries may return in batches — loop until empty.
-      while (true) {
-        const batch: any[] = await new Promise((resolve, reject) =>
-          reader.readEntries(resolve, reject)
-        );
-        if (!batch.length) break;
-        for (const child of batch) {
-          const sub = await collectEntryFiles(child, myPath);
-          results.push(...sub);
-        }
-      }
-      return results;
-    }
-    return [];
-  };
-
-  // Ensure every ancestor directory in `path` exists. VFS.createFile only
-  // creates the immediate parent via updateFileTree, which leaves gaps for
-  // deeply nested uploads like /a/b/c/file.png when /a and /a/b don't exist.
-  const ensureAncestorDirs = async (filePath: string) => {
-    const parts = filePath.split('/').filter(Boolean);
-    parts.pop(); // drop file name
-    let acc = '';
-    for (const part of parts) {
-      acc += '/' + part;
-      await vfs.createDirectory(projectId, acc);
-    }
-  };
-
   const handleFileDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -442,6 +484,13 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
           const file = item.getAsFile();
           if (file) collected.push({ file, path: `/${file.name}` });
         }
+      }
+
+      // A dropped zip is an archive to import, not a file to keep. Storing it left a binary blob in
+      // the tree that nothing in the app could open.
+      if (!hasFolder && collected.length === 1 && /\.zip$/i.test(collected[0].file.name)) {
+        openImport({ kind: 'zip', file: collected[0].file });
+        return;
       }
 
       if (hasFolder) {
@@ -524,15 +573,18 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
   const uploadFile = async (
     file: File,
     targetDir: string | undefined,
-    options?: { explicitPath?: string; silent?: boolean; skipReload?: boolean }
-  ): Promise<'ok' | 'too-large' | 'error'> => {
+    options?: { explicitPath?: string; silent?: boolean; skipReload?: boolean; quiet?: boolean }
+  ): Promise<'ok' | 'too-large' | 'cancelled' | 'error'> => {
     const silent = options?.silent === true;
+    // `silent` also means "never prompt", which a caller that just wants to report the outcome
+    // itself must not inherit — declining a prompt nobody saw is not a refusal.
+    const quiet = silent || options?.quiet === true;
     const skipReload = options?.skipReload === true;
 
     const fileType = getFileTypeFromPath(file.name);
     const sizeLimit = FILE_SIZE_LIMITS[fileType];
     if (file.size > sizeLimit) {
-      if (!silent) toast.error(`File too large: ${file.name}. Maximum size is ${Math.round(sizeLimit / 1024 / 1024)}MB`);
+      if (!quiet) toast.error(`File too large: ${file.name}. Maximum size is ${Math.round(sizeLimit / 1024 / 1024)}MB`);
       return 'too-large';
     }
 
@@ -547,7 +599,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         ? await file.text()
         : await file.arrayBuffer();
 
-      await ensureAncestorDirs(filePath);
+      await ensureAncestorDirs(projectId, filePath);
       await vfs.createFile(projectId, filePath, content);
       if (!skipReload) await loadFiles();
     };
@@ -557,7 +609,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         const sizeMB = (file.size / 1e6).toFixed(1);
         await toast.promise(doUpload(), {
           loading: `Uploading ${file.name} (${sizeMB} MB)…`,
-          success: silent ? null as unknown as string : `Uploaded ${file.name}`,
+          success: quiet ? null as unknown as string : `Uploaded ${file.name}`,
           error: () => {
             // Suppress toast — error is handled in the outer catch
             return null as unknown as string;
@@ -565,7 +617,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         });
       } else {
         await doUpload();
-        if (!silent) toast.success(`Uploaded ${file.name}`);
+        if (!quiet) toast.success(`Uploaded ${file.name}`);
       }
       return 'ok';
     } catch (error: any) {
@@ -580,16 +632,64 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
             return await uploadFile(file, targetDir, options);
           } catch (deleteError) {
             logger.error('Failed to overwrite file:', deleteError);
-            toast.error('Failed to overwrite file');
+            if (!quiet) toast.error('Failed to overwrite file');
             return 'error';
           }
         }
-        return 'error';
+        // Declined, not failed. The distinction is the whole difference between 'nothing happened
+        // because you said so' and 'nothing happened and nobody knows why', and only the caller
+        // knows which words fit its surface.
+        return 'cancelled';
       }
       logger.error('Failed to upload file:', error);
-      if (!silent) toast.error(`Failed to upload ${file.name}: ${error.message}`);
+      if (!quiet) toast.error(`Failed to upload ${file.name}: ${error.message}`);
       return 'error';
     }
+  };
+
+  /**
+   * After an import wrote something. The file tree is the obvious half; the project row is the
+   * half nothing else watches.
+   *
+   * `applyImport` can change the runtime, the entry point, the global styles and the name, all via
+   * `vfs.updateProject`, which fires no event. The workspace store holds the runtime and the entry
+   * point the preview compiles with, so re-reading the row and handing it up is what keeps the
+   * preview and the '(entry)' marker from describing the project as it was before the import.
+   */
+  const handleImportComplete = async () => {
+    await loadFiles();
+    try {
+      const project = await vfs.getProject(projectId);
+      setProjectName(project.name);
+      onProjectUpdate?.(project);
+    } catch (error) {
+      // The import itself succeeded; only the settings hand-off did not.
+      logger.error('Failed to re-read the project after an import:', error);
+    }
+  };
+
+  /**
+   * 'Add as a file instead'. `uploadFile` reports its outcome rather than throwing — every path is
+   * caught inside it — so the dialog, which reads a throw as failure, has to be told. Without this
+   * a zip over the size limit and a declined overwrite both closed the dialog as though they had
+   * worked, the second one without saying anything at all.
+   *
+   * Quiet, because the words below are better ones for this surface than uploadFile's generic
+   * toasts, and two toasts for one click is one too many.
+   */
+  const handleKeepArchiveAsFile = async (file: File) => {
+    const outcome = await uploadFile(file, '/', { quiet: true });
+    if (outcome === 'ok') return;
+    if (outcome === 'too-large') {
+      const limitMb = Math.round(FILE_SIZE_LIMITS[getFileTypeFromPath(file.name)] / 1024 / 1024);
+      throw new Error(
+        `${file.name} is too large to add as a file — the limit is ${limitMb}MB. It can still be imported as a project.`
+      );
+    }
+    if (outcome === 'cancelled') {
+      throw new Error(`A file called ${file.name} is already in this project, and it was kept.`);
+    }
+    throw new Error(`${file.name} could not be added to this project as a file.`);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -633,13 +733,17 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
   };
 
   const handleItemDrop = async (e: React.DragEvent, targetItem: FileTreeItem | null) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
+    // Nothing is being dragged from inside the tree, so this is a drop from the desktop. Let it
+    // bubble to the panel's own handler, which uploads at the root (or opens the importer for a
+    // zip). Calling preventDefault/stopPropagation before this check swallowed such a drop
+    // entirely whenever it landed on a folder row: no upload, no import, no message.
     if (!draggedItem) {
       setDropTarget(null);
       return;
     }
+
+    e.preventDefault();
+    e.stopPropagation();
 
     if (targetItem && draggedItem.path === targetItem.path) {
       setDropTarget(null);
@@ -880,6 +984,20 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
           }
         }}
       />
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          // Cleared first so picking the same file twice still fires a change event.
+          if (importInputRef.current) {
+            importInputRef.current.value = '';
+          }
+          if (file) openImport({ kind: 'zip', file });
+        }}
+      />
       <PanelHeader
         icon={FolderTree}
         title="File Explorer"
@@ -918,6 +1036,39 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
               <Folder className="h-2.5 w-2.5 md:h-3 md:w-3" />
               <span className="text-xs md:hidden">New folder</span>
             </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:w-5 md:px-0 md:border-0 md:bg-transparent md:rounded-md"
+              onClick={handleDownloadProject}
+              title="Download project"
+            >
+              <Download className="h-2.5 w-2.5 md:h-3 md:w-3" />
+              <span className="text-xs md:hidden">Download</span>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 rounded-full border border-border/60 bg-muted/50 px-2.5 gap-1.5 md:h-5 md:w-5 md:px-0 md:border-0 md:bg-transparent md:rounded-md"
+                  title="Import into this project"
+                >
+                  <Import className="h-2.5 w-2.5 md:h-3 md:w-3" />
+                  <span className="text-xs md:hidden">Import</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => importInputRef.current?.click()}>
+                  <FileArchive className="h-4 w-4 mr-2" />
+                  From a file
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => pickFolderSource(openImport)}>
+                  <FolderOpen className="h-4 w-4 mr-2" />
+                  From a folder
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         }
       />
@@ -978,6 +1129,18 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
           <ContextMenuItem onClick={() => fileInputRef.current?.click()}>
             <Upload className="mr-2 h-4 w-4" />
             Upload Files
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleDownloadProject}>
+            <Download className="mr-2 h-4 w-4" />
+            Download Project
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => importInputRef.current?.click()}>
+            <Import className="mr-2 h-4 w-4" />
+            Import from File
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => pickFolderSource(openImport)}>
+            <Import className="mr-2 h-4 w-4" />
+            Import from Folder
           </ContextMenuItem>
           <ContextMenuItem onClick={() => setShowHidden(!showHidden)}>
             {showHidden ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
@@ -1040,6 +1203,19 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
           </TooltipContent>
         </Tooltip>
       )}
+
+      {/* Imports into the project this explorer is showing — the only path that can overwrite. */}
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        source={importSource}
+        target={{ kind: 'existing-project', projectId }}
+        projectName={projectName || undefined}
+        onComplete={handleImportComplete}
+        // Dropping a zip opens the preview, so the escape hatch has to be offered there too —
+        // otherwise keeping it as a plain asset means closing this and going via Upload files.
+        onKeepAsFile={handleKeepArchiveAsFile}
+      />
     </div>
   );
 }

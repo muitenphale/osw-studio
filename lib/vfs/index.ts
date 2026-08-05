@@ -28,6 +28,23 @@ export interface ExportedFile extends Omit<VirtualFile, 'content'> {
   encoding?: 'base64';
 }
 
+/**
+ * The path prefixes the VFS manages in memory instead of in the storage adapter: `/.server/`
+ * (project backend context) and `/.skills/` (skills).
+ *
+ * One exported list, because every layer that has to keep such a path out of ordinary storage —
+ * `readFile`, `fileExists`, the archive importer — must agree on what the set is. A second
+ * hardcoded list is how a namespace ends up covered in one place and missed in another, and the
+ * result is not recoverable by the user: a transient path written into the adapter can never be
+ * read back, because `readFile` short-circuits on the prefix and never looks in storage.
+ */
+export const TRANSIENT_PATH_PREFIXES = ['/.server/', '/.skills/'] as const;
+
+/** Whether a path belongs to a transient namespace. See TRANSIENT_PATH_PREFIXES. */
+export function isTransientPath(path: string): boolean {
+  return TRANSIENT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 export class VirtualFileSystem {
   private adapter: StorageAdapter;
   private initialized = false;
@@ -114,10 +131,11 @@ export class VirtualFileSystem {
 
   /**
    * Check if a path is transient (managed in-memory, not persisted to adapter).
-   * Only known transient namespaces: /.server/ (backend context) and /.skills/ (skills)
+   * Delegates to the module-level predicate so callers outside this class — the archive
+   * importer — screen paths against exactly the same list.
    */
   private isTransientPath(path: string): boolean {
-    return path.startsWith('/.server/') || path.startsWith('/.skills/');
+    return isTransientPath(path);
   }
 
   // --- Generated files (bundle.js, bundle.css) ---
@@ -1145,9 +1163,16 @@ export class VirtualFileSystem {
     return await this.createFile(projectId, newPath, file.content as string);
   }
 
-  async createDirectory(projectId: string, path: string): Promise<void> {
+  /**
+   * `silent` suppresses the `filesChanged` event, mirroring createFile/updateFile. A caller
+   * writing many paths in one batch dispatches one event of its own at the end instead of one per
+   * directory — without it, a bulk write that creates directories triggers a preview recompile per
+   * directory mid-batch. Absent or false keeps the per-call event, so existing callers are
+   * unaffected.
+   */
+  async createDirectory(projectId: string, path: string, options?: { silent?: boolean }): Promise<void> {
     this.ensureInitialized();
-    
+
     const existing = await this.adapter.getTreeNode(projectId, path);
     if (existing) {
       return;
@@ -1166,8 +1191,8 @@ export class VirtualFileSystem {
 
       await this.adapter.createTreeNode(node);
       saveManager.markDirty(projectId);
-      
-      if (typeof window !== 'undefined') {
+
+      if (options?.silent !== true && typeof window !== 'undefined') {
         window.dispatchEvent(new Event('filesChanged'));
       }
   }
@@ -2051,7 +2076,9 @@ export class VirtualFileSystem {
     let parentNode = await this.adapter.getTreeNode(projectId, parentPath);
     
     if (!parentNode && operation === 'create') {
-      await this.createDirectory(projectId, parentPath);
+      // Carries `silent` through: a silent write that had to create its parent would otherwise
+      // dispatch the very event the caller asked it not to.
+      await this.createDirectory(projectId, parentPath, { silent });
       parentNode = await this.adapter.getTreeNode(projectId, parentPath);
     }
     
