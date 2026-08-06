@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import { vfs } from '@/lib/vfs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SettingsPanel } from '@/components/settings';
@@ -36,7 +36,8 @@ import type {
   SecretsDataProvider,
   ScheduledFunctionsDataProvider,
 } from '@/components/database-manager/data-providers';
-import { SchemaEditor, getProjectSchema } from './schema-editor';
+import { SchemaEditor } from './schema-editor';
+import { getProjectSchema } from '@/lib/vfs/project-schema';
 
 interface ProjectSettingsPanelProps {
   project: Project;
@@ -473,8 +474,17 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, worksp
   const scheduledFunctionsProvider = useMemo(() => createScheduledFunctionsProvider(project.id), [project.id]);
 
   // Tracks whether the project already had a database schema, so we only
-  // fire backend_feature_enabled on the empty -> has-schema transition.
-  const hadDbSchemaRef = useRef(!!getProjectSchema(project.id));
+  // fire backend_feature_enabled on the empty -> has-schema transition. Seeded from the record and
+  // then confirmed asynchronously, which is what picks up a project still holding one in
+  // localStorage — reading that costs an await, and the ref has to exist before first render.
+  const hadDbSchemaRef = useRef(!!project.settings?.databaseSchema);
+  useEffect(() => {
+    let cancelled = false;
+    getProjectSchema(project.id).then(schema => {
+      if (!cancelled && schema) hadDbSchemaRef.current = true;
+    });
+    return () => { cancelled = true; };
+  }, [project.id]);
 
   const tabs: TabDef[] = [
     { value: 'settings', icon: <Settings className="h-3 w-3" />, label: 'General' },

@@ -262,6 +262,44 @@ describe('analyzeImport', () => {
     ]);
   });
 
+  it('carries the database schema across a download and back', async () => {
+    // The schema used to live in localStorage, so it travelled with nothing: an imported project
+    // arrived with its edge functions and no tables for them to read.
+    const ddl = 'CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT);';
+    const source = await vfs.createProject('SchemaSource', 'test');
+    const stored = await vfs.getProject(source.id);
+    await vfs.updateProject({ ...stored, settings: { ...stored.settings, databaseSchema: ddl } });
+
+    const { blob } = await exportProjectArchive(vfs, source.id);
+    const { entries } = await readZipArchive(new File([blob], 'a.zip'));
+
+    // Into a different project, which is the case that was broken.
+    const target = await vfs.createProject('SchemaTarget', 'test');
+    const plan = await analyzeImport(vfs, entries, {
+      kind: 'existing-project',
+      projectId: target.id,
+    });
+
+    const change = plan.settingChanges.find((c) => c.key === 'databaseSchema');
+    expect(change).toMatchObject({ label: 'Database schema', from: undefined, to: ddl });
+  });
+
+  it('does not report the database schema as a change when it already matches', async () => {
+    const ddl = 'CREATE TABLE messages (id INTEGER PRIMARY KEY);';
+    const project = await vfs.createProject('SchemaSame', 'test');
+    const stored = await vfs.getProject(project.id);
+    await vfs.updateProject({ ...stored, settings: { ...stored.settings, databaseSchema: ddl } });
+
+    const { blob } = await exportProjectArchive(vfs, project.id);
+    const { entries } = await readZipArchive(new File([blob], 'a.zip'));
+    const plan = await analyzeImport(vfs, entries, {
+      kind: 'existing-project',
+      projectId: project.id,
+    });
+
+    expect(plan.settingChanges).toEqual([]);
+  });
+
   it('is idempotent for binary files too', async () => {
     // Stored content is string | ArrayBuffer depending on how the file was made, so a
     // text-vs-binary comparison that decoded only one side would report a false difference.

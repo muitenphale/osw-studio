@@ -5,7 +5,7 @@ import { ARCHIVE_FORMAT_VERSION, type ProjectManifest } from './types';
 /** Fixed key order — a manifest must serialize byte-identically for the same project state. */
 const KEY_ORDER = [
   'formatVersion', 'name', 'description', 'runtime',
-  'entryPoint', 'globalStyles', 'encoding',
+  'entryPoint', 'globalStyles', 'databaseSchema', 'encoding',
 ] as const satisfies readonly (keyof ProjectManifest)[];
 
 /**
@@ -36,6 +36,7 @@ export function buildManifest(project: Project, files: VirtualFile[]): ProjectMa
     runtime: project.settings?.runtime,
     entryPoint: project.settings?.previewEntryPoint,
     globalStyles: project.settings?.globalStyles,
+    databaseSchema: project.settings?.databaseSchema,
     encoding: Object.keys(encoding).length > 0 ? sortKeys(encoding) : undefined,
   };
   return manifest;
@@ -90,6 +91,7 @@ export function parseManifest(text: string, filename = 'project.json'): ProjectM
     runtime: data.runtime,
     entryPoint: data.entryPoint,
     globalStyles: data.globalStyles,
+    databaseSchema: data.databaseSchema,
     encoding: data.encoding,
   };
 }

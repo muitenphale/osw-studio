@@ -6,50 +6,13 @@ import { Play, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchemaViewer } from '@/components/database-manager/schema-viewer';
 import { SqlEditor } from '@/components/database-manager/sql-editor';
+import { getProjectSchema, setProjectSchema } from '@/lib/vfs/project-schema';
 
 interface SchemaEditorProps {
   projectId: string;
   enabled: boolean;
   onSchemaChange?: (schema: string) => void;
   workspaceId?: string;
-}
-
-// Keep these exports — used by vfs/index.ts for transient file generation
-export function getProjectSchema(projectId: string): string {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem(`osw-db-schema-${projectId}`) || '';
-}
-
-export function setProjectSchema(projectId: string, schema: string): void {
-  if (typeof window === 'undefined') return;
-  if (schema) {
-    localStorage.setItem(`osw-db-schema-${projectId}`, schema);
-  } else {
-    localStorage.removeItem(`osw-db-schema-${projectId}`);
-  }
-}
-
-/**
- * Save schema to localStorage and apply DDL to the project database (Server Mode only).
- * Used by project-manager and template-manager during project creation.
- */
-export async function applyProjectDatabaseSchema(projectId: string, ddl: string, workspaceId?: string): Promise<void> {
-  setProjectSchema(projectId, ddl);
-  if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
-    try {
-      const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
-      const res = await fetch(`${apiBase}/projects/${projectId}/database/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql: ddl }),
-      });
-      if (!res.ok) {
-        console.warn('[Schema] DDL apply failed — will auto-heal on Schema tab open');
-      }
-    } catch {
-      // Non-fatal — auto-apply on Schema tab open will recover
-    }
-  }
 }
 
 type SubTab = 'tables' | 'sql' | 'ddl';
@@ -73,11 +36,11 @@ export function SchemaEditor({ projectId, enabled, onSchemaChange, workspaceId }
     // Only auto-apply once per projectId
     if (autoAppliedRef.current === projectId) return;
 
-    const storedSchema = getProjectSchema(projectId);
-    if (!storedSchema) return;
-
     const tryAutoApply = async () => {
       try {
+        const storedSchema = await getProjectSchema(projectId);
+        if (!storedSchema) return;
+
         // Check if database already has tables
         const schemaRes = await fetch(schemaEndpoint);
         if (!schemaRes.ok) return;
@@ -87,7 +50,7 @@ export function SchemaEditor({ projectId, enabled, onSchemaChange, workspaceId }
           return; // Already has tables, nothing to do
         }
 
-        // Database is empty but localStorage has DDL — apply it
+        // Database is empty but the project has DDL — apply it
         const res = await fetch(queryEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -125,10 +88,10 @@ export function SchemaEditor({ projectId, enabled, onSchemaChange, workspaceId }
 
       toast.success('DDL applied successfully');
 
-      // Update localStorage schema (append DDL) so AI server context stays in sync
-      const existing = getProjectSchema(projectId);
+      // Append to the project's stored schema so the AI server context stays in sync
+      const existing = await getProjectSchema(projectId);
       const updated = existing ? `${existing}\n\n${ddl.trim()}` : ddl.trim();
-      setProjectSchema(projectId, updated);
+      await setProjectSchema(projectId, updated);
       onSchemaChange?.(updated);
 
       // Refresh SchemaViewer

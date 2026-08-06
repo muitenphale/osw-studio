@@ -298,12 +298,12 @@ export class VirtualFileSystem {
         );
       }
 
-      // Mount database schema if present in localStorage
-      if (typeof window !== 'undefined') {
-        const dbSchema = localStorage.getItem(`osw-db-schema-${projectId}`);
-        if (dbSchema) {
-          this.mountTransientFile('/.server/db/schema.sql', dbSchema, true);
-        }
+      // Mount database schema if the project has one. Read through getProjectSchema rather than
+      // from the record directly so a project still holding it in localStorage migrates on mount.
+      const { getProjectSchema } = await import('./project-schema');
+      const dbSchema = await getProjectSchema(projectId, this);
+      if (dbSchema) {
+        this.mountTransientFile('/.server/db/schema.sql', dbSchema, true);
       }
 
       // Ensure all known server context directories are visible (even if empty)

@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import 'fake-indexeddb/auto';
 import JSZip from 'jszip';
 import type { EdgeFunction, ScheduledFunction } from '../../types';
+import { installLocalStorageStub } from '../../__tests__/local-storage-stub';
 
 const { vfs } = await import('../../index');
 const { exportProjectArchive } = await import('../export');
@@ -285,5 +286,46 @@ describe('exportProjectArchive', () => {
     expect(warnings[0].code).toBe('unresolved-reference');
     expect(warnings[0].message).toContain('nightly');
     expect(await pathsOf(blob)).not.toContain('.server/scheduled.json');
+  });
+});
+
+describe('exportProjectArchive database schema', () => {
+  let restore = () => {};
+
+  beforeAll(async () => { await vfs.init(); restore = installLocalStorageStub(); });
+  afterAll(() => { restore(); });
+
+  it('reads the schema from the file system it was handed, not the singleton', async () => {
+    // exportProjectArchive takes a VirtualFileSystem so a caller can pass another instance. Two
+    // exist server-side. Reading the schema off the module singleton instead would pair one
+    // instance's files with another's schema, and no project id is guaranteed to mean the same
+    // thing in both — here 'p' does not exist in the singleton at all.
+    const stub = {
+      getProject: async () => ({
+        id: 'p',
+        name: 'Stub',
+        updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+        settings: { databaseSchema: 'CREATE TABLE from_the_stub (id INTEGER);' },
+      }),
+      getAllFilesAndDirectories: async () => [],
+      isGeneratedPath: () => false,
+      getStorageAdapter: () => ({}),
+    } as unknown as typeof vfs;
+
+    const zip = await zipOf((await exportProjectArchive(stub, 'p')).blob);
+    const manifest = JSON.parse(await zip.file('project.json')!.async('string'));
+    expect(manifest.databaseSchema).toBe('CREATE TABLE from_the_stub (id INTEGER);');
+  });
+
+  it('exports a schema still held in localStorage', async () => {
+    // Browser mode never mounts the server context, so a project created from a backend template
+    // before the schema moved onto the record would otherwise download without it.
+    const ddl = 'CREATE TABLE legacy (id INTEGER PRIMARY KEY);';
+    const project = await vfs.createProject('LegacySchema', 'test');
+    localStorage.setItem(`osw-db-schema-${project.id}`, ddl);
+
+    const zip = await zipOf((await exportProjectArchive(vfs, project.id)).blob);
+    const manifest = JSON.parse(await zip.file('project.json')!.async('string'));
+    expect(manifest.databaseSchema).toBe(ddl);
   });
 });

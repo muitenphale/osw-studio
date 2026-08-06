@@ -82,7 +82,15 @@ export async function exportProjectArchive(
   // would lose its /osw-project.json without a word.
   const ownedPaths = new Set(files.map((file) => file.path));
   const manifestPath = pickManifestPath(ownedPaths, warnings);
-  zip.file(manifestPath, serializeManifest(buildManifest(project, files)), { date: generatedDate });
+  // Read through the accessor rather than off the record: a project created before the schema
+  // moved onto the project still holds it in localStorage, and buildManifest reading the record
+  // directly would download that project without its schema and never migrate it.
+  const { getProjectSchema } = await import('../project-schema');
+  const databaseSchema = (await getProjectSchema(projectId, vfs)) || undefined;
+  const manifestSource = { ...project, settings: { ...project.settings, databaseSchema } };
+  zip.file(manifestPath, serializeManifest(buildManifest(manifestSource, files)), {
+    date: generatedDate,
+  });
 
   const blob = await zip.generateAsync({
     type: 'blob',

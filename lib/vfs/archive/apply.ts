@@ -236,6 +236,12 @@ async function createProjectFromManifest(
     settings.globalStyles = manifest.globalStyles;
     applied += 1;
   }
+  if (manifest.databaseSchema !== undefined) {
+    // Stored only. The DDL is executed against the project database by the Schema tab's
+    // auto-apply, which is Server Mode's job and needs the database to exist first.
+    settings.databaseSchema = manifest.databaseSchema;
+    applied += 1;
+  }
   project.settings = settings;
   await vfs.updateProject(project);
   result.applied.settings += applied;
@@ -460,6 +466,9 @@ function applySetting(project: Project, change: SettingChange, result: ApplyResu
       return true;
     case 'globalStyles':
       project.settings.globalStyles = change.to;
+      return true;
+    case 'databaseSchema':
+      project.settings.databaseSchema = change.to;
       return true;
     case 'runtime':
       if (!isKnownRuntime(change.to)) {

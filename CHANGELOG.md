@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.92.1 - 2026-08-06
+
+### Fixes
+- **A project's database schema stays with the project**: The schema was kept in browser storage rather than on the project, so everything that moves a project left it behind: downloading its files, an `.osws` backup, and Server Mode sync. A project made from the contact form or blog template arrived on another machine with its edge functions intact and no tables for them to read. The schema is now stored with the project and travels in all three, and it appears in the import preview as a setting you can accept or leave. A schema saved before this release moves across the first time it is read, which is when you download the project's files, or when the project opens in Server Mode.
+
 ## v1.92.0 - 2026-08-06
 
 ### Projects

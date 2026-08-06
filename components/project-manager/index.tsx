@@ -6,6 +6,7 @@ import { Project, CustomTemplate } from '@/lib/vfs/types';
 import { getRuntimeBadge } from '@/lib/runtimes/registry';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
+import { clearLegacyProjectSchema } from '@/lib/vfs/project-schema';
 import { TemplateBrowserPanel, runtimeForTemplate } from '@/components/template-browser';
 import { logger } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -526,7 +527,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
 
     try {
       await vfs.deleteProject(project.id);
-      localStorage.removeItem(`osw-db-schema-${project.id}`);
+      clearLegacyProjectSchema(project.id);
       import('@/lib/vfs/auto-sync').then(m => m.autoDeleteProject(project.id)).catch(() => {});
       toast.success('Project deleted');
       track('project_delete');

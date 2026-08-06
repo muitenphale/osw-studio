@@ -6,19 +6,22 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
-## v1.92.0 - Project Download and Import (2026-08-06)
+## v1.92.0 - Files Out and Back (2026-08-06)
 
-Export as ZIP has always given you the compiled site, which is what a web host wants and not much use if you want to work on the project somewhere else. The File Explorer can now download the project itself: your files at their real paths, the runtime and entry point in a `project.json`, and each server function as an editable `.js` file. You can take that zip into any editor and bring it back, and importing shows you exactly what it would change before anything is written — what's new, what already exists, what's identical. Files that already exist are yours to keep, replace, or keep alongside the incoming copy.
+The File Explorer can now download your files and folders as they sit, and read them back. Keep a copy in a git repository, edit it in VS Code or Claude Code, then import the result. Export as ZIP and Export as JSON on the Projects list are unchanged; those package a project, this hands you its contents.
 
-### Projects
-- **Download the project, not the build**: Every file at its real path, including `.PROMPT.md` and the other dot-files the deployable export leaves out. Secret values are never included; their names and descriptions are
-- **Import from a zip, a folder, or a `.json` backup**: As a new project from the Projects list, or into the project you have open from the File Explorer
-- **Nothing is written until you confirm**: The preview lists what would be added, what already exists, what is identical, and anything that can't be imported with the reason. Importing into an existing project takes a checkpoint first, so the file changes can be undone in one step
-- **Server functions come across as editable files**: Each one is a `.js` file next to a small `.json` holding its settings, so you can work on them in an ordinary editor. They import in Browser mode and travel with the project, but only run in Server Mode
-- **An archive carrying AI instructions is called out**: `.PROMPT.md` changes how the assistant works on a project, so it isn't listed as one file among many
+### Download
+- **The tree as it is**: Real paths, nothing compiled or renamed, dot-files like `.PROMPT.md` included
+- **What isn't a file comes too**: Runtime, entry point and global styles in a `project.json`; edge and server functions as editable `.js`. Secret values never leave; their names do, so an import knows what to ask for
+- **Steady between downloads**: Unchanged content downloads byte-identical every time, so a re-download diffs against your last commit as the work you did rather than noise
+
+### Import
+- **A zip or a folder**: Into the open project from the File Explorer, or as a new project from the Projects list
+- **Shown before it's applied**: What's new, what already exists, what's identical, and what can't come in with the reason. Existing files can be kept, replaced, or kept alongside the incoming copy
+- **Reversible**: A checkpoint is taken first, so the file changes undo in one step
 
 ### Fixes
-- **Dropping a file onto a folder works**: Anything dragged in from outside the app and dropped on a folder row was discarded silently. It now lands at the top level of the project
+- **Dropping a file onto a folder works**: Files dragged in from outside the app and dropped on a folder row were discarded silently. They now land at the top level of the project
 
 ---
 

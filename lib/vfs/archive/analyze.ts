@@ -68,6 +68,7 @@ const SETTING_LABELS: Record<SettingChange['key'], string> = {
   runtime: 'Runtime',
   entryPoint: 'Entry point',
   globalStyles: 'Global styles',
+  databaseSchema: 'Database schema',
 };
 
 const BROWSER_MODE_WARNING =
@@ -471,6 +472,7 @@ function diffSettings(project: Project, manifest: ProjectManifest): SettingChang
   add('runtime', project.settings?.runtime, manifest.runtime);
   add('entryPoint', project.settings?.previewEntryPoint, manifest.entryPoint);
   add('globalStyles', project.settings?.globalStyles, manifest.globalStyles);
+  add('databaseSchema', project.settings?.databaseSchema, manifest.databaseSchema);
   return changes;
 }
 

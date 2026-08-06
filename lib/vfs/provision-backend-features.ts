@@ -1,6 +1,6 @@
 import { BackendFeatures } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
-import { applyProjectDatabaseSchema } from '@/components/project-backend/schema-editor';
+import { applyProjectDatabaseSchema } from './project-schema';
 
 export interface ProvisionResult {
   edgeFunctions: number;

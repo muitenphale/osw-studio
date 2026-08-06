@@ -24,6 +24,8 @@ export interface ProjectManifest {
   runtime?: ProjectRuntime;
   entryPoint?: string;
   globalStyles?: string;
+  /** The project database's DDL. Carried as a setting because that is where it is stored. */
+  databaseSchema?: string;
   /**
    * Only files whose stored shape disagrees with what their extension implies.
    * Everything absent is inferred with isTextExtension, the same rule the app uses.
@@ -103,7 +105,7 @@ export interface BackendConflict {
 }
 
 export interface SettingChange {
-  key: 'runtime' | 'entryPoint' | 'globalStyles' | 'name' | 'description';
+  key: 'runtime' | 'entryPoint' | 'globalStyles' | 'databaseSchema' | 'name' | 'description';
   label: string;
   from?: string;
   to: string;
