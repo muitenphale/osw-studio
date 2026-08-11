@@ -24,7 +24,7 @@ import { ProvidersModelsView } from '@/components/providers-models';
 import { createPortal } from 'react-dom';
 import { ProjectModelsPanel } from '@/components/providers-models/project-models-panel';
 import { hasAnyConnectedProvider } from '@/lib/llm/providers/connection-status';
-import { SUGGESTION_PILLS } from '@/lib/constants/suggestion-pills';
+import { SUGGESTION_PILLS, INLINE_SUGGESTION_COUNT } from '@/lib/constants/suggestion-pills';
 import { checkHFCapabilities, loginHF } from '@/lib/auth/hf-auth';
 import { detectDeploymentType } from '@/lib/telemetry/config';
 import { FocusContextPayload } from '@/lib/preview/types';
@@ -291,6 +291,24 @@ export function ChatPanel({
   // Prompt state — owned by ChatPanel, never leaves this component until submit
   const [prompt, setPrompt] = useState('');
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * The starters offered above the composer.
+   *
+   * A project's own suggestions replace the generic ones rather than joining them: they were
+   * seeded by the template that made the project, and "Personal portfolio (one page)" is noise in
+   * a Spring Boot service. A project without any falls back to the generic set, which is what a
+   * blank project gets.
+   */
+  const projectSuggestions = useWorkspaceStore(s => s.promptSuggestions);
+  const suggestions = projectSuggestions.length > 0 ? projectSuggestions : SUGGESTION_PILLS;
+  const inlineSuggestions = suggestions.slice(0, INLINE_SUGGESTION_COUNT);
+  const overflowSuggestions = suggestions.slice(INLINE_SUGGESTION_COUNT);
+
+  const applyPromptSuggestion = useCallback((text: string) => {
+    setPrompt(text);
+    composerTextareaRef.current?.focus();
+  }, []);
 
   // Connection/model-config changes re-render this panel via the store's modelConfigVersion
   // (bumped on apiKeyUpdated + modelConfigChanged by the root-mounted useModelConfigSignal), so
@@ -832,19 +850,43 @@ export function ChatPanel({
           <div>
             <div className="text-xs text-muted-foreground mb-1.5">Try one of these:</div>
             <div className="flex flex-wrap gap-1.5">
-              {SUGGESTION_PILLS.map((pill) => (
+              {inlineSuggestions.map((pill) => (
                 <button
                   key={pill.id}
                   type="button"
-                  onClick={() => {
-                    setPrompt(pill.prompt);
-                    composerTextareaRef.current?.focus();
-                  }}
+                  onClick={() => applyPromptSuggestion(pill.prompt)}
                   className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 cursor-pointer transition-all"
                 >
                   {pill.label}
                 </button>
               ))}
+              {/* The rest, when a project brought more than fit on the row. A menu rather than a
+                  wider wrap: these sit directly above the composer, and a growing block of
+                  buttons pushes the thing you came here to type off the screen. */}
+              {overflowSuggestions.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`${overflowSuggestions.length} more suggestions`}
+                      className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 cursor-pointer transition-all"
+                    >
+                      …
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="max-w-xs">
+                    {overflowSuggestions.map((pill) => (
+                      <DropdownMenuItem
+                        key={pill.id}
+                        onClick={() => applyPromptSuggestion(pill.prompt)}
+                        className="text-xs"
+                      >
+                        {pill.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           </div>
         )}

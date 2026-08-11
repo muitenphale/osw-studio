@@ -3,7 +3,7 @@ import { REACT_DOMAIN_PROMPT } from '@/lib/llm/prompts/react';
 import { CANVAS_CSS, CANVAS_HTML } from '../utils';
 
 export const REACT_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Starter (React + TypeScript)',
+  name: 'React Starter',
   description: 'Minimal React app with TypeScript and auto-bundling',
   directories: ['/src', '/src/components'],
   files: [
@@ -37,7 +37,7 @@ root.render(<App />);
     {
       path: '/src/App.tsx',
       content: `/*
- * Root component — build your UI here.
+ * Root component. Build your UI here.
  *
  * Add components in /src/components/Name.tsx and import them:
  *   import Header from "./components/Header";

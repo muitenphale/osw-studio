@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { ensureDeploymentRoute } from '@/lib/auth/system-database';
 import { isEncryptionConfigured } from '@/lib/edge-functions/secrets-crypto';
+import { mirrorSecretToProject } from '@/lib/api/secret-write-through';
 
 /**
  * Validate secret name (SCREAMING_SNAKE_CASE)
@@ -125,6 +126,13 @@ export async function POST(
     );
 
     const secret = deploymentDb.getSecret(id);
+
+    // The project owns this value; the runtime copy above is what the next publish would overwrite.
+    await mirrorSecretToProject(adapter, deployment.projectId, {
+      name: body.name,
+      value: body.value,
+      description: body.description || undefined,
+    });
 
     return NextResponse.json({ secret }, { status: 201 });
   } catch (error) {

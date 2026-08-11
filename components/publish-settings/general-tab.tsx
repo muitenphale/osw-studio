@@ -14,12 +14,13 @@ interface GeneralTabProps {
   onChange: (settings: PublishSettings) => void;
   projectId: string;
   deploymentId: string;
-  slug?: string;
+  /** Resolved by the server; the client must not derive it from slug + hostname. */
+  publicUrl?: string;
   projects?: Project[];
   onProjectChange?: (projectId: string) => void;
 }
 
-export function GeneralTab({ settings, onChange, projectId, deploymentId, slug, projects, onProjectChange }: GeneralTabProps) {
+export function GeneralTab({ settings, onChange, projectId, deploymentId, publicUrl: resolvedUrl, projects, onProjectChange }: GeneralTabProps) {
   const [originalProjectId] = useState(projectId);
   const handleChange = (field: keyof PublishSettings, value: any) => {
     onChange({
@@ -29,12 +30,13 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, slug, 
   };
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const directUrl = `${origin}/deployments/${deploymentId}`;
-  const subdomainUrl = slug ? `https://${slug}.${hostname}` : null;
+  // The custom domain is applied live so the field previews as it is typed; everything else comes
+  // from the server, which is the only side that knows whether slug subdomains are routed.
   const publicUrl = settings.customDomain
     ? `https://${settings.customDomain}`
-    : subdomainUrl || directUrl;
+    : resolvedUrl || directUrl;
+  const servedElsewhere = publicUrl !== directUrl;
 
   return (
     <div className="space-y-6">
@@ -146,7 +148,7 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, slug, 
           </div>
 
           {/* Show direct path when subdomain or custom domain is set */}
-          {(subdomainUrl || settings.customDomain) && (
+          {servedElsewhere && (
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">Direct Path</Label>
               <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border border-dashed">

@@ -93,6 +93,8 @@ export interface AppSettings {
   };
   /** Provider group ids collapsed in the model picker. */
   modelPickerCollapsed?: string[];
+  /** Intent group ids collapsed in the template picker. */
+  templatePickerCollapsed?: string[];
 }
 
 /**
@@ -756,6 +758,25 @@ class ConfigManager {
     const set = new Set(this.getCollapsedModelGroups());
     if (collapsed) set.add(groupId); else set.delete(groupId);
     this.setSetting('modelPickerCollapsed', [...set]);
+  }
+
+  /**
+   * Which template sections are closed, or null if nobody has said yet.
+   *
+   * Null rather than an empty array because the two mean different things here: the picker starts
+   * some sections closed, and "I opened all of them" has to be distinguishable from "this is a
+   * first visit" or that choice would be undone on the next open.
+   */
+  getCollapsedTemplateGroups(): string[] | null {
+    return this.getSettings().templatePickerCollapsed ?? null;
+  }
+  /**
+   * Stores the whole set rather than one section at a time. Toggling one section has to be applied
+   * to what is currently on screen, which includes sections closed by default and never touched;
+   * reading the stored value here instead would drop those the first time anything was toggled.
+   */
+  setCollapsedTemplateGroups(groupIds: string[]): void {
+    this.setSetting('templatePickerCollapsed', [...groupIds]);
   }
 
   // Custom provider management

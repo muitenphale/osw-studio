@@ -3,7 +3,7 @@ import { VUE_DOMAIN_PROMPT } from '@/lib/llm/prompts/vue';
 import { CANVAS_CSS, CANVAS_HTML } from '../utils';
 
 export const VUE_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Starter (Vue)',
+  name: 'Vue Starter',
   description: 'Vue 3 app with Composition API and auto-bundling',
   directories: ['/src', '/src/components'],
   files: [
@@ -36,7 +36,7 @@ createApp(App).mount("#root");
     {
       path: '/src/App.vue',
       content: `<!--
-  Root component — build your UI here.
+  Root component. Build your UI here.
 
   Add components in /src/components/Name.vue:
     import Header from "./components/Header.vue";

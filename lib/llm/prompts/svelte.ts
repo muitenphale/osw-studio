@@ -1,12 +1,12 @@
 export const SVELTE_DOMAIN_PROMPT = `PROJECT TYPE: Svelte (auto-bundled)
 
-This project uses Svelte 5. Single-file components (.svelte) are compiled in the browser — no build tools or npm needed during development.
+This project uses Svelte 5. Single-file components (.svelte) are compiled in the browser, no build tools or npm needed during development.
 
 ARCHITECTURE:
-- /index.html — HTML shell with <div id="root"> and <script type="module" src="/bundle.js">
-- /src/main.ts — Entry point: mount(App, { target: document.getElementById("root")! })
-- /src/App.svelte — Root component
-- /src/components/ — Reusable components (one per file)
+- /index.html: HTML shell with <div id="root"> and <script type="module" src="/bundle.js">
+- /src/main.ts: Entry point: mount(App, { target: document.getElementById("root")! })
+- /src/App.svelte: Root component
+- /src/components/: Reusable components (one per file)
 
 WRITING COMPONENTS:
 - Create components in /src/components/Name.svelte
@@ -14,15 +14,15 @@ WRITING COMPONENTS:
 - Each .svelte file contains <script>, template HTML, and <style>
 
 SVELTE 5 RUNES:
-- $state() — reactive state declaration:
+- $state(): reactive state declaration:
   let count = $state(0);
-- $derived() — computed values:
+- $derived(): computed values:
   let doubled = $derived(count * 2);
-- $effect() — side effects:
+- $effect(): side effects:
   $effect(() => { console.log(count); });
-- $props() — component props:
+- $props(): component props:
   let { name, age = 25 } = $props();
-- $bindable() — two-way binding props:
+- $bindable(): two-way binding props:
   let { value = $bindable() } = $props();
 
 COMPONENT FORMAT:
@@ -59,7 +59,7 @@ TEMPLATE SYNTAX:
 - Class directive: class:active={isActive}
 
 IMPORTING NPM PACKAGES:
-- Import by package name — resolved via CDN automatically:
+- Import by package name, resolved via CDN automatically:
   import { writable } from "svelte/store";
   import confetti from "canvas-confetti";
   import { format } from "date-fns";
@@ -88,22 +88,22 @@ FILE STRUCTURE EXAMPLE:
 DO NOT:
 - Create .hbs / .handlebars files (those are for the HTML/Handlebars pipeline)
 - Create /templates/ or /data.json (Handlebars-specific)
-- Use old Svelte syntax (export let, $: reactive, on:event) — use Svelte 5 runes
+- Use old Svelte syntax (export let, $: reactive, on:event). Use Svelte 5 runes instead
 - Use require() or CommonJS modules
 - Create build configs (vite.config.ts, svelte.config.js, etc.)
 - Try to install packages with npm/yarn
-- Write JSX/TSX files — use .svelte components instead
+- Write JSX/TSX files. Use .svelte components instead
 
 BUILD OUTPUT:
 - The project auto-compiles when files change
 - Build errors appear in the Terminal panel (esbuild compilation errors)
 - /bundle.js and /bundle.css are generated files visible in the file explorer
-- If bundle.js is missing, the build failed — check Terminal for errors
+- If bundle.js is missing, the build failed. Check Terminal for errors
 - Use 'cat /bundle.js' to inspect the compiled output if needed
 
 IMPORTANT:
 - The preview rebuilds automatically when any file changes
 - Component state is lost on rebuild (expected behavior)
 - TypeScript in <script lang="ts"> is supported
-- All imports resolve at runtime from esm.sh CDN — internet required
+- All imports resolve at runtime from esm.sh CDN, internet required
 - Styles in <style> blocks are automatically scoped`;

@@ -116,16 +116,18 @@ export function GuidedTourProvider({ children }: { children: React.ReactNode }) 
     try {
       // Create a fresh demo project for the tour
       const { vfs } = await import('@/lib/vfs');
-      const { createProjectFromTemplate } = await import('@/lib/vfs/project-templates');
-      const { DEMO_PROJECT_TEMPLATE } = await import('@/lib/vfs/project-templates');
+      const { createProjectFromTemplate, loadBuiltInProjectTemplate } = await import(
+        '@/lib/vfs/project-templates'
+      );
 
       await vfs.init();
 
+      const demo = await loadBuiltInProjectTemplate('demo');
       const tourDemo = await vfs.createProject(
         'Example Studios (Tour)',
         'Demo project for guided tour'
       );
-      await createProjectFromTemplate(vfs, tourDemo.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+      await createProjectFromTemplate(vfs, tourDemo.id, demo, demo.assets);
 
       // Store the demo project ID
       setTourDemoProjectId(tourDemo.id);

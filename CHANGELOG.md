@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.93.0 - 2026-08-11
+
+### Templates
+- **Eight built-in templates are new**, bringing the catalogue to 20: `business-website`, `portfolio`, `store-locator`, `llm-wiki`, `project-tracker`, `guided-chat`, `ai-assistant`, `spring-rest-postgres`. `ai-assistant` requires Server Mode (its key lives in a server function). `spring-rest-postgres` is a Project Kit: Java is neither built nor run here, so its `index.html` is a project overview and its preview is not the service. Closes [#16](https://github.com/o-stahl/osw-studio/issues/16). `research-library` was replaced by `llm-wiki`.
+- **Content templates share one component stylesheet**: the CSS moved into `lib/vfs/templates/theme.ts`, extracted from `deepstudio/osw-template-theme.html`. A template's stylesheet now supplies only tokens (accent hue, colour scheme, radius, serif) via `templateStylesheet()`. Content templates were rewritten onto it, which also replaced their seed content and moved form and comment results from toasts into a live region on the page.
+- **Built-in template contents are lazy-loaded**: the browser loaded every template's files and edge functions on open, roughly 156 KB. `lib/vfs/templates/registry.ts` now holds metadata only, and a template's module is imported when a project is created from it.
+- **Templates can seed `promptSuggestions`** into project settings, applied by `applyBuiltInTemplate`. Copies are per-project; editable in Settings under Project. A project without them falls back to the generic starters.
+- **`react-demo` is now "To-do List" and keeps its list**: saved to `localStorage` under a key scoped to `window.location.pathname`, so two deployments on one host do not share a list.
+
+### Choosing a template
+- **The list is grouped by a template's `intent`** (starter, website, workspace, app, project-kit) instead of filtered by runtime. Collapsed-group state persists via `configManager`. Runtime remains a searchable badge.
+- **A template can be previewed before it is chosen**: it compiles through the same `VirtualServer` path as the editor preview, in a throwaway project deleted on close. Available from the template list and the Templates page. Terminal runtimes (Python, Lua) have no preview.
+- **The list warns when a template cannot fully run in Browser mode**, before the project is created, linking to the Server Mode docs. This covers templates whose runtime or backend features do not run locally.
+- **New projects default to the `handlebars` runtime** rather than `static`. Starter templates renamed (`Starter (Svelte)` to `Svelte Starter`) and moved into a collapsed group.
+
+### Fixes
+- **Bundled runtimes no longer resolve dependencies to a CDN at runtime**: `esbuild-bundler` left package imports pointing at `esm.sh`, so published and exported React, Preact, Svelte and Vue sites fetched their framework on every visit and broke when it was unreachable. Dependencies are fetched during the build and inlined into `bundle.js` (Svelte's runtime alone was 42 modules). Builds need network access, as they already did for the Svelte and Vue compilers. Published and exported output is minified; the editor preview is not.
+- **An outbound `fetch` is bounded by the function's deadline**: the sandbox capped every request at 10s while a function may run for 30s, so a slow upstream was aborted well inside the budget it had been given. Model calls hit this routinely. The cap is now the lower of the function's remaining time and 30s.
+- **A secret set on a deployment survives the next publish**: the deployment's secrets panel wrote only to `runtime.sqlite`, and publishing deletes every runtime secret and re-provisions from the bound project, so the value was silently replaced. Create, update and delete now write through to the project's `project_secrets` as well as the runtime copy.
+- **An edge function's `console` output is logged when it fails**: the sandbox collected it and the route dropped it, so a function that recorded an upstream 401 reported only its own generic error. Output is logged when a call errors or returns 4xx/5xx.
+- **An edge function can call `fetch` again**: any sandboxed function that fetched aborted the QuickJS runtime at teardown (`Assertion failed: list_empty(&rt->gc_obj_list)`) and returned a 500, so every template making a server-side API call was dead. `fetch` returned its deferred promise handle from a `newFunction` callback, transferring ownership to the VM, and the continuation then resolved it through that freed handle. The VM gets a duplicate now.
+- **A function that runs out of time no longer aborts the runtime**: same assertion, different route. The evaluated module's handle was released only on the success path, so a deadline expiring mid-request left it alive with a request still in flight. Teardown cancels outstanding requests, waits for them to settle, and releases the handle whatever the outcome.
+- **A deployment's URL is resolved by the server**: the deployment card and publish settings built `https://{slug}.{hostname}` whenever a slug existed, which publish assigns unconditionally, so a local deployment offered the unreachable `https://{slug}.localhost` and thumbnail capture followed it. Both API routes return a `publicUrl` from `resolveDeploymentServing`, falling back to `/deployments/{id}` unless `STATIC_PROXY` routes slug subdomains.
+- **Preview works from the Projects list**: it required an editor-opened project to compile, so the dialog never left "Compiling project...", and it ignored the project's runtime, rendering bundled-runtime projects blank.
+- **Template Manager applies the template's runtime**: it wrote the files and left the runtime at its default, so bundled-runtime projects stayed marked `static`. It also handled only five built-ins; the rest produced an empty project.
+- **`.oswt` export includes backend features**: it read them from the temporary project it builds to export, which was never provisioned with them.
+- **Template-declared scheduled functions are provisioned**: templates could declare them and nothing created them.
+- **The contact form template sends its notification email**: the Resend call passed an already-encoded body that the server runtime encoded again, so Resend rejected it. Affected projects created from that template with a Resend key; stored submissions were unaffected.
+
+### Security
+- **The contact form template no longer ships `list-messages`**: the edge function returned the 50 most recent submissions, including names, email addresses and message bodies, to any unauthenticated caller. The page called it on load only to detect a server, and discarded the response; that check is now a `contact-status` function returning no data. **Existing projects keep their own copy and republishing will not remove it**: delete the function in the project's Backend panel.
+- **Blog comments are built as DOM nodes** rather than concatenated HTML with manual escaping.
+
 ## v1.92.1 - 2026-08-06
 
 ### Fixes

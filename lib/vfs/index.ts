@@ -10,6 +10,7 @@ import {
   FILE_SIZE_LIMITS,
 } from './types';
 import { saveManager } from './save-manager';
+import { isTemplatePreviewProject } from './template-preview-marker';
 import { skillsService } from './skills';
 import { StorageAdapter } from './adapters/types';
 import { createClientAdapter } from './adapters/factory';
@@ -1627,10 +1628,20 @@ export class VirtualFileSystem {
     await this.adapter.deleteProject(id);
   }
 
-  async listProjects(): Promise<Project[]> {
+  /**
+   * Every project, except the throwaway ones a template preview creates.
+   *
+   * Filtered here rather than at each call site because there are a dozen of those, they include
+   * auto-sync, and none of them ever wants a scratch project: leaving the filter to callers meant
+   * a preview showed up in Recent Projects and would have been pushed to a server in Server Mode.
+   * Only the sweep that deletes them asks to see them.
+   */
+  async listProjects(options?: { includeTemplatePreviews?: boolean }): Promise<Project[]> {
     this.ensureInitialized();
 
-    return await this.adapter.listProjects();
+    const projects = await this.adapter.listProjects();
+    if (options?.includeTemplatePreviews) return projects;
+    return projects.filter((project) => !isTemplatePreviewProject(project.id));
   }
 
   async listFiles(projectId: string): Promise<VirtualFile[]> {

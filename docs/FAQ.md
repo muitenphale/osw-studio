@@ -359,7 +359,7 @@ AI guidance documents injected into the system prompt. They teach the AI how to 
 
 Reusable project starting points with files, structure, and metadata.
 
-**Built-in Templates**: Website Starter (minimal), Starter (Handlebars), Example Studios (multi-page portfolio), Starter (React + TypeScript), React Demo: Task Tracker, Starter (Preact + TypeScript), Starter (Svelte), Starter (Vue), Starter (Python), Starter (Lua), Landing Page with Contact Form (backend), Blog with Comments (backend)
+**Built-in Templates**: twenty, grouped by what you're setting out to make. Handlebars Starter and Static Starter for an empty website; Example Studios, Business Website, Portfolio & CV and Blog with Comments for sites you publish; LLM Wiki and Projects & Tasks for files you keep working in; Landing Page with Contact Form, Store Locator, Guided Chat, AI Assistant and To-do List for things people use; Spring Boot REST API to build elsewhere; and a closed Runtime starters section holding the eight minimal setups, one per runtime. See [Templates](TEMPLATES.md).
 
 **See**: [Templates Guide](?doc=templates)
 

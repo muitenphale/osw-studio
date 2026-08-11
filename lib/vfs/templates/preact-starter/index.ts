@@ -3,7 +3,7 @@ import { PREACT_DOMAIN_PROMPT } from '@/lib/llm/prompts/preact';
 import { CANVAS_CSS, CANVAS_HTML } from '../utils';
 
 export const PREACT_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Starter (Preact + TypeScript)',
+  name: 'Preact Starter',
   description: 'Lightweight Preact app with TypeScript and auto-bundling',
   directories: ['/src', '/src/components'],
   files: [
@@ -36,7 +36,7 @@ render(<App />, document.getElementById("root")!);
     {
       path: '/src/App.tsx',
       content: `/*
- * Root component — build your UI here.
+ * Root component. Build your UI here.
  *
  * Add components in /src/components/Name.tsx and import them:
  *   import Header from "./components/Header";

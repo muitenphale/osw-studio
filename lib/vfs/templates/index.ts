@@ -1,14 +1,24 @@
-export { DEMO_PROJECT_TEMPLATE } from './demo';
-export { BAREBONES_PROJECT_TEMPLATE } from './barebones';
-export { HANDLEBARS_STARTER_PROJECT_TEMPLATE } from './handlebars-starter';
-export { CONTACT_LANDING_PROJECT_TEMPLATE } from './contact-landing';
-export { BLOG_PROJECT_TEMPLATE } from './blog';
-export { REACT_STARTER_PROJECT_TEMPLATE } from './react-starter';
-export { REACT_DEMO_PROJECT_TEMPLATE } from './react-demo';
-export { PREACT_STARTER_PROJECT_TEMPLATE } from './preact-starter';
-export { SVELTE_STARTER_PROJECT_TEMPLATE } from './svelte-starter';
-export { VUE_STARTER_PROJECT_TEMPLATE } from './vue-starter';
-export { PYTHON_STARTER_PROJECT_TEMPLATE } from './python-starter';
-export { LUA_STARTER_PROJECT_TEMPLATE } from './lua-starter';
-export { createProjectFromTemplate, customTemplateToProjectTemplate, type AssetConfig } from './utils';
-export { BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from './registry';
+// Deliberately does not re-export the template constants. Each one is reached through
+// `getBuiltInTemplateDefinition(id).loadProjectTemplate()`, which the bundler can split into its
+// own chunk; a static re-export here would pull every template into the bundle of anything that
+// imports this module, whatever it actually asked for, and the lazy loaders would buy nothing.
+// The few callers that want one specific template import its module directly.
+
+export { createProjectFromTemplate, customTemplateToProjectTemplate } from './utils';
+export {
+  applyBuiltInTemplate,
+  instantiateBuiltInTemplate,
+  loadBuiltInProjectTemplate,
+} from './instantiate';
+export {
+  BUILT_IN_TEMPLATES,
+  BUILT_IN_TEMPLATE_DEFINITIONS,
+  DEFAULT_TEMPLATE_ID,
+  getBuiltInTemplateDefinition,
+} from './registry';
+export type {
+  AssetConfig,
+  ProjectTemplate,
+  BuiltInTemplateMetadata,
+  BuiltInTemplateDefinition,
+} from './types';

@@ -8,7 +8,7 @@ import { FunctionsManager } from '@/components/database-manager/functions-manage
 import { ServerFunctionsManager } from '@/components/database-manager/server-functions-manager';
 import { SecretsManager } from '@/components/database-manager/secrets-manager';
 import { ScheduledFunctionsManager } from '@/components/database-manager/scheduled-functions-manager';
-import { Code2, Wrench, Key, Clock, Lock, Settings, Settings2, PowerOff, Database, AlertTriangle } from 'lucide-react';
+import { Code2, Wrench, Key, Clock, Lock, Settings, Settings2, PowerOff, Database, AlertTriangle, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
@@ -28,7 +28,9 @@ import {
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
 import { track } from '@/lib/telemetry';
-import type { Project, ProjectRuntime } from '@/lib/vfs/types';
+import { newPromptSuggestion, usablePromptSuggestions } from '@/lib/vfs/prompt-suggestions';
+import { INLINE_SUGGESTION_COUNT } from '@/lib/constants/suggestion-pills';
+import type { Project, ProjectRuntime, PromptSuggestion } from '@/lib/vfs/types';
 import { getProjectRuntimes } from '@/lib/runtimes/registry';
 import type {
   FunctionsDataProvider,
@@ -350,6 +352,8 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
         </p>
       </div>
 
+      <PromptSuggestionsEditor project={project} onProjectUpdate={onProjectUpdate} />
+
       <Dialog open={!!promptOverwriteConfirm} onOpenChange={(open) => !open && setPromptOverwriteConfirm(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -371,6 +375,136 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * The chat starters offered above the composer on an empty conversation.
+ *
+ * Edited here rather than only seeded by a template, because the template that made the project
+ * stops being relevant the moment someone changes what the project is for. Order is meaningful:
+ * the first three appear on the row and the rest go behind the overflow menu, which is why there
+ * are move controls rather than an alphabetical list.
+ */
+function PromptSuggestionsEditor({
+  project,
+  onProjectUpdate,
+}: {
+  project: Project;
+  onProjectUpdate: (project: Project) => void;
+}) {
+  const [draft, setDraft] = useState<PromptSuggestion[]>(
+    () => project.settings?.promptSuggestions ?? []
+  );
+  const [saving, setSaving] = useState(false);
+
+  const stored = JSON.stringify(project.settings?.promptSuggestions ?? []);
+  const dirty = JSON.stringify(usablePromptSuggestions(draft)) !== stored;
+
+  const update = (id: string, patch: Partial<PromptSuggestion>) =>
+    setDraft(rows => rows.map(row => (row.id === id ? { ...row, ...patch } : row)));
+
+  const move = (index: number, delta: number) =>
+    setDraft(rows => {
+      const next = [...rows];
+      const target = index + delta;
+      if (target < 0 || target >= next.length) return rows;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      // Cleaned on the way out, so a half-typed row never reaches storage and takes up one of the
+      // three inline slots as an invisible button.
+      const cleaned = usablePromptSuggestions(draft);
+      const proj = await vfs.getProject(project.id);
+      proj.settings = { ...proj.settings, promptSuggestions: cleaned };
+      await vfs.updateProject(proj);
+      vfs.scheduleAutoSync(proj.id);
+      onProjectUpdate(proj);
+      setDraft(cleaned);
+      toast.success(cleaned.length === 0 ? 'Suggestions cleared' : 'Suggestions saved');
+    } catch (err) {
+      logger.error('Failed to save prompt suggestions:', err);
+      toast.error('Failed to save suggestions');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label>Chat suggestions</Label>
+      <p className="text-xs text-muted-foreground">
+        Shown above the chat box before the first message. The first {INLINE_SUGGESTION_COUNT} appear
+        on the row; any others sit behind a menu. With none set, the generic starters are used.
+      </p>
+
+      <div className="space-y-3 pt-1">
+        {draft.map((suggestion, index) => (
+          <div key={suggestion.id} className="rounded-md border border-border p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Input
+                value={suggestion.label}
+                onChange={(e) => update(suggestion.id, { label: e.target.value })}
+                placeholder="Button text"
+                aria-label={`Suggestion ${index + 1} button text`}
+                className="flex-1"
+              />
+              <Button
+                variant="ghost" size="sm" aria-label="Move up"
+                disabled={index === 0}
+                onClick={() => move(index, -1)}
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost" size="sm" aria-label="Move down"
+                disabled={index === draft.length - 1}
+                onClick={() => move(index, 1)}
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost" size="sm" aria-label="Remove suggestion"
+                onClick={() => setDraft(rows => rows.filter(row => row.id !== suggestion.id))}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <textarea
+              value={suggestion.prompt}
+              onChange={(e) => update(suggestion.id, { prompt: e.target.value })}
+              placeholder="What gets put in the chat box. Write it as an instruction."
+              aria-label={`Suggestion ${index + 1} prompt`}
+              rows={3}
+              className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm resize-y"
+            />
+          </div>
+        ))}
+
+        {draft.length === 0 && (
+          <p className="text-xs text-muted-foreground italic">
+            No suggestions. The generic starters are shown instead.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 pt-1">
+        <Button
+          variant="outline" size="sm"
+          onClick={() => setDraft(rows => [...rows, newPromptSuggestion()])}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          Add suggestion
+        </Button>
+        <Button size="sm" onClick={save} disabled={!dirty || saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
     </div>
   );
 }

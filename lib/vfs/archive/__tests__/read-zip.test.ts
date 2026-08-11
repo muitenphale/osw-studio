@@ -160,17 +160,25 @@ describe('readZipArchive', () => {
     await expect(entries[0].read()).rejects.toThrow(/limit|large/i);
   });
 
-  it('does not hold a whole oversized file in memory before refusing it', async () => {
-    const honest = await zipFile((z) => z.file('bomb.txt', 'A'.repeat(20_000_000)), {
-      compression: 'DEFLATE',
-    });
-    const file = await lieAboutUncompressedSize(honest, 8);
-    const { entries } = await readZipArchive(file, { maxTotalBytes: 1_000_000 });
-    const before = process.memoryUsage().heapUsed;
-    await expect(entries[0].read()).rejects.toThrow(/limit|large/i);
-    // A buffer-then-check read would have materialized all 20 MB by the time it threw.
-    expect(process.memoryUsage().heapUsed - before).toBeLessThan(10_000_000);
-  });
+  it(
+    'does not hold a whole oversized file in memory before refusing it',
+    async () => {
+      const honest = await zipFile((z) => z.file('bomb.txt', 'A'.repeat(20_000_000)), {
+        compression: 'DEFLATE',
+      });
+      const file = await lieAboutUncompressedSize(honest, 8);
+      const { entries } = await readZipArchive(file, { maxTotalBytes: 1_000_000 });
+      const before = process.memoryUsage().heapUsed;
+      await expect(entries[0].read()).rejects.toThrow(/limit|large/i);
+      // A buffer-then-check read would have materialized all 20 MB by the time it threw.
+      expect(process.memoryUsage().heapUsed - before).toBeLessThan(10_000_000);
+    },
+    // Deflating the 20 MB fixture takes about 600ms on an idle machine and several times that
+    // when the rest of the suite is running beside it, which put it over the 5s default. The
+    // fixture has to stay well above the 10 MB assertion to mean anything, so the timeout gives
+    // way rather than the size.
+    30_000
+  );
 
   it('counts bytes across entries, not per entry', async () => {
     const file = await zipFile((z) => {

@@ -1,7 +1,7 @@
 /**
  * Static Domain Prompt
  *
- * For pure HTML/CSS/JS projects — no template engine, no partials, no data.json.
+ * For pure HTML/CSS/JS projects, no template engine, no partials, no data.json.
  */
 
 export const STATIC_DOMAIN_PROMPT = `🚨 PLATFORM CONSTRAINTS - READ THIS FIRST:
@@ -45,10 +45,10 @@ For third-party libraries, use CDN URLs: import confetti from 'https://esm.sh/ca
 
 MULTI-PAGE WEBSITES:
 Create separate .html files for each page. Share styles and scripts across pages:
-- /index.html — Home page
-- /about.html — About page
-- /styles/style.css — Shared styles (link from every page)
-- /scripts/main.js — Shared scripts (include in every page)
+- /index.html: Home page
+- /about.html: About page
+- /styles/style.css: Shared styles (link from every page)
+- /scripts/main.js: Shared scripts (include in every page)
 
 Use consistent navigation across pages:
 <nav>
@@ -79,7 +79,7 @@ FILE CREATION GUIDELINES:
 Prefer editing existing files over creating new ones. Check if a file exists before creating.
 
 Create when appropriate:
-- README.md for complex projects (3+ features/pages) — skip for simple single-file changes
+- README.md for complex projects (3+ features/pages); skip it for simple single-file changes
 - Config files (package.json, tsconfig.json) only when functionality requires them
 - Component files matching request scope
 

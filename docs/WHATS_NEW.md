@@ -6,6 +6,33 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.93.0 - Templates and Publishing (2026-08-11)
+
+The template catalogue goes from twelve to twenty, and you can preview any of them before creating a project, instead of choosing from a name and a one-line description. The new ones cover kinds of project that had nothing before: a local business site, a one-person portfolio, a searchable map of your shops, two chat widgets, a task board, a wiki the assistant keeps current, and a Java service you build elsewhere. The other half of the release is what happens after you build: published React, Preact, Svelte and Vue sites no longer fetch their framework from a CDN, edge functions that call an external API work again after being broken outright, and a key set on a deployment stays set. The security fix below needs one action on projects you already made from the contact form template.
+
+### Templates
+- **Eight new ones**: Business Website, Portfolio & CV, Store Locator, LLM Wiki, Projects & Tasks, Guided Chat (replies written in advance, so no key and no server), AI Assistant (calls a model, needs Server Mode), and a Spring Boot REST API kit you edit here and build elsewhere
+- **LLM Wiki** implements [Andrej Karpathy's pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f): the assistant compiles what it reads into a searchable wiki, instead of re-reading your sources every time you ask
+- **The templates that already existed were rewritten**: Landing Page with Contact Form opened on "Build Something Amazing" over three emoji, and now has real prices, hours and copy, marked as placeholder
+
+### Choosing one
+- **Preview a template before you use it**: the eye button on any row opens it rendered, built through the same compiler the editor preview uses. Nothing is created until you select the template
+- **The template list is grouped by what a template is for**: creating a project means picking from Starter, Website, Workspace, App and Project Kit, rather than filtering by runtime before you know what any of them builds. Runtime is still shown on every row and still searchable
+- **Warned before, not after**: picking a Java, Python or Lua project, or a backend template in Browser mode, says what won't run here before the project exists
+- **Chat suggestions come from the template**: the row above the chat box offers "Write a post" on a blog, rather than the same generic starters on every project. Edit them under Settings > Project
+
+### Publishing
+- **No CDN in a published site**: React, Preact, Svelte and Vue projects used to fetch their framework from `esm.sh` on every visit and went blank when it was unreachable. It is compiled into the bundle now, and published output is minified, roughly a third smaller
+
+### Server Mode
+- **Edge functions can call an external API again**: any sandboxed function using `fetch` returned a 500, so the AI Assistant template above, and anything else talking to a model or a mail service, could not work at all
+- **A key you set on a deployment stays set**: secrets saved from a deployment's panel were wiped by the next publish and replaced with the project's copy, so a working key silently stopped working
+
+### Security
+- **The contact form template no longer publishes its own inbox**: it shipped an edge function returning the 50 most recent submissions, with names, email addresses and message bodies, to anyone who asked. New projects are clear. **A project you already made keeps its own copy, and republishing will not remove it**: delete the `list-messages` function in its Backend panel
+
+---
+
 ## v1.92.0 - Files Out and Back (2026-08-06)
 
 The File Explorer can now download your files and folders as they sit, and read them back. Keep a copy in a git repository, edit it in VS Code or Claude Code, then import the result. Export as ZIP and Export as JSON on the Projects list are unchanged; those package a project, this hands you its contents.

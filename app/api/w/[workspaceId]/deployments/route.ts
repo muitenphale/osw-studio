@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { ensureDeploymentRoute } from '@/lib/auth/system-database';
 import { Deployment } from '@/lib/vfs/types';
+import { withPublicUrl } from '@/lib/api/deployment-url';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function GET(
@@ -21,7 +22,7 @@ export async function GET(
 
     const deployments = await adapter.listDeployments?.() || [];
 
-    return NextResponse.json(deployments);
+    return NextResponse.json(deployments.map(withPublicUrl));
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

@@ -6,6 +6,7 @@ export interface ProvisionResult {
   edgeFunctions: number;
   serverFunctions: number;
   secrets: number;
+  scheduledFunctions: number;
   hasDatabaseSchema: boolean;
 }
 
@@ -24,13 +25,18 @@ export async function provisionBackendFeatures(
   let edgeFunctions = 0;
   let serverFunctions = 0;
   let secrets = 0;
+  let scheduledFunctions = 0;
   let hasDatabaseSchema = false;
+
+  /** Edge function ids by name, so a schedule can be linked to the function it just created. */
+  const edgeFunctionIds = new Map<string, string>();
 
   if (backendFeatures.edgeFunctions && adapter.createEdgeFunction) {
     for (const fn of backendFeatures.edgeFunctions) {
+      const id = crypto.randomUUID();
       await adapter.createEdgeFunction({
         ...fn,
-        id: crypto.randomUUID(),
+        id,
         projectId,
         enabled: fn.enabled ?? true,
         method: fn.method ?? 'GET',
@@ -38,6 +44,7 @@ export async function provisionBackendFeatures(
         createdAt: now,
         updatedAt: now,
       });
+      edgeFunctionIds.set(fn.name, id);
       edgeFunctions++;
     }
   }
@@ -70,10 +77,34 @@ export async function provisionBackendFeatures(
     }
   }
 
+  // After the edge functions, which a schedule links to by name. A schedule naming a function the
+  // template does not define is skipped rather than written with a dangling id: the runtime looks
+  // its target up by id, so a broken link would surface as a schedule that silently never fires.
+  if (backendFeatures.scheduledFunctions && adapter.createScheduledFunction) {
+    for (const fn of backendFeatures.scheduledFunctions) {
+      const functionId = edgeFunctionIds.get(fn.functionName);
+      if (!functionId) continue;
+      await adapter.createScheduledFunction({
+        id: crypto.randomUUID(),
+        projectId,
+        name: fn.name,
+        description: fn.description,
+        functionId,
+        cronExpression: fn.cronExpression,
+        timezone: fn.timezone ?? 'UTC',
+        config: fn.config ?? {},
+        enabled: fn.enabled ?? true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      scheduledFunctions++;
+    }
+  }
+
   if (backendFeatures.databaseSchema) {
     await applyProjectDatabaseSchema(projectId, backendFeatures.databaseSchema);
     hasDatabaseSchema = true;
   }
 
-  return { edgeFunctions, serverFunctions, secrets, hasDatabaseSchema };
+  return { edgeFunctions, serverFunctions, secrets, scheduledFunctions, hasDatabaseSchema };
 }

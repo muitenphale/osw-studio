@@ -41,7 +41,7 @@ Drag 36 pre-defined blocks (heroes, forms, pricing, galleries) onto the preview 
 Download complete, deployable websites with one click
 
 **🎯 Templates & Skills**
-Start from 12 built-in templates or teach AI your preferred workflows
+Start from 20 built-in templates or teach AI your preferred workflows
 
 ## Two Modes
 

@@ -30,7 +30,7 @@ export async function compileStaticSite(
   }
 
   const { VirtualServer } = await import('@/lib/preview/virtual-server');
-  const server = new VirtualServer(vfs, projectId, { runtime: project?.settings?.runtime });
+  const server = new VirtualServer(vfs, projectId, { runtime: project?.settings?.runtime, minify: true });
   try {
     const compiledProject = await server.compileProject();
 

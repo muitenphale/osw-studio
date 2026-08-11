@@ -6,7 +6,7 @@ import type { BuiltInTemplateMetadata } from '@/lib/vfs/templates/registry';
 import { getRuntimeBadge } from '@/lib/runtimes/registry';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical, Server } from 'lucide-react';
+import { Trash2, Plus, FileBox, Download, Link2, ExternalLink, MoreVertical, Server, Eye } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   DropdownMenu,
@@ -25,6 +25,8 @@ import {
 interface TemplateCardProps {
   template: CustomTemplate | BuiltInTemplateMetadata;
   onSelect: (template: CustomTemplate | BuiltInTemplateMetadata) => void;
+  /** Opens the template in a preview. Absent for a template with no page to show. */
+  onPreview?: (template: CustomTemplate | BuiltInTemplateMetadata) => void;
   onDelete?: (id: string) => void;
   onExport?: (template: CustomTemplate | BuiltInTemplateMetadata) => void;
   viewMode?: 'grid' | 'list';
@@ -33,13 +35,16 @@ interface TemplateCardProps {
 export function TemplateCard({
   template,
   onSelect,
+  onPreview,
   onDelete,
   onExport,
   viewMode = 'grid'
 }: TemplateCardProps) {
   const isBuiltIn = 'isBuiltIn' in template && template.isBuiltIn;
   const customTemplate = !isBuiltIn ? template as CustomTemplate : null;
-  const hasBackendFeatures = 'backendFeatures' in template && !!template.backendFeatures;
+  const hasBackendFeatures = isBuiltIn
+    ? !!(template as BuiltInTemplateMetadata).hasBackendFeatures
+    : !!customTemplate?.backendFeatures;
 
   const getLicenseLabel = (licenseValue: string): string => {
     const license = LICENSE_OPTIONS.find(opt => opt.value === licenseValue);
@@ -188,6 +193,12 @@ export function TemplateCard({
                   <Plus className="mr-2 h-4 w-4" />
                   Create Project
                 </DropdownMenuItem>
+                {onPreview && (
+                  <DropdownMenuItem onClick={() => onPreview(template)}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    Preview
+                  </DropdownMenuItem>
+                )}
                 {onExport && (
                   <>
                     <DropdownMenuSeparator />
@@ -238,6 +249,12 @@ export function TemplateCard({
                   <Plus className="mr-2 h-4 w-4" />
                   Create Project
                 </DropdownMenuItem>
+                {onPreview && (
+                  <DropdownMenuItem onClick={() => onPreview(template)}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    Preview
+                  </DropdownMenuItem>
+                )}
                 {onExport && (
                   <>
                     <DropdownMenuSeparator />
@@ -418,6 +435,12 @@ export function TemplateCard({
                 <Plus className="mr-2 h-4 w-4" />
                 Create Project
               </DropdownMenuItem>
+              {onPreview && (
+                <DropdownMenuItem onClick={() => onPreview(template)}>
+                  <Eye className="mr-2 h-4 w-4" />
+                  Preview
+                </DropdownMenuItem>
+              )}
               {onExport && (
                 <>
                   <DropdownMenuSeparator />

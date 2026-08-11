@@ -2,8 +2,9 @@
  * esbuild-wasm Bundler for Component-Framework Projects
  *
  * Lazy-loads esbuild-wasm and bundles TSX/TS/JSX/Svelte/Vue source files into
- * a single bundle.js (+ optional bundle.css). Bare npm imports are rewritten
- * to esm.sh CDN URLs and marked external so the browser fetches them at runtime.
+ * a single bundle.js (+ optional bundle.css). Bare npm imports are resolved to
+ * esm.sh, fetched while building, and inlined, so the output is self-contained
+ * and a published site does not reach a CDN when someone visits it.
  *
  * Svelte and Vue single-file components are pre-compiled via CDN-loaded
  * compilers before being fed to esbuild.
@@ -24,6 +25,11 @@ export interface BundleInput {
   entryPoint: string;
   cdnBase?: string;
   runtime?: ProjectRuntime;
+  /**
+   * Minify the output. On for anything a visitor downloads; off for the editor
+   * preview, where a runtime stack trace has to point at readable code.
+   */
+  minify?: boolean;
 }
 
 export interface BundleOutput {
@@ -124,6 +130,22 @@ function getResolveExtensions(sfcExtension?: string): string[] {
   return [sfcExtension, ...BASE_RESOLVE_EXTENSIONS, `/index${sfcExtension}`];
 }
 
+/**
+ * Where a dependency import resolves to.
+ *
+ * Extracted from the plugin so the rule can be tested without a browser and an
+ * esbuild instance: getting this wrong is how you end up with two copies of
+ * React in one bundle, which fails at runtime rather than at build time.
+ */
+export function resolveDependencyUrl(path: string, importer: string, cdnBase: string): string {
+  // Inside a fetched module, esm.sh emits absolute paths like
+  // /react@19.2.8/es2022/react.mjs. Those are relative to the CDN, not to the
+  // project, and must keep one identity per module so esbuild inlines each once.
+  if (/^https?:\/\//.test(importer)) return new URL(path, importer).href;
+  if (/^https?:\/\//.test(path)) return path;
+  return `${cdnBase}/${path}`;
+}
+
 function createVfsPlugin(
   fileMap: Map<string, string>,
   cdnBase: string,
@@ -132,16 +154,44 @@ function createVfsPlugin(
   return {
     name: 'vfs-resolver',
     setup(build: import('esbuild-wasm').PluginBuild) {
-      // Bare imports → CDN external
+      // Imports made *by* a fetched dependency. Registered first because esbuild
+      // takes the first callback that returns, and esm.sh emits absolute paths
+      // like /react@19/es2022/react.mjs which would otherwise be read as project
+      // files. Resolving against the importer's URL keeps one identity per
+      // module, so React is inlined once rather than twice.
+      build.onResolve({ filter: /.*/, namespace: 'cdn' }, (args) => {
+        if (args.path.startsWith('data:')) return { external: true };
+        return { path: resolveDependencyUrl(args.path, args.importer, cdnBase), namespace: 'cdn' };
+      });
+
+      // Already absolute: the JSX runtime, which is handed in as a full URL.
+      build.onResolve({ filter: /^https?:\/\// }, (args) => ({
+        path: args.path,
+        namespace: 'cdn',
+      }));
+
+      // Bare package imports. Fetched at build time and inlined rather than left
+      // external: a bundle that still imports from a CDN is not self-contained,
+      // so an exported site would break whenever that CDN is unreachable. The
+      // build already needs the network for the Svelte and Vue compilers, so
+      // this moves an existing dependency off the visitor and onto the author.
       build.onResolve({ filter: /^[^./]/ }, (args) => {
-        // Skip esbuild internal or already-resolved
-        if (args.path.startsWith('data:') || args.path.startsWith('https://') || args.path.startsWith('http://')) {
-          return { external: true };
+        if (args.path.startsWith('data:')) return { external: true };
+        return { path: resolveDependencyUrl(args.path, args.importer, cdnBase), namespace: 'cdn' };
+      });
+
+      build.onLoad({ filter: /.*/, namespace: 'cdn' }, async (args) => {
+        try {
+          return { contents: await fetchDependency(args.path), loader: loaderForUrl(args.path) };
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          return {
+            errors: [{
+              text: `Could not fetch ${args.path}: ${reason}. `
+                + 'Dependencies are downloaded once while building; this needs a connection.',
+            }],
+          };
         }
-        return {
-          path: `${cdnBase}/${args.path}`,
-          external: true,
-        };
       });
 
       // Relative / absolute imports → resolve against VFS
@@ -224,6 +274,33 @@ function loaderForPath(p: string): string {
 const dynamicImport = new Function('url', 'return import(url)') as (url: string) => Promise<any>;
 
 const compilerCache = new Map<string, any>();
+
+/**
+ * Dependency sources, keyed by resolved URL.
+ *
+ * Module scope so a second build in the same session is offline: the first one
+ * has already pulled everything down. Svelte is the reason this matters, since
+ * its client runtime arrives as 42 separate modules.
+ */
+const dependencyCache = new Map<string, string>();
+
+async function fetchDependency(url: string): Promise<string> {
+  const cached = dependencyCache.get(url);
+  if (cached !== undefined) return cached;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const text = await res.text();
+  dependencyCache.set(url, text);
+  return text;
+}
+
+function loaderForUrl(url: string): import('esbuild-wasm').Loader {
+  const path = url.split('?')[0];
+  if (path.endsWith('.css')) return 'css';
+  if (path.endsWith('.json')) return 'json';
+  return 'js';
+}
 
 async function loadCdnCompiler(url: string): Promise<any> {
   const cached = compilerCache.get(url);
@@ -490,6 +567,7 @@ export async function bundleProject(input: BundleInput): Promise<BundleOutput> {
       bundle: true,
       format: 'esm',
       target: ['es2020'],
+      minify: input.minify === true,
       outdir: '/',
       write: false,
       ...jsxOptions,

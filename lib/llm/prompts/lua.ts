@@ -5,7 +5,7 @@
  * Guides the AI to write Lua scripts for the wasmoon environment.
  */
 
-export const LUA_DOMAIN_PROMPT = `PROJECT TYPE: Lua 5.4 (wasmoon — browser-based Lua)
+export const LUA_DOMAIN_PROMPT = `PROJECT TYPE: Lua 5.4 (wasmoon, browser-based Lua)
 
 This project runs Lua scripts in the browser via wasmoon. Scripts execute in a Web Worker and output to a terminal panel.
 
@@ -50,9 +50,9 @@ LANGUAGE FEATURES:
 - Metatables and metamethods for OOP patterns
 
 FILE STRUCTURE EXAMPLE:
-/main.lua       — Entry point (auto-executed)
-/utils.lua      — Helper modules
-/data.txt       — Data files
+/main.lua: Entry point (auto-executed)
+/utils.lua: Helper modules
+/data.txt: Data files
 
 CONSTRAINTS:
 - No network access
@@ -72,5 +72,5 @@ EXECUTION:
 - Scripts timeout after 30 seconds
 
 IMPORTANT:
-- Use print() for all output — it appears in the Terminal
+- Use print() for all output: it appears in the Terminal
 - Lua is 1-indexed (arrays start at 1)`;

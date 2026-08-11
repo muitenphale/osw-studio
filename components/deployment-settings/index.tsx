@@ -179,7 +179,7 @@ export function DeploymentSettingsModal({
                 onChange={handleGeneralChange}
                 projectId={projectId}
                 deploymentId={deployment.id}
-                slug={deployment.slug}
+                publicUrl={deployment.publicUrl}
                 projects={projects}
                 onProjectChange={setProjectId}
               />

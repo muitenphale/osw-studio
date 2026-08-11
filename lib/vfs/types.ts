@@ -12,6 +12,8 @@ export interface Project {
     globalStyles?: string;
     previewEntryPoint?: string;  // defaults to '/index.html' when absent
     databaseSchema?: string;     // project database DDL; see lib/vfs/project-schema.ts
+    /** Seeded from the template that made the project, then owned and edited by the project. */
+    promptSuggestions?: PromptSuggestion[];
     hfSpace?: {
       repoId: string;        // "<username>/<slug>"
       url: string;           // https://huggingface.co/spaces/<repoId>
@@ -75,6 +77,16 @@ export interface Deployment {
   // State tracking
   settingsVersion: number;
   lastPublishedVersion?: number;
+
+  /**
+   * Where this deployment is actually reachable, computed by the server.
+   *
+   * A slug alone does not mean the deployment is served at a subdomain: publish assigns one
+   * regardless, and only the Caddy static proxy routes them. The UI must not derive this from
+   * `slug` + `window.location.hostname`, which produces a dead `https://{slug}.localhost` on any
+   * install without the proxy. Absent on locally-created deployments not yet round-tripped.
+   */
+  publicUrl?: string;
 
   // Preview
   previewImage?: string; // base64 data URL of deployment screenshot
@@ -406,6 +418,30 @@ export function getMimeType(type: FileType): string {
 
 // Template System Types
 
+/**
+ * What someone is setting out to make, which is how the template list is organised.
+ *
+ * Deliberately not the runtime. A Static project can be any of these, and someone who wants a wiki
+ * does not start by deciding between Handlebars and Preact. The runtime stays on the row as a badge
+ * and stays searchable, but it no longer decides where a template appears.
+ */
+export type TemplateIntent = 'starter' | 'website' | 'workspace' | 'app' | 'project-kit';
+
+/**
+ * A first thing to ask the assistant, offered above the composer on an empty chat.
+ *
+ * Belongs to the project, not to the template: a template seeds these when the project is created
+ * and has no say afterwards, so they can be edited, added to and removed like anything else in the
+ * project. A template that ships none leaves the project with the generic starters.
+ */
+export interface PromptSuggestion {
+  id: string;
+  /** What the button says. Short enough to sit on one line. */
+  label: string;
+  /** What lands in the composer. Written as an instruction, not a topic. */
+  prompt: string;
+}
+
 export interface CustomTemplate {
   id: string;
   name: string;
@@ -427,6 +463,10 @@ export interface CustomTemplate {
     thumbnail?: string;           // Base64 data URL
     previewImages?: string[];     // Array of base64 images
     downloadUrl?: string;
+    /** Optional. Templates without one are listed together rather than guessed at. */
+    intent?: TemplateIntent;
+    /** Seeds `Project.settings.promptSuggestions` when a project is made from this template. */
+    promptSuggestions?: PromptSuggestion[];
   };
   runtime?: ProjectRuntime;
   importedAt: Date;

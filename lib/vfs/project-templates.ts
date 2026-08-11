@@ -1,35 +1,26 @@
 
-import { type AssetConfig } from './templates/utils';
+// The template types moved to ./templates/types so the registry can name them without importing
+// this module, which re-exports the registry. Re-exported here because most of the app imports
+// them from this path.
+//
+// Like ./templates, this does not re-export the template constants: doing so would defeat the
+// per-template chunk split that `loadProjectTemplate` exists to get.
 
-export interface ProjectTemplate {
-  name: string;
-  description: string;
-  files: Array<{
-    path: string;
-    content: string;
-    isBase64?: boolean; // For binary files encoded as base64
-  }>;
-  directories: string[];
-  assets?: AssetConfig[];
-}
-
-// Re-export all templates and utilities from the modular structure
 export {
-  DEMO_PROJECT_TEMPLATE,
-  BAREBONES_PROJECT_TEMPLATE,
-  HANDLEBARS_STARTER_PROJECT_TEMPLATE,
-  CONTACT_LANDING_PROJECT_TEMPLATE,
-  BLOG_PROJECT_TEMPLATE,
-  REACT_STARTER_PROJECT_TEMPLATE,
-  REACT_DEMO_PROJECT_TEMPLATE,
-  PREACT_STARTER_PROJECT_TEMPLATE,
-  SVELTE_STARTER_PROJECT_TEMPLATE,
-  VUE_STARTER_PROJECT_TEMPLATE,
-  PYTHON_STARTER_PROJECT_TEMPLATE,
-  LUA_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   customTemplateToProjectTemplate,
-  type AssetConfig,
+  applyBuiltInTemplate,
+  instantiateBuiltInTemplate,
+  loadBuiltInProjectTemplate,
   BUILT_IN_TEMPLATES,
-  type BuiltInTemplateMetadata
+  BUILT_IN_TEMPLATE_DEFINITIONS,
+  DEFAULT_TEMPLATE_ID,
+  getBuiltInTemplateDefinition,
+} from './templates';
+
+export type {
+  AssetConfig,
+  ProjectTemplate,
+  BuiltInTemplateMetadata,
+  BuiltInTemplateDefinition,
 } from './templates';

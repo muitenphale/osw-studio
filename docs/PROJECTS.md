@@ -10,19 +10,23 @@
 2. Click **+ New Project**
 3. Enter a project name
 4. Choose a template:
-   - **Website Starter** - Minimal starting point with basic HTML/CSS/JS structure
-   - **Starter (Handlebars)** - Handlebars starter with templating
-   - **Example Studios** - Pre-built multi-page portfolio example
-   - **Starter (React + TypeScript)** - Minimal React app with auto-bundling
-   - **React Demo: Task Tracker** - Interactive task tracker showcasing React components and state
-   - **Starter (Preact + TypeScript)** - Lightweight React alternative with signals
-   - **Starter (Svelte)** - Svelte 5 app with compile-time reactivity
-   - **Starter (Vue)** - Vue 3 app with Composition API
-   - **Starter (Python)** - Python script with Pyodide WASM runtime
-   - **Starter (Lua)** - Lua script with wasmoon WASM runtime
-   - **Landing Page with Contact Form** - Contact form with Resend email (Backend)
-   - **Blog with Comments** - Blog with auth and moderated comments (Backend)
+   The list is grouped by what you're setting out to make. A few of the twenty:
+   - **Handlebars Starter** - an empty website with partials and a data file (the default)
+   - **Static Starter** - an empty website in plain HTML, CSS and JavaScript
+   - **Business Website** - one page for a local business: services, prices, hours, location
+   - **Portfolio & CV** - one page about one person: selected work, bio, work history
+   - **LLM Wiki** - a knowledge base the assistant writes and keeps current as you add sources
+   - **Projects & Tasks** - a board of what you are working on, kept in order by the assistant
+   - **Store Locator** - a searchable map of your locations, ready to embed elsewhere
+   - **Guided Chat** - a chat widget with pre-set replies, needing no backend
+   - **AI Assistant** - a chat page whose key stays in a server function (Backend)
+   - **Landing Page with Contact Form** - contact form with Resend email (Backend)
+   - **Blog with Comments** - blog with auth and moderated comments (Backend)
+   - **Spring Boot REST API** - a Java service you edit here and build elsewhere
+   - **Runtime starters** - a closed section holding the eight minimal setups, one per runtime
    - Or select any custom template you've created
+
+   See [Templates](TEMPLATES.md) for the full list.
 5. Optionally add a description
 6. Click **Create Project**
 

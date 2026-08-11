@@ -349,6 +349,12 @@ export function WorkspacesView() {
         {/* Toolbar */}
         <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
           <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
+            <div className="flex items-center shrink-0">
+              <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
+                <Plus className="h-4 w-4" />
+                <span>New Workspace</span>
+              </Button>
+            </div>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -357,12 +363,6 @@ export function WorkspacesView() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
               />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
-                <Plus className="h-4 w-4" />
-                <span>New Workspace</span>
-              </Button>
             </div>
           </div>
         </div>

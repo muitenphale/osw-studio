@@ -1,18 +1,18 @@
 export const PREACT_DOMAIN_PROMPT = `PROJECT TYPE: Preact + TypeScript (auto-bundled)
 
-This project uses Preact with TypeScript. Source files are compiled by esbuild-wasm in the browser — no build tools or npm needed during development.
+This project uses Preact with TypeScript. Source files are compiled by esbuild-wasm in the browser, no build tools or npm needed during development.
 
 ARCHITECTURE:
-- /index.html — HTML shell with <div id="root"> and <script type="module" src="/bundle.js">
-- /src/main.tsx — Entry point: render(<App />, document.getElementById("root")!)
-- /src/App.tsx — Root component
-- /src/components/ — Reusable components (one per file)
-- .css files — Imported directly in TSX: import "./styles.css"
+- /index.html: HTML shell with <div id="root"> and <script type="module" src="/bundle.js">
+- /src/main.tsx: Entry point: render(<App />, document.getElementById("root")!)
+- /src/App.tsx: Root component
+- /src/components/: Reusable components (one per file)
+- .css files, Imported directly in TSX: import "./styles.css"
 
 WRITING COMPONENTS:
 - Create components in /src/components/Name.tsx
 - Use functional components with hooks
-- No need for "import { h }" — JSX transform is automatic (jsxImportSource: preact)
+- No need for "import { h }", JSX transform is automatic (jsxImportSource: preact)
 - Export components as default or named exports
 
 PREACT-SPECIFIC APIs:
@@ -24,7 +24,7 @@ PREACT-SPECIFIC APIs:
 - Compat: import from "preact/compat" for React-compatible libraries
 
 IMPORTING NPM PACKAGES:
-- Import by package name — resolved via CDN automatically:
+- Import by package name, resolved via CDN automatically:
   import { useState } from "preact/hooks";
   import { signal } from "@preact/signals";
   import confetti from "canvas-confetti";
@@ -34,7 +34,7 @@ IMPORTING NPM PACKAGES:
 
 CSS STYLING:
 - Import CSS files directly: import "./App.css"
-- CSS modules are NOT supported — use plain CSS with unique class names
+- CSS modules are NOT supported. Use plain CSS with unique class names
 - For Tailwind CSS, add to index.html <head>: <script src="https://cdn.tailwindcss.com"></script>
 - For other CSS frameworks, use CDN links in index.html
 
@@ -66,18 +66,18 @@ DO NOT:
 - Use require() or CommonJS modules
 - Create build configs (vite.config.ts, webpack.config.js, etc.)
 - Try to install packages with npm/yarn
-- Import from "react" — use "preact/hooks" and "preact/compat" instead
+- Import from "react". Use "preact/hooks" and "preact/compat" instead
 
 BUILD OUTPUT:
 - The project auto-compiles when files change
 - Build errors appear in the Terminal panel (esbuild compilation errors)
 - /bundle.js and /bundle.css are generated files visible in the file explorer
-- If bundle.js is missing, the build failed — check Terminal for errors
+- If bundle.js is missing, the build failed. Check Terminal for errors
 - Use 'cat /bundle.js' to inspect the compiled output if needed
 
 IMPORTANT:
 - The preview rebuilds automatically when any file changes
 - Component state is lost on rebuild (expected behavior)
 - TypeScript types are stripped, not checked (like Vite)
-- All imports resolve at runtime from esm.sh CDN — internet required
-- Preact is ~3KB — much smaller than React, same API`;
+- All imports resolve at runtime from esm.sh CDN, internet required
+- Preact is ~3KB, much smaller than React, same API`;

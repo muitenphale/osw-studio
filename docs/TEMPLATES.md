@@ -42,9 +42,41 @@ Some templates also include **backend features** — edge functions, database sc
 
 ---
 
+## Finding a Template
+
+The template list is grouped by what you're setting out to make, not by which framework a template
+happens to use:
+
+- **Runtime starters** - the smallest working setup for a runtime, from plain HTML to Svelte or Python
+- **Website** - pages you publish and people read: portfolios, blogs, documentation
+- **Workspace** - files you keep working in: notes, research, reference, writing
+- **App** - something people use: forms, inboxes, tools with a backend behind them
+- **Project Kit** - scaffolds you export and run elsewhere
+
+Runtime starters starts closed. It describes starting points rather than what you are setting out to
+make, and it is eight rows that would otherwise sit in front of every section that does. Click any
+heading to fold a section away or open it, and that choice is remembered the next time you open the
+list. A closed section holding the template you have picked says so.
+
+Search covers names, descriptions, tags and runtimes, so typing `svelte` still finds the Svelte
+templates wherever they sit, including inside a folded section, which opens for as long as the
+search matches something in it. Every row keeps its runtime badge, and the template you pick is
+what sets the project's runtime; you can change it later in project settings.
+
+Sections with nothing in them aren't shown, so you may not see all five.
+
+---
+
 ## Built-in Templates
 
-### Website Starter (Project)
+Grouped the way the template list groups them.
+
+### Runtime starters
+
+The smallest working setup for a runtime, from plain HTML to Svelte or Python. This section starts
+closed, because these describe a starting point rather than what you are setting out to make.
+
+#### Static Starter
 
 Minimal starting point with basic structure.
 
@@ -56,7 +88,7 @@ Minimal starting point with basic structure.
 
 **Best for**: Starting from scratch with minimal setup
 
-### Starter (Handlebars)
+#### Handlebars Starter
 
 Handlebars-powered website with templating and partials.
 
@@ -68,19 +100,9 @@ Handlebars-powered website with templating and partials.
 
 **Best for**: Sites that benefit from reusable components (navigation, footer) and data-driven content
 
-### Example Studios (Project)
+---
 
-A multi-page agency portfolio showing OSW Studio's capabilities.
-
-**Includes:**
-- Multiple HTML pages with Handlebars partials
-- `data.json` for site-wide data (site name, navigation, social links)
-- Responsive design with modern CSS
-- Interactive elements (portfolio gallery, contact form)
-
-**Best for**: Learning how OSW Studio works, understanding Handlebars partials
-
-### Starter (React + TypeScript)
+#### React Starter
 
 Component-based React app with TypeScript and automatic bundling.
 
@@ -92,21 +114,7 @@ Component-based React app with TypeScript and automatic bundling.
 
 **Best for**: Starting a React app from scratch with AI, component-driven UIs
 
-### React Demo: Task Tracker (Project)
-
-Interactive task tracker showcasing React components, state management, and typed props.
-
-**Includes:**
-- `index.html` shell with bundle references
-- `src/main.tsx` entry point
-- `src/App.tsx` with `useState` for task management
-- `src/TaskForm.tsx` controlled input with form submit
-- `src/TaskItem.tsx` checkbox toggle and delete
-- `src/App.css` styles
-
-**Best for**: Learning React in OSW Studio, exploring component composition and state
-
-### Starter (Preact + TypeScript)
+#### Preact Starter
 
 Lightweight React alternative with signals for reactive state.
 
@@ -118,7 +126,7 @@ Lightweight React alternative with signals for reactive state.
 
 **Best for**: Small, fast apps where bundle size matters. Same API as React but ~3KB
 
-### Starter (Svelte)
+#### Svelte Starter
 
 Svelte 5 app with compile-time reactivity and runes.
 
@@ -130,7 +138,7 @@ Svelte 5 app with compile-time reactivity and runes.
 
 **Best for**: Apps that benefit from compile-time optimization, scoped styles, and minimal boilerplate
 
-### Starter (Vue)
+#### Vue Starter
 
 Vue 3 app with Composition API and single-file components.
 
@@ -142,7 +150,7 @@ Vue 3 app with Composition API and single-file components.
 
 **Best for**: Progressive apps, gentle learning curve, familiar HTML-like template syntax
 
-### Starter (Python)
+#### Python Starter
 
 Python script running in the browser via Pyodide WASM.
 
@@ -153,7 +161,7 @@ Python script running in the browser via Pyodide WASM.
 
 **Best for**: Scripts, data processing, algorithms, learning Python
 
-### Starter (Lua)
+#### Lua Starter
 
 Lua script running in the browser via wasmoon WASM.
 
@@ -164,19 +172,52 @@ Lua script running in the browser via wasmoon WASM.
 
 **Best for**: Scripting, game logic prototyping, learning Lua
 
-### Landing Page with Contact Form (Backend)
+---
 
-Professional landing page with a working contact form powered by Resend email.
+### Website
+
+Pages you publish and people read.
+
+#### Example Studios
+
+A multi-page agency portfolio showing OSW Studio's capabilities.
 
 **Includes:**
-- Single-page design with contact form
-- 2 edge functions (`submit-contact`, `list-messages`)
-- Database schema for storing messages
-- Optional Resend email integration (requires API key)
+- Multiple HTML pages with Handlebars partials
+- `data.json` for site-wide data (site name, navigation, social links)
+- Responsive design with modern CSS
+- Interactive elements (portfolio gallery, contact form)
 
-**Best for**: Business landing pages, lead capture, contact forms
+**Best for**: Learning how OSW Studio works, understanding Handlebars partials
 
-### Blog with Comments (Backend)
+#### Business Website
+
+One page for one local business: what you do, what it costs, when you are open and where to find you. It arrives filled in as a joinery workshop so you can see a finished site rather than a wireframe, and all of that content is meant to be replaced.
+
+**Includes:**
+- Single `index.html` holding every word on the site, so the page renders instantly and reads correctly to search engines
+- Sections for services, pricing, opening hours, location and contact, linked from the navigation
+- A palette and two typefaces set by six custom properties at the top of the stylesheet
+- Prompt suggestions that convert it to a restaurant, a trade, or your own business
+
+Contact is email and phone. Storing what visitors send needs Server Mode, and the page says so rather than offering a form that discards messages.
+
+**Best for**: Local businesses, trades, practices, anyone whose customers want hours and a phone number
+
+#### Portfolio & CV
+
+One page about one person: selected work, a short bio, work history and how to reach you. Follows the system light or dark setting.
+
+**Includes:**
+- Single `index.html` with work entries, an about section and a work history list
+- A one-column layout that does its work through type and space
+- Prompt suggestions for adding a project, giving one its own case study page, and sharpening write-ups that describe responsibilities rather than outcomes
+
+The seed content is invented, and the AI instructions tell the assistant to ask you for real details rather than making them up.
+
+**Best for**: Developers, designers, writers, students, anyone job hunting
+
+#### Blog with Comments (Backend)
 
 Static blog with user authentication and moderated comments.
 
@@ -216,6 +257,159 @@ Static blog with user authentication and moderated comments.
 **Best for**: Personal blogs, content sites with community interaction
 
 ---
+
+### Workspace
+
+Files you keep working in. The page is a way to read what is there; the assistant maintains the files.
+
+#### LLM Wiki
+
+A knowledge base the assistant writes and keeps current as you add sources. An implementation of the
+LLM Wiki pattern described by [Andrej Karpathy](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+
+Most ways of using an LLM with documents re-read the raw files on every question, so nothing
+accumulates: the tenth question knows no more than the first. Here the assistant compiles what it
+reads into a wiki and then keeps it current. When a source arrives it writes the source page,
+revises the pages that source touches, flags where it contradicts what was already claimed, and logs
+what it did. The cross-references and the contradictions are on disk before you ask.
+
+**Three layers:**
+- `/raw/` is yours: the sources as they came. The assistant reads them and never edits them
+- `/wiki/` is the assistant's: interlinked Markdown it writes and keeps consistent
+- `.PROMPT.md` is the schema: the conventions and the workflow, which you and the assistant change together as you learn what suits your subject
+
+**Three operations**, and the prompt suggestions above the message box are exactly these:
+- **Ingest**: read a source, write its page, update everything it touches, log it
+- **Ask the wiki**: answer from the pages with citations, and file good answers back as new pages instead of losing them to chat history
+- **Lint**: find contradictions, stale claims, orphan pages, links to pages that were never written, and gaps two sources mention but nothing covers
+
+**Includes:**
+- `wiki/index.md`, the catalogue the sidebar is built from, and `wiki/log.md`, an append-only history
+- A seed wiki on street trees and summer heat: a synthesis, three concept pages, three source pages and an open-questions page, with a real contradiction running through them
+- A reader with full-text search, tag filters, `[[wiki links]]` you can click, and a "linked from" list at the foot of every page
+- Links to pages that do not exist yet are drawn dashed, so what the assistant still owes you is visible
+
+**How it works:** give the assistant a source and ask it to ingest. It writes the pages; you curate
+the sources and ask the questions. The page only reads, because a static page cannot write back to
+the project, so changes go through the assistant and there is one source of truth.
+
+**Best for**: Researching a subject over weeks, reading a book closely, competitive analysis, due
+diligence, anything where knowledge should accumulate rather than scatter
+
+#### Projects & Tasks
+
+A board of what you are working on and what is left, with each project stating what finished looks like.
+
+**Includes:**
+- `tasks.json` holding the projects, their objectives and every task
+- A board with To do, In progress and Done columns, filtered by project
+- Prompt suggestions for adding a project, marking work done, and asking what to do this week
+
+**The page only reads.** There are no checkboxes and no form for adding tasks, because a static page cannot write back to the project: a tick would either vanish on reload or hide in browser storage where the assistant cannot see it, and the board would then disagree with the file. Changes are made by asking.
+
+**Best for**: Personal planning, small projects, anyone who would rather describe a change than fill in a form
+
+---
+
+### App
+
+Something people use.
+
+#### Landing Page with Contact Form (Backend)
+
+Professional landing page with a working contact form powered by Resend email.
+
+**Includes:**
+- Single-page design with contact form
+- 2 edge functions (`submit-contact`, `contact-status`)
+- Database schema for storing messages, readable in the Database panel
+- Optional Resend email integration (requires API key)
+
+**Best for**: Business landing pages, lead capture, contact forms
+
+#### Store Locator
+
+A map of your locations beside a searchable list of the same places. Clicking a location moves the map; clicking a marker highlights the list entry.
+
+**Includes:**
+- `locations.json` with each location's address, coordinates, opening hours, phone and a note
+- A map drawn with Leaflet over OpenStreetMap tiles, with attribution
+- Search across name, address and postcode
+
+The map is loaded from the network. Without a connection the list still works and a line appears where the map would be. Coordinates have to be real: the AI instructions tell the assistant to ask for them rather than guess, because a guessed latitude puts a shop in a field convincingly.
+
+**Best for**: Retailers, chains, clinics, anyone with more than one address. Also a good candidate for embedding in an existing site with an iframe
+
+#### Guided Chat
+
+A chat widget where every reply is written in advance and every answer the visitor gives is a button. It looks like a chatbot and behaves like a decision tree, so it needs no model, no API key and no server.
+
+**Includes:**
+- `flow.json` holding the entire conversation as steps and choices
+- A chat interface with a transcript and a restart button
+- A seed flow answering the questions a small business actually gets, with real prices
+
+Nothing is stored and nothing is sent anywhere. Reloading starts over. Capturing what visitors asked would need Server Mode, and telling them it is being recorded.
+
+**Best for**: Answering the same handful of questions on a site, qualifying enquiries, embedding in an existing page
+
+#### AI Assistant (Backend)
+
+A chat page whose answers come from a model, with the API key held in a server function so it never reaches the browser. **Needs Server Mode**, which is the point of the template: a static page cannot keep a secret, because everything it contains is downloaded by every visitor.
+
+**Includes:**
+- `ask`, a server function that holds the system prompt and calls the model
+- `ai-status`, a probe so the page can tell whether it has a server
+- An `AI_API_KEY` secret placeholder, set in the Backend panel
+- A chat page that disables itself and explains why when there is no server
+
+Works with any OpenAI-compatible endpoint by changing two constants in the `ask` function. Replies arrive whole rather than streaming. Nothing is stored, there is no rate limiting by default, and a published page with a working key can be used by anyone who finds it: add a limit or keep the deployment private before putting it in public.
+
+**Best for**: A support or FAQ assistant that knows about one business, and for seeing what Server Mode is for
+
+#### To-do List
+
+A personal checklist you add to, tick off and delete, kept in the browser it was written in. The
+list is saved to `localStorage` as you change it, so it is still there next time the page opens. It
+is not sent anywhere: it will not follow you to another device, and clearing site data clears it.
+The page says so at the bottom, and says something different if the browser refuses to save at all,
+which is what a private window does.
+
+**Includes:**
+- `index.html` shell with bundle references
+- `src/main.tsx` entry point
+- `src/storage.ts` reading and writing the list, with the key scoped per page
+- `src/App.tsx` holding the task array and saving on every change
+- `src/components/TaskForm.tsx` controlled input with form submit
+- `src/components/TaskItem.tsx` checkbox toggle and delete
+- `src/App.css` styles
+
+**Best for**: A checklist of your own, and for reading a small React app end to end: state in one
+place, changes travelling down as props, and persistence kept in a module of its own
+
+---
+
+### Project Kit
+
+Scaffolds you export and run elsewhere.
+
+#### Spring Boot REST API
+
+A layered Spring Boot and PostgreSQL service: controller, service, domain, JPA adapter, Flyway migrations, validation, error handling and unit tests, with Docker Compose for the database.
+
+**Includes:**
+- A complete Maven project under `src/main/java/`
+- Flyway migration and `application.yml`
+- Unit tests and a context test
+- `AGENTS.md` and `docs/architecture.md`, which travel with the repository
+- A project overview page as the preview
+
+**OSWS cannot build or run Java.** There is no Maven, Docker or PostgreSQL here, so nothing in the project has been compiled or tested. The preview is an informational page saying so, and the instructions tell the assistant to never claim it verified anything. Download the project and run it with Maven.
+
+**Best for**: Starting a Spring Boot service with its structure and conventions already decided
+
+---
+
 
 ## Using Templates
 
@@ -369,8 +563,9 @@ Even if you'll heavily customize it, starting from a template is faster than fro
 **💡 Create templates for repetition**
 Building similar sites for clients? Create a template once, reuse forever
 
-**💡 Keep templates simple**
-Generic templates are more reusable than highly specific ones
+**💡 Specific is fine**
+A template narrow enough to describe in one line is easier to find and easier to start from than a
+general one you have to adapt. Make it as specific as the job you actually do repeatedly
 
 **💡 Document your templates**
 Add comments in the code explaining sections and how to customize

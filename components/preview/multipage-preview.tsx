@@ -61,6 +61,15 @@ interface MultipagePreviewProps {
   placementActive?: boolean;
   onPlacementToggle?: () => void;
   onPlacementComplete?: (payload: PlacementResult) => void;
+  /**
+   * Render outside the workspace, from a dialog that opened this project itself.
+   *
+   * The compile normally waits for `workspaceReady`, which the workspace sets once it has finished
+   * opening a project. A dialog in the project list or the template browser has no workspace to
+   * wait for, so that flag is never set and the preview sits on "Compiling project..." forever.
+   * This says there is nothing to wait for.
+   */
+  standalone?: boolean;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -381,7 +390,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   isFullscreen = false,
   placementActive,
   onPlacementToggle,
-  onPlacementComplete
+  onPlacementComplete,
+  standalone = false
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -770,7 +780,9 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   }, [compileAndLoad]);
 
 
-  const workspaceReady = useWorkspaceStore(s => s.workspaceReady);
+  const workspaceReadyFlag = useWorkspaceStore(s => s.workspaceReady);
+  // A standalone preview owns its project, so there is no opening sequence to wait behind.
+  const workspaceReady = standalone || workspaceReadyFlag;
   const workspaceReadyRef = useRef(workspaceReady);
   workspaceReadyRef.current = workspaceReady;
 

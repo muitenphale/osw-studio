@@ -1,5 +1,11 @@
 export interface SuggestionPill { id: string; label: string; prompt: string }
 
+/**
+ * How many starters sit on the row above the composer. The rest go behind an overflow menu:
+ * the row is directly above the input, so it must not grow enough to push it down.
+ */
+export const INLINE_SUGGESTION_COUNT = 3;
+
 // Fast first-task starters shown above the composer: a single-page build, a multi-page build,
 // and one that configures the workspace for a goal (custom runtime + CDN stack + .PROMPT.md),
 // which shows the project space is not limited to the built-in runtimes.

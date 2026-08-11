@@ -3,7 +3,7 @@ import { STATIC_DOMAIN_PROMPT } from '@/lib/llm/prompts/static';
 import { CANVAS_CSS, CANVAS_HTML } from '../utils';
 
 export const BAREBONES_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Website Starter',
+  name: 'Static Starter',
   description: 'Minimal starting template with basic HTML/CSS/JS structure',
   directories: ['/styles', '/scripts'],
   files: [

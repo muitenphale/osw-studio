@@ -993,6 +993,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     useWorkspaceStore.getState().updateProjectSettings({
       runtime: updated.settings?.runtime,
       previewEntryPoint: updated.settings?.previewEntryPoint,
+      promptSuggestions: updated.settings?.promptSuggestions ?? [],
     });
   }, []);
 

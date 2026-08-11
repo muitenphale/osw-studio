@@ -70,6 +70,66 @@ describe('project slice', () => {
     expect(store.getState().refreshTrigger).toBe(before + 1);
   });
 
+  it('initProject takes the prompt suggestions from the project', () => {
+    store.getState().initProject({
+      id: 'p',
+      name: 'P',
+      settings: { promptSuggestions: [{ id: 's1', label: 'Write a post', prompt: 'Add a post.' }] },
+    });
+    expect(store.getState().promptSuggestions).toEqual([
+      { id: 's1', label: 'Write a post', prompt: 'Add a post.' },
+    ]);
+  });
+
+  it('initProject gives a project saved without suggestions an empty list', () => {
+    // Every project created before the field existed has no `promptSuggestions`, and the chat row
+    // falls back to the generic starters only when this is empty rather than undefined.
+    store.getState().initProject({ id: 'p', name: 'P', settings: { runtime: 'static' } });
+    expect(store.getState().promptSuggestions).toEqual([]);
+  });
+
+  it('updateProjectSettings replaces the suggestions, including with none', () => {
+    // Deleting the last suggestion has to reach the store, rather than being read as "no change"
+    // and leaving the old list in place.
+    store.getState().initProject({
+      id: 'p',
+      name: 'P',
+      settings: { promptSuggestions: [{ id: 's1', label: 'One', prompt: 'Do one.' }] },
+    });
+
+    store.getState().updateProjectSettings({
+      promptSuggestions: [{ id: 's2', label: 'Two', prompt: 'Do two.' }],
+    });
+    expect(store.getState().promptSuggestions).toEqual([
+      { id: 's2', label: 'Two', prompt: 'Do two.' },
+    ]);
+
+    store.getState().updateProjectSettings({ promptSuggestions: [] });
+    expect(store.getState().promptSuggestions).toEqual([]);
+  });
+
+  it('updateProjectSettings leaves the suggestions alone when it is not given any', () => {
+    store.getState().initProject({
+      id: 'p',
+      name: 'P',
+      settings: { promptSuggestions: [{ id: 's1', label: 'One', prompt: 'Do one.' }] },
+    });
+    store.getState().updateProjectSettings({ runtime: 'handlebars' });
+    expect(store.getState().promptSuggestions).toEqual([
+      { id: 's1', label: 'One', prompt: 'Do one.' },
+    ]);
+  });
+
+  it('resetProject clears the suggestions so they cannot follow you to the next project', () => {
+    store.getState().initProject({
+      id: 'p',
+      name: 'P',
+      settings: { promptSuggestions: [{ id: 's1', label: 'One', prompt: 'Do one.' }] },
+    });
+    store.getState().resetProject();
+    expect(store.getState().promptSuggestions).toEqual([]);
+  });
+
   it('defaults to code mode', () => {
     expect(store.getState().mode).toBe('code');
   });

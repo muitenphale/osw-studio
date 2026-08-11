@@ -1,40 +1,10 @@
 import type { Project } from '@/lib/vfs/types';
 import type { ProjectBrief, SpecSection } from './types';
 import { vfs } from '@/lib/vfs';
-import {
-  BAREBONES_PROJECT_TEMPLATE,
-  HANDLEBARS_STARTER_PROJECT_TEMPLATE,
-  DEMO_PROJECT_TEMPLATE,
-  CONTACT_LANDING_PROJECT_TEMPLATE,
-  BLOG_PROJECT_TEMPLATE,
-  REACT_STARTER_PROJECT_TEMPLATE,
-  REACT_DEMO_PROJECT_TEMPLATE,
-  PREACT_STARTER_PROJECT_TEMPLATE,
-  SVELTE_STARTER_PROJECT_TEMPLATE,
-  VUE_STARTER_PROJECT_TEMPLATE,
-  PYTHON_STARTER_PROJECT_TEMPLATE,
-  LUA_STARTER_PROJECT_TEMPLATE,
-  BUILT_IN_TEMPLATES,
-  createProjectFromTemplate,
-  type BuiltInTemplateMetadata,
-} from '@/lib/vfs/templates';
+import { createProjectFromTemplate, getBuiltInTemplateDefinition } from '@/lib/vfs/templates';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
+import { seedPromptSuggestions } from '@/lib/vfs/prompt-suggestions';
 import { serializeBriefToPrompt, serializeSpec, serializeTranscript } from './brief-serializer';
-
-const TEMPLATE_MAP = {
-  'blank': BAREBONES_PROJECT_TEMPLATE,
-  'handlebars-starter': HANDLEBARS_STARTER_PROJECT_TEMPLATE,
-  'demo': DEMO_PROJECT_TEMPLATE,
-  'contact-landing': CONTACT_LANDING_PROJECT_TEMPLATE,
-  'blog': BLOG_PROJECT_TEMPLATE,
-  'react-starter': REACT_STARTER_PROJECT_TEMPLATE,
-  'react-demo': REACT_DEMO_PROJECT_TEMPLATE,
-  'preact-starter': PREACT_STARTER_PROJECT_TEMPLATE,
-  'svelte-starter': SVELTE_STARTER_PROJECT_TEMPLATE,
-  'vue-starter': VUE_STARTER_PROJECT_TEMPLATE,
-  'python-starter': PYTHON_STARTER_PROJECT_TEMPLATE,
-  'lua-starter': LUA_STARTER_PROJECT_TEMPLATE,
-} as const;
 
 export interface CreateFromBriefOptions {
   brief: ProjectBrief;
@@ -61,19 +31,31 @@ export async function createProjectFromBrief(options: CreateFromBriefOptions): P
   const templateId: string = brief.template ?? 'blank';
   const hasSpec = spec.length > 0;
 
+  // A brief is persisted, so its template id can outlive the template. Falling back to blank keeps
+  // a stale brief creating a project rather than failing. Resolved before the project is created:
+  // the files are a lazily imported chunk, and a failure afterwards would strand an empty project.
+  const definition =
+    getBuiltInTemplateDefinition(templateId) ?? getBuiltInTemplateDefinition('blank');
+  const template = await definition?.loadProjectTemplate();
+
   // 1. Create bare project
   const project = await vfs.createProject(name);
 
   // 2. Set runtime in project settings
   const finalProject: Project = {
     ...project,
-    settings: { ...project.settings, runtime },
+    settings: {
+      ...project.settings,
+      runtime,
+      promptSuggestions: seedPromptSuggestions(definition?.promptSuggestions),
+    },
   };
   await vfs.updateProject(finalProject);
 
   // 3. Apply template
-  const template = TEMPLATE_MAP[templateId as keyof typeof TEMPLATE_MAP] ?? BAREBONES_PROJECT_TEMPLATE;
-  await createProjectFromTemplate(vfs, finalProject.id, template, template.assets);
+  if (template) {
+    await createProjectFromTemplate(vfs, finalProject.id, template, template.assets);
+  }
 
   // 4. Append brief to .PROMPT.md (template already wrote platform constraints)
   const briefContent = serializeBriefToPrompt(brief, hasSpec);
@@ -99,9 +81,8 @@ export async function createProjectFromBrief(options: CreateFromBriefOptions): P
   }
 
   // 7. Provision backend features if the template has them
-  const builtInMeta = BUILT_IN_TEMPLATES.find(t => t.id === templateId) as BuiltInTemplateMetadata | undefined;
-  if (builtInMeta?.backendFeatures) {
-    await provisionBackendFeatures(finalProject.id, builtInMeta.backendFeatures);
+  if (template?.backendFeatures) {
+    await provisionBackendFeatures(finalProject.id, template.backendFeatures);
   }
 
   return finalProject;

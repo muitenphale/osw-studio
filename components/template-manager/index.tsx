@@ -1,15 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { CustomTemplate, BackendFeatures } from '@/lib/vfs/types';
+import { CustomTemplate, BackendFeatures, ProjectRuntime } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { createProjectFromTemplate, customTemplateToProjectTemplate, BUILT_IN_TEMPLATES, type BuiltInTemplateMetadata } from '@/lib/vfs/templates';
-import { BAREBONES_PROJECT_TEMPLATE, HANDLEBARS_STARTER_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE, CONTACT_LANDING_PROJECT_TEMPLATE, BLOG_PROJECT_TEMPLATE } from '@/lib/vfs/project-templates';
+import {
+  applyBuiltInTemplate,
+  getBuiltInTemplateDefinition,
+  instantiateBuiltInTemplate,
+} from '@/lib/vfs/project-templates';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { TemplateCard } from './template-card';
+import { TemplatePreviewDialog } from '@/components/template-browser/template-preview-dialog';
+import { templatePreviewUnavailableReason } from '@/lib/vfs/templates/preview-project';
 import { logger } from '@/lib/utils';
 import { toast } from 'sonner';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
@@ -53,6 +59,11 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  // The template being previewed, carried as the browser's selection value so one dialog serves
+  // both surfaces.
+  const [previewing, setPreviewing] = useState<
+    { value: string; name: string; runtime: ProjectRuntime } | null
+  >(null);
 
   const loadCustomTemplates = useCallback(async () => {
     try {
@@ -121,26 +132,20 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           template.description
         );
 
-        // Populate with template content
-        if (template.id === 'blank') {
-          await createProjectFromTemplate(vfs, tempProject.id, BAREBONES_PROJECT_TEMPLATE);
-        } else if (template.id === 'handlebars-starter') {
-          await createProjectFromTemplate(vfs, tempProject.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
-        } else if (template.id === 'demo') {
-          await createProjectFromTemplate(vfs, tempProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
-        } else if (template.id === 'contact-landing') {
-          await createProjectFromTemplate(vfs, tempProject.id, CONTACT_LANDING_PROJECT_TEMPLATE);
-        } else if (template.id === 'blog') {
-          await createProjectFromTemplate(vfs, tempProject.id, BLOG_PROJECT_TEMPLATE);
-        }
+        // Fill it, backend features included. The export reads those back out of the project's
+        // own storage, so a temp project that was only given files exports a template with no
+        // edge functions, no secrets and no schema.
+        const definition = getBuiltInTemplateDefinition(template.id);
+        if (!definition) throw new Error(`Unknown built-in template: ${template.id}`);
+        await instantiateBuiltInTemplate(vfs, tempProject.id, definition);
 
         // Export as template
         const blob = await templateService.exportProjectAsTemplate(vfs, tempProject.id, {
           name: template.name,
           description: template.description,
           version: '1.0.0',
-          author: 'OSW Studio',
-          license: 'mit',
+          author: template.metadata?.author || 'OSW Studio',
+          license: template.metadata?.license || 'mit',
           tags: template.metadata?.tags || []
         });
 
@@ -184,9 +189,25 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     try {
       setCreating(true);
 
-      const projectName = template.name === 'Website Starter' || template.name === 'Example Studios'
+      // A template whose name describes the project it makes can name the project. A starter's
+      // name describes the starting point instead, so "Handlebars Starter" would be a poor project
+      // name for whatever gets built on it. Keyed off the intent rather than the template's name,
+      // which used to be matched literally and quietly stopped matching when a name changed.
+      const intent = 'metadata' in template ? template.metadata?.intent : undefined;
+      const namesTheStartingPoint = intent === 'starter';
+      const projectName = namesTheStartingPoint
         ? `New ${template.name} Project`
         : template.name;
+
+      // Resolved before the project exists: a built-in's files are a lazily imported chunk, and a
+      // failure after createProject would leave an empty project behind.
+      const definition =
+        'isBuiltIn' in template && template.isBuiltIn
+          ? getBuiltInTemplateDefinition(template.id)
+          : undefined;
+      if ('isBuiltIn' in template && template.isBuiltIn && !definition) {
+        throw new Error(`Unknown built-in template: ${template.id}`);
+      }
 
       const project = await vfs.createProject(
         projectName,
@@ -196,19 +217,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       // Use built-in template or custom template
       let backendFeatures: BackendFeatures | undefined;
 
-      if ('isBuiltIn' in template && template.isBuiltIn) {
-        if (template.id === 'blank') {
-          await createProjectFromTemplate(vfs, project.id, BAREBONES_PROJECT_TEMPLATE);
-        } else if (template.id === 'handlebars-starter') {
-          await createProjectFromTemplate(vfs, project.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
-        } else if (template.id === 'demo') {
-          await createProjectFromTemplate(vfs, project.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
-        } else if (template.id === 'contact-landing') {
-          await createProjectFromTemplate(vfs, project.id, CONTACT_LANDING_PROJECT_TEMPLATE);
-        } else if (template.id === 'blog') {
-          await createProjectFromTemplate(vfs, project.id, BLOG_PROJECT_TEMPLATE);
-        }
-
+      if (definition) {
+        const template = await applyBuiltInTemplate(vfs, project.id, definition);
         backendFeatures = template.backendFeatures;
       } else {
         // Custom template
@@ -228,6 +238,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           if (result.edgeFunctions > 0) parts.push(`${result.edgeFunctions} edge function(s)`);
           if (result.serverFunctions > 0) parts.push(`${result.serverFunctions} server function(s)`);
           if (result.secrets > 0) parts.push(`${result.secrets} secret placeholder(s)`);
+          if (result.scheduledFunctions > 0) parts.push(`${result.scheduledFunctions} schedule(s)`);
           if (result.hasDatabaseSchema) parts.push('database schema');
           if (parts.length > 0) {
             toast.success(`Backend features provisioned: ${parts.join(', ')}`, { duration: 5000 });
@@ -271,7 +282,10 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
 
     // Type filter
     if (typeFilter !== 'all') {
-      const hasBackendFeatures = 'backendFeatures' in template && !!template.backendFeatures;
+      const hasBackendFeatures =
+        'isBuiltIn' in template && template.isBuiltIn
+          ? !!template.hasBackendFeatures
+          : !!(template as CustomTemplate).backendFeatures;
       if (typeFilter === 'server' && !hasBackendFeatures) return false;
       if (typeFilter === 'standard' && hasBackendFeatures) return false;
     }
@@ -281,6 +295,31 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
 
   // Sort templates: custom first, then built-in; the chosen sort applies within each group.
   const builtInTemplateIds = new Set(BUILT_IN_TEMPLATES.map(t => t.id));
+
+  /**
+   * What the preview dialog needs, or null for a template it cannot show.
+   *
+   * Custom templates predate the runtime field; those without one are Handlebars, matching how the
+   * template browser treats them.
+   */
+  const templatePreviewTarget = (
+    template: CustomTemplate | BuiltInTemplateMetadata
+  ): { value: string; name: string; runtime: ProjectRuntime } | null => {
+    const isBuiltIn = builtInTemplateIds.has(template.id);
+    const runtime: ProjectRuntime = isBuiltIn
+      ? (template as BuiltInTemplateMetadata).runtime
+      : (template as CustomTemplate).runtime || 'handlebars';
+    if (templatePreviewUnavailableReason(runtime)) return null;
+    return {
+      value: isBuiltIn ? template.id : `custom:${template.id}`,
+      name: template.name,
+      runtime,
+    };
+  };
+
+  const handlePreviewTemplate = (template: CustomTemplate | BuiltInTemplateMetadata) => {
+    setPreviewing(templatePreviewTarget(template));
+  };
   const sortedTemplates = [...filteredTemplates].sort((a, b) => {
     const builtInDelta = Number(builtInTemplateIds.has(a.id)) - Number(builtInTemplateIds.has(b.id));
     if (builtInDelta !== 0) return builtInDelta;
@@ -457,6 +496,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
                   key={template.id}
                   template={template}
                   onSelect={handleCreateProject}
+                  onPreview={templatePreviewTarget(template) ? handlePreviewTemplate : undefined}
                   onDelete={handleDeleteTemplate}
                   onExport={handleExportTemplate}
                   viewMode={viewMode}
@@ -473,6 +513,14 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
         )}
         </div>
       </div>
+
+      <TemplatePreviewDialog
+        value={previewing?.value ?? null}
+        name={previewing?.name ?? ''}
+        runtime={previewing?.runtime ?? 'static'}
+        customTemplates={customTemplates}
+        onClose={() => setPreviewing(null)}
+      />
     </div>
   );
 }

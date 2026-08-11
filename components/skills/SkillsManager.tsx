@@ -386,6 +386,13 @@ export function SkillsManager() {
         <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
           <div className="mx-auto max-w-7xl flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex items-center shrink-0">
+                <Button onClick={handleCreateNew} size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  New
+                </Button>
+              </div>
+
               {/* Search */}
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -410,10 +417,6 @@ export function SkillsManager() {
                 <Button variant="outline" size="sm" onClick={handleExportAll}>
                   <Download className="w-4 h-4 mr-2" />
                   Export
-                </Button>
-                <Button onClick={handleCreateNew} size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  New
                 </Button>
               </div>
             </div>

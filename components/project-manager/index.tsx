@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, CustomTemplate } from '@/lib/vfs/types';
+import { Project, CustomTemplate, type BackendFeatures, type PromptSuggestion, type TemplateIntent } from '@/lib/vfs/types';
 import { getRuntimeBadge } from '@/lib/runtimes/registry';
 import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { clearLegacyProjectSchema } from '@/lib/vfs/project-schema';
 import { TemplateBrowserPanel, runtimeForTemplate } from '@/components/template-browser';
 import { logger } from '@/lib/utils';
+import { sweepTemplatePreviewProjects } from '@/lib/vfs/templates/preview-project';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
@@ -56,23 +57,15 @@ import { pushProjectToServer } from '@/lib/vfs/push-project-to-server';
 import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
 import { refreshProjectSyncState } from '@/lib/vfs/project-sync-state';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
+import { seedPromptSuggestions } from '@/lib/vfs/prompt-suggestions';
 import {
-  BAREBONES_PROJECT_TEMPLATE,
-  HANDLEBARS_STARTER_PROJECT_TEMPLATE,
-  DEMO_PROJECT_TEMPLATE,
-  CONTACT_LANDING_PROJECT_TEMPLATE,
-  BLOG_PROJECT_TEMPLATE,
-  REACT_STARTER_PROJECT_TEMPLATE,
-  REACT_DEMO_PROJECT_TEMPLATE,
-  PREACT_STARTER_PROJECT_TEMPLATE,
-  SVELTE_STARTER_PROJECT_TEMPLATE,
-  VUE_STARTER_PROJECT_TEMPLATE,
-  PYTHON_STARTER_PROJECT_TEMPLATE,
-  LUA_STARTER_PROJECT_TEMPLATE,
   createProjectFromTemplate,
   customTemplateToProjectTemplate,
+  getBuiltInTemplateDefinition,
+  loadBuiltInProjectTemplate,
   BUILT_IN_TEMPLATES,
-  type BuiltInTemplateMetadata
+  DEFAULT_TEMPLATE_ID,
+  type ProjectTemplate,
 } from '@/lib/vfs/project-templates';
 import {
   Select,
@@ -115,7 +108,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
-  const [newProjectTemplate, setNewProjectTemplate] = useState<string>('blank');
+  // Handlebars rather than static: partials mean a nav or footer is written once instead of
+  // copied into every page, which is the difference the assistant pays for on a multi-page site.
+  const [newProjectTemplate, setNewProjectTemplate] = useState<string>(DEFAULT_TEMPLATE_ID);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
   const [createMode, setCreateMode] = useState<'quick' | 'describe' | 'template'>('quick');
   const [templatePending, setTemplatePending] = useState<string | null>(null);
@@ -129,7 +124,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
 
   const isQuickDirty = createMode !== 'describe' && (
     newProjectName !== '' || newProjectDescription !== '' ||
-    newProjectTemplate !== 'blank'
+    newProjectTemplate !== DEFAULT_TEMPLATE_ID
   );
   const isCreateDirty = createMode === 'describe' ? describeDirty : isQuickDirty;
 
@@ -209,6 +204,10 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
 
     try {
       await vfs.init();
+
+      // A tab closed mid-preview leaves its scratch project behind, and the list has no filter of
+      // its own, so it would show up here as a project called "Preview: something".
+      await sweepTemplatePreviewProjects(vfs);
 
       // Load local projects immediately — don't block on server sync
       const projectList = await vfs.listProjects();
@@ -295,11 +294,12 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     demoCreationRef.current = true;
     
     try {
+      const demo = await loadBuiltInProjectTemplate('demo');
       const demoProject = await vfs.createProject(
         'Multi-File Demo',
         'Interactive examples showing how HTML, CSS, and JavaScript files work together'
       );
-      await createProjectFromTemplate(vfs, demoProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+      await createProjectFromTemplate(vfs, demoProject.id, demo, demo.assets);
       toast.success('Demo project created successfully');
       await reloadProjects();
       onProjectSelect(demoProject);
@@ -315,11 +315,12 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const handleStartTour = async () => {
     try {
       // Always create a fresh demo project for the tour to ensure correct file structure
+      const demo = await loadBuiltInProjectTemplate('demo');
       const tourDemo = await vfs.createProject(
         'Example Studios (Tour)',
         'Demo project for guided tour'
       );
-      await createProjectFromTemplate(vfs, tourDemo.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
+      await createProjectFromTemplate(vfs, tourDemo.id, demo, demo.assets);
 
       // Store the demo project ID in tour context
       setTourDemoProjectId(tourDemo.id);
@@ -419,6 +420,35 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     }
 
     try {
+      // Resolved before the project exists. A built-in's files are a lazily imported chunk, so a
+      // failure here would otherwise land between creating the project and filling it, leaving an
+      // empty project behind with no way to tell it apart from a deliberate one.
+      let projectTemplate: ProjectTemplate | undefined;
+      let backendFeatures: BackendFeatures | undefined;
+      let templateIntent: TemplateIntent | undefined;
+      let promptSuggestions: PromptSuggestion[] | undefined;
+
+      if (newProjectTemplate.startsWith('custom:')) {
+        const customTemplateId = newProjectTemplate.replace('custom:', '');
+        const customTemplate = customTemplates.find(t => t.id === customTemplateId);
+        if (customTemplate) {
+          projectTemplate = customTemplateToProjectTemplate(customTemplate);
+          templateIntent = customTemplate.metadata?.intent;
+          promptSuggestions = seedPromptSuggestions(customTemplate.metadata?.promptSuggestions);
+        }
+      } else {
+        // An id the catalog no longer knows falls back to blank, the same way the switch this
+        // replaced did: it can come from a stale selection rather than from a bug.
+        const definition =
+          getBuiltInTemplateDefinition(newProjectTemplate) ?? getBuiltInTemplateDefinition('blank');
+        if (definition) {
+          projectTemplate = await definition.loadProjectTemplate();
+          backendFeatures = projectTemplate.backendFeatures;
+          templateIntent = definition.metadata?.intent;
+          promptSuggestions = seedPromptSuggestions(definition.promptSuggestions);
+        }
+      }
+
       const project = await vfs.createProject(
         newProjectName.trim().slice(0, 50),
         newProjectDescription.trim().slice(0, 200) || undefined
@@ -427,66 +457,21 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       // Persist runtime in project settings and keep updated object for onProjectSelect
       const finalProject: Project = {
         ...project,
-        settings: { ...project.settings, runtime: newProjectRuntime },
+        settings: { ...project.settings, runtime: newProjectRuntime, promptSuggestions },
       };
       await vfs.updateProject(finalProject);
 
-      // Apply selected template
-      if (newProjectTemplate.startsWith('custom:')) {
-        // Custom template from IndexedDB
-        const customTemplateId = newProjectTemplate.replace('custom:', '');
-        const customTemplate = customTemplates.find(t => t.id === customTemplateId);
-
-        if (customTemplate) {
-          await createProjectFromTemplate(vfs, finalProject.id, customTemplateToProjectTemplate(customTemplate));
-        }
-      } else {
-        // Built-in template
-        switch (newProjectTemplate) {
-          case 'handlebars-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, HANDLEBARS_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'demo':
-            await createProjectFromTemplate(vfs, finalProject.id, DEMO_PROJECT_TEMPLATE, DEMO_PROJECT_TEMPLATE.assets);
-            break;
-          case 'contact-landing':
-            await createProjectFromTemplate(vfs, finalProject.id, CONTACT_LANDING_PROJECT_TEMPLATE);
-            break;
-          case 'blog':
-            await createProjectFromTemplate(vfs, finalProject.id, BLOG_PROJECT_TEMPLATE);
-            break;
-          case 'react-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, REACT_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'react-demo':
-            await createProjectFromTemplate(vfs, finalProject.id, REACT_DEMO_PROJECT_TEMPLATE);
-            break;
-          case 'preact-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, PREACT_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'svelte-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, SVELTE_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'vue-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, VUE_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'python-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, PYTHON_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'lua-starter':
-            await createProjectFromTemplate(vfs, finalProject.id, LUA_STARTER_PROJECT_TEMPLATE);
-            break;
-          case 'blank':
-          default:
-            await createProjectFromTemplate(vfs, finalProject.id, BAREBONES_PROJECT_TEMPLATE);
-            break;
-        }
+      if (projectTemplate) {
+        await createProjectFromTemplate(
+          vfs,
+          finalProject.id,
+          projectTemplate,
+          projectTemplate.assets
+        );
       }
 
       // Provision backend features if the selected template has them
       {
-        const builtInTemplate = BUILT_IN_TEMPLATES.find(t => t.id === newProjectTemplate) as BuiltInTemplateMetadata | undefined;
-        const backendFeatures = builtInTemplate?.backendFeatures;
         if (backendFeatures) {
           try {
             await provisionBackendFeatures(finalProject.id, backendFeatures);
@@ -504,6 +489,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         method: 'quick',
         runtime: newProjectRuntime,
         template: newProjectTemplate.startsWith('custom:') ? 'custom' : newProjectTemplate,
+        // Absent for an imported template, which does not declare one. Reported rather than
+        // guessed: the point of recording it is to learn which section people actually pick from.
+        template_intent: templateIntent,
       });
 
       toast.success('Project created successfully');
@@ -717,6 +705,14 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
             {/* Toolbar */}
             <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
               <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3" data-tour-id="projects-actions">
+                {/* New Project */}
+                <div className="flex items-center shrink-0">
+                  <Button onClick={() => setCreateDialogOpen(true)} size="sm" className="gap-2" data-tour-id="new-project-button">
+                    <Plus className="h-4 w-4" />
+                    <span>New</span>
+                  </Button>
+                </div>
+
                 {/* Search */}
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -774,12 +770,6 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                       <List className="h-4 w-4" />
                     </Button>
                   </div>
-
-                  {/* New Project */}
-                  <Button onClick={() => setCreateDialogOpen(true)} size="sm" className="gap-2" data-tour-id="new-project-button">
-                    <Plus className="h-4 w-4" />
-                    <span>New</span>
-                  </Button>
 
                   {/* Import — a file or a folder, since one input cannot offer both */}
                   <DropdownMenu>
@@ -1133,6 +1123,9 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
             <div className="flex-1 overflow-hidden">
               <MultipagePreview
                 projectId={previewProject.id}
+                runtime={previewProject.settings?.runtime}
+                entryPoint={previewProject.settings?.previewEntryPoint}
+                standalone
               />
             </div>
           </DialogContent>

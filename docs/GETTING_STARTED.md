@@ -92,19 +92,25 @@ Let's build a simple personal website.
 1. Click **Projects** in the sidebar
 2. Click **+ New Project**
 3. Name your project (e.g., "My Portfolio")
-4. Choose a runtime and template:
-   - **Website Starter** - Minimal pure HTML/CSS/JS starting point
-   - **Starter (Handlebars)** - Handlebars templating with partials
-   - **Example Studios** - Multi-page portfolio with Handlebars
-   - **Starter (React + TypeScript)** - Component-based React app
-   - **Starter (Preact + TypeScript)** - Lightweight React alternative (~3KB)
-   - **Starter (Svelte)** - Compile-time reactive framework
-   - **Starter (Vue)** - Progressive framework with SFC support
-   - **Starter (Python)** - Python scripts via Pyodide WASM
-   - **Starter (Lua)** - Lua scripts via wasmoon WASM
-   - **Landing Page with Contact Form** - Contact page wired to an edge function (Server Mode)
-   - **React Demo: Task Tracker** - Fully working task app with local state
-   - **Blog with Comments** - Multi-page blog with comments via a server function (Server Mode)
+4. Choose a template. The list is grouped by what you're setting out to make, and starts on
+   **Handlebars Starter**, an empty website with partials so a nav or footer is written once. Some
+   of the twenty:
+   - **Static Starter** - an empty website in plain HTML, CSS and JavaScript
+   - **Business Website** - one page for a local business: services, prices, hours, location
+   - **Portfolio & CV** - one page about one person: selected work, bio, work history
+   - **Example Studios** - multi-page agency portfolio with Handlebars
+   - **LLM Wiki** - a knowledge base the assistant writes and keeps current as you add sources
+   - **Projects & Tasks** - a board of what you are working on, kept in order by the assistant
+   - **Store Locator** - a searchable map of your locations, ready to embed elsewhere
+   - **Guided Chat** - a chat widget with pre-set replies, needing no backend
+   - **To-do List** - a checklist that saves itself in your browser
+   - **Landing Page with Contact Form** - contact page wired to an edge function (Server Mode)
+   - **Blog with Comments** - multi-page blog with comments via a server function (Server Mode)
+   - **AI Assistant** - a chat page whose API key stays in a server function (Server Mode)
+   - **Spring Boot REST API** - a Java service you edit here and build elsewhere
+   - **Runtime starters** - a closed section holding the eight minimal setups, one per runtime
+
+   The template sets the project's runtime, and you can change it later in project settings.
 
 You'll see the workspace with 4 panels:
 - **Chat** (left-most) - Talk to AI

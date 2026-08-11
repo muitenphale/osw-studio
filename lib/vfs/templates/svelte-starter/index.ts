@@ -3,7 +3,7 @@ import { SVELTE_DOMAIN_PROMPT } from '@/lib/llm/prompts/svelte';
 import { CANVAS_CSS, CANVAS_HTML } from '../utils';
 
 export const SVELTE_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Starter (Svelte)',
+  name: 'Svelte Starter',
   description: 'Svelte 5 app with runes and auto-bundling',
   directories: ['/src', '/src/components'],
   files: [
@@ -36,7 +36,7 @@ mount(App, { target: document.getElementById("root")! });
     {
       path: '/src/App.svelte',
       content: `<!--
-  Root component — build your UI here.
+  Root component. Build your UI here.
 
   Add components in /src/components/Name.svelte:
     import Header from "./components/Header.svelte";

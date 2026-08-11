@@ -69,12 +69,9 @@ export function DeploymentCard({
   const isPublished = deployment.lastPublishedVersion !== null && deployment.lastPublishedVersion !== undefined;
   const hasPendingChanges = isPublished && Number(deployment.settingsVersion) > Number(deployment.lastPublishedVersion);
 
-  const hostname = window.location.hostname;
-  const publicUrl = deployment.customDomain
-    ? `https://${deployment.customDomain}`
-    : deployment.slug
-    ? `https://${deployment.slug}.${hostname}`
-    : `${window.location.origin}/deployments/${deployment.id}`;
+  // Resolved by the server, which is the only side that knows whether the static proxy routes
+  // slug subdomains. Deriving it here from `slug` produced a dead https://{slug}.localhost.
+  const publicUrl = deployment.publicUrl || `${window.location.origin}/deployments/${deployment.id}`;
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(publicUrl);
@@ -91,12 +88,7 @@ export function DeploymentCard({
         <ThumbnailArea
           image={deployment.previewImage || project?.previewImage}
           onCapture={isPublished ? async () => {
-            const deploymentUrl = deployment.customDomain
-              ? `https://${deployment.customDomain}`
-              : deployment.slug
-              ? `https://${deployment.slug}.${hostname}`
-              : `${window.location.origin}/deployments/${deployment.id}`;
-            return captureDeploymentScreenshot(deploymentUrl);
+            return captureDeploymentScreenshot(publicUrl);
           } : undefined}
           onImageChange={(img) => onThumbnailChange?.(deployment.id, img)}
           size="md"

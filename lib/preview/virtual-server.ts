@@ -18,13 +18,17 @@ export class VirtualServer {
   private partialsRegistered: boolean = false;
   private entryPoint: string;
   private runtime: ProjectRuntime;
+  private minify: boolean;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, opts?: { deploymentId?: string; entryPoint?: string; runtime?: ProjectRuntime }) {
+  constructor(vfs: VirtualFileSystem, projectId: string, opts?: { deploymentId?: string; entryPoint?: string; runtime?: ProjectRuntime; minify?: boolean }) {
     this.vfs = vfs;
     this.projectId = projectId;
     this.deploymentId = opts?.deploymentId;
     this.entryPoint = opts?.entryPoint || '/index.html';
     this.runtime = opts?.runtime || 'handlebars';
+    // Off unless a caller asks: the editor preview wants readable output, and
+    // only the paths that produce something a visitor downloads turn it on.
+    this.minify = opts?.minify === true;
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
     // Initialize Handlebars instance
@@ -302,7 +306,7 @@ export class VirtualServer {
     const entryPoint = detectBundleEntryPoint(files);
     if (!entryPoint) return files;
 
-    const result = await bundleProject({ files, entryPoint, runtime: this.runtime });
+    const result = await bundleProject({ files, entryPoint, runtime: this.runtime, minify: this.minify });
 
     // Push errors through the compile-errors system
     for (const err of result.errors) {

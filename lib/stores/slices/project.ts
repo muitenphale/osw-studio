@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import type { ProjectRuntime } from '@/lib/vfs/types';
+import type { ProjectRuntime, PromptSuggestion } from '@/lib/vfs/types';
 import type { FocusContextPayload } from '@/lib/preview/types';
 import { track } from '@/lib/telemetry';
 
@@ -20,6 +20,8 @@ export interface ProjectSlice {
   lastSavedAt: Date | null;
   entryPoint: string | undefined;
   projectRuntime: ProjectRuntime | undefined;
+  /** The project's own chat starters, seeded by its template and editable in Settings. */
+  promptSuggestions: PromptSuggestion[];
   modelConfigVersion: number;
   focusContext: FocusTarget | null;
   mode: WorkspaceMode;
@@ -38,7 +40,7 @@ export interface ProjectSlice {
   bumpRefreshTrigger: () => void;
   bumpModelConfig: () => void;
   incrementCheckpointRefresh: () => void;
-  updateProjectSettings: (settings: { runtime?: ProjectRuntime; previewEntryPoint?: string }) => void;
+  updateProjectSettings: (settings: { runtime?: ProjectRuntime; previewEntryPoint?: string; promptSuggestions?: PromptSuggestion[] }) => void;
   setMode: (mode: WorkspaceMode) => void;
   setActiveInterview: (interview: ActiveInterview | null) => void;
   setBackendEnabled: (enabled: boolean) => void;
@@ -58,6 +60,7 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
   lastSavedAt: null,
   entryPoint: undefined,
   projectRuntime: undefined,
+  promptSuggestions: [],
   modelConfigVersion: 0,
   focusContext: null,
   mode: 'code',
@@ -76,6 +79,7 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
       projectName: project.name,
       entryPoint: project.settings?.previewEntryPoint,
       projectRuntime: project.settings?.runtime,
+      promptSuggestions: project.settings?.promptSuggestions ?? [],
       lastSavedAt: project.lastSavedAt ?? null,
       isDirty: false,
     });
@@ -92,6 +96,8 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
     set(s => ({
       projectRuntime: settings.runtime ?? s.projectRuntime,
       entryPoint: settings.previewEntryPoint ?? s.entryPoint,
+      // ?? rather than ||: emptying the list is a deliberate edit, and [] must not read as absent.
+      promptSuggestions: settings.promptSuggestions ?? s.promptSuggestions,
       refreshTrigger: s.refreshTrigger + 1,
     }));
   },
@@ -145,6 +151,7 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
       lastSavedAt: null,
       entryPoint: undefined,
       projectRuntime: undefined,
+      promptSuggestions: [],
       focusContext: null,
       activeInterview: null,
       backendEnabled: false,

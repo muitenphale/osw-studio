@@ -10,6 +10,7 @@ import { logger } from '@/lib/utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { isEncryptionConfigured } from '@/lib/edge-functions/secrets-crypto';
+import { mirrorSecretToProject, removeSecretFromProject } from '@/lib/api/secret-write-through';
 
 function validateSecretName(name: string): string | null {
   if (!name || name.trim().length === 0) {
@@ -125,6 +126,14 @@ export async function PUT(
 
     const secret = deploymentDb.getSecret(secretId);
 
+    // Mirror onto the project, which is what the next publish re-provisions from.
+    await mirrorSecretToProject(adapter, deployment.projectId, {
+      name: metadataUpdates.name ?? existing.name,
+      previousName: existing.name,
+      value: body.value !== undefined && body.value !== '' ? body.value : undefined,
+      description: metadataUpdates.description,
+    });
+
     return NextResponse.json({ secret });
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -165,6 +174,7 @@ export async function DELETE(
     }
 
     deploymentDb.deleteSecret(secretId);
+    await removeSecretFromProject(adapter, deployment.projectId, secret.name);
 
     return NextResponse.json({ success: true });
   } catch (error) {

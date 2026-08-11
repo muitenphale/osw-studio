@@ -172,7 +172,7 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     const hasEdgeFunctions = edgeFunctions.some(f => f.enabled);
 
     // Compile project using VirtualServer (renders Handlebars templates)
-    const server = new VirtualServer(serverVfs as any, deployment.projectId, { runtime: project.settings?.runtime });
+    const server = new VirtualServer(serverVfs as any, deployment.projectId, { runtime: project.settings?.runtime, minify: true });
     const compiledProject = await server.compileProject();
 
     // Create reverse map: blobUrl -> filePath for replacements

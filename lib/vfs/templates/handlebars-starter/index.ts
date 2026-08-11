@@ -3,7 +3,7 @@ import { HANDLEBARS_DOMAIN_PROMPT } from '@/lib/llm/prompts/handlebars';
 import { CANVAS_CSS, CANVAS_HTML } from '../utils';
 
 export const HANDLEBARS_STARTER_PROJECT_TEMPLATE: ProjectTemplate = {
-  name: 'Starter (Handlebars)',
+  name: 'Handlebars Starter',
   description: 'Minimal starting template with Handlebars partials and data',
   directories: ['/styles', '/scripts', '/templates'],
   files: [
@@ -62,7 +62,7 @@ header, main, footer {
     },
     {
       path: '/templates/example.hbs',
-      content: `{{!-- Example partial — include in HTML with {{> example}} --}}
+      content: `{{!-- Example partial. Include it in HTML with {{> example}} --}}
 {{!-- Variables come from /data.json --}}
 <div>
     <h1>{{siteName}}</h1>

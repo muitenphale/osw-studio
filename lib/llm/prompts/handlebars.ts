@@ -324,7 +324,7 @@ FILE CREATION GUIDELINES:
 Prefer editing existing files over creating new ones. Check if a file exists before creating.
 
 Create when appropriate:
-- README.md for complex projects (3+ features/pages) — skip for simple single-file changes
+- README.md for complex projects (3+ features/pages); skip it for simple single-file changes
 - Config files (package.json, tsconfig.json) only when functionality requires them
 - Component files matching request scope
 

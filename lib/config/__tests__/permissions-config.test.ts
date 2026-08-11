@@ -76,4 +76,27 @@ describe('permissions config', () => {
     configManager.setModelGroupCollapsed('openrouter', false);
     expect(configManager.getCollapsedModelGroups()).toEqual(['anthropic']);
   });
+
+  it('reports no template collapse preference until one is stored', () => {
+    // Null, not []: the picker starts some sections closed, so it has to tell a first visit apart
+    // from someone who opened every section. Returning [] for both would reopen Starter each time.
+    expect(configManager.getCollapsedTemplateGroups()).toBeNull();
+  });
+
+  it('stores the template collapse set as given, including empty', () => {
+    configManager.setCollapsedTemplateGroups(['website', 'app']);
+    expect(configManager.getCollapsedTemplateGroups()!.sort()).toEqual(['app', 'website']);
+
+    configManager.setCollapsedTemplateGroups([]);
+    expect(configManager.getCollapsedTemplateGroups()).toEqual([]);
+  });
+
+  it('keeps the two pickers' + "'" + ' collapsed sections apart', () => {
+    // Both store a set of group ids, and "starter" or a provider name could plausibly appear in
+    // either. Sharing one key would close a template section when a model group was closed.
+    configManager.setModelGroupCollapsed('starter', true);
+
+    expect(configManager.getCollapsedTemplateGroups()).toBeNull();
+    expect(configManager.getCollapsedModelGroups()).toEqual(['starter']);
+  });
 });

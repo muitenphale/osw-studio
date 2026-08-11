@@ -7,6 +7,7 @@
  */
 
 import { logger } from '@/lib/utils';
+import { withPublicUrl } from '@/lib/api/deployment-url';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { cleanStaticDeployment } from '@/lib/compiler/static-builder';
@@ -30,7 +31,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(deployment);
+    return NextResponse.json(withPublicUrl(deployment));
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

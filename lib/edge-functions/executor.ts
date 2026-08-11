@@ -58,8 +58,16 @@ const MAX_MEMORY_BYTES = 64 * 1024 * 1024;
  * Fetch security limits
  */
 const MAX_FETCH_REQUESTS = 10;
-const FETCH_TIMEOUT_MS = 10000;
+/**
+ * Ceiling for a single outbound request. The function's own deadline is the real bound: a fetch
+ * that outlives it only leaves work in flight when the runtime is torn down. This was a flat 10s
+ * while functions get up to 30s, so a slow upstream (a model call is the common one) was aborted
+ * well inside the budget the function had been given.
+ */
+const FETCH_TIMEOUT_MS = 30000;
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5MB
+/** How long teardown waits for a cancelled request to settle before disposing anyway. */
+const FETCH_SETTLE_MS = 2000;
 
 /**
  * Check if a URL targets a private/internal IP address
@@ -131,6 +139,11 @@ export async function executeFunction(
   // Create database API
   const db = createDatabaseAPI(deploymentDb);
 
+  // The evaluated module's handle. Held out here because the disposal below sits on the success
+  // path: a throw between here and there (a deadline, a pending-job error) would otherwise leave it
+  // alive when the runtime is freed, which QuickJS turns into a process-level abort.
+  let evalValue: QuickJSHandle | undefined;
+
   // Load enabled server functions
   const serverFunctions = deploymentDb.listServerFunctions().filter(f => f.enabled);
 
@@ -197,6 +210,7 @@ export async function executeFunction(
         }
       },
       fetchState,
+      deadline,
     });
 
     // Build the code to execute
@@ -217,6 +231,7 @@ export async function executeFunction(
 
     // If we got a promise, we need to execute pending jobs
     const value = result.value;
+    evalValue = value;
 
     // Execute any pending async operations (including fetch)
     let executePending = true;
@@ -254,6 +269,7 @@ export async function executeFunction(
     }
 
     value.dispose();
+    evalValue = undefined;
 
     // If no response was set, return 204 No Content
     if (!responseSet) {
@@ -280,7 +296,23 @@ export async function executeFunction(
       error: errorMessage,
     };
   } finally {
-    // Always clean up
+    // A request still in flight owns QuickJS handles it disposes in its own `finally`. Tearing the
+    // context down first leaves those alive and QuickJS aborts the process at `JS_FreeRuntime`
+    // ("Assertion failed: list_empty(&rt->gc_obj_list)"). This is reachable whenever the function's
+    // deadline trips mid-request, which a slow upstream does routinely. Cancel them and let their
+    // continuations run before disposing.
+    const inFlight = fetchState.pendingFetches.filter((f) => !f.completed && f.promise);
+    if (inFlight.length > 0) {
+      for (const f of inFlight) {
+        try { f.abort?.(); } catch { /* already gone */ }
+      }
+      await Promise.race([
+        Promise.allSettled(inFlight.map((f) => f.promise!)),
+        new Promise((resolve) => setTimeout(resolve, FETCH_SETTLE_MS)),
+      ]);
+    }
+
+    if (evalValue?.alive) evalValue.dispose();
     context.dispose();
     runtime.dispose();
   }
@@ -297,6 +329,8 @@ interface GlobalsConfig {
   serverFunctions: ServerFunction[];
   setResponse: (response: FunctionResponse) => void;
   fetchState: FetchState;
+  /** When the invoking function's budget expires; outbound requests are bounded by it. */
+  deadline: number;
 }
 
 /**
@@ -307,6 +341,8 @@ interface FetchState {
   pendingFetches: Array<{
     promise: Promise<void> | null;
     completed: boolean;
+    /** Cancels the request so its continuation settles and releases its handles. */
+    abort?: () => void;
   }>;
 }
 
@@ -314,7 +350,7 @@ interface FetchState {
  * Inject global objects and functions into the QuickJS context
  */
 function injectGlobals(context: QuickJSContext, config: GlobalsConfig): void {
-  const { request, db, logs, decryptedSecrets, serverFunctions, setResponse, fetchState } = config;
+  const { request, db, logs, decryptedSecrets, serverFunctions, setResponse, fetchState, deadline } = config;
 
   // Inject request object (read-only data)
   const requestHandle = jsonToHandle(context, request);
@@ -337,7 +373,7 @@ function injectGlobals(context: QuickJSContext, config: GlobalsConfig): void {
   injectServerFunctions(context, serverFunctions, logs);
 
   // Inject fetch API
-  injectFetch(context, logs, fetchState);
+  injectFetch(context, logs, fetchState, deadline);
 
   // Inject base64 helpers (atob/btoa)
   injectBase64Helpers(context);
@@ -597,7 +633,12 @@ function injectServerFunctions(
  * 3. Resolving the QuickJS promise when fetch completes
  * 4. The execution loop polls for pending fetches
  */
-function injectFetch(context: QuickJSContext, logs: string[], fetchState: FetchState): void {
+function injectFetch(
+  context: QuickJSContext,
+  logs: string[],
+  fetchState: FetchState,
+  deadline: number
+): void {
   const fetchFn = context.newFunction('fetch', (urlHandle: QuickJSHandle, optionsHandle?: QuickJSHandle) => {
     try {
       const url = context.dump(urlHandle) as string;
@@ -653,13 +694,20 @@ function injectFetch(context: QuickJSContext, logs: string[], fetchState: FetchS
       const promiseHandle = promiseResult.value;
 
       // Track this fetch operation
-      const fetchEntry: { promise: Promise<void> | null; completed: boolean } = { promise: null, completed: false };
+      const fetchEntry: {
+        promise: Promise<void> | null;
+        completed: boolean;
+        abort?: () => void;
+      } = { promise: null, completed: false };
 
       // Execute the actual fetch
       fetchEntry.promise = (async () => {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+          fetchEntry.abort = () => controller.abort();
+          // Never outlive the function that issued it, and never cut it short of its own budget.
+          const budget = Math.max(0, Math.min(FETCH_TIMEOUT_MS, deadline - Date.now()));
+          const timeoutId = setTimeout(() => controller.abort(), budget);
 
           const fetchOptions: RequestInit = {
             method: (options.method as string) || 'GET',
@@ -733,12 +781,20 @@ function injectFetch(context: QuickJSContext, logs: string[], fetchState: FetchS
           errorHandle.dispose();
         } finally {
           fetchEntry.completed = true;
+          // Release the host's reference. The VM holds its own (see the dup below), so the promise
+          // stays alive for the sandbox while this side stops tracking it.
+          promiseHandle.dispose();
         }
       })();
 
       fetchState.pendingFetches.push(fetchEntry);
 
-      return promiseHandle;
+      // Returning a handle from newFunction hands ownership to the VM, which disposes it. The async
+      // continuation above still needs the promise to resolve it, so the VM gets a duplicate and the
+      // host keeps `promiseHandle`. Returning it directly left the continuation writing through a
+      // handle the VM had already freed, which corrupted the refcounts and aborted QuickJS at
+      // teardown: "Assertion failed: list_empty(&rt->gc_obj_list)".
+      return promiseHandle.dup();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logs.push(`[ERROR] fetch failed: ${errorMsg}`);

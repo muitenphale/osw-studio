@@ -360,7 +360,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         // (e.g. user publishes without opening the preview first)
         toast.info('Compiling project bundles...');
         const { VirtualServer } = await import('@/lib/preview/virtual-server');
-        const vs = new VirtualServer(vfs as any, deployment.projectId, { runtime });
+        const vs = new VirtualServer(vfs as any, deployment.projectId, { runtime, minify: true });
         await vs.compileProject();
         vs.cleanupBlobUrls();
 
@@ -654,6 +654,14 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         {/* Toolbar */}
         <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
           <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
+            {/* New Deployment */}
+            <div className="flex items-center shrink-0">
+              <Button onClick={handleOpenCreate} size="sm" className="gap-2">
+                <Plus className="h-4 w-4" />
+                <span>New</span>
+              </Button>
+            </div>
+
             {/* Search */}
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -692,12 +700,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                   </div>
                 </PopoverContent>
               </Popover>
-
-              {/* New Deployment */}
-              <Button onClick={handleOpenCreate} size="sm" className="gap-2">
-                <Plus className="h-4 w-4" />
-                <span>New</span>
-              </Button>
             </div>
           </div>
         </div>

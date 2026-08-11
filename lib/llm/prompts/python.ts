@@ -5,7 +5,7 @@
  * Guides the AI to write Python scripts for the Pyodide environment.
  */
 
-export const PYTHON_DOMAIN_PROMPT = `PROJECT TYPE: Python (Pyodide — browser-based CPython)
+export const PYTHON_DOMAIN_PROMPT = `PROJECT TYPE: Python (Pyodide, browser-based CPython)
 
 This project runs Python scripts in the browser via Pyodide. Scripts execute in a Web Worker and output to a terminal panel.
 
@@ -21,18 +21,18 @@ INSTALLING PACKAGES (REQUIRED for any non-stdlib module):
   await micropip.install("matplotlib")
   import numpy as np
   import matplotlib.pyplot as plt
-- This includes numpy, pandas, scipy, matplotlib, etc. — none are pre-loaded
+- This includes numpy, pandas, scipy, matplotlib and the rest. None are pre-loaded
 - Always put micropip.install() calls at the top of the script, before any imports of those packages
 
 VISUAL OUTPUT (matplotlib, etc.):
-- Save figures to /output/ directory — they appear in the Preview panel:
+- Save figures to the /output/ directory; they appear in the Preview panel:
   import matplotlib.pyplot as plt
   plt.plot([1, 2, 3], [1, 4, 9])
   plt.savefig("/output/plot.png")
   plt.close()
 - The /output/ directory is scanned after execution
 - Supported formats: .png, .jpg, .svg, .html
-- You can also write .html files to /output/ — they will be rendered in the Preview panel
+- You can also write .html files to /output/; they are rendered in the Preview panel
 
 FILE I/O:
 - Read/write files using standard open():
@@ -46,20 +46,20 @@ FILE I/O:
 PRINT OUTPUT:
 - print() writes to the Terminal panel (stdout)
 - Errors and tracebacks appear in red (stderr)
-- Use print() for all text output — there is no GUI/tkinter
+- Use print() for all text output: there is no GUI/tkinter
 
 FILE STRUCTURE EXAMPLE:
-/main.py          — Entry point (auto-executed)
-/utils.py         — Helper modules
-/data.csv         — Data files
-/output/plot.png  — Visual output (shown in Preview)
-/output/index.html — HTML output (rendered in Preview)
+/main.py: Entry point (auto-executed)
+/utils.py: Helper modules
+/data.csv: Data files
+/output/plot.png: Visual output (shown in Preview)
+/output/index.html: HTML output (rendered in Preview)
 
 CONSTRAINTS:
 - No network access (no urllib, no requests to external URLs)
 - No subprocess or os.system()
 - No threading (single-threaded WebAssembly)
-- No input() — scripts are non-interactive
+- No input(): scripts are non-interactive
 - No tkinter or GUI libraries (use matplotlib savefig for visuals)
 - Scripts are terminated after 30 seconds
 
@@ -79,5 +79,5 @@ PREVIEW:
 - Example: python main.py && preview /output/chart.html
 
 IMPORTANT:
-- Use print() for all text output — it appears in the Terminal
+- Use print() for all text output: it appears in the Terminal
 - For visual output, save to /output/ and it shows in Preview`;

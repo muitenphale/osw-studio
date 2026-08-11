@@ -1,12 +1,12 @@
 export const VUE_DOMAIN_PROMPT = `PROJECT TYPE: Vue (auto-bundled)
 
-This project uses Vue 3. Single-file components (.vue) are compiled in the browser — no build tools or npm needed during development.
+This project uses Vue 3. Single-file components (.vue) are compiled in the browser, no build tools or npm needed during development.
 
 ARCHITECTURE:
-- /index.html — HTML shell with <div id="root"> and <script type="module" src="/bundle.js">
-- /src/main.ts — Entry point: createApp(App).mount("#root")
-- /src/App.vue — Root component
-- /src/components/ — Reusable components (one per file)
+- /index.html: HTML shell with <div id="root"> and <script type="module" src="/bundle.js">
+- /src/main.ts: Entry point: createApp(App).mount("#root")
+- /src/App.vue: Root component
+- /src/components/: Reusable components (one per file)
 
 WRITING COMPONENTS:
 - Create components in /src/components/Name.vue
@@ -14,15 +14,15 @@ WRITING COMPONENTS:
 - Each .vue file contains <script setup>, <template>, and <style>
 
 COMPOSITION API:
-- ref() — reactive primitive:
+- ref(): reactive primitive:
   const count = ref(0); count.value++;
-- reactive() — reactive object:
+- reactive(): reactive object:
   const state = reactive({ name: 'World', items: [] });
-- computed() — derived values:
+- computed(): derived values:
   const doubled = computed(() => count.value * 2);
-- watch() — side effects:
+- watch(): side effects:
   watch(count, (newVal) => console.log(newVal));
-- onMounted(), onUnmounted() — lifecycle hooks
+- onMounted() and onUnmounted(): lifecycle hooks
 
 COMPONENT FORMAT:
 \`\`\`vue
@@ -62,7 +62,7 @@ TEMPLATE SYNTAX:
 - Show/hide: v-show="isVisible"
 
 IMPORTING NPM PACKAGES:
-- Import by package name — resolved via CDN automatically:
+- Import by package name, resolved via CDN automatically:
   import { ref, computed } from "vue";
   import confetti from "canvas-confetti";
   import { format } from "date-fns";
@@ -92,22 +92,22 @@ FILE STRUCTURE EXAMPLE:
 DO NOT:
 - Create .hbs / .handlebars files (those are for the HTML/Handlebars pipeline)
 - Create /templates/ or /data.json (Handlebars-specific)
-- Use Options API (data(), methods, computed properties) — use Composition API
+- Use Options API (data(), methods, computed properties). Use the Composition API instead
 - Use require() or CommonJS modules
 - Create build configs (vite.config.ts, vue.config.js, etc.)
 - Try to install packages with npm/yarn
-- Write JSX/TSX files — use .vue components instead
+- Write JSX/TSX files. Use .vue components instead
 
 BUILD OUTPUT:
 - The project auto-compiles when files change
 - Build errors appear in the Terminal panel (esbuild compilation errors)
 - /bundle.js and /bundle.css are generated files visible in the file explorer
-- If bundle.js is missing, the build failed — check Terminal for errors
+- If bundle.js is missing, the build failed. Check Terminal for errors
 - Use 'cat /bundle.js' to inspect the compiled output if needed
 
 IMPORTANT:
 - The preview rebuilds automatically when any file changes
 - Component state is lost on rebuild (expected behavior)
 - TypeScript in <script setup lang="ts"> is supported
-- All imports resolve at runtime from esm.sh CDN — internet required
+- All imports resolve at runtime from esm.sh CDN, internet required
 - <style scoped> styles are automatically scoped to the component`;
