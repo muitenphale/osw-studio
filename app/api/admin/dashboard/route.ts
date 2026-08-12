@@ -14,6 +14,7 @@ import { getRequestStats, cleanupOldLogs } from '@/lib/logging/request-logger';
 import { getSystemDatabase } from '@/lib/auth/system-database';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { deploymentsStaticRoot } from '@/lib/compiler/deployment-static-dir';
 
 // Read version from package.json
 async function getVersion(): Promise<string> {
@@ -176,7 +177,7 @@ export async function GET() {
       Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM files').get() as { count: number }).count),
       Promise.resolve((db.prepare('SELECT COUNT(*) as count FROM deployments WHERE published_at IS NOT NULL').get() as { count: number }).count),
       countDeploymentDatabases(),
-      getDirectorySize(path.join(process.cwd(), 'public', 'deployments')),
+      getDirectorySize(deploymentsStaticRoot()),
       Promise.resolve(getRequestStats(24)),
       getWhatsNew(),
     ]);

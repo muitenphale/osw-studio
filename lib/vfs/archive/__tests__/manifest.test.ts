@@ -29,12 +29,15 @@ describe('buildManifest', () => {
 
   it('records only files whose stored shape disagrees with their extension', () => {
     const files = [
-      { path: '/config.yaml', content: 'a: 1' },          // .yaml infers binary, stored text
+      // An extension nobody enumerates infers binary, so text stored under one is the
+      // disagreement the manifest exists to record. (.yaml was this case until the text
+      // extension list grew to cover it.)
+      { path: '/report.customfmt', content: 'plain text' },
       { path: '/notes.md', content: '# hi' },             // agrees, omitted
       { path: '/logo.png', content: new ArrayBuffer(4) }, // agrees, omitted
     ] as any[];
     const m = buildManifest(project, files);
-    expect(m.encoding).toEqual({ '/config.yaml': 'text' });
+    expect(m.encoding).toEqual({ '/report.customfmt': 'text' });
   });
 
   it('omits encoding entirely when nothing disagrees', () => {

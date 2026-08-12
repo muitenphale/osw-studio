@@ -14,6 +14,7 @@ import { getWorkspaceById } from '@/lib/auth/system-database';
 import { logger } from '@/lib/utils';
 import fs from 'fs';
 import path from 'path';
+import { deploymentStaticDir } from '@/lib/compiler/deployment-static-dir';
 
 function getDirSize(dir: string): number {
   let total = 0;
@@ -40,7 +41,7 @@ function getCachedStorageMb(workspaceId: string, deploymentIds: string[]): numbe
     const wsDir = path.join(dataDir, 'workspaces', workspaceId);
     totalBytes = getDirSize(wsDir);
     for (const depId of deploymentIds) {
-      totalBytes += getDirSize(path.join(process.cwd(), 'public', 'deployments', depId));
+      totalBytes += getDirSize(deploymentStaticDir(depId));
     }
   } catch {}
   const mb = Math.round(totalBytes / (1024 * 1024) * 10) / 10;

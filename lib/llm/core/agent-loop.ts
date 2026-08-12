@@ -408,7 +408,16 @@ export class AgentLoop {
             this.progress.onEvent('exit_reason', { reason: 'status_complete', iteration });
             break;
           } else if (this.lastStatusResult.hasExplicitFlag) {
-            // Explicit --incomplete flag
+            // Explicit --incomplete. With a message and no tool calls the model did no work and
+            // addressed the user: a hand-back, not progress. Continuing re-prompts it with nothing
+            // new, and it answers its own question rather than waiting. Without a message it is
+            // mid-task and simply reported progress, so carry on.
+            if (hasContent) {
+              this.lastStatusResult = null;
+              exitReason = 'awaiting_user';
+              this.progress.onEvent('exit_reason', { reason: 'awaiting_user', iteration });
+              break;
+            }
             this.lastStatusResult = null;
             this.nudgeCount = 0;
             continue;

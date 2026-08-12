@@ -23,6 +23,8 @@ import {
 
 interface CreateDeploymentModalProps {
   projects: Project[];
+  /** Preselects the project when the dialog is opened from Deploy in the workspace. */
+  initialProjectId?: string;
   isOpen: boolean;
   onClose: () => void;
   onCreate: (data: { projectId: string; name: string; slug?: string }) => Promise<void>;
@@ -30,11 +32,12 @@ interface CreateDeploymentModalProps {
 
 export function CreateDeploymentModal({
   projects,
+  initialProjectId,
   isOpen,
   onClose,
   onCreate,
 }: CreateDeploymentModalProps) {
-  const [projectId, setProjectId] = useState('');
+  const [projectId, setProjectId] = useState(initialProjectId ?? '');
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [isCreating, setIsCreating] = useState(false);

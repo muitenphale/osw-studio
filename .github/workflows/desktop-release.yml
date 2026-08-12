@@ -118,6 +118,7 @@ jobs:
           [ "$RECOVERY" = "ok" ] || FAIL="$FAIL workspace recovery $RECOVERY;"
           [ -f "$DATA_DIR/system.sqlite" ] || FAIL="$FAIL system.sqlite not created in DATA_DIR;"
           [ -d "desktop/app/data" ] && FAIL="$FAIL server wrote data/ into the app directory (read-only when installed);"
+          [ -d "desktop/app/public/deployments" ] && FAIL="$FAIL server wrote published output into the app directory (read-only when installed);"
           if [ -n "$FAIL" ]; then
             echo "::error::Desktop smoke test failed —$FAIL"
             exit 1

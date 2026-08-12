@@ -311,8 +311,83 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
       'yaml': 'yaml',
       'yml': 'yaml',
       'py': 'python',
-      'lua': 'lua'
+      'lua': 'lua',
+      // Frameworks already storable before this list caught up with them.
+      'jsx': 'javascript',
+      'svelte': 'html',
+      'vue': 'html',
+      'hbs': 'handlebars',
+      'handlebars': 'handlebars',
+      // Languages with no runtime here. Editing and highlighting them is independent of running
+      // them: the file is text, and it runs wherever you take it.
+      'php': 'php',
+      'phtml': 'php',
+      'java': 'java',
+      'sql': 'sql',
+      'rb': 'ruby',
+      'go': 'go',
+      'rs': 'rust',
+      'c': 'c',
+      'h': 'c',
+      'cpp': 'cpp',
+      'hpp': 'cpp',
+      'cs': 'csharp',
+      'kt': 'kotlin',
+      'swift': 'swift',
+      'dart': 'dart',
+      'scala': 'scala',
+      'pl': 'perl',
+      'r': 'r',
+      'sh': 'shell',
+      'bash': 'shell',
+      'zsh': 'shell',
+      'fish': 'shell',
+      'bat': 'bat',
+      'ps1': 'powershell',
+      'scss': 'scss',
+      'sass': 'scss',
+      'less': 'less',
+      'graphql': 'graphql',
+      'gql': 'graphql',
+      // No Monaco grammar ships for these; an unknown id simply renders unhighlighted.
+      'toml': 'ini',
+      'ini': 'ini',
+      'cfg': 'ini',
+      'conf': 'ini',
+      'env': 'ini',
+      'properties': 'ini',
+      'jsonc': 'json',
+      'json5': 'json',
+      'ejs': 'html',
+      'erb': 'html',
+      'twig': 'html',
+      'njk': 'html',
+      'liquid': 'html',
+      'mustache': 'html',
+      'astro': 'html',
+      'csv': 'plaintext',
+      'tsv': 'plaintext',
+      'log': 'plaintext',
+      'diff': 'plaintext',
+      'patch': 'plaintext',
+      'rst': 'plaintext',
+      'adoc': 'plaintext',
+      'tex': 'plaintext',
+      'mk': 'plaintext'
     };
+
+    // Extensionless text files, matched on the whole name.
+    const byFilename: Record<string, string> = {
+      'dockerfile': 'dockerfile',
+      'containerfile': 'dockerfile',
+      'makefile': 'plaintext',
+      'jenkinsfile': 'plaintext',
+      'caddyfile': 'plaintext',
+    };
+    const filename = path.split('/').pop()?.toLowerCase() || '';
+    if (byFilename[filename]) {
+      return { type: 'text', language: byFilename[filename] };
+    }
     
     if (textExtensions[ext || '']) {
       return { type: 'text', language: textExtensions[ext || ''] };

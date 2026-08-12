@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { deploymentStaticDir } from '@/lib/compiler/deployment-static-dir';
 
 export async function GET(
   request: NextRequest,
@@ -20,7 +21,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const indexPath = path.join(process.cwd(), 'public', 'deployments', id, 'index.html');
+    const indexPath = path.join(deploymentStaticDir(id), 'index.html');
 
     try {
       await fs.access(indexPath);

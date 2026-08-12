@@ -6,6 +6,25 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.94.0 - Housekeeping (2026-08-13)
+
+Text files the app did not recognise are stored and edited as text now: PHP, Java, SQL, YAML, shell scripts, SCSS, Dockerfile and the rest. Dropping one in used to store it as bytes, so it could not be opened or edited even though nothing about it was binary. The rest of the release is upkeep, plus three fixes.
+
+### Files
+- **Any text format, not only the ones on a list**: bring in a WordPress theme, a Java service or a folder of SQL migrations, edit them here, and run them wherever they belong. v1.90.0 made any file storable; this is about which ones count as text
+- **Files with no extension too**: `Dockerfile`, `Makefile`, `Procfile`, `LICENSE` and similar
+- **Highlighting to match**: the editor knows those languages now, along with `.jsx`, `.svelte`, `.vue` and `.hbs`, which were storable but shown as plain text
+
+### Fixes
+- **Publishing works in the desktop app**: it wrote into the install directory, which is read-only once the app is installed, so publishing failed or was discarded on the next upgrade
+- **Deploy starts a deployment for the project you pressed it from**: it used to leave you on the Deployments list with nothing selected, which is how a deployment ends up serving the wrong project
+- **The assistant waits when it asks you a question**: given no answer it would carry on, invent one, and build on it
+
+### Under the hood
+- **Next.js 16, and nothing known outstanding in `npm audit`**: down from seven advisories, one of them critical
+
+---
+
 ## v1.93.0 - Templates and Publishing (2026-08-11)
 
 The template catalogue goes from twelve to twenty, and you can preview any of them before creating a project, instead of choosing from a name and a one-line description. The new ones cover kinds of project that had nothing before: a local business site, a one-person portfolio, a searchable map of your shops, two chat widgets, a task board, a wiki the assistant keeps current, and a Java service you build elsewhere. The other half of the release is what happens after you build: published React, Preact, Svelte and Vue sites no longer fetch their framework from a CDN, edge functions that call an external API work again after being broken outright, and a key set on a deployment stays set. The security fix below needs one action on projects you already made from the contact form template.

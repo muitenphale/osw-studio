@@ -17,6 +17,7 @@ import { configManager } from '@/lib/config/storage';
 import { detectDeploymentType } from '@/lib/telemetry/config';
 import { checkHFCapabilities, loginHF } from '@/lib/auth/hf-auth';
 import { HFSpaceTarget } from './hf-space-target';
+import { requestDeploymentFor } from '@/lib/deployments/pending-create';
 
 interface DeployDialogProps {
   open: boolean;
@@ -82,6 +83,9 @@ export function DeployDialog({ open, projectId, onOpenChange }: DeployDialogProp
   }
 
   const goToDeployments = () => {
+    // Carry the project across. Without it Deployments opens on a list and the deployment has to be
+    // pointed at a project by hand, which is how a deployment ends up serving one you did not mean.
+    requestDeploymentFor(projectId);
     window.dispatchEvent(new CustomEvent('nav-to-view', { detail: { view: 'deployments' } }));
     close();
   };
@@ -152,14 +156,15 @@ export function DeployDialog({ open, projectId, onOpenChange }: DeployDialogProp
         ) : target === 'osws' && isServerMode ? (
           <>
             <div className="py-4 text-sm text-muted-foreground">
-              Deployments let you publish this project to this instance with their own settings,
-              custom domain, and analytics. Continue to Deployments to create and publish.
+              Deployments publish this project to this instance, each with its own settings, custom
+              domain and analytics. This opens Deployments with a new one started for this project;
+              you enable and publish it there.
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={close}>
                 Cancel
               </Button>
-              <Button onClick={goToDeployments}>Go to Deployments</Button>
+              <Button onClick={goToDeployments}>Create a deployment</Button>
             </DialogFooter>
           </>
         ) : target === 'zip' ? (

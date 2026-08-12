@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.94.0 - 2026-08-13
+
+### AI Orchestration
+- **A run stops for the user when the agent asks something**: a turn with a message, no tool calls and an explicit `status --incomplete` is a hand-back, but `agent-loop.ts` treated the flag as "more work remains" and continued, so the agent answered its own question instead of waiting. It exits `awaiting_user` now. An `--incomplete` with no message still carries on.
+
+### Publishing
+- **Published output can be written outside the install directory**: the builder and both serving routes hardcoded `cwd/public/deployments`, and on a desktop install `cwd` is the app bundle, so publishing failed with `EACCES` or landed where the next upgrade discarded it. `DEPLOYMENTS_STATIC_DIR` redirects it, as `DATA_DIR` and `DEPLOYMENTS_DIR` do for the databases. The default is unchanged, so a `STATIC_PROXY` install keeps serving from where Caddy is rooted.
+- **Deploy in the workspace starts a deployment for that project**: the Server Mode target dispatched `nav-to-view` with no project attached, so it landed on the Deployments list and the deployment had to be pointed at a project by hand, which is how one ends up serving a project you did not mean. It now opens Deployments with a new deployment started for the project you pressed Deploy from.
+
+### Files
+- **Text formats with no runtime here are stored as text**: `SUPPORTED_EXTENSIONS` in `lib/vfs/types.ts` classified anything outside 28 extensions as `binary`, which decides whether an upload is read with `file.text()` or `file.arrayBuffer()` and how a download encodes it. `.php`, `.java`, `.sql`, `.yml`, `.sh`, `.scss` and the rest are text now; unknown extensions still default to bytes. Archives exported before this carry those files as base64.
+- **Extensionless text files are recognised**: `Dockerfile`, `Makefile`, `Procfile`, `LICENSE` and similar matched no extension (`'Dockerfile'.split('.').pop()` returns the whole name) and were read as bytes. `TEXT_FILENAMES` matches them by filename.
+- **The editor highlights the languages it can store**: its map held 16 extensions, so `.php`, `.java`, `.sql`, `.sh`, `.scss`, `.rb`, `.go`, `.rs` and others opened as plaintext, as did `.jsx`, `.svelte`, `.vue` and `.hbs`.
+
+### Dependencies
+- **The dependency tree has no known vulnerabilities**: `npm audit` reported 7 (1 critical, 5 high). The lockfile had drifted behind `node_modules` after an interrupted `npm update`, so `npm ci` and CI installed the vulnerable versions while a local tree looked clean. Refreshing the lock cleared four; the remaining three were `postcss` and `sharp` bundled inside `next`, which needed Next 16.
+- **Next builds with webpack explicitly**: Next 16 defaults to Turbopack and refuses a build carrying a `webpack` config. `next dev` and `next build` now pass `--webpack`, keeping the client-side `better-sqlite3` alias and the `fs`/`path`/`crypto` exclusions that config sets.
+- **`npm run lint` runs `eslint .`**: Next 16 removed the `lint` subcommand. `eslint.config.mjs` now carries the ignores `next lint` applied implicitly (`.next`, `out`, `build`, `public`, `desktop`), so lint covers the same files as before.
+
 ## v1.93.0 - 2026-08-11
 
 ### Templates

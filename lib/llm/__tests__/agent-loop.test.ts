@@ -111,6 +111,105 @@ function defaultConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
 // --- Tests ---
 
 describe('AgentLoop', () => {
+  it('stops for the user when an incomplete status comes with a message and no work', async () => {
+    // A turn with a message and no tool calls did no work and addressed the user: a question. The
+    // loop used to carry on, which re-prompts the model with nothing new — one run asked which
+    // company to build for, was continued, and invented a company to build a whole site for.
+    const statusCall: ToolCall = {
+      id: 'tc1',
+      type: 'function',
+      function: {
+        name: 'bash',
+        arguments:
+          '{"command":"status --task \\"Understand a company\\" --done \\"asked which company\\" --remaining \\"awaiting the company name\\" --incomplete"}',
+      },
+    };
+
+    const provider = createMockProvider([
+      { content: '', toolCalls: [statusCall] },
+      { content: 'Which company would you like me to build a site for?' },
+      { content: 'No name came through, so I will invent one.' },
+    ]);
+
+    const results = new Map([
+      [
+        'tc1',
+        {
+          tool_call_id: 'tc1',
+          content: 'Status recorded.',
+          success: true,
+          signals: {
+            statusResult: {
+              task: 'Understand a company',
+              done: 'asked which company',
+              remaining: 'awaiting the company name',
+              complete: false,
+              hasExplicitFlag: true,
+            },
+          },
+        } as ToolResult,
+      ],
+    ]);
+
+    const loop = new AgentLoop({
+      config: defaultConfig(),
+      provider,
+      executor: createMockExecutor(results),
+      context: createMockContext(),
+      progress: createMockProgress(),
+      cost: createMockCost(),
+    });
+
+    const result = await loop.run('Understand a company');
+
+    expect(result.exitReason).toBe('awaiting_user');
+    // The third response is the invention. Stopping means it is never requested.
+    expect(provider.call).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps working when an incomplete status carries no message', async () => {
+    // Reporting progress mid-task is not a hand-back: there is nothing addressed to the user, so
+    // the run must not stall waiting for input it does not need.
+    const statusCall: ToolCall = {
+      id: 'tc1',
+      type: 'function',
+      function: { name: 'bash', arguments: '{"command":"status --remaining \\"more to do\\" --incomplete"}' },
+    };
+    const doneCall: ToolCall = {
+      id: 'tc2',
+      type: 'function',
+      function: { name: 'bash', arguments: '{"command":"status --remaining \\"none\\" --complete"}' },
+    };
+
+    const provider = createMockProvider([
+      { content: '', toolCalls: [statusCall] },
+      { content: '' },
+      { content: '', toolCalls: [doneCall] },
+      { content: 'Finished.' },
+    ]);
+
+    const results = new Map([
+      ['tc1', { tool_call_id: 'tc1', content: 'Status recorded.', success: true,
+        signals: { statusResult: { task: 't', done: 'd', remaining: 'more to do', complete: false, hasExplicitFlag: true } } } as ToolResult],
+      ['tc2', { tool_call_id: 'tc2', content: 'Status recorded.', success: true,
+        signals: { statusComplete: true, statusResult: { task: 't', done: 'd', remaining: 'none', complete: true, hasExplicitFlag: true } } } as ToolResult],
+    ]);
+
+    const loop = new AgentLoop({
+      config: defaultConfig(),
+      provider,
+      executor: createMockExecutor(results),
+      context: createMockContext(),
+      progress: createMockProgress(),
+      cost: createMockCost(),
+    });
+
+    const result = await loop.run('Do the thing');
+
+    // Ran to completion rather than stalling: the incomplete status carried the run forward.
+    expect(result.exitReason).toBe('status_complete_post_tool');
+  });
+
   it('completes when model returns statusComplete signal', async () => {
     // 1. Provider returns a tool call, 2. Provider returns text (after status signal)
     const toolCall: ToolCall = {

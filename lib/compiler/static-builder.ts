@@ -15,6 +15,7 @@ import { processHtml } from '@/lib/publishing/html-processor';
 import { stripPreviewScripts } from '@/lib/preview/strip-preview-scripts';
 import { generateSitemap, generateRobotsTxt } from '@/lib/publishing/seo-generator';
 import { extractBackendFeatures } from './backend-feature-extractor';
+import { deploymentStaticDir } from './deployment-static-dir';
 import { resolveDeploymentServing, replaceAssetPathsWithDeploymentPrefix } from './deployment-paths';
 
 export interface BuildResult {
@@ -131,8 +132,7 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
 
     // Check if under construction - if so, replace entire deployment with construction page
     if (deployment.underConstruction) {
-      // Output directory: public/deployments/[deploymentId]
-      const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
+      const outputDir = deploymentStaticDir(deploymentId);
 
       // Clean existing output directory
       try {
@@ -231,8 +231,7 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
       }
     }
 
-    // Output directory: public/deployments/[deploymentId]
-    const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
+    const outputDir = deploymentStaticDir(deploymentId);
 
     // Clean existing output directory
     try {
@@ -364,7 +363,7 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
  */
 export async function cleanStaticDeployment(deploymentId: string): Promise<boolean> {
   try {
-    const outputDir = path.join(process.cwd(), 'public', 'deployments', deploymentId);
+    const outputDir = deploymentStaticDir(deploymentId);
     await fs.rm(outputDir, { recursive: true, force: true });
     return true;
   } catch (error) {

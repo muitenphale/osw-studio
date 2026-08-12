@@ -10,6 +10,7 @@ import { DeploymentCard } from '../deployment-card';
 import { DeploymentSettingsModal } from '../deployment-settings';
 import { ServerSettingsModal } from '../server-settings';
 import { CreateDeploymentModal } from '../create-deployment-modal';
+import { takePendingDeploymentRequest } from '@/lib/deployments/pending-create';
 import { AnalyticsDashboard } from '../analytics-dashboard';
 import { TemplateExportDialog } from '../templates/template-export-dialog';
 import { ProjectSwapDialog } from '../project-swap-dialog';
@@ -43,6 +44,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
   const [showServerSettingsModal, setShowServerSettingsModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForProjectId, setCreateForProjectId] = useState<string | undefined>(undefined);
   const [showTemplateExportModal, setShowTemplateExportModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
@@ -139,6 +141,16 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     // Refresh in the background; the dropdown updates reactively when it resolves.
     void refreshProjectList();
   };
+
+  // Deploy in the workspace leaves the project here rather than passing a prop, because this view
+  // is not mounted at the moment Deploy runs. Collect it once, on mount.
+  useEffect(() => {
+    const projectId = takePendingDeploymentRequest();
+    if (!projectId) return;
+    setCreateForProjectId(projectId);
+    setShowCreateModal(true);
+    void refreshProjectList();
+  }, [refreshProjectList]);
 
   // A push from the Server Sync dialog happens in a sibling subtree (it is mounted by PageLayout),
   // so it cannot reach this view through props. It broadcasts instead.
@@ -807,8 +819,13 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
 
       <CreateDeploymentModal
         projects={projects}
+        initialProjectId={createForProjectId}
+        key={createForProjectId ?? 'new'}
         isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        onClose={() => {
+          setShowCreateModal(false);
+          setCreateForProjectId(undefined);
+        }}
         onCreate={handleCreateDeployment}
       />
 

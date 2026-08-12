@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { deploymentStaticDir } from '@/lib/compiler/deployment-static-dir';
 
 const MIME_TYPES: Record<string, string> = {
   html: 'text/html',
@@ -48,7 +49,7 @@ export async function GET(
   const requestedPath = pathSegments.length > 0 ? pathSegments.join('/') : 'index.html';
 
   try {
-    const staticFilePath = path.join(process.cwd(), 'public', 'deployments', id, requestedPath);
+    const staticFilePath = path.join(deploymentStaticDir(id), requestedPath);
 
     try {
       await fs.access(staticFilePath);

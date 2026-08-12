@@ -11,9 +11,18 @@ const nextConfig: NextConfig = {
     'esbuild-wasm',
     'handlebars',
   ],
-  eslint: {
-    ignoreDuringBuilds: true,
+  // Next 16 forwards browser console output to the dev terminal, defaulting to 'warn'. A project
+  // under construction warns constantly, since the agent is mid-write and pages reference images
+  // and files that do not exist yet, and that noise buries everything else.
+  logging: {
+    browserToTerminal: 'error',
   },
+
+  // Next 16 writes AGENTS.md and CLAUDE.md into the project when `next dev` detects an AI agent,
+  // and re-adds them after deletion. This repo keeps its agent instructions in the parent
+  // directory, so an injected CLAUDE.md here would be loaded as a second, unowned source.
+  agentRules: false,
+
   typescript: {
     // We'll handle TypeScript errors separately
     ignoreBuildErrors: false,

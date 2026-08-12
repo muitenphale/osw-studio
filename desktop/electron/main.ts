@@ -65,6 +65,7 @@ async function startNextServer(host: string = 'localhost'): Promise<number> {
   const appDir = app.getAppPath();
   const dataDir = path.join(app.getPath('userData'), 'data');
   const deploymentsDir = path.join(app.getPath('userData'), 'deployments');
+  const deploymentsStaticDir = path.join(app.getPath('userData'), 'deployments-static');
 
   // One-time rescue: versions ≤1.75 stored data inside the install directory.
   // If that data is still reachable (e.g. a Windows update that preserved it),
@@ -72,12 +73,19 @@ async function startNextServer(host: string = 'localhost'): Promise<number> {
   // replaces the bundle (and the data inside it) before this code can run.
   migrateLegacyDir(path.join(appDir, 'data'), dataDir, logToFile);
   migrateLegacyDir(path.join(appDir, 'deployments'), deploymentsDir, logToFile);
+  migrateLegacyDir(path.join(appDir, 'public', 'deployments'), deploymentsStaticDir, logToFile);
 
   fs.mkdirSync(dataDir, { recursive: true });
   process.env.DATA_DIR = dataDir;
 
   fs.mkdirSync(deploymentsDir, { recursive: true });
   process.env.DEPLOYMENTS_DIR = deploymentsDir;
+
+  // Published static output. Without this the builder writes into `cwd/public/deployments`, and
+  // cwd is the app bundle (see the chdir below): publishing fails with EACCES on Linux and
+  // Windows, and on macOS lands inside the bundle where the next drag-install discards it.
+  fs.mkdirSync(deploymentsStaticDir, { recursive: true });
+  process.env.DEPLOYMENTS_STATIC_DIR = deploymentsStaticDir;
 
   // Security secrets — generated on first launch, persisted across restarts
   const secretsFile = path.join(app.getPath('userData'), '.secrets.json');

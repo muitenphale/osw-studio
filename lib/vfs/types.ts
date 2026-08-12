@@ -281,7 +281,20 @@ export const SUPPORTED_EXTENSIONS = {
   css: ['css'],
   js: ['js', 'mjs', 'jsx', 'ts', 'tsx', 'svelte', 'vue', 'py', 'lua'],
   json: ['json'],
-  text: ['txt', 'md', 'xml', 'svg'],
+  text: [
+    'txt', 'md', 'xml', 'svg',
+    // Formats with no runtime here, which is not the same as no support: the agent edits them,
+    // they survive a download, and they run wherever you take them. A .php moved to a WordPress
+    // install is the motivating case.
+    'php', 'phtml', 'ejs', 'erb', 'twig', 'njk', 'liquid', 'mustache', 'astro',
+    'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties', 'jsonc', 'json5',
+    'sql', 'csv', 'tsv', 'graphql', 'gql',
+    'sh', 'bash', 'zsh', 'fish', 'bat', 'ps1', 'mk',
+    'java', 'rb', 'go', 'rs', 'c', 'h', 'cpp', 'hpp', 'cs', 'kt', 'swift', 'pl', 'r', 'scala', 'dart',
+    'scss', 'sass', 'less', 'styl',
+    'rst', 'adoc', 'tex', 'log', 'diff', 'patch',
+    'gitignore', 'gitattributes', 'dockerignore', 'editorconfig', 'npmrc', 'nvmrc', 'example',
+  ],
   template: ['hbs', 'handlebars'],
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp'],
   video: ['mp4', 'webm', 'ogv'],
@@ -304,6 +317,13 @@ export const FILE_SIZE_LIMITS = {
   binary: 10 * 1024 * 1024
 };
 
+/** Extensionless files that are text. Matched on the whole filename, lowercased. */
+export const TEXT_FILENAMES: ReadonlySet<string> = new Set([
+  'dockerfile', 'containerfile', 'makefile', 'rakefile', 'gemfile', 'procfile', 'brewfile',
+  'license', 'licence', 'notice', 'authors', 'contributors', 'changelog', 'readme', 'codeowners',
+  'jenkinsfile', 'vagrantfile', 'caddyfile', 'justfile',
+]);
+
 /**
  * Coarse category for a path, used for presentation: which icon to show, which viewer to open,
  * which size cap to apply. It does NOT decide how content is stored or transported — that follows
@@ -314,6 +334,12 @@ export const FILE_SIZE_LIMITS = {
  * data, and it means a format nobody enumerated — .glb, .wasm, whatever comes next — just works.
  */
 export function getFileTypeFromPath(path: string): FileType {
+  const name = path.split('/').pop()?.toLowerCase() || '';
+
+  // Text files that carry no extension. `'Dockerfile'.split('.').pop()` returns the whole name, so
+  // without this they fall through to 'binary' and get read as bytes.
+  if (TEXT_FILENAMES.has(name)) return 'text';
+
   const ext = path.split('.').pop()?.toLowerCase() || '';
 
   for (const [type, extensions] of Object.entries(SUPPORTED_EXTENSIONS)) {
