@@ -60,7 +60,7 @@ describe('SyncManager.pushProjectDelta', () => {
     expect(body.deletedPaths).toEqual(['/removed.css']);
   });
 
-  it('uses the full sync only when the project does not yet exist on the server', async () => {
+  it('sends every file, and deletes nothing, when the project is not on the server yet', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ status: 404, ok: false })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ project }) });
@@ -68,9 +68,10 @@ describe('SyncManager.pushProjectDelta', () => {
 
     await new SyncManager().pushProjectDelta(project.id, project as any, [unchangedFile]);
 
+    // Two calls, not three: the 404 manifest is handed to the full push rather than re-fetched.
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(body.partial).toBeUndefined();
-    expect(body.files).toHaveLength(1);
+    expect(body.files.map((f: { path: string }) => f.path)).toEqual(['/index.html']);
+    expect(body.deletedPaths).toEqual([]);
   });
 });

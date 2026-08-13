@@ -23,6 +23,16 @@ const nextConfig: NextConfig = {
   // directory, so an injected CLAUDE.md here would be loaded as a second, unowned source.
   agentRules: false,
 
+  experimental: {
+    // Next buffers every request body so it can be replayed into middleware, and truncates that
+    // buffer at this size rather than rejecting the request: the route then receives a body cut
+    // mid-string and `request.json()` throws what reads like data corruption. The default is 10MB.
+    // Pushes are chunked well below this (lib/vfs/sync-manager.ts), so this is headroom rather
+    // than the thing holding the sync together — the whole body is buffered in memory per request,
+    // which is why it is not set higher.
+    proxyClientMaxBodySize: '32mb',
+  },
+
   typescript: {
     // We'll handle TypeScript errors separately
     ignoreBuildErrors: false,

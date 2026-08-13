@@ -83,8 +83,8 @@ describe('applyImport', () => {
     else process.env.NEXT_PUBLIC_SERVER_MODE = serverModeBefore;
   });
 
-  // The checkpoint covers files and directories only — restoreCheckpoint does not touch backend
-  // records or project settings, so "one undo" is true of the file half of an import and no more.
+  // The file half of the undo. Backend records and settings restore too — covered in
+  // checkpoint-backend.test.ts, which exercises them directly rather than through an import.
   it('checkpoints before the first write, and restoring undoes the files it wrote', async () => {
     const project = await vfs.createProject('Checkpoint', 'test');
     await vfs.createFile(project.id, '/index.html', 'ORIGINAL');

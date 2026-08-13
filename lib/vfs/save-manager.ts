@@ -119,7 +119,11 @@ class SaveManager {
         logger.warn('[SaveManager] Saved checkpoint missing', { projectId, checkpointId });
         return false;
       }
-      const success = await checkpointManager.restoreCheckpoint(checkpointId);
+      // Files only. This runs on every project open, not when someone asks to go back, and
+      // backend features are editable from the project gallery with no Save button in sight —
+      // so rolling them back to the last save here would silently discard an edit the user had
+      // no way to commit, and take any secret value created since it with them.
+      const success = await checkpointManager.restoreCheckpoint(checkpointId, { backend: false });
       if (!success) {
         logger.error('[SaveManager] Failed to restore saved checkpoint', { projectId, checkpointId });
       }

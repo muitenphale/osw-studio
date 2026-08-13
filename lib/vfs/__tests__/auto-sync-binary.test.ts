@@ -82,7 +82,7 @@ describe('autoSyncProject file payload', () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it('base64-encodes binary content instead of sending an empty object', async () => {
-    // No manifest available → full push of every file.
+    // Server does not have the project yet → every file goes, nothing is deleted.
     mocks.apiFetch.mockImplementation(async (_url: string, init?: { method?: string }) =>
       init?.method === 'POST' ? pushResponse() : { ok: false, status: 404, json: async () => ({}) }
     );
@@ -126,7 +126,22 @@ describe('autoSyncProject file payload', () => {
     expect(body.deletedPaths).toEqual(['/old.html']);
   });
 
-  it('falls back to a full push when the manifest cannot be read', async () => {
+  it('sends every file, and deletes nothing, when the server does not have the project', async () => {
+    mocks.apiFetch.mockImplementation(async (_url: string, init?: { method?: string }) =>
+      init?.method === 'POST' ? pushResponse() : { ok: false, status: 404, json: async () => ({}) }
+    );
+
+    await autoSyncProject('p1');
+
+    const body = pushBody();
+    expect(body.files.map((f: { path: string }) => f.path)).toEqual(['/index.html', '/logo.png']);
+    expect(body.deletedPaths).toEqual([]);
+  });
+
+  it('does not push at all when the manifest cannot be read', async () => {
+    // Every push is partial now, and a partial push needs the manifest to know what the server
+    // holds that this project no longer does. The route's delete-and-recreate would answer that
+    // without a manifest, but it cannot be split across requests — so this retries instead.
     mocks.apiFetch.mockImplementation(async (_url: string, init?: { method?: string }) => {
       if (init?.method === 'POST') return pushResponse();
       throw new Error('network');
@@ -134,10 +149,40 @@ describe('autoSyncProject file payload', () => {
 
     await autoSyncProject('p1');
 
-    const body = pushBody();
-    expect(body.partial).toBe(false);
-    expect(body.files).toHaveLength(2);
-    expect(body.deletedPaths).toEqual([]);
+    expect(mocks.apiFetch.mock.calls.some((call) => call[1]?.method === 'POST')).toBe(false);
+  });
+
+  it('splits a project too large for one request across several, writing the row only at the end', async () => {
+    const big = 'x'.repeat(3 * 1024 * 1024);
+    mocks.listFiles.mockResolvedValue([
+      { path: '/a.txt', content: big, updatedAt: FILE_UPDATED, size: big.length },
+      { path: '/b.txt', content: big, updatedAt: FILE_UPDATED, size: big.length },
+      { path: '/c.txt', content: big, updatedAt: FILE_UPDATED, size: big.length },
+    ]);
+    mocks.apiFetch.mockImplementation(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') return pushResponse();
+      return { ok: true, status: 200, json: async () => ({ files: [{ path: '/gone.txt', updatedAt: FILE_UPDATED.toISOString(), size: 1 }] }) };
+    });
+
+    await autoSyncProject('p1');
+
+    const posts = mocks.apiFetch.mock.calls
+      .filter((call) => call[1]?.method === 'POST')
+      .map((call) => JSON.parse(call[1].body));
+
+    expect(posts.length).toBeGreaterThan(1);
+    // Every batch is partial: a `partial: false` batch would delete what the one before it wrote.
+    expect(posts.every((b) => b.partial === true)).toBe(true);
+    // Only the last batch writes the project row and carries the deletion.
+    expect(posts.map((b) => b.writeProject)).toEqual([
+      ...posts.slice(0, -1).map(() => false),
+      true,
+    ]);
+    expect(posts.slice(0, -1).every((b) => b.deletedPaths.length === 0)).toBe(true);
+    expect(posts[posts.length - 1].deletedPaths).toEqual(['/gone.txt']);
+    // Every file still went, exactly once.
+    expect(posts.flatMap((b) => b.files.map((f: { path: string }) => f.path)).sort())
+      .toEqual(['/a.txt', '/b.txt', '/c.txt']);
   });
 });
 

@@ -35,7 +35,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { checkpointManager } from '@/lib/vfs/checkpoint';
+import { checkpointManager, isEmptyPreview, type BackendRestorePreview } from '@/lib/vfs/checkpoint';
+import { RestoreSecretsDialog } from '@/components/restore-secrets-dialog';
 import { saveManager } from '@/lib/vfs/save-manager';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { useGuidedTour } from '@/components/guided-tour/context';
@@ -87,6 +88,12 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const placedBlocks = useWorkspaceStore(s => s.placedBlocks);
   const paletteOpen = useWorkspaceStore(s => s.paletteOpen);
   const [publishOpen, setPublishOpen] = useState(false);
+  // Set when a restore would cost a stored secret value; held until the user confirms or cancels.
+  const [pendingRestore, setPendingRestore] = useState<{
+    preview: BackendRestorePreview;
+    description?: string;
+    restore: () => Promise<void>;
+  } | null>(null);
 
   // After an OAuth round-trip started from Deploy (grant/reconnect), reopen the Deploy dialog
   // for this project so the user lands back where they left off instead of in the workspace.
@@ -1087,6 +1094,33 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
+  // The /.server/ mount is built from the backend records as they were when the project opened,
+  // so a restore that rewrote those records leaves it describing the wrong ones to the AI and the
+  // file tree. Returns early in browser mode, where nothing is mounted.
+  const remountBackendContext = useCallback(async () => {
+    if (process.env.NEXT_PUBLIC_SERVER_MODE !== 'true' || !backendEnabled) return;
+    await vfs.mountProjectBackendContext(project.id);
+    useWorkspaceStore.getState().bumpRefreshTrigger();
+  }, [backendEnabled, project.id]);
+
+  /**
+   * Run a restore, first confirming any stored secret value it would cost. A checkpoint holds a
+   * secret's name and not its value, so a restore can leave a secret empty or remove it outright;
+   * nothing else a restore does is unrecoverable, and every other case goes straight through.
+   */
+  const runRestore = useCallback(async (
+    checkpointId: string,
+    description: string | undefined,
+    restore: () => Promise<void>
+  ) => {
+    const preview = await checkpointManager.previewRestore(checkpointId);
+    if (!preview || isEmptyPreview(preview)) {
+      await restore();
+      return;
+    }
+    setPendingRestore({ preview, description, restore });
+  }, []);
+
   const handleRestoreCheckpoint = useCallback(async (checkpointId: string, description?: string, options?: { isDiscard?: boolean }) => {
     try {
       // First check if checkpoint exists
@@ -1097,30 +1131,33 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
         return;
       }
 
-      const success = await saveManager.runWithSuppressedDirty(project.id, () =>
-        checkpointManager.restoreCheckpoint(checkpointId)
-      );
-      if (success) {
-        toast.success(`Restored to: ${description || 'checkpoint'}`);
-        track(options?.isDiscard ? 'changes_discarded' : 'checkpoint_restore');
-        handleFilesChange();
+      await runRestore(checkpointId, description, async () => {
+        const success = await saveManager.runWithSuppressedDirty(project.id, () =>
+          checkpointManager.restoreCheckpoint(checkpointId)
+        );
+        if (success) {
+          await remountBackendContext();
+          toast.success(`Restored to: ${description || 'checkpoint'}`);
+          track(options?.isDiscard ? 'changes_discarded' : 'checkpoint_restore');
+          handleFilesChange();
 
-        const savedId = saveManager.getSavedCheckpointId(project.id);
-        if (savedId && savedId === checkpointId) {
-          saveManager.markClean(project.id);
-          const latestProject = await vfs.getProject(project.id);
-          useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
+          const savedId = saveManager.getSavedCheckpointId(project.id);
+          if (savedId && savedId === checkpointId) {
+            saveManager.markClean(project.id);
+            const latestProject = await vfs.getProject(project.id);
+            useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
+          } else {
+            saveManager.markDirty(project.id);
+          }
         } else {
-          saveManager.markDirty(project.id);
+          toast.error('Failed to restore checkpoint');
         }
-      } else {
-        toast.error('Failed to restore checkpoint');
-      }
+      });
     } catch (error) {
       logger.error('Error restoring checkpoint:', error);
       toast.error('Failed to restore checkpoint');
     }
-  }, [handleFilesChange, project.id]);
+  }, [handleFilesChange, project.id, remountBackendContext, runRestore]);
 
   const handleScrollToCheckpoint = useCallback((checkpointId: string) => {
     if (!useWorkspaceStore.getState().showChat) useWorkspaceStore.getState().togglePanel('chat');
@@ -1186,42 +1223,44 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       }
 
       // Restore the checkpoint
-      const success = await saveManager.runWithSuppressedDirty(project.id, () =>
-        checkpointManager.restoreCheckpoint(checkpointId)
-      );
-      if (!success) {
-        toast.error('Failed to restore checkpoint');
-        return;
-      }
+      await runRestore(checkpointId, undefined, async () => {
+        const success = await saveManager.runWithSuppressedDirty(project.id, () =>
+          checkpointManager.restoreCheckpoint(checkpointId)
+        );
+        if (!success) {
+          toast.error('Failed to restore checkpoint');
+          return;
+        }
+        await remountBackendContext();
 
-      const savedId = saveManager.getSavedCheckpointId(project.id);
-      if (savedId && savedId === checkpointId) {
-        saveManager.markClean(project.id);
-        const latestProject = await vfs.getProject(project.id);
-        useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
-      } else {
-        saveManager.markDirty(project.id);
-      }
+        const savedId = saveManager.getSavedCheckpointId(project.id);
+        if (savedId && savedId === checkpointId) {
+          saveManager.markClean(project.id);
+          const latestProject = await vfs.getProject(project.id);
+          useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
+        } else {
+          saveManager.markDirty(project.id);
+        }
 
-      // Truncate debug events to remove the user message and all subsequent events
-      // The user message will be re-added by the orchestrator when generation runs
-      const truncatedEvents = debugEvents.slice(0, userMessageIndex);
-      useWorkspaceStore.setState({ debugEvents: truncatedEvents });
-      useWorkspaceStore.getState().resetOrchestrator();
-      await debugEventsState.truncateEvents(project.id, truncatedEvents);
+        // Truncate debug events to remove the user message and all subsequent events
+        // The user message will be re-added by the orchestrator when generation runs
+        const truncatedEvents = debugEvents.slice(0, userMessageIndex);
+        useWorkspaceStore.setState({ debugEvents: truncatedEvents });
+        useWorkspaceStore.getState().resetOrchestrator();
+        await debugEventsState.truncateEvents(project.id, truncatedEvents);
 
-      toast.success('Restored checkpoint and retrying...');
-      handleFilesChange();
+        toast.success('Restored checkpoint and retrying...');
+        handleFilesChange();
 
-      // Retry generation with the original user message.
-      // Use setTimeout so handleGenerate (declared below) is available.
-      setTimeout(() => handleGenerateRef.current?.(userMessageContent), 0);
-
+        // Retry generation with the original user message.
+        // Use setTimeout so handleGenerate (declared below) is available.
+        setTimeout(() => handleGenerateRef.current?.(userMessageContent), 0);
+      });
     } catch (error) {
       logger.error('Error during retry:', error);
       toast.error('Failed to retry');
     }
-  }, [handleFilesChange, project.id, debugEvents]);
+  }, [handleFilesChange, project.id, debugEvents, remountBackendContext, runRestore]);
 
   const storeStartGeneration = useWorkspaceStore(s => s.startGeneration);
 
@@ -1467,6 +1506,21 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
           open={publishOpen}
           projectId={project.id}
           onOpenChange={setPublishOpen}
+        />
+
+        <RestoreSecretsDialog
+          open={pendingRestore !== null}
+          description={pendingRestore?.description}
+          preview={pendingRestore?.preview ?? null}
+          onCancel={() => setPendingRestore(null)}
+          onConfirm={() => {
+            const pending = pendingRestore;
+            setPendingRestore(null);
+            pending?.restore().catch(error => {
+              logger.error('Error restoring checkpoint:', error);
+              toast.error('Failed to restore checkpoint');
+            });
+          }}
         />
 
         {/* Desktop Workspace */}

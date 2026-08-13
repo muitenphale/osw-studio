@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.94.1 - 2026-08-13
+
+### Server Sync
+- **A project larger than one request body pushes**: `pushSingleProject`, `pushProjectDelta` (`lib/vfs/sync-manager.ts`) and `autoSyncProject` (`lib/vfs/auto-sync.ts`) send files in ~5MB batches. Next truncates a body past `experimental.proxyClientMaxBodySize` instead of rejecting it, so the route parsed a body cut mid-string and returned 500. Auto-sync read that 500 as the backend being down.
+- **`experimental.proxyClientMaxBodySize` is 32MB** (`next.config.ts`), up from the 10MB default. Batching keeps pushes under it.
+- **Every push sends `partial: true`**: a `partial: false` delete-and-recreate cannot be split across requests, so both paths compute `deletedPaths` from the server manifest. A push whose manifest cannot be read is refused rather than attempted.
+- **Only the last batch of a push writes the project row**: the route takes `writeProject`. The row stores the client's `updatedAt`, so an earlier batch writing it put the server past the client's `lastSyncedAt` and the next batch took a 409 from the concurrency check. A row a non-final batch creates is stamped at the epoch, since an equal pair of timestamps reads as `synced`.
+- **An interrupted push resumes**: deletions ride with the last batch and `lastSyncedAt` is recorded only once it lands, so the retry is a delta carrying the remainder.
+- **A file over 24MB serialized fails the push by path** rather than being dropped from it.
+- **Push and pull report progress**: `lib/vfs/sync-progress-toast.ts` updates one toast in place, batch count for a push and file count for a pull.
+
+### Checkpoints
+- **Checkpoints cover backend features and project settings**: `createCheckpoint` snapshotted only `listDirectory` output, leaving edge functions, server functions, secrets, schedules, `runtime`, `previewEntryPoint`, `globalStyles` and `databaseSchema` outside every undo. `lib/vfs/checkpoint-backend.ts` captures and diffs them; `restoreCheckpoint` takes `{ backend: false }`. Checkpoints written before this leave the backend alone.
+- **A checkpoint holds a secret's name, never its value**: a restore keeps the project's stored value where the secret still exists. `previewRestore` reports the two cases that cost one, and the workspace confirms before those restores only.
+- **`saveManager.restoreLastSaved` restores files only**: it runs on every project open, and backend features are editable from the project gallery, so rolling them back to the last save discarded edits there was no Save button to commit.
+
 ## v1.94.0 - 2026-08-13
 
 ### AI Orchestration

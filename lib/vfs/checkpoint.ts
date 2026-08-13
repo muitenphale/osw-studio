@@ -1,6 +1,17 @@
 import { getActiveVFS } from './index';
 import { logger } from '@/lib/utils';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
+import {
+  captureBackend,
+  isEmptyPreview,
+  previewBackendRestore,
+  restoreBackend,
+  type BackendRestorePreview,
+  type CheckpointBackendSnapshot,
+} from './checkpoint-backend';
+
+export { isEmptyPreview };
+export type { BackendRestorePreview, CheckpointBackendSnapshot };
 
 export type CheckpointKind = 'auto' | 'manual';
 
@@ -21,6 +32,12 @@ export interface Checkpoint {
   kind: CheckpointKind;
   pinned?: boolean;
   baseRevisionId?: string | null;
+  /**
+   * Backend records and covered project settings. Absent on checkpoints written before this
+   * existed, and on any created while the adapter could not list backend records — in both cases
+   * a restore leaves the project's backend alone rather than treating "nothing" as "empty".
+   */
+  backend?: CheckpointBackendSnapshot;
 }
 
 // Lightweight metadata for listing (kept in RAM)
@@ -45,9 +62,10 @@ interface StoredCheckpoint {
   kind?: CheckpointKind;
   pinned?: boolean;
   baseRevisionId?: string | null;
+  backend?: CheckpointBackendSnapshot;
 }
 
-// Compressed checkpoint format — lz-string UTF-16 encoded files+directories
+// Compressed checkpoint format — lz-string UTF-16 encoded files+directories+backend
 interface StoredCheckpointCompressed {
   id: string;
   timestamp: string;
@@ -57,7 +75,7 @@ interface StoredCheckpointCompressed {
   pinned?: boolean;
   baseRevisionId?: string | null;
   compressed: true;
-  compressedData: string; // lz-string UTF-16 compressed JSON of { files, directories }
+  compressedData: string; // lz-string UTF-16 compressed JSON of { files, directories, backend }
 }
 
 type StoredCheckpointAny = StoredCheckpoint | StoredCheckpointCompressed;
@@ -182,6 +200,7 @@ class CheckpointManager {
 
         let files: Map<string, string | CheckpointFileContent>;
         let directories: Set<string>;
+        let backend: CheckpointBackendSnapshot | undefined;
 
         if ('compressed' in stored && stored.compressed) {
           // Compressed format — decompress lz-string UTF-16
@@ -194,11 +213,13 @@ class CheckpointManager {
           const parsed = JSON.parse(json);
           files = new Map(parsed.files);
           directories = new Set(parsed.directories);
+          backend = parsed.backend;
         } else {
           // Legacy uncompressed format
           const legacy = stored as StoredCheckpoint;
           files = new Map(legacy.files);
           directories = new Set(legacy.directories);
+          backend = legacy.backend;
         }
 
         const checkpoint: Checkpoint = {
@@ -210,7 +231,8 @@ class CheckpointManager {
           pinned: stored.pinned ?? false,
           baseRevisionId: stored.baseRevisionId ?? null,
           files,
-          directories
+          directories,
+          backend
         };
         resolve(checkpoint);
       };
@@ -233,7 +255,8 @@ class CheckpointManager {
     try {
       const payload = JSON.stringify({
         files: Array.from(checkpoint.files.entries()),
-        directories: Array.from(checkpoint.directories)
+        directories: Array.from(checkpoint.directories),
+        backend: checkpoint.backend
       });
       const compressedData = compressToUTF16(payload);
 
@@ -359,7 +382,8 @@ class CheckpointManager {
       directories,
       projectId,
       kind: options.kind || 'auto',
-      baseRevisionId: options.baseRevisionId ?? null
+      baseRevisionId: options.baseRevisionId ?? null,
+      backend: await captureBackend(activeVFS, projectId)
     };
 
     const metadata: CheckpointMetadata = {
@@ -399,9 +423,80 @@ class CheckpointManager {
   }
   
   /**
-   * Restore project to a checkpoint
+   * What restoring this checkpoint would do to the project's stored secret values.
+   *
+   * Returns null when the checkpoint is missing or predates backend coverage, which callers read
+   * as "nothing to warn about". `isEmptyPreview` distinguishes a restore that touches no secret
+   * from one that has not been checked.
    */
-  async restoreCheckpoint(checkpointId: string): Promise<boolean> {
+  async previewRestore(checkpointId: string): Promise<BackendRestorePreview | null> {
+    await this.initDB();
+
+    const loaded = await this.loadBackendFromDB(checkpointId);
+    if (!loaded) return null;
+
+    const activeVFS = getActiveVFS();
+    await activeVFS.init();
+
+    try {
+      return await previewBackendRestore(activeVFS, loaded.backend, loaded.projectId);
+    } catch (error) {
+      logger.error('[Checkpoint] Failed to preview restore', error);
+      return null;
+    }
+  }
+
+  /**
+   * Read only the backend half of a stored checkpoint.
+   *
+   * A preview runs on the way to a restore that loads the same record again, so it skips
+   * rebuilding the file Map and directory Set it has no use for. The payload still has to be
+   * decompressed to reach the backend snapshot; caching it between the two reads would avoid that
+   * too, and a stale cache on the path that overwrites the project is not worth the milliseconds.
+   */
+  private async loadBackendFromDB(
+    checkpointId: string
+  ): Promise<{ backend: CheckpointBackendSnapshot; projectId: string } | null> {
+    return new Promise((resolve, reject) => {
+      const db = this.getDB();
+      const request = db.transaction([this.storeName], 'readonly').objectStore(this.storeName).get(checkpointId);
+
+      request.onsuccess = () => {
+        const stored = request.result as StoredCheckpointAny | undefined;
+        if (!stored) {
+          resolve(null);
+          return;
+        }
+
+        let backend: CheckpointBackendSnapshot | undefined;
+        if ('compressed' in stored && stored.compressed) {
+          const json = decompressFromUTF16(stored.compressedData);
+          backend = json ? JSON.parse(json).backend : undefined;
+        } else {
+          backend = (stored as StoredCheckpoint).backend;
+        }
+
+        resolve(backend ? { backend, projectId: stored.projectId } : null);
+      };
+
+      request.onerror = () => {
+        logger.error('Failed to load checkpoint from DB');
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Restore project to a checkpoint.
+   *
+   * `options.backend` opts out of restoring backend records and settings. The one caller that
+   * does is `saveManager.restoreLastSaved`, which runs on every project open rather than on a
+   * user asking to go back — see the comment there.
+   */
+  async restoreCheckpoint(
+    checkpointId: string,
+    options: { backend?: boolean } = {}
+  ): Promise<boolean> {
     // Defensive check: ensure checkpointId is a string
     if (typeof checkpointId !== 'string') {
       logger.error('[Checkpoint] Invalid checkpoint ID type:', typeof checkpointId, checkpointId);
@@ -493,6 +588,12 @@ class CheckpointManager {
         } else {
           await activeVFS.createFile(checkpoint.projectId, path, actualContent, { silent: true });
         }
+      }
+
+      // After the files, so a restored edge function and the code that calls it land together,
+      // and so a backend failure cannot leave the file half half-written.
+      if (checkpoint.backend && options.backend !== false) {
+        await restoreBackend(activeVFS, checkpoint.backend, checkpoint.projectId);
       }
 
       if (typeof window !== 'undefined') {

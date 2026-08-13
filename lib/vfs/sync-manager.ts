@@ -39,6 +39,76 @@ interface FileManifestEntry {
   size?: number;
 }
 
+/** Reported as each batch of a chunked push lands, so callers can show a ratio, not a spinner. */
+export interface PushProgress {
+  batch: number;
+  batches: number;
+}
+
+/**
+ * Target serialized bytes per push batch.
+ *
+ * Next buffers each request body so it can be replayed into middleware and **truncates** it past
+ * `experimental.proxyClientMaxBodySize` rather than rejecting it, so the route receives a body cut
+ * mid-string and `request.json()` throws what looks like data corruption. `next.config.ts` raises
+ * that ceiling to 32MB, and batching well under it keeps the ceiling from being load-bearing —
+ * which matters because a HuggingFace Space or a self-hosted instance behind someone else's proxy
+ * is not ours to configure.
+ */
+const PUSH_BATCH_BYTES = 5 * 1024 * 1024;
+
+/**
+ * A single file this large cannot be batched, since a batch cannot be smaller than the file in it.
+ * Set below the 32MB ceiling so the rest of the request body fits. Named in the error rather than
+ * skipped: a file dropped from a push leaves the server holding a project that is quietly wrong.
+ */
+const PUSH_FILE_LIMIT_BYTES = 24 * 1024 * 1024;
+
+type SerializedFile = VirtualFile & { _isBinaryBase64?: boolean };
+
+function serializedByteSize(value: unknown): number {
+  // Blob measures UTF-8 exactly. JSON.stringify's length is UTF-16 code units, which undercounts
+  // by up to 3x on non-ASCII text — enough to push a "5MB" batch over the wire limit.
+  return new Blob([JSON.stringify(value)]).size;
+}
+
+/**
+ * Split files into batches under `cap` bytes, keeping every file whole.
+ *
+ * Batches by serialized size rather than file count because one image can outweigh a hundred
+ * pages. Always returns at least one batch: a push with no changed files still has to carry the
+ * project metadata and any deletions.
+ */
+export function batchFilesBySize(
+  files: SerializedFile[],
+  cap: number = PUSH_BATCH_BYTES,
+  fileLimit: number = PUSH_FILE_LIMIT_BYTES
+): { batches: SerializedFile[][]; oversized: string[] } {
+  const batches: SerializedFile[][] = [];
+  const oversized: string[] = [];
+  let current: SerializedFile[] = [];
+  let currentBytes = 0;
+
+  for (const file of files) {
+    const size = serializedByteSize(file);
+    if (size > fileLimit) {
+      oversized.push(file.path);
+      continue;
+    }
+    if (current.length > 0 && currentBytes + size > cap) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(file);
+    currentBytes += size;
+  }
+  if (current.length > 0) batches.push(current);
+  if (batches.length === 0) batches.push([]);
+
+  return { batches, oversized };
+}
+
 export interface SkillSyncResult extends SyncResult {
   skill?: Skill;
   action?: 'created' | 'updated';
@@ -350,108 +420,79 @@ export class SyncManager {
   }
 
   /**
-   * Push a single project and all of its files to the server.
+   * Fetch the server's file manifest for a project.
    *
-   * `force` overwrites the server copy even when it has moved on since this client last synced.
-   * Reserved for an explicit push from Server Sync: the user is looking at the conflict and
-   * choosing to keep the local copy. Background syncs omit it so conflicts still surface.
+   * `absent` is a 404, which is how a project the server has never seen reports itself.
+   * `unavailable` is anything else, and callers treat it as "cannot compute a delta" rather than
+   * as an error, so a push still has a path that does not depend on this endpoint. It carries the
+   * server's own message, because "Unauthorized" is the thing worth reading in a log and a
+   * generic failure line would replace it.
    */
-  async pushSingleProject(
-    projectId: string,
-    project: Project,
-    files: VirtualFile[],
-    options?: { force?: boolean }
-  ): Promise<ProjectSyncResult> {
+  private async fetchManifest(projectId: string): Promise<
+    | { status: 'ok'; project: Project; files: FileManifestEntry[] }
+    | { status: 'absent' }
+    | { status: 'unavailable'; error: string }
+  > {
     try {
-      const serializedFiles = files.map(serializeFileContent);
-
-      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ project, files: serializedFiles, force: options?.force ?? false }),
-      });
-
+      const response = await fetch(
+        `${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}?manifest=1`,
+      );
+      if (response.status === 404) return { status: 'absent' };
       if (!response.ok) {
-        const errorData = await response.json();
-        return {
-          success: false,
-          error: errorData.error || `HTTP ${response.status}`,
-        };
+        const errorData = await response.json().catch(() => ({}));
+        return { status: 'unavailable', error: errorData.error || `HTTP ${response.status}` };
       }
-
-      const data = await response.json();
-      return {
-        success: true,
-        project: data.project,
-      };
+      const data = await response.json() as { project: Project; files: FileManifestEntry[] };
+      return { status: 'ok', project: data.project, files: data.files };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Network error',
-      };
+      return { status: 'unavailable', error: error instanceof Error ? error.message : 'Network error' };
     }
   }
 
   /**
-   * Sync only files whose VFS revision differs from the server manifest. The
-   * first sync still sends the full project; later generations avoid sending
-   * unchanged source and binary assets over the network.
+   * Send a push as a sequence of `partial: true` batches.
+   *
+   * Three things make this safe to interrupt, and all three are load-bearing:
+   *
+   * 1. **Only the last batch writes the project row** (`writeProject`). The route stores the row
+   *    with the client's `updatedAt`, so a batch that wrote it would move the server's timestamp
+   *    past the client's `lastSyncedAt` and the *next* batch of the same push would fail the
+   *    optimistic-concurrency check against itself. Holding the write to the end keeps the check
+   *    live — it still catches a real concurrent change — rather than forcing past it.
+   * 2. **Deletions ride with that last batch.** Until a push completes, the server's copy is
+   *    strictly additive, so a run that dies half way has lost nothing.
+   * 3. **The caller records `lastSyncedAt` only on success.** A partially applied push must keep
+   *    reading as un-synced, because that is what makes the retry a delta that resends the
+   *    remainder instead of a no-op.
    */
-  async pushProjectDelta(projectId: string, project: Project, files: VirtualFile[]): Promise<ProjectSyncResult> {
-    try {
-      const manifestResponse = await fetch(
-        `${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}?manifest=1`,
-      );
-
-      if (manifestResponse.status === 404) {
-        return this.pushSingleProject(projectId, project, files);
-      }
-      if (!manifestResponse.ok) {
-        const errorData = await manifestResponse.json().catch(() => ({}));
-        return { success: false, error: errorData.error || `HTTP ${manifestResponse.status}` };
-      }
-
-      const manifestData = await manifestResponse.json() as {
-        project: Project;
-        files: FileManifestEntry[];
+  private async pushBatches(
+    projectId: string,
+    project: Project,
+    serializedFiles: SerializedFile[],
+    deletedPaths: string[],
+    options?: { force?: boolean; onProgress?: (progress: PushProgress) => void }
+  ): Promise<ProjectSyncResult> {
+    const { batches, oversized } = batchFilesBySize(serializedFiles);
+    if (oversized.length > 0) {
+      return {
+        success: false,
+        error: `Too large to sync (over ${Math.round(PUSH_FILE_LIMIT_BYTES / 1024 / 1024)}MB once encoded): ${oversized.join(', ')}`,
       };
-      const serverProject = manifestData.project;
-      const clientLastSynced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : 0;
-      const serverUpdated = new Date(serverProject.updatedAt).getTime();
-      // No force option here on purpose. A delta sends only the files that differ from the server's
-      // manifest, so forcing one would leave whatever the server gained meanwhile in place — the
-      // opposite of "keep my copy". Resolving a conflict goes through the full push instead.
-      if (clientLastSynced > 0 && serverUpdated > clientLastSynced) {
-        return { success: false, error: 'conflict' };
-      }
+    }
 
-      const serverFiles = new Map(manifestData.files.map((file) => [file.path, file]));
-      const changedFiles = files.filter((file) => {
-        const serverFile = serverFiles.get(file.path);
-        if (!serverFile) return true;
-        return new Date(serverFile.updatedAt).getTime() !== new Date(file.updatedAt).getTime()
-          || (serverFile.size ?? 0) !== (file.size ?? 0);
-      });
-      const localPaths = new Set(files.map((file) => file.path));
-      const deletedPaths = manifestData.files
-        .filter((file) => !localPaths.has(file.path))
-        .map((file) => file.path);
-      const projectChanged = new Date(project.updatedAt).getTime() !== serverUpdated;
-
-      if (changedFiles.length === 0 && deletedPaths.length === 0 && !projectChanged) {
-        return { success: true, project: serverProject };
-      }
-
+    let lastProject: Project | undefined;
+    for (let i = 0; i < batches.length; i++) {
+      const isLast = i === batches.length - 1;
       const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project,
-          files: changedFiles.map(serializeFileContent),
-          deletedPaths,
+          files: batches[i],
+          deletedPaths: isLast ? deletedPaths : [],
           partial: true,
+          force: options?.force ?? false,
+          writeProject: isLast,
         }),
       });
 
@@ -461,7 +502,126 @@ export class SyncManager {
       }
 
       const data = await response.json();
-      return { success: true, project: data.project };
+      lastProject = data.project;
+      options?.onProgress?.({ batch: i + 1, batches: batches.length });
+    }
+
+    return { success: true, project: lastProject };
+  }
+
+  /**
+   * Push a project and all of its files to the server.
+   *
+   * `force` overwrites the server copy even when it has moved on since this client last synced.
+   * Reserved for an explicit push from Server Sync: the user is looking at the conflict and
+   * choosing to keep the local copy. Background syncs omit it so conflicts still surface.
+   *
+   * Sends every local file, so it is the first upload and the "make the server match my copy"
+   * button rather than a routine save. Files the server holds and this project no longer has are
+   * removed by path, which is the chunkable equivalent of the delete-all the route still supports
+   * for a `partial: false` push — a 129MB project cannot be one request, and that request would be
+   * silently truncated rather than refused.
+   */
+  async pushSingleProject(
+    projectId: string,
+    project: Project,
+    files: VirtualFile[],
+    options?: { force?: boolean; onProgress?: (progress: PushProgress) => void }
+  ): Promise<ProjectSyncResult> {
+    try {
+      return await this.pushAllFiles(projectId, project, files, await this.fetchManifest(projectId), options);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * The body of `pushSingleProject`, taking the manifest as an argument so the delta path can hand
+   * over the one it already fetched instead of paying for a second round trip on a first upload.
+   */
+  private async pushAllFiles(
+    projectId: string,
+    project: Project,
+    files: VirtualFile[],
+    manifest: Awaited<ReturnType<SyncManager['fetchManifest']>>,
+    options?: { force?: boolean; onProgress?: (progress: PushProgress) => void }
+  ): Promise<ProjectSyncResult> {
+    // Without a manifest there is no way to know what the server holds that this project does
+    // not, and the route's `partial: false` delete-and-recreate cannot be split across requests —
+    // each batch would delete what the batch before it wrote. Reported rather than attempted: a
+    // manifest that cannot be read almost always means a POST would fail too.
+    if (manifest.status === 'unavailable') {
+      return { success: false, error: manifest.error };
+    }
+
+    const localPaths = new Set(files.map((file) => file.path));
+    const deletedPaths = manifest.status === 'ok'
+      ? manifest.files.filter((file) => !localPaths.has(file.path)).map((file) => file.path)
+      : [];
+
+    return this.pushBatches(projectId, project, files.map(serializeFileContent), deletedPaths, options);
+  }
+
+  /**
+   * Sync only files whose VFS revision differs from the server manifest. The
+   * first sync still sends the full project; later generations avoid sending
+   * unchanged source and binary assets over the network.
+   */
+  async pushProjectDelta(
+    projectId: string,
+    project: Project,
+    files: VirtualFile[],
+    options?: { onProgress?: (progress: PushProgress) => void }
+  ): Promise<ProjectSyncResult> {
+    try {
+      const manifest = await this.fetchManifest(projectId);
+
+      if (manifest.status === 'absent') {
+        // Everything is new, and there is nothing on the server to delete. Hand the manifest over
+        // rather than letting the full push fetch it again.
+        return this.pushAllFiles(projectId, project, files, manifest, options);
+      }
+      if (manifest.status === 'unavailable') {
+        return { success: false, error: manifest.error };
+      }
+
+      const serverProject = manifest.project;
+      const clientLastSynced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : 0;
+      const serverUpdated = new Date(serverProject.updatedAt).getTime();
+      // No force option here on purpose. A delta sends only the files that differ from the server's
+      // manifest, so forcing one would leave whatever the server gained meanwhile in place — the
+      // opposite of "keep my copy". Resolving a conflict goes through the full push instead.
+      if (clientLastSynced > 0 && serverUpdated > clientLastSynced) {
+        return { success: false, error: 'conflict' };
+      }
+
+      const serverFiles = new Map(manifest.files.map((file) => [file.path, file]));
+      const changedFiles = files.filter((file) => {
+        const serverFile = serverFiles.get(file.path);
+        if (!serverFile) return true;
+        return new Date(serverFile.updatedAt).getTime() !== new Date(file.updatedAt).getTime()
+          || (serverFile.size ?? 0) !== (file.size ?? 0);
+      });
+      const localPaths = new Set(files.map((file) => file.path));
+      const deletedPaths = manifest.files
+        .filter((file) => !localPaths.has(file.path))
+        .map((file) => file.path);
+      const projectChanged = new Date(project.updatedAt).getTime() !== serverUpdated;
+
+      if (changedFiles.length === 0 && deletedPaths.length === 0 && !projectChanged) {
+        return { success: true, project: serverProject };
+      }
+
+      return await this.pushBatches(
+        projectId,
+        project,
+        changedFiles.map(serializeFileContent),
+        deletedPaths,
+        options
+      );
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Network error' };
     }

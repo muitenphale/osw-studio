@@ -6,7 +6,7 @@ import { SummaryBar } from './summary-bar';
 import { SyncItemRow } from '../sync-item-row';
 import { vfs, Project } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
-import { toast } from 'sonner';
+import { createSyncProgressToast } from '@/lib/vfs/sync-progress-toast';
 import { logger } from '@/lib/utils';
 import { track } from '@/lib/telemetry';
 
@@ -57,10 +57,13 @@ export function ProjectsTab({
 
   const handlePushSingle = async (item: SyncableItem, opts?: { silent?: boolean }) => {
     onSyncingIdsChange((prev: Set<string>) => new Set(prev).add(item.id));
+    // A push is one request per batch, so a large project is a sequence of them. The toast
+    // resolves to this push's own outcome, replacing the ones the code below used to raise.
+    const progress = createSyncProgressToast(`Pushing "${item.name}"`);
     try {
       const project = await vfs.getProject(item.id);
       if (!project) {
-        toast.error(`Project "${item.name}" not found`);
+        progress.error(`Project "${item.name}" not found`);
         return;
       }
 
@@ -68,7 +71,10 @@ export function ProjectsTab({
       // An explicit push from this dialog means "make the server match my copy", including when
       // both sides have changed — the row says Conflict and the tooltip offers exactly this. Only
       // background syncs leave the server's newer copy alone and report the conflict instead.
-      const result = await syncManager.pushSingleProject(item.id, project, files, { force: true });
+      const result = await syncManager.pushSingleProject(item.id, project, files, {
+        force: true,
+        onProgress: ({ batch, batches }) => progress.update(batch, batches),
+      });
 
       if (result.success) {
         // Update local sync metadata to prevent conflict on refresh
@@ -80,19 +86,19 @@ export function ProjectsTab({
           project.serverUpdatedAt = serverUpdatedAt;
           await vfs.updateProject(project, { preserveUpdatedAt: true });
         }
-        toast.success(`Pushed "${item.name}" to server`);
+        progress.success(`Pushed "${item.name}" to server`);
         if (!opts?.silent) {
           track('sync_manual', { item_type: 'project', direction: 'push', bulk: false, count: 1 });
         }
         onRefresh();
         onSyncComplete();
       } else {
-        toast.error(result.error || 'Failed to push project');
+        progress.error(result.error || 'Failed to push project');
         track('sync_fail', { item_type: 'project', direction: 'push' });
       }
     } catch (error) {
       logger.error('Push error:', error);
-      toast.error('Failed to push project');
+      progress.error('Failed to push project');
       track('sync_fail', { item_type: 'project', direction: 'push' });
     } finally {
       onSyncingIdsChange((prev: Set<string>) => {
@@ -105,11 +111,14 @@ export function ProjectsTab({
 
   const handlePullSingle = async (item: SyncableItem, opts?: { silent?: boolean }) => {
     onSyncingIdsChange((prev: Set<string>) => new Set(prev).add(item.id));
+    // The download is one request, but writing the files back is one VFS call each — which is the
+    // part that takes visible time on a large project and showed nothing until it finished.
+    const progress = createSyncProgressToast(`Pulling "${item.name}"`);
     try {
       const result = await syncManager.pullSingleProject(item.id);
 
       if (!result.success || !result.project) {
-        toast.error(result.error || 'Failed to pull project');
+        progress.error(result.error || 'Failed to pull project');
         track('sync_fail', { item_type: 'project', direction: 'pull' });
         return;
       }
@@ -134,8 +143,11 @@ export function ProjectsTab({
       }
 
       // Create all files
-      for (const file of result.files || []) {
+      const pulledFiles = result.files || [];
+      let written = 0;
+      for (const file of pulledFiles) {
         await vfs.createFile(item.id, file.path, file.content || '');
+        progress.update(++written, pulledFiles.length);
       }
 
       // Update project with server data and sync metadata
@@ -157,7 +169,7 @@ export function ProjectsTab({
         await vfs.updateProject(pulledProject, { preserveUpdatedAt: true });
       }
 
-      toast.success(`Pulled "${item.name}" from server`);
+      progress.success(`Pulled "${item.name}" from server`);
       if (!opts?.silent) {
         track('sync_manual', { item_type: 'project', direction: 'pull', bulk: false, count: 1 });
       }
@@ -165,7 +177,7 @@ export function ProjectsTab({
       onSyncComplete();
     } catch (error) {
       logger.error('Pull error:', error);
-      toast.error('Failed to pull project');
+      progress.error('Failed to pull project');
       track('sync_fail', { item_type: 'project', direction: 'pull' });
     } finally {
       onSyncingIdsChange((prev: Set<string>) => {

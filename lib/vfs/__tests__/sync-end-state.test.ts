@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({ getWorkspaceContext: vi.fn() }));
 
 vi.mock('@/lib/api/workspace-context', () => ({ getWorkspaceContext: mocks.getWorkspaceContext }));
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock('@/lib/telemetry', () => ({ track: vi.fn() }));
 

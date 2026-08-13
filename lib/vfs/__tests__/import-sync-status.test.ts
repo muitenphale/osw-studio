@@ -23,7 +23,7 @@ vi.mock('@/lib/vfs/sync-manager', () => ({
     pushProjectDelta: mocks.pushProjectDelta,
   }),
 }));
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), loading: vi.fn(), dismiss: vi.fn() } }));
 
 import { vfs } from '../index';
 import { pushProjectToServer } from '../push-project-to-server';

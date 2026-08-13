@@ -36,9 +36,22 @@ let createdDirs: string[] = [];
 let createdFiles: { path: string; content: string | ArrayBuffer }[] = [];
 let updatedFiles: { path: string; content: string | ArrayBuffer }[] = [];
 
+// Backend features live on the storage adapter, not the VFS. These tests are about files, so the
+// adapter here holds nothing: captureBackend still runs, and an empty snapshot is what it records.
+// checkpoint-backend.test.ts is where a populated one is exercised.
+const emptyBackendAdapter = {
+  listEdgeFunctions: async () => [],
+  listServerFunctions: async () => [],
+  listSecrets: async () => [],
+  listScheduledFunctions: async () => [],
+};
+
 const mockVfs = {
   init: vi.fn().mockResolvedValue(undefined),
   getDatabase: () => testDb,
+  getStorageAdapter: () => emptyBackendAdapter,
+  getProject: vi.fn().mockImplementation(async (id: string) => ({ id, name: id, settings: {} })),
+  updateProject: vi.fn().mockResolvedValue(undefined),
   listDirectory: vi.fn().mockImplementation(async () => projectFiles),
   readFile: vi.fn().mockImplementation(async (_pid: string, path: string) => {
     const f = projectFiles.find(f => f.path === path);

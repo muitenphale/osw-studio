@@ -95,11 +95,12 @@ interface FileWrite {
  * The one thing that *is* fatal is a failed checkpoint on an existing project (below).
  *
  * **What the checkpoint does and does not cover.** `restoreCheckpoint` restores files and
- * directories (checkpoint.ts:430) and nothing else: backend records live in the storage adapter,
- * not the VFS, and project settings live on the project row. So the file half of an import is one
- * undo, and replacing an edge or server function's code is *not* — the previous code is in
- * neither the checkpoint nor the archive. That is why nothing here replaces a record the user did
- * not explicitly resolve to 'replace', and why 'keep both' writes a second record instead.
+ * directories, and the backend records and covered settings too
+ * (`lib/vfs/checkpoint-backend.ts`), so an import is one undo. The exception is a secret's stored
+ * value, which a checkpoint deliberately never holds: replacing a secret is the one write here
+ * that cannot be undone. That, plus the fact that an archive carries no old code either, is why
+ * nothing replaces a record the user did not explicitly resolve to 'replace', and why 'keep both'
+ * writes a second record instead.
  *
  * Backend features are written through the storage adapter and never through the `/.server/`
  * mount: `mountProjectBackendContext` returns immediately unless `NEXT_PUBLIC_SERVER_MODE` is
@@ -450,8 +451,9 @@ async function applySettingChanges(
 
 /**
  * A manifest is a hand-editable text file, so its values are input rather than state. A runtime
- * the app does not have would leave the project unable to preview, and unlike a file there is no
- * checkpoint that puts a setting back — checkpoints hold files — so it is refused, not written.
+ * the app does not have would leave the project unable to preview, and a project that cannot
+ * preview is hard to get back from even with the import's checkpoint in hand, so it is refused
+ * rather than written.
  */
 function applySetting(project: Project, change: SettingChange, result: ApplyResult): boolean {
   switch (change.key) {

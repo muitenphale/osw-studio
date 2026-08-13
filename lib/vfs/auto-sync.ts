@@ -7,7 +7,7 @@
 
 import { Project, VirtualFile } from './types';
 import { calculateItemSyncStatus, toTime } from './sync-types';
-import { serializeFileContent, deserializeFileContent } from './sync-manager';
+import { batchFilesBySize, serializeFileContent, deserializeFileContent } from './sync-manager';
 import { notifyServerProjectsChanged } from './sync-events';
 import { vfs } from './index';
 import { saveManager } from './save-manager';
@@ -142,22 +142,25 @@ const MAX_RETRIES = 3;
 /**
  * Work out which files actually need sending.
  *
- * Falls back to a full push whenever the server's manifest can't be read (including the first
- * push, where there is nothing on the server yet) — a full push is correct, just expensive.
+ * A 404 means the server has never seen this project, so everything goes and there is nothing to
+ * delete. Returns null when the manifest cannot be read at all: without it there is no way to know
+ * what the server holds that this project does not, and the alternative — the route's
+ * `partial: false` delete-and-recreate — cannot be split across requests, since each batch would
+ * delete what the batch before it wrote. The caller treats null as a failed sync and retries.
  */
 async function buildFileDelta(
   projectId: string,
   files: VirtualFile[]
-): Promise<{ files: VirtualFile[]; deletedPaths: string[]; partial: boolean }> {
-  const full = { files, deletedPaths: [] as string[], partial: false };
+): Promise<{ files: VirtualFile[]; deletedPaths: string[] } | null> {
   try {
     const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}?manifest=1`));
-    if (!response.ok) return full;
+    if (response.status === 404) return { files, deletedPaths: [] };
+    if (!response.ok) return null;
 
     const manifest = await response.json() as {
       files?: Array<{ path: string; updatedAt: string; size?: number }>;
     };
-    if (!Array.isArray(manifest.files)) return full;
+    if (!Array.isArray(manifest.files)) return null;
 
     const serverFiles = new Map(manifest.files.map((file) => [file.path, file]));
     const changed = files.filter((file) => {
@@ -171,10 +174,57 @@ async function buildFileDelta(
       .filter((file) => !localPaths.has(file.path))
       .map((file) => file.path);
 
-    return { files: changed, deletedPaths, partial: true };
+    return { files: changed, deletedPaths };
   } catch {
-    return full;
+    return null;
   }
+}
+
+/**
+ * POST the push as a sequence of batches, and hand back the response the caller should act on:
+ * the first that failed, or the last one when they all succeeded.
+ *
+ * Next truncates a request body past `experimental.proxyClientMaxBodySize` rather than rejecting
+ * it, so a project that outgrew the limit arrived cut mid-string and the route's `request.json()`
+ * threw — reported here as a 500, which also marks the whole backend as down. Same protocol as
+ * `SyncManager.pushBatches`: `partial: true` throughout, only the last batch writes the project
+ * row, and deletions ride with it so an interrupted run is strictly additive.
+ */
+async function postProjectBatches(
+  projectId: string,
+  project: Project,
+  files: VirtualFile[],
+  deletedPaths: string[]
+): Promise<Response> {
+  const { batches, oversized } = batchFilesBySize(files.map(serializeFileContent));
+  if (oversized.length > 0) {
+    throw new Error(`Too large to sync: ${oversized.join(', ')}`);
+  }
+
+  for (let i = 0; i < batches.length; i++) {
+    const isLast = i === batches.length - 1;
+    // Binary content MUST go through serializeFileContent (done above): JSON.stringify turns an
+    // ArrayBuffer into {}, and the route rebuilds the server's copy from this payload, so sending
+    // raw files silently replaced every image and font with an empty object.
+    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        project,
+        files: batches[i],
+        deletedPaths: isLast ? deletedPaths : [],
+        partial: true,
+        writeProject: isLast,
+      }),
+    });
+
+    if (!response.ok || isLast) return response;
+  }
+
+  // batchFilesBySize always returns at least one batch, so the loop always returns.
+  throw new Error('[AutoSync] nothing to send');
 }
 
 /**
@@ -204,22 +254,11 @@ export async function autoSyncProject(projectId: string, silent = true): Promise
     // Ask the server what it already has, so an unchanged file is not re-uploaded and, more
     // importantly, so the push does not have to be a full delete-and-recreate of every file.
     const delta = await buildFileDelta(projectId, files);
+    if (!delta) {
+      throw new Error('Sync failed: could not read the server manifest');
+    }
 
-    // Push to server. Binary content MUST go through serializeFileContent: JSON.stringify turns an
-    // ArrayBuffer into {}, and the route rebuilds the server's copy from this payload, so sending
-    // raw files silently replaced every image and font with an empty object.
-    const response = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${projectId}`), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        project,
-        files: delta.files.map(serializeFileContent),
-        deletedPaths: delta.deletedPaths,
-        partial: delta.partial,
-      }),
-    });
+    const response = await postProjectBatches(projectId, project, delta.files, delta.deletedPaths);
 
     if (response.status === 401) {
       syncRetries.delete(projectId);
