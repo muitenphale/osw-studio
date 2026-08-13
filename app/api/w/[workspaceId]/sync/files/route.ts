@@ -70,7 +70,17 @@ export async function POST(
     const { adapter, workspaceId } = await getWorkspaceContext(params);
 
     const body = await request.json();
-    const { projectId, files } = body as { projectId: string; files: (VirtualFile & { _isBinaryBase64?: boolean })[] };
+    /**
+     * `replace` clears the project's files before writing, which is what a push of the whole file
+     * set means. A push too large for one request body arrives as a sequence of them, and only
+     * the first carries it: clearing on every batch would delete what the batch before it wrote.
+     * Defaults to true so a caller that sends the whole set in one request is unchanged.
+     */
+    const { projectId, files, replace = true } = body as {
+      projectId: string;
+      files: (VirtualFile & { _isBinaryBase64?: boolean })[];
+      replace?: boolean;
+    };
 
     if (!projectId || !Array.isArray(files)) {
       return NextResponse.json(
@@ -79,9 +89,12 @@ export async function POST(
       );
     }
 
-    // Check storage quota before writing (managed mode only)
+    // Check storage quota before writing (managed mode only). Once per push rather than once per
+    // batch: getDirSize walks the whole workspace synchronously, which blocks the event loop for
+    // every workspace on the instance, and a chunked push would repeat that walk per batch. The
+    // first batch is the one that carries `replace`.
     const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
-    if (isManagedMode) {
+    if (isManagedMode && replace) {
       const workspace = getWorkspaceById(workspaceId);
       if (workspace) {
         const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -96,12 +109,20 @@ export async function POST(
       }
     }
 
-    // Delete existing files for the project
-    await adapter.deleteProjectFiles(projectId);
+    if (replace) {
+      await adapter.deleteProjectFiles(projectId);
+    }
 
-    // Create all files
     for (const fileData of deserializeFilesFromRequest(files)) {
-      await adapter.createFile(fileData);
+      // Nothing survives the clear, so the batch carrying it creates outright. A later batch has
+      // to upsert, since the path may already be there from a push that was retried.
+      if (replace) {
+        await adapter.createFile(fileData);
+        continue;
+      }
+      const existing = await adapter.getFile(projectId, fileData.path);
+      if (existing) await adapter.updateFile(fileData);
+      else await adapter.createFile(fileData);
     }
 
     return NextResponse.json({ success: true, count: files.length });

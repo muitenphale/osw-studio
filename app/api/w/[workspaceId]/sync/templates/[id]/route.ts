@@ -57,7 +57,18 @@ export async function POST(
     const { adapter } = await getWorkspaceContext(params);
     const { id } = await params;
     const body = await request.json();
-    const { template } = body as { template: CustomTemplate };
+    /**
+     * `appendFiles` adds this request's files to the stored template instead of replacing it.
+     *
+     * A template carries the whole file set of the project it was made from
+     * (`lib/vfs/template-service.ts`), so one too large for a request body has to arrive as a
+     * sequence of them. The first request stores the record and its first slice; the rest append.
+     * Absent it defaults to false, so a caller sending the template in one request is unchanged.
+     */
+    const { template, appendFiles = false } = body as {
+      template: CustomTemplate;
+      appendFiles?: boolean;
+    };
 
     if (!template || template.id !== id) {
       return NextResponse.json(
@@ -70,6 +81,9 @@ export async function POST(
 
     const templateToSave: CustomTemplate = {
       ...template,
+      files: appendFiles && existing
+        ? [...(existing.files ?? []), ...(template.files ?? [])]
+        : template.files,
       updatedAt: new Date(),
     };
 

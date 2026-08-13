@@ -79,14 +79,14 @@ function serializedByteSize(value: unknown): number {
  * pages. Always returns at least one batch: a push with no changed files still has to carry the
  * project metadata and any deletions.
  */
-export function batchFilesBySize(
-  files: SerializedFile[],
+export function batchFilesBySize<T extends { path: string }>(
+  files: T[],
   cap: number = PUSH_BATCH_BYTES,
   fileLimit: number = PUSH_FILE_LIMIT_BYTES
-): { batches: SerializedFile[][]; oversized: string[] } {
-  const batches: SerializedFile[][] = [];
+): { batches: T[][]; oversized: string[] } {
+  const batches: T[][] = [];
   const oversized: string[] = [];
-  let current: SerializedFile[] = [];
+  let current: T[] = [];
   let currentBytes = 0;
 
   for (const file of files) {
@@ -287,31 +287,45 @@ export class SyncManager {
   /**
    * Push files for a project to server (IndexedDB -> SQLite)
    */
-  async pushFiles(projectId: string, files: VirtualFile[]): Promise<FilesSyncResult> {
+  async pushFiles(
+    projectId: string,
+    files: VirtualFile[],
+    options?: { onProgress?: (progress: PushProgress) => void }
+  ): Promise<FilesSyncResult> {
     try {
-      const serializedFiles = files.map(serializeFileContent);
-
-      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/files')}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ projectId, files: serializedFiles }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
+      const { batches, oversized } = batchFilesBySize(files.map(serializeFileContent));
+      if (oversized.length > 0) {
         return {
           success: false,
-          error: errorData.error || `HTTP ${response.status}`,
+          error: `Too large to sync (over ${Math.round(PUSH_FILE_LIMIT_BYTES / 1024 / 1024)}MB once encoded): ${oversized.join(', ')}`,
         };
       }
 
-      const data = await response.json();
-      return {
-        success: true,
-        count: data.count,
-      };
+      let count = 0;
+      for (let i = 0; i < batches.length; i++) {
+        const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/files')}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          // Only the first batch clears the project's files; the rest add to what it wrote.
+          body: JSON.stringify({ projectId, files: batches[i], replace: i === 0 }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          return {
+            success: false,
+            error: errorData.error || `HTTP ${response.status}`,
+          };
+        }
+
+        const data = await response.json();
+        count += data.count ?? 0;
+        options?.onProgress?.({ batch: i + 1, batches: batches.length });
+      }
+
+      return { success: true, count };
     } catch (error) {
       return {
         success: false,
@@ -359,7 +373,8 @@ export class SyncManager {
    */
   async pushProjectWithFiles(
     project: Project,
-    files: VirtualFile[]
+    files: VirtualFile[],
+    options?: { onProgress?: (progress: PushProgress) => void }
   ): Promise<SyncResult> {
     // Push project metadata first
     const projectResult = await this.pushProject(project);
@@ -368,7 +383,7 @@ export class SyncManager {
     }
 
     // Then push all files
-    const filesResult = await this.pushFiles(project.id, files);
+    const filesResult = await this.pushFiles(project.id, files, options);
     if (!filesResult.success) {
       return filesResult;
     }
@@ -1191,29 +1206,45 @@ export class SyncManager {
    */
   async pushTemplate(template: CustomTemplate): Promise<TemplateSyncResult> {
     try {
-      const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/templates/${encodeURIComponent(template.id)}`)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          template: { ...template, files: encodeTemplateFiles(template.files) },
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
+      // A template made from a project carries that project's whole file set, so it runs into the
+      // same request body limit a project push does. The first request stores the record with its
+      // first slice of files; the rest append to it.
+      const { batches, oversized } = batchFilesBySize(encodeTemplateFiles(template.files));
+      if (oversized.length > 0) {
         return {
           success: false,
-          error: errorData.error || `HTTP ${response.status}`,
+          error: `Too large to sync (over ${Math.round(PUSH_FILE_LIMIT_BYTES / 1024 / 1024)}MB once encoded): ${oversized.join(', ')}`,
         };
       }
 
-      const data = await response.json();
+      let data: { template?: CustomTemplate; action?: 'created' | 'updated' } | undefined;
+      for (let i = 0; i < batches.length; i++) {
+        const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/templates/${encodeURIComponent(template.id)}`)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            template: { ...template, files: batches[i] },
+            appendFiles: i > 0,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          return {
+            success: false,
+            error: errorData.error || `HTTP ${response.status}`,
+          };
+        }
+
+        data = await response.json();
+      }
+
       return {
         success: true,
-        template: data.template && { ...data.template, files: decodeTemplateFiles(data.template.files) },
-        action: data.action,
+        template: data?.template && { ...data.template, files: decodeTemplateFiles(data.template.files) },
+        action: data?.action,
       };
     } catch (error) {
       return {

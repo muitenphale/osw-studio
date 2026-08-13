@@ -34,7 +34,15 @@ import {
   GET as projectGET,
   POST as projectPOST,
 } from '@/app/api/w/[workspaceId]/sync/projects/[id]/route';
-import { GET as projectsGET } from '@/app/api/w/[workspaceId]/sync/projects/route';
+import {
+  GET as projectsGET,
+  POST as projectsPOST,
+} from '@/app/api/w/[workspaceId]/sync/projects/route';
+import {
+  GET as filesGET,
+  POST as filesPOST,
+} from '@/app/api/w/[workspaceId]/sync/files/route';
+import { POST as templatePOST } from '@/app/api/w/[workspaceId]/sync/templates/[id]/route';
 
 import { vfs } from '../index';
 import { batchFilesBySize, getSyncManager } from '../sync-manager';
@@ -78,7 +86,19 @@ async function dispatch(rawUrl: string, init?: RequestInit): Promise<Response> {
   });
 
   if (rest === 'status') return statusGET(request, { params: Promise.resolve({ workspaceId }) });
-  if (rest === 'projects') return projectsGET(request, { params: Promise.resolve({ workspaceId }) });
+  if (rest === 'projects') {
+    const params = Promise.resolve({ workspaceId });
+    return method === 'POST' ? projectsPOST(request, { params }) : projectsGET(request, { params });
+  }
+  if (rest.startsWith('files')) {
+    const params = Promise.resolve({ workspaceId });
+    return method === 'POST' ? filesPOST(request, { params }) : filesGET(request, { params });
+  }
+
+  const template = rest.match(/^templates\/([^/?]+)$/);
+  if (template && method === 'POST') {
+    return templatePOST(request, { params: Promise.resolve({ workspaceId, id: template[1] }) });
+  }
 
   const single = rest.match(/^projects\/([^/?]+)$/);
   if (single) {
@@ -326,5 +346,87 @@ describe('batchFilesBySize', () => {
 
     expect(oversized).toEqual(['/huge.bin']);
     expect(batches.map((b) => b.map((f) => f.path))).toEqual([['/ok.txt']]);
+  });
+});
+
+/**
+ * The publish path, which reaches the server through /sync/files rather than /sync/projects/{id}.
+ * That route clears the project's files before writing them, so only the batch carrying `replace`
+ * may do it — a route that cleared on every batch would leave the server holding the last batch
+ * alone, and say it succeeded.
+ */
+describe('publishing a project too large for one request', () => {
+  /** What publish does: the project row first, then its files, which is how the FK is satisfied. */
+  async function publishPush(projectId: string, options?: { onProgress?: (p: { batch: number; batches: number }) => void }) {
+    const project = await vfs.getProject(projectId);
+    return getSyncManager(WORKSPACE).pushProjectWithFiles(project, await vfs.listFiles(projectId), options);
+  }
+
+  it('leaves every file on the server, not just the last batch', async () => {
+    const id = await createBigProject('Publish');
+
+    const result = await publishPush(id);
+
+    expect(result.success).toBe(true);
+    expect(postCount).toBeGreaterThan(2);
+    const onServer = await serverFiles(id);
+    expect([...onServer.keys()].sort()).toEqual(['/note.txt', '/one.txt', '/three.txt', '/two.txt']);
+    expect(onServer.get('/note.txt')).toBe('small');
+  });
+
+  it('replaces what the server held rather than adding to it', async () => {
+    const id = await createBigProject('Replace');
+    expect((await publishPush(id)).success).toBe(true);
+
+    await vfs.deleteFile(id, '/note.txt');
+    expect((await publishPush(id)).success).toBe(true);
+
+    // The first batch clears, so a file the project no longer has does not survive the push.
+    expect((await serverFiles(id)).has('/note.txt')).toBe(false);
+  });
+
+  it('forwards progress from the files it pushes', async () => {
+    const id = await createBigProject('Progress');
+    const seen: number[] = [];
+
+    const result = await publishPush(id, { onProgress: ({ batch }) => seen.push(batch) });
+
+    expect(result.success).toBe(true);
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+  });
+});
+
+describe('a template too large for one request', () => {
+  /**
+   * "Create a Template" copies the project's whole file set into the template
+   * (`lib/vfs/template-service.ts`), so a template made from a large project runs into the same
+   * request body limit. Read back from the database rather than from the response, because what
+   * matters is that the server ends up holding every file rather than the last batch alone.
+   */
+  it('is stored whole, not just its last batch', async () => {
+    const files = [
+      { path: '/a.txt', content: BIG },
+      { path: '/b.txt', content: BIG },
+      { path: '/c.txt', content: BIG },
+      { path: '/small.txt', content: 'tiny' },
+    ];
+
+    const result = await getSyncManager(WORKSPACE).pushTemplate({
+      id: 'tmpl-big',
+      name: 'Big',
+      description: 'made from a large project',
+      version: '1.0.0',
+      files,
+      directories: [],
+      metadata: { license: 'personal', tags: [] },
+      importedAt: CREATED_AT,
+    } as never);
+
+    expect(result.success).toBe(true);
+    const stored = await adapter.getCustomTemplate('tmpl-big');
+    expect(stored?.files.map((f) => f.path).sort())
+      .toEqual(['/a.txt', '/b.txt', '/c.txt', '/small.txt']);
+    expect(stored?.files.find((f) => f.path === '/small.txt')?.content).toBe('tiny');
   });
 });

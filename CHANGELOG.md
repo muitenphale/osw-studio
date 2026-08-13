@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.94.2 - 2026-08-14
+
+### Server Sync
+- **Publishing a deployment larger than one request body works**: publish goes through `pushProjectWithFiles` (`lib/vfs/sync-manager.ts`), whose `/sync/files` POST sent every file in one request and failed on the truncated body. `pushFiles` batches it. v1.94.1 covered the three paths reaching `/sync/projects/{id}`; this is the fourth.
+- **`/sync/files` takes `replace`**: it clears the project's files before writing, which only the first batch may carry, or each batch would delete what the one before it wrote. Absent it defaults to true, so a caller sending the whole set in one request is unchanged.
+- **The storage quota is checked once per push** rather than once per batch (managed mode). `getDirSize` walks the whole workspace synchronously, so repeating it per batch blocked the event loop for every workspace on the instance.
+- **Publishing reports upload progress**: batch count on one toast, the same handle the workspace and Server Sync use.
+- **A template larger than one request body syncs**: "Create a Template" copies the project's whole file set (`lib/vfs/template-service.ts`), so `pushTemplate` hit the same limit. It batches, and `/sync/templates/{id}` takes `appendFiles`, sent on every request but the first, adding to the stored record rather than replacing it.
+
 ## v1.94.1 - 2026-08-13
 
 ### Server Sync

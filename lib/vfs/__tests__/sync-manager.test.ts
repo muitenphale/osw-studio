@@ -75,3 +75,48 @@ describe('SyncManager.pushProjectDelta', () => {
     expect(body.deletedPaths).toEqual([]);
   });
 });
+
+/**
+ * The publish flow pushes the whole file set through here (deployments-view -> pushProjectWithFiles
+ * -> pushFiles), and the route clears the project's files before writing them. A project too large
+ * for one request body was truncated by Next and came back as a JSON parse error, so this batches
+ * — and only the first batch may carry the clear, or each batch would delete the one before it.
+ */
+describe('SyncManager.pushFiles', () => {
+  const big = 'x'.repeat(3 * 1024 * 1024);
+  const fileAt = (path: string, content: string) => ({
+    ...unchangedFile, path, name: path.slice(1), content, size: content.length,
+  });
+
+  it('clears the project once, on the first batch only', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ count: 1 }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new SyncManager().pushFiles(project.id, [
+      fileAt('/a.txt', big), fileAt('/b.txt', big), fileAt('/c.txt', big),
+    ] as any);
+
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(call[1].body));
+    expect(bodies.length).toBeGreaterThan(1);
+    expect(bodies.map((b) => b.replace)).toEqual([true, ...bodies.slice(1).map(() => false)]);
+    // Every file went, exactly once, and the reported count adds up across the batches.
+    expect(bodies.flatMap((b) => b.files.map((f: { path: string }) => f.path)).sort())
+      .toEqual(['/a.txt', '/b.txt', '/c.txt']);
+    expect(result.success).toBe(true);
+    expect(result.count).toBe(bodies.length);
+  });
+
+  it('stops at the first batch the server rejects', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ count: 1 }) })
+      .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: 'Storage limit reached' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new SyncManager().pushFiles(project.id, [
+      fileAt('/a.txt', big), fileAt('/b.txt', big), fileAt('/c.txt', big),
+    ] as any);
+
+    expect(result).toEqual({ success: false, error: 'Storage limit reached' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

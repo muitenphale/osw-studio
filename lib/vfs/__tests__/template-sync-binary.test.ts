@@ -90,3 +90,51 @@ describe('pushing a template to the server', () => {
     expect(Buffer.from(png.content, 'base64')).toEqual(Buffer.from(PNG));
   });
 });
+
+/**
+ * A template made from a project carries that project's whole file set
+ * (`lib/vfs/template-service.ts`), so it hits the same request body limit a project push does.
+ * Next truncates past the limit rather than refusing, so the failure reads as corrupt JSON.
+ */
+describe('pushing a template too large for one request', () => {
+  const big = 'x'.repeat(3 * 1024 * 1024);
+
+  function bigTemplate() {
+    return {
+      ...templateWithImage(),
+      files: [
+        { path: '/a.txt', content: big },
+        { path: '/b.txt', content: big },
+        { path: '/c.txt', content: big },
+      ],
+    };
+  }
+
+  it('sends it in batches, appending to what the first request stored', async () => {
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ template: { files: [] }, action: 'created' }) });
+
+    const { getSyncManager } = await import('../sync-manager');
+    const result = await getSyncManager('w1').pushTemplate(bigTemplate() as never);
+
+    const bodies = mocks.fetch.mock.calls.map((call) => JSON.parse(call[1].body));
+    expect(bodies.length).toBeGreaterThan(1);
+    // The first request stores the record; the rest add their files to it, or each would
+    // overwrite the files the one before it wrote.
+    expect(bodies.map((b) => b.appendFiles)).toEqual([false, ...bodies.slice(1).map(() => true)]);
+    expect(bodies.flatMap((b) => b.template.files.map((f: { path: string }) => f.path)).sort())
+      .toEqual(['/a.txt', '/b.txt', '/c.txt']);
+    expect(result.success).toBe(true);
+  });
+
+  it('stops at the first request the server rejects', async () => {
+    mocks.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ template: { files: [] } }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: 'boom' }) });
+
+    const { getSyncManager } = await import('../sync-manager');
+    const result = await getSyncManager('w1').pushTemplate(bigTemplate() as never);
+
+    expect(result).toEqual({ success: false, error: 'boom' });
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+});

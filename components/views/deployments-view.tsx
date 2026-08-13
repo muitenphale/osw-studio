@@ -5,6 +5,7 @@ import { Deployment, Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { getLoginUrl } from '@/lib/config/storage';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
+import { createSyncProgressToast } from '@/lib/vfs/sync-progress-toast';
 import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
 import { DeploymentCard } from '../deployment-card';
 import { DeploymentSettingsModal } from '../deployment-settings';
@@ -385,11 +386,18 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
 
       const syncManager = getSyncManager();
 
-      // Push project and files to server
-      const syncResult = await syncManager.pushProjectWithFiles(project, files);
+      // Push project and files to server. A project too large for one request body goes in
+      // batches, which is many sequential requests over however slow the link is, so it reports
+      // where it is instead of sitting on "Building deployment..." for the duration.
+      const uploadProgress = createSyncProgressToast(`Uploading "${project.name}"`);
+      const syncResult = await syncManager.pushProjectWithFiles(project, files, {
+        onProgress: ({ batch, batches }) => uploadProgress.update(batch, batches),
+      });
       if (!syncResult.success) {
+        uploadProgress.dismiss();
         throw new Error(syncResult.error || 'Failed to sync files to server');
       }
+      uploadProgress.dismiss();
 
       // Sync backend features from IndexedDB to server
       const adapter = await vfs.getStorageAdapter();
