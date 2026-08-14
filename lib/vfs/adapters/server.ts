@@ -68,6 +68,23 @@ export function getWorkspaceAdapter(workspaceId: string): SQLiteAdapter {
 }
 
 /**
+ * Close a workspace's adapter and drop it from the cache.
+ *
+ * Deleting a workspace removes its directory, and a cached adapter would otherwise keep the
+ * database handle open over the deleted file and hand a later request a connection to it.
+ */
+export function closeWorkspaceAdapter(workspaceId: string): void {
+  const cached = workspaceAdapters.get(workspaceId);
+  if (!cached) return;
+  try {
+    cached.adapter.close?.();
+  } catch {
+    // Already closed, or the file is gone. Dropping it from the cache is what matters.
+  }
+  workspaceAdapters.delete(workspaceId);
+}
+
+/**
  * Get the default SQLiteAdapter (backward compatible singleton)
  * Used by public routes that don't require user context:
  * - Analytics tracking/reading

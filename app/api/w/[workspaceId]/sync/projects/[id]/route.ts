@@ -11,6 +11,7 @@ import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { Project, VirtualFile } from '@/lib/vfs/types';
 import { serializeFilesForResponse, deserializeFilesFromRequest } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
+import { isSafeVirtualPath } from '@/lib/vfs/path-safety';
 
 interface PushRequestBody {
   project: Project;
@@ -54,6 +55,17 @@ export async function POST(
     if (!project || project.id !== id || !Array.isArray(files) || !Array.isArray(deletedPaths)) {
       return NextResponse.json(
         { error: 'Invalid project data' },
+        { status: 400 }
+      );
+    }
+
+    // Checked before anything is written, for the reason given in the files route: a path with a
+    // `..` segment becomes a filesystem path at publish time.
+    const unsafe = (Array.isArray(files) ? files : []).find((file) => !isSafeVirtualPath(file?.path));
+    if (unsafe) {
+      logger.warn(`[API sync/projects] Rejected push with unsafe path: ${String(unsafe?.path).slice(0, 120)}`);
+      return NextResponse.json(
+        { error: 'Invalid request: file paths must be absolute and contain no "." or ".." segments' },
         { status: 400 }
       );
     }

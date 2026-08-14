@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.95.0 - 2026-08-14
+
+### Security
+- **A project file path cannot escape its deployment directory on publish**: `static-builder.ts` joined `file.path` onto the output directory, so `/assets/../../../x` resolved above it and wrote anywhere the server process could reach, across workspaces. `resolveWithin` (`lib/vfs/path-safety.ts`) drops such a file, and `isSafeVirtualPath` rejects the push at `sync/files` and `sync/projects/[id]` with a 400. A leading `..` was already excluded, since `shouldExcludeFromExport` drops a dot-prefixed first segment.
+- **Deleting a workspace removes its deployments' published output**: the admin delete route cleaned the workspace directory only, leaving `public/deployments/{id}/` on disk and served. It now calls `cleanStaticDeployment`, `removeDeploymentRoute` and `deleteDeployment` per deployment, then `closeWorkspaceAdapter` (`lib/vfs/adapters/server.ts`) before removing the directory.
+
+### Storage
+- **Server-side binary content is stored beside the database, not inside it**: a file row holds a sha256 and the bytes live once in `data/workspaces/{id}/blobs/` (`lib/vfs/adapters/blob-store.ts`), recorded as `encoding = 'blob'`. Rows written before this keep `base64` and are read as before.
+- **A workspace directory has to be backed up whole**: a database restored without its `blobs/` reads every binary as empty and logs the path and hash. A build older than this reads a `blob` row's hash as the file's text.
+- **Publishing hardlinks media into the deployment instead of copying it**: `static-builder.ts` links each blob, and writes only the text it transforms. Copies instead when the deployment output and the data directory are on different filesystems, which is the default on desktop.
+- **Unreferenced blobs are collected after a publish**: a blob goes when no row holds its hash, nothing links it, and it was not written in the last ten minutes. A deployment still serving a file the project has replaced keeps working until it is republished.
+- **Storage is measured by what it occupies rather than by path**: `lib/api/directory-size.ts` counts hardlinked content once, and the reported figure (`sync/status`) and the enforced one (`sync/files`) both use it.
+
+### Preview
+- **A project of several hundred pages compiles**: `processInternalReferences` (`lib/preview/virtual-server.ts`) called `listDirectory` once per HTML file, only to test whether a referenced path exists, so one compile read the whole project — content included, uncached — once per page. `compileProject` builds the path set once. A 621-page project reported `Compile timed out after 30000ms`.
+- **The blob-URL map is injected once rather than baked into every page**: `processHTML` wrote a copy into each page's asset interceptor, 45KB per page with 700 assets. The interceptor reads `window.__oswVfsBlobUrls`, supplied by the preview host and by `captureProjectScreenshot` (`lib/utils/project-thumbnail.ts`) through `injectVfsBlobMap`.
+
 ## v1.94.2 - 2026-08-14
 
 ### Server Sync

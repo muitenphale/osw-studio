@@ -1221,9 +1221,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       processedHtml += injectedScripts;
     }
 
-    // Expose the complete blob-URL map to the iframe so the runtime fetch/XHR
-    // interceptor can resolve any VFS path (e.g. fetch('/components/nav.html')),
-    // not just the partial map baked into the page during compilation.
+    // Expose the blob-URL map to the iframe so the runtime fetch/XHR interceptor can resolve any
+    // VFS path (e.g. fetch('/components/nav.html')). A compiled page carries no map of its own, so
+    // whoever renders one has to supply it; `injectVfsBlobMap` is the same script for renderers
+    // that inject it alone, and the two have to stay in step.
     const vfsMapJson = JSON.stringify(Object.fromEntries(projectToUse.blobUrls)).replace(/</g, '\\u003c');
     const vfsMapScript = `<script>window.__oswVfsBlobUrls = ${vfsMapJson};</script>`;
 

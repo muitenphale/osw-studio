@@ -177,6 +177,9 @@ export class VirtualServer {
     const oldBlobUrls = new Map(this.blobUrls);
     const newBlobUrls = new Map<string, string>();
     const rawProcessedFiles: ProcessedFile[] = [];
+    // Built once and handed to every page. Each page used to read the project itself to answer
+    // whether a referenced path exists, which is a full content-bearing read per page.
+    const projectPaths: ReadonlySet<string> = new Set(files.map((file) => file.path));
     
     // First pass: Create blob URLs for all non-HTML files (images, JS, etc.)
     for (const file of files) {
@@ -217,7 +220,7 @@ export class VirtualServer {
         continue;
       }
       
-      const processedFile = await this.processHTML(file, newBlobUrls);
+      const processedFile = await this.processHTML(file, newBlobUrls, projectPaths);
       
       const contentHash = this.hashContent(processedFile.content);
       const previousHash = this.fileHashes.get(processedFile.path);
@@ -382,41 +385,41 @@ export class VirtualServer {
     return hash.toString(36);
   }
 
-  private async processHTML(file: VirtualFile, blobUrls?: Map<string, string>): Promise<ProcessedFile> {
+  private async processHTML(
+    file: VirtualFile,
+    blobUrls?: Map<string, string>,
+    projectPaths?: ReadonlySet<string>
+  ): Promise<ProcessedFile> {
     let content = file.content as string;
 
     // Only run Handlebars for the handlebars runtime; skip /output/ files (script-generated)
     if (this.runtime === 'handlebars' && !file.path.startsWith('/output/')) {
       content = await this.processHandlebarsTemplates(content, file.path);
     }
-    
+
     // Then process internal references with available blob URLs
-    content = await this.processInternalReferences(content, blobUrls);
+    content = await this.processInternalReferences(content, blobUrls, projectPaths);
     
     // Inject VFS asset interceptor for transparent HTTP requests
     // Always inject the interceptor, even if no blob URLs yet (for future dynamic loading)
-    const blobUrlMap = blobUrls ? Object.fromEntries(blobUrls) : {};
     const deploymentIdForScript = this.deploymentId || '';
     const vfsScript = `<script>
 // VFS Asset Interceptor - Auto-injected by OSW Studio
 (function() {
-  const vfsBlobUrls = ${JSON.stringify(blobUrlMap)};
   const deploymentId = ${JSON.stringify(deploymentIdForScript)};
 
   // Helper function to resolve VFS paths to blob URLs
   function resolveVfsUrl(url) {
     if (!url || typeof url !== 'string') return url;
-    // Prefer the complete runtime map injected by the preview host. The baked
-    // vfsBlobUrls map only holds files processed before this page, so it can miss
-    // component files fetched at runtime (e.g. fetch('/components/nav.html')).
+    // The map is injected by whoever renders the page, not baked in here: it is the same map for
+    // every page, so a project of several hundred pages carried several hundred copies of it.
+    // Both renderers supply it — the preview host and the thumbnail capture — and each supplies
+    // the complete one, where a baked copy could only hold the files processed before its page.
     try {
       if (window.__oswVfsBlobUrls && window.__oswVfsBlobUrls[url]) {
         return window.__oswVfsBlobUrls[url];
       }
     } catch {}
-    if (vfsBlobUrls[url]) {
-      return vfsBlobUrls[url];
-    }
     return url;
   }
 
@@ -967,9 +970,24 @@ export class VirtualServer {
     return assetExtensions.includes(extension);
   }
 
-  private async processInternalReferences(content: string, blobUrls?: Map<string, string>): Promise<string> {
-    const files = await this.vfs.listDirectory(this.projectId, '/');
-    
+  /**
+   * Rewrite a page's internal asset references to their blob URLs.
+   *
+   * `projectPaths` is every path the project holds, used to tell an asset reference from a link
+   * to something that is not there. It is passed in rather than read here: this runs once per HTML
+   * file, and reading it here meant a full `listDirectory` — which loads every file's *content* —
+   * for each page. On a 621-page project that was the whole project read 621 times, and the
+   * preview timed out before it finished rather than because anything stalled.
+   */
+  private async processInternalReferences(
+    content: string,
+    blobUrls?: Map<string, string>,
+    projectPaths?: ReadonlySet<string>
+  ): Promise<string> {
+    const paths = projectPaths ?? new Set(
+      (await this.vfs.listDirectory(this.projectId, '/')).map((file) => file.path)
+    );
+
     // Use provided blob URLs or fall back to instance blob URLs
     const urlMap = blobUrls || this.blobUrls;
     
@@ -996,7 +1014,7 @@ export class VirtualServer {
 
         const normalizedPath = this.normalizePath(url);
         
-        const fileExists = files.some(f => f.path === normalizedPath);
+        const fileExists = paths.has(normalizedPath);
         if (fileExists) {
           // Check if we have a blob URL for this file
           const blobUrl = urlMap.get(normalizedPath);

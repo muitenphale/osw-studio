@@ -6,6 +6,24 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.95.0 - Large Projects (2026-08-14)
+
+A project of several hundred pages works in the editor now; the preview used to give up with "Compile timed out after 30000ms" before it could render anything. In Server Mode, publishing a project full of images no longer puts a second copy of them on the server. It also closes a hole that let a published project write files outside its own directory, which is reason enough to take this one if you self-host.
+
+### Server Mode
+- **A published site shares its images with the project**: a 100MB project took about 233MB once published, and now stays near 100MB as you push it again
+- **A second deployment of the same project adds almost nothing**: it links the same files instead of copying them again
+- **The storage figure counts what is actually used**: a file shared between a project and its deployments is counted once, not once for each
+
+### If you self-host
+- **A publish could write outside its deployment folder**: a crafted file path escaped it, and on an instance holding several workspaces that reached the others. It has been there since Server Mode shipped, and pushes carrying such a path are now refused
+- **Deleting a workspace takes its published sites down**: their files were left on disk and kept being served after the workspace was gone
+- **Back up `data/workspaces/{id}/` whole, not just the `.sqlite` file**: images live beside the database now, and a database restored without its `blobs/` folder comes back with every image empty
+- **Roll forward rather than back**: a build older than this one reads the new format as text, so downgrading after you have published would leave images broken
+- **The desktop app still copies**: it keeps its data and its published output in separate places, and sharing files needs both on one filesystem
+
+---
+
 ## v1.94.0 - Housekeeping (2026-08-13)
 
 Text files the app did not recognise are stored and edited as text now: PHP, Java, SQL, YAML, shell scripts, SCSS, Dockerfile and the rest. Dropping one in used to store it as bytes, so it could not be opened or edited even though nothing about it was binary. The rest of the release is upkeep, plus three fixes.

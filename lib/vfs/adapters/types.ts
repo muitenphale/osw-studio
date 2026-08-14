@@ -46,6 +46,19 @@ export interface StorageAdapter {
   listFiles(projectId: string): Promise<VirtualFile[]>;
   deleteProjectFiles(projectId: string): Promise<void>;
 
+  /**
+   * Directory this adapter keeps its files beside, when it keeps any on disk.
+   *
+   * Binary content lives in a content-addressed store there rather than in the database, so
+   * publishing can hardlink a file into a deployment instead of writing a second copy of it.
+   * Undefined for an adapter with no such directory, which is the browser's IndexedDB and an
+   * in-memory database; those callers fall back to writing the bytes.
+   */
+  getBaseDir?(): string | undefined;
+
+  /** Every blob hash a file row still refers to. The blob sweep removes what this omits. */
+  listReferencedBlobHashes?(): Promise<string[]>;
+
   // ============================================
   // File Tree
   // ============================================

@@ -15,7 +15,12 @@ import {
   deleteWorkspace,
   getSystemDatabase,
   getWorkspaceProjectCount,
+  removeDeploymentRoute,
 } from '@/lib/auth/system-database';
+import { getWorkspaceAdapter, closeWorkspaceAdapter } from '@/lib/vfs/adapters/server';
+import { cleanStaticDeployment } from '@/lib/compiler/static-builder';
+import { regenerateInstanceCaddy } from '@/lib/caddy/regenerate';
+import { logger } from '@/lib/utils';
 
 function getWorkspaceDeploymentCount(workspaceId: string): number {
   try {
@@ -160,6 +165,37 @@ export async function DELETE(
       return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
     }
 
+    // Published output first, while the workspace database can still say what it published.
+    //
+    // Deleting only the workspace directory leaves `public/deployments/{id}/` in place, and those
+    // files stay on disk and stay served: a deleted workspace's sites would keep answering, and
+    // its content would outlive it. Deleting a single deployment already does this (static output,
+    // routing, per-deployment databases), so the workspace case does the same for each of them.
+    let hadCustomDomain = false;
+    try {
+      const adapter = getWorkspaceAdapter(id);
+      await adapter.init();
+      const deployments = (await adapter.listDeployments?.()) ?? [];
+      for (const deployment of deployments) {
+        // Each one on its own, so a deployment that cannot be cleaned does not take the rest with
+        // it. Sharing a single try meant one failure left every later deployment on disk and still
+        // being served, which is the state this is here to prevent.
+        try {
+          hadCustomDomain = hadCustomDomain || !!deployment.customDomain;
+          await cleanStaticDeployment(deployment.id);
+          removeDeploymentRoute(deployment.id);
+          await adapter.deleteDeployment?.(deployment.id);
+        } catch (error) {
+          logger.error(`[API /api/admin/workspaces] Failed to clean up deployment ${deployment.id}:`, error);
+        }
+      }
+    } catch (error) {
+      logger.error('[API /api/admin/workspaces] Failed to list deployments before delete:', error);
+    }
+
+    // Released before the directory goes, or the cached adapter keeps a handle on a deleted file.
+    closeWorkspaceAdapter(id);
+
     deleteWorkspace(id);
 
     // Clean up workspace data directory
@@ -171,6 +207,10 @@ export async function DELETE(
       }
     } catch {
       // Filesystem cleanup failure is non-fatal
+    }
+
+    if (hadCustomDomain) {
+      regenerateInstanceCaddy().catch(() => {});
     }
 
     return NextResponse.json({ success: true });

@@ -8,6 +8,8 @@ OSW Studio server mode supports workspaces and multiple users on a single instan
 
 A workspace is a self-contained environment with its own projects, deployments, templates, skills, and quotas. Each workspace maps to its own SQLite database at `data/workspaces/{id}/osws.sqlite`. Data in one workspace is completely isolated from other workspaces.
 
+Images, fonts and other binary files are stored beside that database in `data/workspaces/{id}/blobs/`, not inside it, so a published deployment can share them rather than keeping a second copy. **Back up the whole `data/workspaces/{id}/` directory, not just the `.sqlite` file** — a database restored without its `blobs/` directory loads, but every image in every project comes back empty.
+
 Workspaces are what you manage. Users are just accounts that get access to workspaces.
 
 ### Access Model

@@ -15,6 +15,8 @@
  */
 
 import path from 'path';
+import { BLOB_ENCODING, putBlob, readBlob } from './blob-store';
+import { logger } from '@/lib/utils';
 import type { Database } from 'better-sqlite3';
 import { StorageAdapter } from './types';
 import { Project, VirtualFile, FileTreeNode, CustomTemplate, Deployment, EdgeFunction, ServerFunction, Secret, ScheduledFunction } from '../types';
@@ -460,10 +462,17 @@ const MIGRATIONS: Migration[] = [
  * wrong for every binary type outside the image/video list. The returned encoding is stored
  * alongside the content so reading back needs no guess either.
  */
-function encodeFileContent(raw: unknown): { content: string; encoding: string | null } {
+function encodeFileContent(raw: unknown, baseDir?: string): { content: string; encoding: string | null } {
   // Tag check rather than instanceof: content can arrive as a structured clone from another realm.
   if (Object.prototype.toString.call(raw) === '[object ArrayBuffer]') {
-    return { content: Buffer.from(raw as ArrayBuffer).toString('base64'), encoding: 'base64' };
+    const bytes = Buffer.from(raw as ArrayBuffer);
+    // Bytes go to the blob store, and the row keeps the hash. Without a base directory there is
+    // nowhere to put them, so base64 stays the fallback: that is the in-memory database the tests
+    // and the default core connection use.
+    if (baseDir) {
+      return { content: putBlob(baseDir, bytes), encoding: BLOB_ENCODING };
+    }
+    return { content: bytes.toString('base64'), encoding: 'base64' };
   }
   if (typeof raw === 'string') {
     return { content: raw, encoding: null };
@@ -585,6 +594,24 @@ export class SQLiteAdapter implements StorageAdapter {
   /**
    * Get the core database, ensuring it's initialized
    */
+  getBaseDir(): string | undefined {
+    return this.baseDir;
+  }
+
+  /**
+   * Every blob hash a file row still refers to, across all projects in this workspace.
+   *
+   * The blob sweep deletes what this does not name, so it has to be the complete set. Only file
+   * rows can hold a hash: templates keep their files as JSON in their own column, and nothing else
+   * goes through `encodeFileContent`.
+   */
+  async listReferencedBlobHashes(): Promise<string[]> {
+    const rows = this.getDB()
+      .prepare(`SELECT DISTINCT content FROM files WHERE encoding = ? AND content IS NOT NULL`)
+      .all(BLOB_ENCODING) as Array<{ content: string }>;
+    return rows.map((row) => row.content);
+  }
+
   private getDB(): Database {
     if (!this.db || !this.db.open) {
       if (this.initialized) {
@@ -1043,7 +1070,7 @@ export class SQLiteAdapter implements StorageAdapter {
 
     // Handle ArrayBuffer content (binary files)
     // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
-    const { content, encoding } = encodeFileContent(file.content);
+    const { content, encoding } = encodeFileContent(file.content, this.baseDir);
 
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO files (
@@ -1083,7 +1110,7 @@ export class SQLiteAdapter implements StorageAdapter {
 
     // Handle ArrayBuffer content
     // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
-    const { content, encoding } = encodeFileContent(file.content);
+    const { content, encoding } = encodeFileContent(file.content, this.baseDir);
 
     const stmt = db.prepare(`
       UPDATE files SET
@@ -1133,7 +1160,23 @@ export class SQLiteAdapter implements StorageAdapter {
     // the extension is what lost audio, fonts and PDFs. Rows predating the encoding column were
     // labelled by the add_file_encoding_v10 migration, so there is nothing left to guess about.
     let content: string | ArrayBuffer = rawContent;
-    if (row.encoding === 'base64' && rawContent) {
+    if (row.encoding === BLOB_ENCODING && rawContent) {
+      // Branching on the encoding alone, never on whether a store happens to be configured: a row
+      // that says 'blob' holds a hash, and handing that back as the file's content would put a
+      // 64-character string where an image belongs. Empty bytes are wrong too, but visibly so.
+      const bytes = this.baseDir ? readBlob(this.baseDir, rawContent) : null;
+      if (bytes) {
+        content = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      } else {
+        logger.error(
+          `[SQLiteAdapter] Missing blob for ${row.path as string} (${rawContent}). The file reads ` +
+          (this.baseDir
+            ? 'as empty; its content is not in the blob store, which a workspace restored without its blobs/ directory would explain.'
+            : 'as empty; this database was opened without the directory its blob store lives in.')
+        );
+        content = new ArrayBuffer(0);
+      }
+    } else if (row.encoding === 'base64' && rawContent) {
       try {
         // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,")
         let base64Data = rawContent;

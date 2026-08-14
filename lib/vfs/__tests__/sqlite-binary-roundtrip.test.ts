@@ -98,9 +98,11 @@ describe('SQLite file content round-trip', () => {
     await writeFile('p1', '/a.png', png.buffer.slice(0) as ArrayBuffer);
     const db = (adapter as unknown as { getDB(): { prepare(s: string): { run(...a: unknown[]): void; get(...a: unknown[]): unknown } } }).getDB();
 
-    // An image row is stored with the flag set, like every other binary.
-    expect(db.prepare('SELECT encoding FROM files WHERE path = ?').get('/a.png'))
-      .toEqual({ encoding: 'base64' });
+    // An image row records how it was stored, like every other binary. This adapter is backed by a
+    // file, so it has a blob store to write to and the row holds a hash; an adapter with nowhere to
+    // put the bytes records 'base64' instead.
+    const stored = db.prepare('SELECT encoding FROM files WHERE path = ?').get('/a.png') as { encoding: string | null };
+    expect(stored.encoding).toBe('blob');
 
     // Strip the flag and the same row is text, despite still being typed 'image'.
     db.prepare('UPDATE files SET encoding = NULL WHERE path = ?').run('/a.png');

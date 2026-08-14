@@ -11,19 +11,9 @@ import { getWorkspaceById } from '@/lib/auth/system-database';
 import { VirtualFile } from '@/lib/vfs/types';
 import { serializeFilesForResponse, deserializeFilesFromRequest } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
-import fs from 'fs';
+import { combinedDirectorySize } from '@/lib/api/directory-size';
+import { isSafeVirtualPath } from '@/lib/vfs/path-safety';
 import path from 'path';
-
-function getDirSize(dir: string): number {
-  let total = 0;
-  try {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, entry.name);
-      total += entry.isDirectory() ? getDirSize(p) : fs.statSync(p).size;
-    }
-  } catch {}
-  return total;
-}
 
 export async function GET(
   request: NextRequest,
@@ -89,8 +79,20 @@ export async function POST(
       );
     }
 
+    // Rejected here rather than sanitized: a path with a `..` segment is not a file anyone meant to
+    // push, and publishing turns it into a filesystem path. The whole batch is refused so a caller
+    // cannot half-write a project and be told it succeeded.
+    const unsafe = files.find((file) => !isSafeVirtualPath(file?.path));
+    if (unsafe) {
+      logger.warn(`[API sync/files] Rejected push with unsafe path: ${String(unsafe?.path).slice(0, 120)}`);
+      return NextResponse.json(
+        { error: 'Invalid request: file paths must be absolute and contain no "." or ".." segments' },
+        { status: 400 }
+      );
+    }
+
     // Check storage quota before writing (managed mode only). Once per push rather than once per
-    // batch: getDirSize walks the whole workspace synchronously, which blocks the event loop for
+    // batch: `combinedDirectorySize` walks the whole workspace synchronously, which blocks the event loop for
     // every workspace on the instance, and a chunked push would repeat that walk per batch. The
     // first batch is the one that carries `replace`.
     const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
@@ -99,7 +101,7 @@ export async function POST(
       if (workspace) {
         const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
         const wsDir = path.join(dataDir, 'workspaces', workspaceId);
-        const usedMb = getDirSize(wsDir) / (1024 * 1024);
+        const usedMb = combinedDirectorySize([wsDir]) / (1024 * 1024);
         if (usedMb >= workspace.max_storage_mb) {
           return NextResponse.json(
             { error: `Storage limit reached (${workspace.max_storage_mb} MB). Free up space or contact your admin.` },

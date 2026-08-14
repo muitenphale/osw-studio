@@ -7,6 +7,7 @@
 import { vfs } from '@/lib/vfs';
 import { VirtualServer } from '@/lib/preview/virtual-server';
 import { captureIframeScreenshot } from './screenshot';
+import { injectVfsBlobMap } from '@/lib/preview/inject-vfs-blob-map';
 
 export async function captureProjectScreenshot(projectId: string): Promise<string | null> {
   await vfs.init();
@@ -53,6 +54,10 @@ export async function captureProjectScreenshot(projectId: string): Promise<strin
     const blobUrl = compiled.blobUrls.get(path);
     return blobUrl ? `src="${blobUrl}"` : match;
   });
+
+  // The rewrites above cover the references present in the markup; this covers the ones the page
+  // asks for while it renders.
+  html = injectVfsBlobMap(html, compiled.blobUrls);
 
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';

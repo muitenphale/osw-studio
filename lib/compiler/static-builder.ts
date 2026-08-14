@@ -13,6 +13,8 @@ import { VirtualFile, FileTreeNode, Deployment } from '@/lib/vfs/types';
 import { logger } from '@/lib/utils';
 import { processHtml } from '@/lib/publishing/html-processor';
 import { stripPreviewScripts } from '@/lib/preview/strip-preview-scripts';
+import { collectBlobs, linkBlob, putBlob } from '@/lib/vfs/adapters/blob-store';
+import { resolveWithin } from '@/lib/vfs/path-safety';
 import { generateSitemap, generateRobotsTxt } from '@/lib/publishing/seo-generator';
 import { extractBackendFeatures } from './backend-feature-extractor';
 import { deploymentStaticDir } from './deployment-static-dir';
@@ -244,6 +246,9 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     await fs.mkdir(outputDir, { recursive: true });
 
     let filesWritten = 0;
+    // Undefined for an adapter with nothing on disk, which falls back to writing the bytes.
+    const blobBaseDir = adapter.getBaseDir?.();
+    let copiedInsteadOfLinked = 0;
 
     // Write compiled files
     for (const file of compiledProject.files) {
@@ -252,19 +257,29 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
         continue;
       }
 
-      // Determine file path (remove leading slash)
-      const relativePath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
-      const filePath = path.join(outputDir, relativePath);
+      // A file path comes from whoever pushed the project, so joining it onto the output directory
+      // is not enough on its own: `/assets/../../../x` resolves outside it and writes wherever the
+      // server process can reach. Anything that would land outside is dropped rather than written.
+      const filePath = resolveWithin(outputDir, file.path);
+      if (!filePath) {
+        logger.warn(`[Static Builder] Skipped file with unsafe path: ${file.path.slice(0, 120)}`);
+        continue;
+      }
 
       // Create directory if needed
       const fileDir = path.dirname(filePath);
       await fs.mkdir(fileDir, { recursive: true });
 
-      // Write file content
+      // Text is transformed on the way out (asset paths rewritten, preview scripts stripped, SEO
+      // injected), so it is written. Binary content passes through untouched, so it is linked to
+      // the blob the project already holds: the deployment gets a directory entry rather than a
+      // second copy of every image. Copying is the fallback when there is no store to link from.
       if (typeof file.content === 'string') {
         await fs.writeFile(filePath, file.content, 'utf-8');
+      } else if (blobBaseDir) {
+        const hash = putBlob(blobBaseDir, Buffer.from(file.content));
+        if (!linkBlob(blobBaseDir, hash, filePath)) copiedInsteadOfLinked += 1;
       } else {
-        // Binary content (ArrayBuffer)
         await fs.writeFile(filePath, Buffer.from(file.content));
       }
 
@@ -335,6 +350,25 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
 
     // Clean up VirtualServer resources
     server.cleanupBlobUrls();
+
+    // The previous build's directory was cleared before this one was written, so blobs it alone
+    // was keeping alive are now unreferenced. Sweeping here rather than on a timer keeps the
+    // store bounded by what is actually published, and the sweep skips anything still linked, so
+    // a deployment serving an older version of a replaced file is untouched.
+    if (blobBaseDir && adapter.listReferencedBlobHashes) {
+      const referenced = new Set(await adapter.listReferencedBlobHashes());
+      const removed = collectBlobs(blobBaseDir, referenced);
+      if (removed > 0) {
+        logger.debug(`[Static Builder] Removed ${removed} unreferenced blob(s)`);
+      }
+      if (copiedInsteadOfLinked > 0) {
+        logger.warn(
+          `[Static Builder] Copied ${copiedInsteadOfLinked} file(s) instead of linking them. ` +
+          'The deployment output and the data directory are on different filesystems, so each ' +
+          'published copy costs its own storage.'
+        );
+      }
+    }
 
     logger.info(`[Static Builder] Build complete: ${filesWritten} files written to /deployments/${deploymentId}`);
 
