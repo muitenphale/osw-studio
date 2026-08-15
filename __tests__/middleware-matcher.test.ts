@@ -1,0 +1,54 @@
+import { describe, it, expect } from 'vitest';
+import { config } from '../middleware';
+
+/**
+ * Which paths reach the middleware at all.
+ *
+ * A preview iframe sends every asset reference the VFS interceptor misses to this app, and a
+ * project referencing files it does not contain turns those into a stream of requests that can only
+ * 404. Running each one through the session check costs a JWT verification, so static-asset
+ * extensions are excluded from the matcher.
+ *
+ * These assertions are on the pattern, not on Next's routing: they catch an extension being dropped
+ * from the list or the negative lookahead being broken. That the pattern is applied to the pathname
+ * rather than the full URL, so a query string does not defeat the `$` anchor, was verified against a
+ * running server instead.
+ */
+
+const matcher = new RegExp(`^${config.matcher[0]}$`);
+const reachesMiddleware = (pathname: string) => matcher.test(pathname);
+
+const WS = '/w/b80f9b8d-99e0-4934-9920-5dd6c5cf3edd';
+
+describe('the middleware matcher', () => {
+  it('still guards the workspace pages and APIs', () => {
+    for (const path of [`${WS}/projects`, `${WS}/deployments`, `/api/w/x/sync/status`, '/admin/users']) {
+      expect(reachesMiddleware(path)).toBe(true);
+    }
+  });
+
+  it('skips the asset types a preview miss produces', () => {
+    // Scripts and stylesheets are the ones that were costing a session check; a webpack chunk
+    // loader retrying a missing one sent thousands.
+    for (const extension of ['js', 'mjs', 'cjs', 'css', 'map', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'ico', 'avif']) {
+      expect(reachesMiddleware(`${WS}/wp-content/plugins/x/a.bundle.min.${extension}`)).toBe(false);
+    }
+  });
+
+  it('still skips the image types it always did', () => {
+    for (const extension of ['svg', 'png', 'jpg', 'jpeg', 'gif', 'webp']) {
+      expect(reachesMiddleware(`${WS}/img/logo.${extension}`)).toBe(false);
+    }
+  });
+
+  it('does not exclude a path merely containing an extension name', () => {
+    // The lookahead is anchored, so a directory called `js` or a page called `css` is not an asset.
+    expect(reachesMiddleware(`${WS}/js/settings`)).toBe(true);
+    expect(reachesMiddleware(`${WS}/projects/my.css.project`)).toBe(true);
+  });
+
+  it('keeps excluding the build output and published deployments', () => {
+    expect(reachesMiddleware('/_next/static/chunks/main.js')).toBe(false);
+    expect(reachesMiddleware('/deployments/abc/index.html')).toBe(false);
+  });
+});

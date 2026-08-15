@@ -11,6 +11,7 @@ import type { ModelTemplate } from '@/lib/llm/models/assignment';
 import type { CustomConnection } from '@/lib/llm/providers/connection-record';
 import { EnhancedSyncStatusResponse } from './sync-types';
 import { encodeTemplateFiles, decodeTemplateFiles } from './binary-encoding';
+import { isArrayBuffer } from './is-array-buffer';
 
 export interface SyncResult {
   success: boolean;
@@ -164,9 +165,10 @@ export interface ConnectionsListSyncResult extends SyncResult {
 // Helper: Convert ArrayBuffer to base64 for JSON transport.
 // Exported because auto-sync pushes over its own transport: JSON.stringify turns an ArrayBuffer
 // into {}, and the push route recreates the server's files from what it receives, so skipping this
-// silently blanks every binary asset in the project.
+// silently blanks every binary asset in the project. The tag check rather than `instanceof` is
+// what makes that true of content read back from IndexedDB as well; see `isArrayBuffer`.
 export function serializeFileContent(file: VirtualFile): VirtualFile & { _isBinaryBase64?: boolean } {
-  if (file.content instanceof ArrayBuffer) {
+  if (isArrayBuffer(file.content)) {
     const bytes = new Uint8Array(file.content);
     let binary = '';
     for (let i = 0; i < bytes.byteLength; i++) {

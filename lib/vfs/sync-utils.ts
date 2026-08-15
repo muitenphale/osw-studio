@@ -5,14 +5,18 @@
  */
 
 import { VirtualFile } from './types';
+import { isArrayBuffer } from './is-array-buffer';
 
 /**
  * Serialize files for JSON response (ArrayBuffer -> base64)
  * Used by sync API routes to properly serialize binary file content.
+ *
+ * Same tag check as the push direction: a pull that misses a binary file sends `{}` to the client,
+ * which writes it into IndexedDB as an empty file.
  */
 export function serializeFilesForResponse(files: VirtualFile[]): (VirtualFile & { _isBinaryBase64?: boolean })[] {
   return files.map(file => {
-    if (file.content instanceof ArrayBuffer) {
+    if (isArrayBuffer(file.content)) {
       const buffer = Buffer.from(file.content);
       return {
         ...file,

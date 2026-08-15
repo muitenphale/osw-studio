@@ -220,8 +220,29 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
+/**
+ * Static-asset extensions skip the middleware entirely.
+ *
+ * A preview iframe is a `srcdoc` document with no base URL of its own, so any asset reference the
+ * VFS interceptor does not resolve is sent to this app instead. A project carrying references to
+ * files it does not contain (a scraped site whose lazily-loaded scripts were never captured) turns
+ * every one of those into a request here, and a loader that retries turns it into thousands. Each
+ * would otherwise verify the session JWT, and possibly re-sign it, before the router returns 404.
+ *
+ * What makes this safe is that no guarded route can end in one of these. `/api/server-generate` and
+ * `/api/admin/dashboard` have this middleware as their only gate, and they are reachable only at
+ * fixed paths with no extension; every route under `/api/w` additionally authenticates itself. A
+ * dynamic segment added under a prefix that does not authenticate itself would break that, since
+ * the segment's value is the end of the path.
+ *
+ * What is lost is a redirect to the login page for a *page* path ending in one of these, which no
+ * real workspace view does.
+ *
+ * Written out rather than composed from a constant: Next has to statically analyse this value at
+ * build time and ignores one it cannot, which would leave every route above unguarded.
+ */
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|deployments/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|deployments/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|avif|js|mjs|cjs|css|map|woff|woff2|ttf|otf|eot)$).*)',
   ],
 };

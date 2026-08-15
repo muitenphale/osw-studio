@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.95.1 - 2026-08-15
+
+### Server Mode
+- **A binary file whose `ArrayBuffer` carries another realm's constructor syncs as bytes**: `serializeFileContent` (`lib/vfs/sync-manager.ts`) and `serializeFilesForResponse` (`lib/vfs/sync-utils.ts`) tested with `instanceof`, which an IndexedDB structured clone fails, so `JSON.stringify` sent `{}` and the file was stored empty and published zero-length. Both use `isArrayBuffer` (`lib/vfs/is-array-buffer.ts`), as `backup-service.ts`, `binary-encoding.ts` and `sqlite-adapter.ts` already did.
+- **A request for a static asset skips the middleware**: `middleware.ts` excludes `js`, `mjs`, `cjs`, `css`, `map`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `ico` and `avif` alongside the image types it already did. A preview iframe sends every reference the VFS interceptor cannot resolve to the app, so each 404 verified the session JWT first, and a loader retrying a missing chunk sent thousands.
+
 ## v1.95.0 - 2026-08-14
 
 ### Security
