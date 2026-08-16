@@ -5,6 +5,7 @@ import Handlebars from 'handlebars';
 import { logger } from '@/lib/utils';
 import { beginCompilation, pushCompileError, commitCompilation } from './compile-errors';
 import { isRuntimeBundled } from '@/lib/runtimes/registry';
+import { injectProvenance } from './provenance';
 
 export class VirtualServer {
   private vfs: VirtualFileSystem;
@@ -19,8 +20,9 @@ export class VirtualServer {
   private entryPoint: string;
   private runtime: ProjectRuntime;
   private minify: boolean;
+  private provenance: boolean;
 
-  constructor(vfs: VirtualFileSystem, projectId: string, opts?: { deploymentId?: string; entryPoint?: string; runtime?: ProjectRuntime; minify?: boolean }) {
+  constructor(vfs: VirtualFileSystem, projectId: string, opts?: { deploymentId?: string; entryPoint?: string; runtime?: ProjectRuntime; minify?: boolean; provenance?: boolean }) {
     this.vfs = vfs;
     this.projectId = projectId;
     this.deploymentId = opts?.deploymentId;
@@ -29,6 +31,10 @@ export class VirtualServer {
     // Off unless a caller asks: the editor preview wants readable output, and
     // only the paths that produce something a visitor downloads turn it on.
     this.minify = opts?.minify === true;
+    // Preview-only element provenance. Off unless a caller asks: this instrumentation must never
+    // reach published output, and the publish, export and thumbnail paths all construct a
+    // VirtualServer in the same browser tab as the preview.
+    this.provenance = opts?.provenance === true;
     this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
     // Initialize Handlebars instance
@@ -110,7 +116,15 @@ export class VirtualServer {
       );
 
       for (const file of templateFiles) {
-        const content = file.content as string;
+        const raw = file.content as string;
+        // A partial is registered from its own file's raw text, which is what makes an element
+        // inside /templates/navigation.hbs name that file rather than the page that included it.
+        // Injected once per file, above the registration calls: the same string is registered
+        // under up to three names below. The runtime guard avoids scanning every /templates/*.hbs
+        // for a `static` project, where partials are never used.
+        const content = this.provenance && this.runtime === 'handlebars'
+          ? injectProvenance(raw, file.path)
+          : raw;
 
         // Extract path relative to /templates/
         // e.g., /templates/components/header.hbs → components/header
@@ -391,6 +405,15 @@ export class VirtualServer {
     projectPaths?: ReadonlySet<string>
   ): Promise<ProcessedFile> {
     let content = file.content as string;
+
+    // The single shared HTML path for both runtimes, and so the only injection point for page
+    // content. For `handlebars` the injected string is what gets compiled below, so a `{{#each}}`
+    // copies the attribute onto every rendered instance and the offsets stay the template's.
+    // Injecting again inside processHandlebarsTemplates would double-tag every element, the second
+    // attribute carrying offsets shifted by this pass.
+    if (this.provenance) {
+      content = injectProvenance(content, file.path);
+    }
 
     // Only run Handlebars for the handlebars runtime; skip /output/ files (script-generated)
     if (this.runtime === 'handlebars' && !file.path.startsWith('/output/')) {

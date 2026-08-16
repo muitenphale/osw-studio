@@ -170,6 +170,14 @@ export async function curlCommand(env: ShellEnv): Promise<ShellResult> {
             const { stripPreviewScripts } = await import('@/lib/preview/strip-preview-scripts');
             content = stripPreviewScripts(content);
 
+            // Same reason, one layer down: preview-only element provenance. This runs *before* the
+            // -o branch below, which is the one path in the app that writes a compiled artifact
+            // back into project source — a leak there is permanent, not just noise in the output.
+            // Belt and braces: the VirtualServer above is constructed without the provenance
+            // option, so there should be nothing to strip.
+            const { stripProvenance } = await import('@/lib/preview/provenance');
+            content = stripProvenance(content);
+
             if (curlFlags.head) {
               // Headers only
               const headers = [
