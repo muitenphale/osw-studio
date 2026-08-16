@@ -95,6 +95,7 @@
   --button-files-active: oklch(0.6 0.15 220); /* Blue */
   --button-editor-active: oklch(0.55 0.18 285); /* Purple */
   --button-preview-active: oklch(0.7 0.2 45); /* Orange */
+  --button-elements-active: oklch(0.68 0.12 195); /* Cyan — preview-adjacent, distinct from files blue */
   --button-checkpoint-active: oklch(0.65 0.15 55); /* Warm amber */
 
   /* Sidebar toggle active surface (theme-aware): solid panel color fill + white glyph in light mode.
@@ -103,6 +104,7 @@
   --button-files-active-bg: var(--button-files-active);
   --button-editor-active-bg: var(--button-editor-active);
   --button-preview-active-bg: var(--button-preview-active);
+  --button-elements-active-bg: var(--button-elements-active);
   --button-skills-active-bg: #a855f7;
   --button-terminal-active-bg: #22c55e;
   --button-checkpoint-active-bg: var(--button-checkpoint-active);
@@ -110,6 +112,7 @@
   --button-files-active-fg: #fff;
   --button-editor-active-fg: #fff;
   --button-preview-active-fg: #fff;
+  --button-elements-active-fg: #fff;
   --button-skills-active-fg: #fff;
   --button-terminal-active-fg: #fff;
   --button-checkpoint-active-fg: #fff;
@@ -173,6 +176,7 @@
   --button-files-active: oklch(0.6 0.15 220); /* Blue */
   --button-editor-active: oklch(0.55 0.18 285); /* Purple */
   --button-preview-active: oklch(0.7 0.2 45); /* Orange */
+  --button-elements-active: oklch(0.7 0.11 195); /* Cyan — preview-adjacent, distinct from files blue */
   --button-checkpoint-active: oklch(0.65 0.15 55); /* Warm amber */
 
   /* Sidebar toggle active surface (theme-aware): neutral fill + panel-colored glyph in dark mode.
@@ -182,6 +186,7 @@
   --button-files-active-bg: var(--sidebar-active-surface);
   --button-editor-active-bg: var(--sidebar-active-surface);
   --button-preview-active-bg: var(--sidebar-active-surface);
+  --button-elements-active-bg: var(--sidebar-active-surface);
   --button-skills-active-bg: var(--sidebar-active-surface);
   --button-terminal-active-bg: var(--sidebar-active-surface);
   --button-checkpoint-active-bg: var(--sidebar-active-surface);
@@ -189,6 +194,7 @@
   --button-files-active-fg: var(--button-files-active);
   --button-editor-active-fg: var(--button-editor-active);
   --button-preview-active-fg: var(--button-preview-active);
+  --button-elements-active-fg: var(--button-elements-active);
   --button-skills-active-fg: #a855f7;
   --button-terminal-active-fg: #22c55e;
   --button-checkpoint-active-fg: var(--button-checkpoint-active);

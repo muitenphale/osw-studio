@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 
 type MobilePanelType = 'chat' | 'files' | 'editor' | 'preview' | 'checkpoints' | 'console' | 'skills' | 'debug';
 
-const DEFAULT_PANEL_ORDER = ['chat', 'files', 'editor', 'skills', 'console', 'preview', 'checkpoints', 'debug'];
+const DEFAULT_PANEL_ORDER = ['chat', 'files', 'editor', 'skills', 'console', 'preview', 'elements', 'checkpoints', 'debug'];
 
 export interface LayoutSlice {
   showChat: boolean;
@@ -13,6 +13,7 @@ export interface LayoutSlice {
   showConsole: boolean;
   showSkillsPanel: boolean;
   showDebugPanel: boolean;
+  showElements: boolean;
   showProjectSettingsModal: boolean;
   fullscreenPreview: boolean;
   panelOrder: string[];
@@ -72,7 +73,7 @@ function persistPanels(state: LayoutSlice) {
       chat: state.showChat, files: state.showFiles, editor: state.showEditor,
       preview: state.showPreview, checkpoints: state.showCheckpoints,
       debug: state.showDebugPanel, skills: state.showSkillsPanel,
-      console: state.showConsole,
+      console: state.showConsole, elements: state.showElements,
     }));
   } catch {}
 }
@@ -85,8 +86,50 @@ function persistPanelOrder(order: string[]) {
 
 export const PANEL_MAP: Record<string, keyof LayoutSlice> = {
   chat: 'showChat', files: 'showFiles', editor: 'showEditor', console: 'showConsole',
-  preview: 'showPreview', checkpoints: 'showCheckpoints', debug: 'showDebugPanel', skills: 'showSkillsPanel',
+  preview: 'showPreview', elements: 'showElements', checkpoints: 'showCheckpoints',
+  debug: 'showDebugPanel', skills: 'showSkillsPanel',
 };
+
+/**
+ * Panels that cannot do their job unless a companion panel is also open.
+ *
+ * The Elements tree is serialized inside the preview iframe and posted to the host, so a layout
+ * without the preview leaves the tree with nothing to query. Since the workspace shows at most
+ * three panels and the preview is open by default, the eviction rule below would otherwise close
+ * the preview to make room for Elements — opening the panel straight onto the empty state it
+ * exists to avoid.
+ */
+const PANEL_COMPANION: Record<string, string> = { elements: 'preview' };
+
+/**
+ * The panel keys in `order` that are currently open, in order.
+ *
+ * PANEL_MAP is the single list of panels; deriving visibility from it keeps the workspace's
+ * drag-reorder and panel-sizing paths in step with panel registration instead of repeating the
+ * key→flag mapping as a hardcoded chain that a new panel can silently fall out of.
+ */
+export function visiblePanelKeys(state: LayoutSlice, order: string[] = state.panelOrder): string[] {
+  return order.filter(k => {
+    const flag = PANEL_MAP[k];
+    return flag ? !!state[flag] : false;
+  });
+}
+
+/**
+ * Which open panel to close to make room for `opening`, walking from the right. Returns null when
+ * there is nothing to evict. `opening`'s companion (see PANEL_COMPANION) is passed over unless it
+ * is the only candidate left, in which case taking it beats refusing to open the panel at all.
+ */
+export function pickEvictionTarget(panels: { key: string; open: boolean }[], opening: string): string | null {
+  const companion = PANEL_COMPANION[opening];
+  for (let i = panels.length - 1; i >= 0; i--) {
+    if (panels[i].open && panels[i].key !== opening && panels[i].key !== companion) return panels[i].key;
+  }
+  for (let i = panels.length - 1; i >= 0; i--) {
+    if (panels[i].open && panels[i].key !== opening) return panels[i].key;
+  }
+  return null;
+}
 
 export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
   const saved = loadSavedPanels();
@@ -100,6 +143,7 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
     showConsole: saved?.console ?? false,
     showSkillsPanel: saved?.skills ?? false,
     showDebugPanel: saved?.debug ?? false,
+    showElements: saved?.elements ?? false,
     showProjectSettingsModal: false,
     fullscreenPreview: false,
     panelOrder: loadPanelOrder(),
@@ -138,21 +182,18 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
       const patch: Partial<LayoutSlice> = { [key]: true, panelReplacePreview: null, panelInsertPreview: null };
 
       if (visibleCount >= MAX_VISIBLE_PANELS) {
-        // Close the rightmost visible panel and insert new one at its position
-        for (let i = allPanels.length - 1; i >= 0; i--) {
-          if (allPanels[i].open && allPanels[i].key !== panel) {
-            const closedKey = allPanels[i].key;
-            const closedPanelKey = PANEL_MAP[closedKey] as keyof LayoutSlice;
-            (patch as any)[closedPanelKey] = false;
-            // Move the new panel to the closed panel's position in order
-            newOrder = newOrder.filter(k => k !== panel);
-            const insertIdx = newOrder.indexOf(closedKey);
-            if (insertIdx >= 0) {
-              newOrder.splice(insertIdx, 0, panel);
-            } else {
-              newOrder.push(panel);
-            }
-            break;
+        // Close the rightmost evictable panel and insert new one at its position
+        const closedKey = pickEvictionTarget(allPanels, panel);
+        if (closedKey) {
+          const closedPanelKey = PANEL_MAP[closedKey] as keyof LayoutSlice;
+          (patch as any)[closedPanelKey] = false;
+          // Move the new panel to the closed panel's position in order
+          newOrder = newOrder.filter(k => k !== panel);
+          const insertIdx = newOrder.indexOf(closedKey);
+          if (insertIdx >= 0) {
+            newOrder.splice(insertIdx, 0, panel);
+          } else {
+            newOrder.push(panel);
           }
         }
       } else {
