@@ -8,7 +8,7 @@ import { FileExplorer } from '@/components/file-explorer';
 import { MultiTabEditor, openFileInEditor } from '@/components/editor/multi-tab-editor';
 import { MultipagePreview, MultipagePreviewHandle } from '@/components/preview/multipage-preview';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Terminal as TerminalIcon, Sparkles, ChevronDown, ChevronUp, EllipsisVertical, Upload } from 'lucide-react';
+import { ArrowLeft, MessageSquare, FolderTree, Code2, Eye, Settings, Save, Bug, RotateCcw, History, Terminal as TerminalIcon, Sparkles, ChevronDown, ChevronUp, EllipsisVertical, Upload, ListTree } from 'lucide-react';
 import { AppHeader, HeaderAction } from '@/components/ui/app-header';
 import { PendingImage, PendingAudio, PendingFile } from '@/lib/llm/multi-agent-orchestrator';
 import { configManager, migrateBackendKey } from '@/lib/config/storage';
@@ -17,7 +17,7 @@ import { useWorkspaceStore } from '@/lib/stores/workspace';
 import type { InterviewTemplate, InterviewHandoff } from '@/lib/interview/types';
 import { track } from '@/lib/telemetry';
 import { bucketInterviewTemplateId } from '@/lib/telemetry/tool-analytics';
-import { PANEL_MAP } from '@/lib/stores/slices/layout';
+import { PANEL_MAP, pickEvictionTarget, visiblePanelKeys } from '@/lib/stores/slices/layout';
 import { useCostSettings } from '@/lib/hooks/use-cost-settings';
 import { getModelInputModalities } from '@/lib/llm/providers/registry';
 import { isProjectProviderReady } from '@/lib/llm/models/project-assignment';
@@ -43,7 +43,7 @@ import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
 import { FocusContextPayload } from '@/lib/preview/types';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
-import type { PlacementResult } from '@/lib/preview/types';
+import type { PlacementResult, PreviewHostMessage, PreviewMessage } from '@/lib/preview/types';
 import { getBlockById } from '@/lib/semantic-blocks/registry';
 import { DebugPanel } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
@@ -51,7 +51,8 @@ import { DeploymentSelector } from '@/components/workspace/deployment-selector';
 import { CheckpointPanel } from '@/components/checkpoint-panel';
 import { ProjectSettingsModal } from '@/components/project-backend';
 import { SkillsPanel } from '@/components/workspace/skills-panel';
-import { PanelDragProvider } from '@/components/ui/panel';
+import { PanelDragProvider, PanelContainer, PanelHeader } from '@/components/ui/panel';
+import { ElementsPanel, type ElementsPanelHandle } from '@/components/elements-panel';
 import { ConsolePanel } from '@/components/console';
 import { drainRuntimeErrors, peekRuntimeErrors, formatRuntimeErrors } from '@/lib/preview/runtime-errors';
 
@@ -62,6 +63,47 @@ interface WorkspaceProps {
 }
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
+
+/**
+ * What makes two focus selections "the same one" for the 400 ms click dedup.
+ *
+ * One function rather than the expression written out at each site: the click path *writes* this
+ * signature and the re-resolve path has to write the same shape, or the user's next genuine click
+ * dedups against something that was never spelled the same way and is silently swallowed.
+ */
+function focusSignature(selection: FocusContextPayload): string {
+  return `${selection.domPath || ''}::${selection.tagName || ''}::${selection.outerHTML ? selection.outerHTML.length : 0}`;
+}
+
+/**
+ * What to do with the focus context when the preview frame announces a fresh document.
+ *
+ * Pure and exported so the decision is testable: `handleFrameReady` runs inside a React callback and
+ * reaches the store, so the *only* way to cover this reasoning without a mock is to have the
+ * reasoning live somewhere a plain function call can reach it.
+ *
+ * The path comparison is the part worth having. `onFrameReady` fires on **every** load, in-preview
+ * navigation included, and `domPath` carries no page identity — so without it a selection made on
+ * `/` silently rebinds to whatever `main > section > p` happens to be on `/about`, and *that*
+ * element's `outerHTML` is what goes to the agent with the next message.
+ *
+ * @param selectedOnPath the preview path the selection was made on, or null when unrecorded
+ * @param activePath     the path the frame has just loaded
+ */
+export function focusReloadAction(
+  focus: FocusContextPayload | null,
+  selectedOnPath: string | null,
+  activePath: string | null,
+): { kind: 'none' } | { kind: 'clear' } | { kind: 'resolve'; domPath: string } {
+  // Nothing selected, or a selection with no positional handle to re-resolve by. Clearing here
+  // would take away a selection the recompile did not actually invalidate.
+  if (!focus || !focus.domPath) return { kind: 'none' };
+  // An unrecorded path is not evidence of a navigation — a selection can predate the recording —
+  // so it re-resolves. The domPath still has to match an element, and null is the answer if it does
+  // not; a navigation, by contrast, is a positive signal and clears.
+  if (selectedOnPath !== null && selectedOnPath !== activePath) return { kind: 'clear' };
+  return { kind: 'resolve', domPath: focus.domPath };
+}
 
 export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const refreshTrigger = useWorkspaceStore(s => s.refreshTrigger);
@@ -107,7 +149,36 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   }, [project.id]);
 
   const lastFocusSignatureRef = useRef<{ signature: string; timestamp: number } | null>(null);
+  /**
+   * The preview path the current focus context was selected on, or null when there is no selection.
+   *
+   * `FocusContextPayload.domPath` carries no page identity, so this is the only thing that can tell
+   * a recompile of the same page (re-resolve) from a navigation to another one (clear).
+   */
+  const focusPathRef = useRef<string | null>(null);
   const previewRef = useRef<MultipagePreviewHandle>(null);
+  const elementsPanelRef = useRef<ElementsPanelHandle>(null);
+  /**
+   * The *desktop* preview's handle, specifically.
+   *
+   * The desktop block (`hidden md:flex`) and the mobile block (`flex md:hidden`) are both always in
+   * the React tree — the mobile one is hidden by CSS, not unmounted, and its preview renders
+   * whenever `activeMobilePanel === 'preview'`, which is the store's default. Both pass
+   * `previewRef`, and the mobile instance commits last, so on a desktop viewport `previewRef` points
+   * at a hidden frame that was compiled without provenance.
+   *
+   * That is a pre-existing hazard for every consumer of `previewRef` and is deliberately left
+   * alone. The Elements tree cannot live with it: `sendToFrame` addresses one specific iframe, and
+   * addressing the hidden one would serialize a document with no `data-osw-src` in it at all. So the
+   * tree keeps its own reference to the instance whose props it is wired to.
+   */
+  const desktopPreviewRef = useRef<MultipagePreviewHandle | null>(null);
+  // Stable, so it runs on mount and unmount only. An inline callback ref would re-run on every
+  // render and start reordering which instance `previewRef` ends up holding.
+  const attachDesktopPreview = useCallback((handle: MultipagePreviewHandle | null) => {
+    previewRef.current = handle;
+    desktopPreviewRef.current = handle;
+  }, []);
   const generatingRef = useRef(false);
   const handleGenerateRef = useRef<((promptText?: string, images?: PendingImage[], audio?: PendingAudio[], files?: PendingFile[]) => Promise<void>) | null>(null);
   const storeSetMode = useWorkspaceStore(s => s.setMode);
@@ -222,6 +293,9 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const showProjectSettingsModal = useWorkspaceStore(s => s.showProjectSettingsModal);
   const showSkillsPanel = useWorkspaceStore(s => s.showSkillsPanel);
   const showConsole = useWorkspaceStore(s => s.showConsole);
+  // Gates the preview's provenance instrumentation, which is off for everyone else: the publish,
+  // export and thumbnail paths must never see `data-osw-src`, and flipping this recompiles.
+  const showElements = useWorkspaceStore(s => s.showElements);
   const fullscreenPreview = useWorkspaceStore(s => s.fullscreenPreview);
   const panelReplacePreview = useWorkspaceStore(s => s.panelReplacePreview);
   const panelInsertPreview = useWorkspaceStore(s => s.panelInsertPreview);
@@ -249,18 +323,10 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
   const handlePanelDragEnd = useCallback(() => {
     if (draggingPanel && dropTarget !== null) {
-      // Capture current sizes keyed by panel identity before reordering
-      const visibleBefore = panelOrder.filter(k => {
-        if (k === 'chat') return showChat;
-        if (k === 'files') return showFiles;
-        if (k === 'editor') return showEditor;
-        if (k === 'console') return showConsole;
-        if (k === 'preview') return showPreview;
-        if (k === 'checkpoints') return showCheckpoints;
-        if (k === 'debug') return showDebugPanel;
-        if (k === 'skills') return showSkillsPanel;
-        return false;
-      });
+      // Capture current sizes keyed by panel identity before reordering. Derived from PANEL_MAP
+      // rather than a hardcoded key→flag chain: this list indexes the drop zones, so a panel
+      // missing from it silently shifts every drop target to the right of it.
+      const visibleBefore = visiblePanelKeys(useWorkspaceStore.getState(), panelOrder);
       const currentLayout = panelGroupRef.current?.getLayout() || [];
       const sizeByKey: Record<string, number> = {};
       visibleBefore.forEach((key, i) => {
@@ -304,7 +370,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     useWorkspaceStore.getState().endDrag();
     draggedPanelCenter.current = null;
     document.body.style.cursor = '';
-  }, [draggingPanel, dropTarget, panelOrder, showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel]);
+  }, [draggingPanel, dropTarget, panelOrder]);
 
   // Document-level mouseup listener — ends drag whether inside or outside the container.
   // If mouseUp is inside the container, the container's own onMouseUp handles it (with drop logic).
@@ -383,13 +449,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       return;
     }
     store.setPanelInsertPreview(null);
-    for (let i = allPanels.length - 1; i >= 0; i--) {
-      if (allPanels[i].open && allPanels[i].key !== key) {
-        store.setPanelReplacePreview(allPanels[i].key);
-        return;
-      }
-    }
-    store.setPanelReplacePreview(null);
+    // Same picker togglePanel uses, so the highlighted panel is the one that will actually close.
+    store.setPanelReplacePreview(pickEvictionTarget(allPanels, key));
   }, []);
 
   const consoleBufferRef = useRef<{ level: string; text: string }[]>([]);
@@ -434,7 +495,9 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     useWorkspaceStore.getState().setActiveInterview(null);
   }, [project.id]);
   
-  const visiblePanelCount = [showChat, showFiles, showEditor, showConsole, showPreview, showCheckpoints, showDebugPanel, showSkillsPanel].filter(Boolean).length;
+  // Derived from PANEL_MAP for the same reason as visibleBefore above: a panel missing from this
+  // count sizes every rendered panel as if there were one fewer.
+  const visiblePanelCount = useWorkspaceStore(s => visiblePanelKeys(s).length);
   const baseSize = visiblePanelCount > 0 ? Math.floor(100 / visiblePanelCount) : 100;
 
   const getModelDisplayName = (modelId: string) => {
@@ -545,9 +608,10 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     if (!selection) {
       useWorkspaceStore.getState().setFocusContext(null);
       lastFocusSignatureRef.current = null;
+      focusPathRef.current = null;
       return;
     }
-    const signature = `${selection.domPath || ''}::${selection.tagName || ''}::${selection.outerHTML ? selection.outerHTML.length : 0}`;
+    const signature = focusSignature(selection);
     const now = Date.now();
     if (lastFocusSignatureRef.current && lastFocusSignatureRef.current.signature === signature && (now - lastFocusSignatureRef.current.timestamp) < 400) {
       return;
@@ -561,7 +625,82 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       description: describeFocusTarget(nextTarget)
     });
     lastFocusSignatureRef.current = { signature, timestamp: now };
+    // Which page the selection was made on. `domPath` carries no page identity, so this is the only
+    // thing that stops a re-resolve after an in-preview navigation binding the selection to
+    // whatever element the same path happens to hit on the new page.
+    focusPathRef.current = desktopPreviewRef.current?.getActivePath?.() ?? null;
   }, [describeFocusTarget]);
+
+  /**
+   * A re-resolved selection, taken silently.
+   *
+   * Not routed through `handleFocusSelection`, which fires `toast.info('Focus context set')` — this
+   * runs on every recompile, and the 400 ms dedup would not suppress it anyway: the signature
+   * includes `outerHTML.length`, which moves the moment `data-osw-id` is stamped on the element.
+   *
+   * It still writes `lastFocusSignatureRef`, because that ref is what the *click* path dedups
+   * against. Leaving it holding the pre-recompile signature would let the user's next genuine click
+   * on the same element be swallowed as a duplicate.
+   */
+  const handleSelectionResolved = useCallback((message: Extract<PreviewMessage, { type: 'selection-resolved' }>) => {
+    const payload = message.payload;
+    const now = Date.now();
+    if (!payload) {
+      // The element is gone — edited away, or the page changed under us. Keeping the old payload
+      // would send the agent the `outerHTML` of something that no longer exists.
+      useWorkspaceStore.getState().setFocusContext(null);
+      lastFocusSignatureRef.current = null;
+      focusPathRef.current = null;
+      return;
+    }
+    useWorkspaceStore.getState().setFocusContext({ ...payload, timestamp: now });
+    lastFocusSignatureRef.current = { signature: focusSignature(payload), timestamp: now };
+  }, []);
+
+  // The Elements panel is a sibling of the preview in the panel map, so the frame's tree replies
+  // have to be lifted through here. Stable identities: `onTreeLevel`/`onTreeStale` sit in the
+  // preview's message-listener dependencies, and an inline arrow would tear that listener down and
+  // re-add it on every workspace render.
+  const handleTreeLevel = useCallback((message: Extract<PreviewMessage, { type: 'tree-level' }>) => {
+    elementsPanelRef.current?.handleTreeLevel(message);
+  }, []);
+
+  const handleTreeStale = useCallback(() => {
+    elementsPanelRef.current?.handleTreeStale();
+  }, []);
+
+  // Declared before `handleFrameReady`, which needs it: the frame-ready path is the one that asks
+  // the new document to resolve the selection again.
+  const sendToPreviewFrame = useCallback((message: PreviewHostMessage) => {
+    desktopPreviewRef.current?.sendToFrame(message);
+  }, []);
+
+  const handleFrameReady = useCallback(() => {
+    elementsPanelRef.current?.handleFrameReady();
+    // A recompile mints a new document, so the `nodeId` in the focus context is dead while the
+    // context itself survives — nothing clears it on frame-ready. `domPath` is the handle that
+    // outlives the document, and this turns it back into one the frame can be asked about. The
+    // decision, guard included, is `focusReloadAction`; this is only the dispatch.
+    const action = focusReloadAction(
+      useWorkspaceStore.getState().focusContext,
+      focusPathRef.current,
+      desktopPreviewRef.current?.getActivePath?.() ?? null,
+    );
+    if (action.kind === 'none') return;
+    if (action.kind === 'clear') {
+      useWorkspaceStore.getState().setFocusContext(null);
+      lastFocusSignatureRef.current = null;
+      focusPathRef.current = null;
+      return;
+    }
+    sendToPreviewFrame({ type: 'selection-resolve', domPath: action.domPath });
+  }, [sendToPreviewFrame]);
+
+  const handleOpenPreviewPanel = useCallback(() => {
+    if (!useWorkspaceStore.getState().showPreview) {
+      useWorkspaceStore.getState().togglePanel('preview');
+    }
+  }, []);
 
   const handlePlacementToggle = useCallback(() => {
     useWorkspaceStore.getState().setPaletteOpen(!useWorkspaceStore.getState().paletteOpen);
@@ -1671,6 +1810,42 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
               <TooltipTrigger asChild>
                 <button
                   className={`h-6 w-6 px-1 rounded-sm flex items-center justify-center transition-all ${
+                    showElements
+                      ? 'shadow-sm'
+                      : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                  style={{
+                    backgroundColor: showElements ? 'var(--button-elements-active-bg)' : undefined,
+                    color: showElements ? 'var(--button-elements-active-fg)' : undefined
+                  }}
+                  onClick={() => togglePanel('elements')}
+                  onMouseEnter={() => handleSidebarHover('elements')}
+                  onMouseLeave={() => handleSidebarHover(null)}
+                  aria-label={showElements ? 'Close elements panel' : 'Open elements panel'}
+                >
+                  <ListTree className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="border-0"
+                style={{
+                  backgroundColor: 'var(--button-elements-active)',
+                  color: 'white'
+                }}
+                arrowStyle={{
+                  backgroundColor: 'var(--button-elements-active)',
+                  fill: 'var(--button-elements-active)'
+                }}
+              >
+                <p>Elements</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={`h-6 w-6 px-1 rounded-sm flex items-center justify-center transition-all ${
                     showSkillsPanel
                       ? 'shadow-sm'
                       : 'bg-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground'
@@ -1899,7 +2074,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   style={fullscreenPreview ? undefined : { background: `linear-gradient(0deg, rgba(var(--panel-preview-rgb), 0.01), rgba(var(--panel-preview-rgb), 0.01)), var(--card)`, minWidth: '240px' }}
                 >
                   <MultipagePreview
-                    ref={previewRef}
+                    ref={attachDesktopPreview}
                     projectId={project.id}
                     refreshTrigger={refreshTrigger}
                     onFocusSelection={handleFocusSelection}
@@ -1914,8 +2089,37 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     onPlacementComplete={handlePlacementComplete}
                     onFullscreen={handleEnterFullscreen}
                     isFullscreen={fullscreenPreview}
+                    provenance={showElements}
+                    onTreeLevel={handleTreeLevel}
+                    onTreeStale={handleTreeStale}
+                    onSelectionResolved={handleSelectionResolved}
+                    onFrameReady={handleFrameReady}
                   />
                 </div>
+              )};
+
+              // Desktop only. The mobile block renders one panel at a time and has no Elements
+              // entry, which is deliberate: with the preview unmounted there would be no frame to
+              // query. Note also that both blocks pass `ref={previewRef}` — a pre-existing hazard
+              // that the tree does not exercise, since it never runs alongside the mobile preview.
+              if (showElements) panelMap['elements'] = { minSize: 14, content: (
+                <PanelContainer>
+                  <PanelHeader
+                    icon={ListTree}
+                    title="Elements"
+                    color="var(--button-elements-active)"
+                    panelKey="elements"
+                    onClose={() => useWorkspaceStore.getState().togglePanel('elements')}
+                  />
+                  <ElementsPanel
+                    ref={elementsPanelRef}
+                    projectId={project.id}
+                    runtime={projectRuntime || 'handlebars'}
+                    previewOpen={showPreview}
+                    onOpenPreview={handleOpenPreviewPanel}
+                    sendToFrame={sendToPreviewFrame}
+                  />
+                </PanelContainer>
               )};
 
               if (showCheckpoints) panelMap['checkpoints'] = { minSize: 12, content: (

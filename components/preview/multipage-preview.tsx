@@ -10,6 +10,9 @@ import {
 } from '@/lib/preview/types';
 import { vfs } from '@/lib/vfs';
 import { PreviewLifecycle } from '@/lib/preview/preview-lifecycle';
+import { STRIP_PROVENANCE_JS } from '@/lib/preview/provenance';
+import { SERIALIZE_TREE_JS } from '@/lib/preview/element-tree';
+import { STYLE_QUERY_JS, STYLE_PREVIEW_JS, STYLE_LOCATOR_JS, STYLE_PROBE_JS } from '@/lib/preview/style-preview';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,6 +47,17 @@ export interface MultipagePreviewHandle {
   startBlockDrag: (block: PlacementBlockInfo) => void;
   getActivePath: () => string;
   removePlaceholder: (placementId: string) => void;
+  /**
+   * Post a message to the preview frame.
+   *
+   * For panels that are siblings of the preview rather than children of it — the Elements tree is
+   * the first — so they can talk to the frame without a second copy of the posting logic.
+   *
+   * There is no queue: a message sent before the frame holds the compiled document is delivered to
+   * `about:blank`, or dropped outright when there is no contentWindow, and nothing retries it. Wait
+   * for `onFrameReady` before the first send, and again after every reload.
+   */
+  sendToFrame: (message: PreviewHostMessage) => void;
 }
 
 interface MultipagePreviewProps {
@@ -70,6 +84,58 @@ interface MultipagePreviewProps {
    * This says there is nothing to wait for.
    */
   standalone?: boolean;
+  /**
+   * Compile with element provenance (`data-osw-src`) so a selected element can name its source.
+   *
+   * Off by default and per-instance rather than global: the publish, export and thumbnail paths
+   * construct their own VirtualServer in the same browser tab, and this instrumentation must never
+   * reach any of them. Toggling it recompiles in place without navigating.
+   */
+  provenance?: boolean;
+  /**
+   * A level of the Elements tree arrived from the frame.
+   *
+   * Lifted through the host because the panel is a sibling in the workspace's panel map, not a
+   * child of this component, so it cannot receive the frame's messages itself.
+   */
+  onTreeLevel?: (message: Extract<PreviewMessage, { type: 'tree-level' }>) => void;
+  /**
+   * An id the consumer sent could not be resolved in the frame.
+   *
+   * Lifted for the same reason as `onTreeLevel`. Without this route the frame's `tree-stale` reply
+   * reaches the host's listener and stops there, so a selection of a vanished element would look to
+   * the panel exactly like a selection that was simply never answered.
+   */
+  onTreeStale?: (message: Extract<PreviewMessage, { type: 'tree-stale' }>) => void;
+  /**
+   * The computed values a `style-query` asked for.
+   *
+   * Lifted for the same reason as `onTreeLevel`: the panel that asked is a sibling in the
+   * workspace's panel map, not a child of this component, so the frame's reply cannot reach it
+   * directly. Must be `useCallback`-stable — this component is `React.memo` and this prop sits in
+   * the message listener's dependency array.
+   */
+  onStyleComputed?: (message: Extract<PreviewMessage, { type: 'style-computed' }>) => void;
+  /**
+   * Whether an override actually took effect, and what beat it. Same routing and same stability
+   * requirement as `onStyleComputed`.
+   */
+  onStyleProbeResult?: (message: Extract<PreviewMessage, { type: 'style-probe-result' }>) => void;
+  /**
+   * A fresh payload for a `selection-resolve`, or `null` when that path no longer resolves.
+   *
+   * The consumer here is the workspace rather than a panel: it owns the focus context, and a
+   * recompile is exactly when the `nodeId` in it stops resolving.
+   */
+  onSelectionResolved?: (message: Extract<PreviewMessage, { type: 'selection-resolved' }>) => void;
+  /**
+   * The frame has loaded the document this component wrote, verified by its load marker.
+   *
+   * Fires on every load, so it is also the reload signal: a `srcdoc` reassignment mints a new
+   * document and every id a consumer holds for the old one is dead. A consumer that requests
+   * anything on mount instead of on this callback is usually posting into `about:blank`.
+   */
+  onFrameReady?: () => void;
 }
 
 type DeviceSize = 'mobile' | 'tablet' | 'desktop' | 'responsive';
@@ -96,8 +162,76 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
-function generatePlacementScript(): string {
+/**
+ * Strip the Elements tree's transient node id, as JavaScript source for injection into the iframe.
+ *
+ * `data-osw-node` is stamped onto live elements as the tree is serialized, so anything read out of
+ * the frame's DOM after an expansion carries it: the focus payload's `outerHTML` and the placement
+ * request's `htmlContext` both do, and both end up in the agent's prompt.
+ *
+ * Authored here rather than inside the script template literals, for the reason
+ * `STRIP_PROVENANCE_JS` is authored in `lib/preview/provenance.ts`: `\\s` below is `\s` in the
+ * emitted JavaScript, and the same regex hand-written inside a template literal would collapse to a
+ * literal `s`. The tests extract this function out of the *emitted* text and run it.
+ *
+ * No `:\d+` guard, unlike the provenance stripper: that guard exists because `stripProvenance`
+ * writes its result back into project source via `curl -o`, where a false positive is data loss.
+ * This attribute is stamped at runtime and never appears in compiled output, so it has no such
+ * path.
+ */
+export const STRIP_NODE_ID_JS =
+  `function __oswStripNodeId(h){return String(h||'').replace(/\\s?data-osw-node="[^"]*"/g,'');}`;
+
+/**
+ * Escape an element id for use inside a CSS selector, as JavaScript source for the iframe.
+ *
+ * **`CSS.escape` is absent in jsdom** — measured — and every test of frame script runs in jsdom, so
+ * an unguarded call throws `ReferenceError` and takes the whole script down at parse-and-run time,
+ * not just the one branch. That is the entire reason this is hand-written rather than a one-liner
+ * delegating to the platform.
+ *
+ * Authored as a character loop and **not as a regex**, for this file's standing reason: a regex
+ * hand-written inside the script template literals below loses one level of escaping before it is
+ * emitted, and a replacement string of `'\\$1'` is exactly the shape that silently arrives as
+ * `'$1'`. The backslash it emits is spelled as its code unit for the same reason — a literal one
+ * would need doubling in this template literal and would still be one edit away from collapsing.
+ *
+ * A leading digit gets the hex form with its terminating space (`1abc` → `\31 abc`) rather than a
+ * bare backslash: `\1abc` is a valid CSS escape for codepoint U+1ABC, so the cheap spelling does not
+ * fail loudly — it silently selects a different id, or nothing.
+ */
+export const ESCAPE_CSS_IDENT_JS = `
+function __oswEscapeIdent(value) {
+  var s = String(value == null ? '' : value);
+  var bs = String.fromCharCode(92);
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charAt(i);
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_' || c === '-' || c > '~') {
+      out += c;
+      continue;
+    }
+    if (c >= '0' && c <= '9') {
+      // A digit is an ordinary ident character anywhere but the front.
+      out += i === 0 ? bs + '3' + c + ' ' : c;
+      continue;
+    }
+    out += bs + c;
+  }
+  return out;
+}
+`;
+
+/**
+ * The preview's semantic-block placement script, as source for the iframe.
+ *
+ * Exported for the same reason as generateNavigationScript below: the escaping of anything authored
+ * inside this template literal is only observable in the emitted string.
+ */
+export function generatePlacementScript(): string {
   return `<script>(function() {
+    ${STRIP_PROVENANCE_JS}
+    ${STRIP_NODE_ID_JS}
     var state = {
       active: false,
       block: null,
@@ -129,7 +263,12 @@ function generatePlacementScript(): string {
     function isPlaceholderOrIndicator(el) {
       if (!el || !el.getAttribute) return false;
       return el.getAttribute('data-semantic-placeholder') === 'true' ||
-             el.getAttribute('data-semantic-indicator') === 'true';
+             el.getAttribute('data-semantic-indicator') === 'true' ||
+             // The selector's highlight overlay. It stays in the document once created — hidden
+             // rather than detached — so findDropTarget's fallback, which returns the last body
+             // child when the pointer is over bare body, would otherwise pick it and hand the agent
+             // a domPath into preview furniture.
+             el.getAttribute('data-osw-overlay') !== null;
     }
 
     function getInsertPosition(el, x, y) {
@@ -288,7 +427,10 @@ function generatePlacementScript(): string {
       for (var k = scripts.length - 1; k >= 0; k--) {
         scripts[k].parentNode.removeChild(scripts[k]);
       }
-      return clone.outerHTML;
+      // Preview-only instrumentation must not reach the agent: this string becomes the placement
+      // request's htmlContext. A separate code path from the focus-context payload, so both
+      // strippers have to be applied here too.
+      return __oswStripNodeId(__oswStripProv(clone.outerHTML));
     }
 
     function handleDrop() {
@@ -367,13 +509,512 @@ function generatePlacementScript(): string {
         deactivate(true);
       } else if (data.type === 'placement-remove') {
         var pid = data.placementId;
-        if (typeof pid === 'string' && /^sb-\d+-[a-z0-9]+$/.test(pid)) {
+        // The doubled backslash below is deliberate: this is a template literal, so a single one
+        // would collapse before the script is emitted and the guard would match a literal "d"
+        // rather than a digit, rejecting every real id. Same doubling as the external-link test.
+        if (typeof pid === 'string' && /^sb-\\d+-[a-z0-9]+$/.test(pid)) {
           var el = document.querySelector('[data-placement-id="' + pid + '"]');
           if (el && el.parentNode) el.parentNode.removeChild(el);
         }
       }
     });
   })();<\/script>`;
+}
+
+/**
+ * The preview's navigation + element-selector script, as source for the iframe.
+ *
+ * Module level and exported so a test can assert on the *emitted* text. These literals are the
+ * one place in this file where an authored `\s` silently collapses to a literal `s` before it is
+ * ever emitted, so the emitted string — not the source — is what has to be checked.
+ */
+export function generateNavigationScript(normalizedPath: string): string {
+  return `
+      <script>
+        (function() {
+          ${STRIP_PROVENANCE_JS}
+          ${STRIP_NODE_ID_JS}
+          ${SERIALIZE_TREE_JS}
+          ${STYLE_QUERY_JS}
+          ${STYLE_PREVIEW_JS}
+          ${STYLE_LOCATOR_JS}
+          ${STYLE_PROBE_JS}
+          ${ESCAPE_CSS_IDENT_JS}
+          const isInIframe = window !== window.parent;
+
+          function resolveInternalPath(href) {
+            let path = href;
+            if (!path.startsWith('/')) {
+              const currentPath = '${normalizedPath}';
+              const currentDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
+              path = currentDir + '/' + path;
+            }
+
+            if (path.endsWith('.html')) {
+              path = path.slice(0, -5);
+            }
+            if (path === '/index') {
+              path = '/';
+            }
+            return path;
+          }
+
+          document.addEventListener('click', function(e) {
+            // Respect app-handled navigation: a client router (react-router, vue-router,
+            // svelte Link) calls preventDefault at/near the link, which bubbles to us already
+            // marked handled. Never hijack those — that is what broke framework routing.
+            if (e.defaultPrevented) return;
+            const target = e.target && e.target.closest ? e.target.closest('a') : null;
+            if (!target || !target.getAttribute) return;
+            const href = target.getAttribute('href');
+            if (!href) return;
+
+            // Hash links: a srcdoc document resolves '#x' against the PARENT's base URL, so letting
+            // the browser navigate would load the parent app into the frame. Instead, set the hash
+            // on the current document — this scrolls to '#section' and fires hashchange for a hash
+            // router, with no navigation. (A router that handles the click itself already
+            // preventDefaulted above, so we don't reach here for those.)
+            if (href.charAt(0) === '#') {
+              e.preventDefault();
+              var id = href.length > 1 ? href.slice(1) : '';
+              var scrollEl = id ? document.getElementById(id) : null;
+              if (scrollEl) {
+                scrollEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              } else {
+                // No matching element — likely a hash-router route (e.g. #/about); set the hash to
+                // fire hashchange so the router responds. No navigation in either case.
+                try { window.location.hash = href; } catch (e) { /* best-effort */ }
+              }
+              return;
+            }
+            // Native schemes and downloads — let the browser handle them.
+            if (/^(mailto:|tel:|javascript:)/i.test(href) || target.hasAttribute('download')) return;
+
+            if (!isInIframe) return;
+
+            // External: don't let the frame navigate away (that replaces the preview). Hand off
+            // to the host, which confirms and opens a new tab with noopener,noreferrer.
+            if (/^(https?:)?\\/\\//i.test(href)) {
+              e.preventDefault();
+              window.parent.postMessage({ type: 'preview:external', href: href }, '*');
+              return;
+            }
+            // Internal, not app-handled → host serves the file (no server behind srcdoc).
+            e.preventDefault();
+            window.parent.postMessage({ type: 'navigate', path: resolveInternalPath(href) }, '*');
+          });
+
+          const selectorState = {
+            active: false,
+            overlay: null,
+            lastTarget: null,
+            previousCursor: ''
+          };
+
+          function isElement(node) {
+            return node && node.nodeType === 1;
+          }
+
+          function ensureOverlay() {
+            if (selectorState.overlay) {
+              return selectorState.overlay;
+            }
+            const overlay = document.createElement('div');
+            // The one thing that tells this div apart from a user's own. Nothing could recognise it
+            // before, so neither a serializer walking document.body nor any future consumer could
+            // exclude it.
+            overlay.setAttribute('data-osw-overlay', '1');
+            overlay.style.position = 'absolute';
+            overlay.style.pointerEvents = 'none';
+            overlay.style.border = '2px solid rgba(99, 102, 241, 0.95)';
+            overlay.style.background = 'rgba(99, 102, 241, 0.08)';
+            overlay.style.boxShadow = '0 0 0 4px rgba(99, 102, 241, 0.32), 0 20px 40px rgba(15, 23, 42, 0.28)';
+            overlay.style.borderRadius = '12px';
+            overlay.style.zIndex = '2147483647';
+            overlay.style.transition = 'top 0.12s ease-out, left 0.12s ease-out, width 0.12s ease-out, height 0.12s ease-out';
+            overlay.style.willChange = 'top, left, width, height';
+            selectorState.overlay = overlay;
+            document.body.appendChild(overlay);
+            return overlay;
+          }
+
+          function positionOverlay(target) {
+            if (!isElement(target)) {
+              return;
+            }
+            const overlay = ensureOverlay();
+            const rect = target.getBoundingClientRect();
+            overlay.style.top = (rect.top + window.scrollY) + 'px';
+            overlay.style.left = (rect.left + window.scrollX) + 'px';
+            overlay.style.width = Math.max(rect.width, 1) + 'px';
+            overlay.style.height = Math.max(rect.height, 1) + 'px';
+            overlay.style.opacity = '1';
+          }
+
+          // The single entry point for the highlight: an element to show it on, or null to hide it.
+          //
+          // Hides rather than removes, and every path goes through here. Detaching and re-appending
+          // the node would churn document.body.children between two serializations of the same
+          // level, which is exactly the instability the Elements tree has to be immune to. It also
+          // means a highlight raised while the click-selector is off has a way back down — the old
+          // teardown was reachable only from disableSelector, which early-returns when the selector
+          // is inactive.
+          function setOverlayVisible(target) {
+            if (isElement(target)) {
+              positionOverlay(target);
+              return;
+            }
+            if (selectorState.overlay) {
+              selectorState.overlay.style.opacity = '0';
+            }
+          }
+
+          function buildDomPath(element) {
+            if (!isElement(element)) {
+              return '';
+            }
+            const segments = [];
+            let current = element;
+            while (current && current.nodeType === 1) {
+              let segment = current.tagName.toLowerCase();
+              if (current.id) {
+                // Escaped, because this path is fed back to querySelector by selection-resolve
+                // after a recompile. A raw '#' + id makes an id starting with a digit or containing
+                // '.', ':' or '/' either throw a SyntaxError or — worse — quietly select something
+                // else. Ordinary ids come through unchanged, so the emitted format is untouched for
+                // everything that already worked. (No backticks in this comment: it lives inside a
+                // template literal, and one would terminate it.)
+                segment += '#' + __oswEscapeIdent(current.id);
+                segments.unshift(segment);
+                break;
+              }
+              const parent = current.parentElement;
+              if (parent) {
+                const siblings = parent.children;
+                let index = 0;
+                for (let i = 0; i < siblings.length; i++) {
+                  if (siblings[i].tagName === current.tagName) {
+                    index++;
+                  }
+                  if (siblings[i] === current) {
+                    if (index > 1) {
+                      segment += ':nth-of-type(' + index + ')';
+                    } else {
+                      const hasSame = Array.from(siblings).some(function(child, childIndex) {
+                        return childIndex !== i && child.tagName === current.tagName;
+                      });
+                      if (hasSame) {
+                        segment += ':nth-of-type(' + index + ')';
+                      }
+                    }
+                    break;
+                  }
+                }
+              }
+              segments.unshift(segment);
+              current = parent;
+            }
+            return segments.join(' > ');
+          }
+
+          function gatherAttributes(element) {
+            const attributes = {};
+            if (!isElement(element) || !element.attributes) {
+              return attributes;
+            }
+            const maxAttributes = 25;
+            for (let i = 0; i < element.attributes.length && i < maxAttributes; i++) {
+              const attr = element.attributes[i];
+              if (!attr) continue;
+              const name = attr.name;
+              if (!name || name === 'style' || name.startsWith('on')) {
+                continue;
+              }
+              // Preview-only instrumentation. Injection lands immediately after the tag name, so
+              // this is always attribute index 0 — describeFocusTarget renders the first six
+              // attributes into the prompt, so leaving it in would both show it to the agent and
+              // evict a real attribute.
+              if (name === 'data-osw-src') {
+                continue;
+              }
+              // Same reasoning for the Elements tree's transient node id: stamped on the live
+              // element as the tree serializes it, so it would otherwise be attribute index 1 of
+              // anything the user has expanded to.
+              if (name === 'data-osw-node') {
+                continue;
+              }
+              attributes[name] = attr.value;
+            }
+            return attributes;
+          }
+
+          // The one place a focus payload is built. Every field derives from the target element
+          // alone — nothing comes from the click event — so any caller holding an element can
+          // produce the identical payload, and the Elements tree's select path does exactly that.
+          //
+          // The guarantee has to live in this function rather than in a test comparing two copies:
+          // a comparison test passes right up until the copies drift, which is the next change.
+          function buildSelectionPayload(target) {
+            // Stamped before anything else is read, so the attribute is genuinely on the element by
+            // the time outerHTML is taken — the stripper is then what keeps it out of the payload,
+            // rather than the order these fields happen to be evaluated in. __oswNodeId hands back
+            // an existing id, so an element the tree already serialized keeps the id the host holds.
+            var nodeId = __oswNodeId(target);
+            // Provenance is read here and counted here: the host cannot reach into
+            // contentDocument, so anything derived from the live DOM has to be computed inside
+            // the frame. Attribute values are compared in a loop rather than built into a
+            // selector string — no escaping, so there is nothing to get wrong.
+            var srcAttr = target.getAttribute ? target.getAttribute('data-osw-src') : null;
+            var instanceCount = 0;
+            if (srcAttr) {
+              var all = document.querySelectorAll('[data-osw-src]');
+              for (var q = 0; q < all.length; q++) {
+                if (all[q].getAttribute('data-osw-src') === srcAttr) instanceCount++;
+              }
+            }
+            return {
+              domPath: buildDomPath(target),
+              tagName: target.tagName.toLowerCase(),
+              attributes: gatherAttributes(target),
+              outerHTML: __oswStripNodeId(__oswStripProv(target.outerHTML || '')),
+              srcAttr: srcAttr || undefined,
+              instanceCount: instanceCount || undefined,
+              nodeId: nodeId
+            };
+          }
+
+          function handleMouseMove(event) {
+            if (!selectorState.active) {
+              return;
+            }
+            const target = isElement(event.target) ? event.target : (event.target && event.target.parentElement);
+            if (!isElement(target) || target === selectorState.lastTarget) {
+              return;
+            }
+            selectorState.lastTarget = target;
+            setOverlayVisible(target);
+          }
+
+          function handleClick(event) {
+            if (!selectorState.active) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === 'function') {
+              event.stopImmediatePropagation();
+            }
+            const target = isElement(event.target) ? event.target : (event.target && event.target.parentElement);
+            if (!isElement(target)) {
+              disableSelector(false);
+              return;
+            }
+            const payload = buildSelectionPayload(target);
+            if (isInIframe) {
+              window.parent.postMessage({ type: 'selector-selection', payload: payload }, '*');
+            }
+            disableSelector(false);
+          }
+
+          function handleContextMenu(event) {
+            if (!selectorState.active) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+          }
+
+          function handleKeyDown(event) {
+            if (!selectorState.active) {
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              disableSelector(true);
+            }
+          }
+
+          function enableSelector() {
+            if (selectorState.active) {
+              return;
+            }
+            selectorState.active = true;
+            selectorState.previousCursor = document.body.style.cursor;
+            const overlay = ensureOverlay();
+            overlay.style.opacity = '0';
+            document.body.style.cursor = 'crosshair';
+            document.addEventListener('mousemove', handleMouseMove, true);
+            document.addEventListener('click', handleClick, true);
+            document.addEventListener('contextmenu', handleContextMenu, true);
+            document.addEventListener('keydown', handleKeyDown, true);
+          }
+
+          function disableSelector(notifyCancel) {
+            if (!selectorState.active) {
+              return;
+            }
+            selectorState.active = false;
+            selectorState.lastTarget = null;
+            setOverlayVisible(null);
+            document.body.style.cursor = selectorState.previousCursor || '';
+            document.removeEventListener('mousemove', handleMouseMove, true);
+            document.removeEventListener('click', handleClick, true);
+            document.removeEventListener('contextmenu', handleContextMenu, true);
+            document.removeEventListener('keydown', handleKeyDown, true);
+            if (notifyCancel && isInIframe) {
+              window.parent.postMessage({ type: 'selector-cancelled' }, '*');
+            }
+          }
+
+          // Resolve an Elements-tree node id back to its live element, or null when it is gone.
+          // querySelector rather than a Map of id to element: a map hands back a *detached* node
+          // for a removed element, which positions a 1x1 overlay at (0,0) and builds a domPath from
+          // a non-document root. null is the stale signal the panel wants.
+          //
+          // The selector is assembled by concatenation, and the id is checked to be decimal digits
+          // first. Inside this frame ids can only be digits — __oswSerializeLevel mints them as
+          // String(counter) — but the value arriving here came from the host over postMessage, so
+          // the frame is not the only writer. A quote in it injects nothing (querySelector executes
+          // nothing) but does throw a SyntaxError, which would abort the rest of this handler; the
+          // digit check makes that unreachable without needing to reason about escaping.
+          function __oswResolveNode(nodeId) {
+            if (typeof nodeId !== 'string' || nodeId.length === 0) {
+              return null;
+            }
+            for (let i = 0; i < nodeId.length; i++) {
+              const c = nodeId.charAt(i);
+              if (c < '0' || c > '9') return null;
+            }
+            return document.querySelector('[data-osw-node="' + nodeId + '"]');
+          }
+
+          window.addEventListener('message', function(event) {
+            const data = event.data;
+            if (!data || typeof data !== 'object') {
+              return;
+            }
+            if (data.type === 'selector-toggle') {
+              if (data.active) {
+                enableSelector();
+              } else {
+                disableSelector(false);
+              }
+            }
+
+            if (data.type === 'tree-request') {
+              // null id is the body level. An id that no longer resolves passes null through to the
+              // serializer, which returns an empty level — the reply still names the parent the
+              // host asked about, so an expansion of a vanished branch resolves as empty rather
+              // than leaving the panel waiting for a message that never comes.
+              const root = data.nodeId == null ? document.body : __oswResolveNode(data.nodeId);
+              const level = __oswSerializeLevel(root);
+              if (isInIframe) {
+                window.parent.postMessage({
+                  type: 'tree-level',
+                  parentId: data.nodeId == null ? null : data.nodeId,
+                  nodes: level.nodes,
+                  truncated: level.truncated
+                }, '*');
+              }
+              return;
+            }
+
+            if (data.type === 'tree-highlight') {
+              // The click selector's overlay, through its one visibility control — not a second
+              // highlight mechanism, so a hover from the tree and a hover in the preview cannot
+              // both be showing at once.
+              setOverlayVisible(data.nodeId == null ? null : __oswResolveNode(data.nodeId));
+              return;
+            }
+
+            if (data.type === 'tree-select') {
+              const selected = __oswResolveNode(data.nodeId);
+              if (!selected) {
+                // Stop here. Falling through would build a payload for a detached or absent
+                // element and hand the agent a domPath that resolves to nothing, or to something
+                // else. The host is told the id is dead instead.
+                if (isInIframe) {
+                  window.parent.postMessage({ type: 'tree-stale', nodeId: data.nodeId }, '*');
+                }
+                return;
+              }
+              // The same builder the click path uses, so the two selections cannot differ.
+              if (isInIframe) {
+                window.parent.postMessage({ type: 'selector-selection', payload: buildSelectionPayload(selected) }, '*');
+              }
+              return;
+            }
+
+            if (data.type === 'style-query') {
+              // Answered unconditionally, including for an id that no longer resolves:
+              // __oswReadComputed returns {} for a null element. Returning early instead would
+              // leave the host unable to tell a dead id from a frame that has not replied yet.
+              const queried = __oswResolveNode(data.nodeId);
+              if (isInIframe) {
+                window.parent.postMessage({
+                  type: 'style-computed',
+                  nodeId: data.nodeId,
+                  values: __oswReadComputed(queried, data.properties)
+                }, '*');
+              }
+              return;
+            }
+
+            if (data.type === 'style-preview') {
+              // No reply: the host is not waiting on one, and the next style-query reads the
+              // result out of the live document anyway.
+              //
+              // Deliberately not re-applied on frame-ready. A recompile mints a new document and
+              // takes the transient <style> with it, which is the wanted behaviour — by then
+              // /overrides.css carries the rule, and putting a stale copy back would mask the next
+              // edit the agent makes to the same element.
+              __oswApplyStylePreview(data.markerId, data.css);
+              return;
+            }
+
+            if (data.type === 'style-probe') {
+              // Answered unconditionally, for the same reason style-query is: a dead id, a marker
+              // with no rule in the document and an override that is simply winning all look
+              // identical to a host that got no reply.
+              const probed = __oswResolveNode(data.nodeId);
+              const outcome = __oswProbeStyleLoss(probed, data.markerId, data.properties);
+              if (isInIframe) {
+                const reply = { type: 'style-probe-result', nodeId: data.nodeId, lost: outcome.lost };
+                // Only when there is one to name. An always-present winner:null would have 4b's
+                // message renderer branching on a value that is null in the ordinary case.
+                if (outcome.winner) reply.winner = outcome.winner;
+                window.parent.postMessage(reply, '*');
+              }
+              return;
+            }
+
+            if (data.type === 'selection-resolve') {
+              // The recompile took every node id with it, so the host is holding a domPath and
+              // nothing else. querySelector is wrapped because the path can predate the escaping
+              // above — a selection made before this version, or an id the escape does not cover —
+              // and a SyntaxError here would abort the rest of this handler.
+              let resolved = null;
+              try {
+                resolved = typeof data.domPath === 'string' && data.domPath !== ''
+                  ? document.querySelector(data.domPath)
+                  : null;
+              } catch (err) {
+                resolved = null;
+              }
+              if (isInIframe) {
+                // The same builder the click and tree paths use, so a re-resolved selection is not
+                // a second, subtly different kind of selection.
+                window.parent.postMessage({
+                  type: 'selection-resolved',
+                  payload: resolved ? buildSelectionPayload(resolved) : null
+                }, '*');
+              }
+              return;
+            }
+          });
+        })();
+      </script>
+    `;
 }
 
 const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePreviewProps>(({
@@ -391,7 +1032,14 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   placementActive,
   onPlacementToggle,
   onPlacementComplete,
-  standalone = false
+  standalone = false,
+  provenance = false,
+  onTreeLevel,
+  onTreeStale,
+  onStyleComputed,
+  onStyleProbeResult,
+  onSelectionResolved,
+  onFrameReady
 }, ref) => {
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
@@ -577,6 +1225,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     removePlaceholder: (placementId: string) => {
       postMessageToIframe({ type: 'placement-remove', placementId });
     },
+    sendToFrame: postMessageToIframe,
   }), [iframeReady, startBlockDrag, activePath, postMessageToIframe]);
 
   const compilingRef = useRef(false);
@@ -599,6 +1248,12 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       postMessageToIframe({ type: 'selector-toggle', active: selectorActive });
     }
   }, [selectorActive, iframeReady, postMessageToIframe]);
+
+  // Kept in a ref rather than in the load effect's dependencies: the consumer passes an inline
+  // callback, so a dependency would tear down and re-add the load listener on every parent render —
+  // and that effect also owns escape detection.
+  const onFrameReadyRef = useRef(onFrameReady);
+  onFrameReadyRef.current = onFrameReady;
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -624,6 +1279,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
           markerReadableRef.current = true;
           lifecycleRef.current.onAck(expected);
           setEscaped(false);
+          // Only here, and only after the marker matched: this is the first moment a message posted
+          // into the frame reaches the document we wrote. Announced on every load, because each one
+          // invalidates whatever the consumer knows about the old document.
+          onFrameReadyRef.current?.();
         } else if (typeof markerLoadId === 'number') {
           // A different load's marker: still one of our documents (a stale/rapid load), not an
           // external escape — reads work, so record that, but don't recover.
@@ -697,7 +1356,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         serverRef.current.cleanupBlobUrls();
       }
 
-      const server = new VirtualServer(vfs, projectId, { deploymentId: deploymentId || undefined, entryPoint, runtime });
+      const server = new VirtualServer(vfs, projectId, { deploymentId: deploymentId || undefined, entryPoint, runtime, provenance });
       serverRef.current = server;
 
       const compiled = await withTimeout(server.compileProject(), COMPILE_TIMEOUT_MS, 'Compile');
@@ -729,7 +1388,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         setLoading(false);
       }
     }
-  }, [projectId, deploymentId, entryPoint, runtime]);
+  }, [projectId, deploymentId, entryPoint, runtime, provenance]);
 
   const compileAndLoad = useCallback((preserveCurrentPath: boolean = false, showLoading: boolean = true) => {
     if (compilingRef.current) {
@@ -790,6 +1449,20 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     if (!workspaceReady) return;
     compileAndLoad();
   }, [projectId, workspaceReady, compileAndLoad]);
+
+  // Toggling provenance changes the compiled output, so it needs a recompile — but only when the
+  // flag itself changed. The guard is on the previous *value*, not on "is this the first run":
+  // compileAndLoad's identity also changes with projectId/deploymentId/entryPoint/runtime, and a
+  // first-run guard would then fire here on every project switch. Because compileAndLoad OR-merges
+  // pending options, that would force preserve: true onto the fresh-navigation compile the effect
+  // above is already doing, plus a redundant second compile.
+  const prevProvenance = useRef(provenance);
+  useEffect(() => {
+    if (prevProvenance.current === provenance) return;
+    prevProvenance.current = provenance;
+    // Keep the current page, no loading flash — the user is looking at the page they selected in.
+    compileAndLoad(true, false);
+  }, [provenance, compileAndLoad]);
 
   // refreshTrigger bumps coalesce with concurrent filesChanged events through
   // the same debounce so a bulk operation produces one compile, not two.
@@ -926,292 +1599,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       return blobUrl ? `src="${blobUrl}"` : match;
     });
 
-    const navigationScript = `
-      <script>
-        (function() {
-          const isInIframe = window !== window.parent;
-
-          function resolveInternalPath(href) {
-            let path = href;
-            if (!path.startsWith('/')) {
-              const currentPath = '${normalizedPath}';
-              const currentDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
-              path = currentDir + '/' + path;
-            }
-
-            if (path.endsWith('.html')) {
-              path = path.slice(0, -5);
-            }
-            if (path === '/index') {
-              path = '/';
-            }
-            return path;
-          }
-
-          document.addEventListener('click', function(e) {
-            // Respect app-handled navigation: a client router (react-router, vue-router,
-            // svelte Link) calls preventDefault at/near the link, which bubbles to us already
-            // marked handled. Never hijack those — that is what broke framework routing.
-            if (e.defaultPrevented) return;
-            const target = e.target && e.target.closest ? e.target.closest('a') : null;
-            if (!target || !target.getAttribute) return;
-            const href = target.getAttribute('href');
-            if (!href) return;
-
-            // Hash links: a srcdoc document resolves '#x' against the PARENT's base URL, so letting
-            // the browser navigate would load the parent app into the frame. Instead, set the hash
-            // on the current document — this scrolls to '#section' and fires hashchange for a hash
-            // router, with no navigation. (A router that handles the click itself already
-            // preventDefaulted above, so we don't reach here for those.)
-            if (href.charAt(0) === '#') {
-              e.preventDefault();
-              var id = href.length > 1 ? href.slice(1) : '';
-              var scrollEl = id ? document.getElementById(id) : null;
-              if (scrollEl) {
-                scrollEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              } else {
-                // No matching element — likely a hash-router route (e.g. #/about); set the hash to
-                // fire hashchange so the router responds. No navigation in either case.
-                try { window.location.hash = href; } catch (e) { /* best-effort */ }
-              }
-              return;
-            }
-            // Native schemes and downloads — let the browser handle them.
-            if (/^(mailto:|tel:|javascript:)/i.test(href) || target.hasAttribute('download')) return;
-
-            if (!isInIframe) return;
-
-            // External: don't let the frame navigate away (that replaces the preview). Hand off
-            // to the host, which confirms and opens a new tab with noopener,noreferrer.
-            if (/^(https?:)?\\/\\//i.test(href)) {
-              e.preventDefault();
-              window.parent.postMessage({ type: 'preview:external', href: href }, '*');
-              return;
-            }
-            // Internal, not app-handled → host serves the file (no server behind srcdoc).
-            e.preventDefault();
-            window.parent.postMessage({ type: 'navigate', path: resolveInternalPath(href) }, '*');
-          });
-
-          const selectorState = {
-            active: false,
-            overlay: null,
-            lastTarget: null,
-            previousCursor: ''
-          };
-
-          function isElement(node) {
-            return node && node.nodeType === 1;
-          }
-
-          function ensureOverlay() {
-            if (selectorState.overlay) {
-              return selectorState.overlay;
-            }
-            const overlay = document.createElement('div');
-            overlay.style.position = 'absolute';
-            overlay.style.pointerEvents = 'none';
-            overlay.style.border = '2px solid rgba(99, 102, 241, 0.95)';
-            overlay.style.background = 'rgba(99, 102, 241, 0.08)';
-            overlay.style.boxShadow = '0 0 0 4px rgba(99, 102, 241, 0.32), 0 20px 40px rgba(15, 23, 42, 0.28)';
-            overlay.style.borderRadius = '12px';
-            overlay.style.zIndex = '2147483647';
-            overlay.style.transition = 'top 0.12s ease-out, left 0.12s ease-out, width 0.12s ease-out, height 0.12s ease-out';
-            overlay.style.willChange = 'top, left, width, height';
-            selectorState.overlay = overlay;
-            document.body.appendChild(overlay);
-            return overlay;
-          }
-
-          function positionOverlay(target) {
-            if (!isElement(target)) {
-              return;
-            }
-            const overlay = ensureOverlay();
-            const rect = target.getBoundingClientRect();
-            overlay.style.top = (rect.top + window.scrollY) + 'px';
-            overlay.style.left = (rect.left + window.scrollX) + 'px';
-            overlay.style.width = Math.max(rect.width, 1) + 'px';
-            overlay.style.height = Math.max(rect.height, 1) + 'px';
-            overlay.style.opacity = '1';
-          }
-
-          function clearOverlay() {
-            if (selectorState.overlay && selectorState.overlay.parentElement) {
-              selectorState.overlay.parentElement.removeChild(selectorState.overlay);
-            }
-            selectorState.overlay = null;
-          }
-
-          function buildDomPath(element) {
-            if (!isElement(element)) {
-              return '';
-            }
-            const segments = [];
-            let current = element;
-            while (current && current.nodeType === 1) {
-              let segment = current.tagName.toLowerCase();
-              if (current.id) {
-                segment += '#' + current.id;
-                segments.unshift(segment);
-                break;
-              }
-              const parent = current.parentElement;
-              if (parent) {
-                const siblings = parent.children;
-                let index = 0;
-                for (let i = 0; i < siblings.length; i++) {
-                  if (siblings[i].tagName === current.tagName) {
-                    index++;
-                  }
-                  if (siblings[i] === current) {
-                    if (index > 1) {
-                      segment += ':nth-of-type(' + index + ')';
-                    } else {
-                      const hasSame = Array.from(siblings).some(function(child, childIndex) {
-                        return childIndex !== i && child.tagName === current.tagName;
-                      });
-                      if (hasSame) {
-                        segment += ':nth-of-type(' + index + ')';
-                      }
-                    }
-                    break;
-                  }
-                }
-              }
-              segments.unshift(segment);
-              current = parent;
-            }
-            return segments.join(' > ');
-          }
-
-          function gatherAttributes(element) {
-            const attributes = {};
-            if (!isElement(element) || !element.attributes) {
-              return attributes;
-            }
-            const maxAttributes = 25;
-            for (let i = 0; i < element.attributes.length && i < maxAttributes; i++) {
-              const attr = element.attributes[i];
-              if (!attr) continue;
-              const name = attr.name;
-              if (!name || name === 'style' || name.startsWith('on')) {
-                continue;
-              }
-              attributes[name] = attr.value;
-            }
-            return attributes;
-          }
-
-          function handleMouseMove(event) {
-            if (!selectorState.active) {
-              return;
-            }
-            const target = isElement(event.target) ? event.target : (event.target && event.target.parentElement);
-            if (!isElement(target) || target === selectorState.lastTarget) {
-              return;
-            }
-            selectorState.lastTarget = target;
-            positionOverlay(target);
-          }
-
-          function handleClick(event) {
-            if (!selectorState.active) {
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-            if (typeof event.stopImmediatePropagation === 'function') {
-              event.stopImmediatePropagation();
-            }
-            const target = isElement(event.target) ? event.target : (event.target && event.target.parentElement);
-            if (!isElement(target)) {
-              disableSelector(false);
-              return;
-            }
-            const payload = {
-              domPath: buildDomPath(target),
-              tagName: target.tagName.toLowerCase(),
-              attributes: gatherAttributes(target),
-              outerHTML: target.outerHTML || ''
-            };
-            if (isInIframe) {
-              window.parent.postMessage({ type: 'selector-selection', payload: payload }, '*');
-            }
-            disableSelector(false);
-          }
-
-          function handleContextMenu(event) {
-            if (!selectorState.active) {
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-          }
-
-          function handleKeyDown(event) {
-            if (!selectorState.active) {
-              return;
-            }
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              disableSelector(true);
-            }
-          }
-
-          function enableSelector() {
-            if (selectorState.active) {
-              return;
-            }
-            selectorState.active = true;
-            selectorState.previousCursor = document.body.style.cursor;
-            const overlay = ensureOverlay();
-            overlay.style.opacity = '0';
-            document.body.style.cursor = 'crosshair';
-            document.addEventListener('mousemove', handleMouseMove, true);
-            document.addEventListener('click', handleClick, true);
-            document.addEventListener('contextmenu', handleContextMenu, true);
-            document.addEventListener('keydown', handleKeyDown, true);
-          }
-
-          function disableSelector(notifyCancel) {
-            if (!selectorState.active) {
-              return;
-            }
-            selectorState.active = false;
-            selectorState.lastTarget = null;
-            if (selectorState.overlay) {
-              selectorState.overlay.style.opacity = '0';
-              window.setTimeout(clearOverlay, 120);
-            } else {
-              clearOverlay();
-            }
-            document.body.style.cursor = selectorState.previousCursor || '';
-            document.removeEventListener('mousemove', handleMouseMove, true);
-            document.removeEventListener('click', handleClick, true);
-            document.removeEventListener('contextmenu', handleContextMenu, true);
-            document.removeEventListener('keydown', handleKeyDown, true);
-            if (notifyCancel && isInIframe) {
-              window.parent.postMessage({ type: 'selector-cancelled' }, '*');
-            }
-          }
-
-          window.addEventListener('message', function(event) {
-            const data = event.data;
-            if (!data || typeof data !== 'object') {
-              return;
-            }
-            if (data.type === 'selector-toggle') {
-              if (data.active) {
-                enableSelector();
-              } else {
-                disableSelector(false);
-              }
-            }
-          });
-        })();
-      </script>
-    `;
+    const navigationScript = generateNavigationScript(normalizedPath);
     
     const placementScript = generatePlacementScript();
     const injectedScripts = navigationScript + placementScript;
@@ -1362,6 +1750,31 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         return;
       }
 
+      if (data.type === 'tree-level') {
+        onTreeLevel?.(data);
+        return;
+      }
+
+      if (data.type === 'tree-stale') {
+        onTreeStale?.(data);
+        return;
+      }
+
+      if (data.type === 'style-computed') {
+        onStyleComputed?.(data);
+        return;
+      }
+
+      if (data.type === 'style-probe-result') {
+        onStyleProbeResult?.(data);
+        return;
+      }
+
+      if (data.type === 'selection-resolved') {
+        onSelectionResolved?.(data);
+        return;
+      }
+
       if (data.type === 'iframe-click') {
         const ps = paletteStateRef.current;
         if (ps.localPaletteOpen && ps.paletteVisible && !ps.draggingBlock) {
@@ -1376,7 +1789,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [handleNavigation, onFocusSelection, onPlacementComplete]);
+  }, [handleNavigation, onFocusSelection, onPlacementComplete, onTreeLevel, onTreeStale,
+      onStyleComputed, onStyleProbeResult, onSelectionResolved]);
 
 
   useEffect(() => {
