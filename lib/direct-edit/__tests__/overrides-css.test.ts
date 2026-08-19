@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { upsertDeclaration, removeMarkerBlock, OVERRIDES_HEADER } from '../overrides-css';
+import {
+  declaredProperties,
+  upsertDeclaration,
+  removeDeclaration,
+  removeMarkerBlock,
+  OVERRIDES_HEADER,
+} from '../overrides-css';
 
 const BLOCK = (id: string) => new RegExp(`\\[data-osw-id="${id}"\\]\\[data-osw-id\\]\\s*\\{`, 'g');
+
+/** The selector `upsertDeclaration` writes, for the cases that hand-build a file rather than seed one. */
+const SELECTOR = (id: string) => `[data-osw-id="${id}"][data-osw-id]`;
 
 describe('upsertDeclaration', () => {
   it('creates the file body with a header when empty', () => {
@@ -162,6 +171,97 @@ describe('upsertDeclaration', () => {
   });
 });
 
+describe('removeDeclaration', () => {
+  /** Two properties on one marker, plus a hand-written rule that must survive everything. */
+  const seeded = (): string => {
+    const hand = '/* keep me */\n.thing { color: hotpink; }\n';
+    let out = upsertDeclaration(hand, 'aaaaaaaa', { property: 'color', value: 'red' });
+    out = upsertDeclaration(out, 'aaaaaaaa', { property: 'padding-block', value: '1rem' });
+    return upsertDeclaration(out, 'bbbbbbbb', { property: 'color', value: 'blue' });
+  };
+
+  it('removes only the named declaration and leaves the rest of the block alone', () => {
+    const after = removeDeclaration(seeded(), 'aaaaaaaa', 'color');
+    expect(after).not.toContain('color: red;');
+    expect(after).toContain('padding-block: 1rem;');
+    // The block is still there, still one of it, still keyed to the same marker.
+    expect(after.match(BLOCK('aaaaaaaa'))).toHaveLength(1);
+  });
+
+  it('removes the whole block once its last declaration goes', () => {
+    let after = removeDeclaration(seeded(), 'aaaaaaaa', 'color');
+    after = removeDeclaration(after, 'aaaaaaaa', 'padding-block');
+    // Not an empty rule: an empty rule reads as an override that failed rather than one never made.
+    expect(after).not.toContain('aaaaaaaa');
+    expect(after.match(BLOCK('aaaaaaaa'))).toBeNull();
+    expect(after).not.toMatch(/\{\s*\}/);
+  });
+
+  it('takes the block with it when only a comment would be left behind', () => {
+    // `parseBody` keeps hand-written comments as items so re-emitting a block does not delete them.
+    // That is right while the block still declares something; once the last declaration goes, a
+    // block holding nothing but a comment is an override that no longer exists, still occupying the
+    // file and still claiming the marker.
+    const seeded = SELECTOR('aaaaaaaa') + ' {\n  /* why this one is pinned */\n  color: red;\n}\n';
+    const after = removeDeclaration(seeded, 'aaaaaaaa', 'color');
+
+    expect(after).not.toContain('aaaaaaaa');
+    expect(after).not.toContain('why this one is pinned');
+    expect(after).not.toMatch(/\{[^}]*\}/);
+  });
+
+  it('leaves every other marker, and every hand-written rule, exactly as they were', () => {
+    let after = removeDeclaration(seeded(), 'aaaaaaaa', 'color');
+    after = removeDeclaration(after, 'aaaaaaaa', 'padding-block');
+    expect(after).toContain('bbbbbbbb');
+    expect(after).toContain('color: blue;');
+    expect(after).toContain('/* keep me */');
+    expect(after).toContain('.thing { color: hotpink; }');
+  });
+
+  it('is a no-op for a marker that owns nothing, and for a property it never set', () => {
+    const hand = '/* keep me */\n.thing { color: hotpink; }\n';
+    expect(removeDeclaration(hand, 'aaaaaaaa', 'color')).toBe(hand);
+    const css = seeded();
+    expect(removeDeclaration(css, 'aaaaaaaa', 'margin-block')).toBe(css);
+  });
+
+  it('matches the property however it is cased', () => {
+    const css = upsertDeclaration('', 'aaaaaaaa', { property: 'Color', value: 'red' });
+    expect(removeDeclaration(css, 'aaaaaaaa', 'color')).not.toContain('red');
+  });
+
+  it('clears the property out of EVERY block the marker owns, not just the last', () => {
+    // Only reachable by hand-editing, and the case that matters: `upsertDeclaration` edits the last
+    // block, so a removal that did the same would leave an earlier duplicate still overriding the
+    // property — a Reset the user watches fail.
+    const doubled = upsertDeclaration(
+      upsertDeclaration('', 'aaaaaaaa', { property: 'color', value: 'red' })
+        + '\n[data-osw-id="aaaaaaaa"][data-osw-id] { color: green; padding: 0; }\n',
+      'aaaaaaaa',
+      { property: 'margin', value: '0' },
+    );
+    const after = removeDeclaration(doubled, 'aaaaaaaa', 'color');
+    expect(after).not.toContain('color: red;');
+    expect(after).not.toContain('color: green;');
+    expect(after).toContain('padding: 0;');
+  });
+
+  it('refuses the same ambiguity the writer refuses', () => {
+    const commented = '/* [data-osw-id="aaaaaaaa"][data-osw-id] mentioned */\n.victim { color: hotpink; }\n';
+    expect(() => removeDeclaration(commented, 'aaaaaaaa', 'color')).toThrow();
+
+    const nested = '@media (min-width: 40em) {\n  [data-osw-id="aaaaaaaa"][data-osw-id] { color: red; }\n}\n';
+    expect(() => removeDeclaration(nested, 'aaaaaaaa', 'color')).toThrow();
+  });
+
+  it('refuses an unsafe property name and an unsafe marker id', () => {
+    const css = upsertDeclaration('', 'aaaaaaaa', { property: 'color', value: 'red' });
+    expect(() => removeDeclaration(css, 'aaaaaaaa', 'color; } body { color')).toThrow();
+    expect(() => removeDeclaration(css, 'a"a', 'color')).toThrow();
+  });
+});
+
 describe('removeMarkerBlock', () => {
   it('removes only that block and leaves everything else byte-exact', () => {
     const hand = '/* keep me */\n.thing { color: hotpink; }\n';
@@ -174,8 +274,69 @@ describe('removeMarkerBlock', () => {
     expect(after).toContain('.thing { color: hotpink; }');
   });
 
+  it('removes every block the marker owns, not just one of them', () => {
+    // `upsertDeclaration` keeps a marker to a single block, so two is a file that was hand-edited or
+    // written by an older build — exactly the file this has to survive. The blocks are cut back to
+    // front because the offsets were all measured against the original string: cutting the first one
+    // first shifts every later offset and the second cut lands mid-rule, splicing the file into
+    // something that no longer parses.
+    const css = [
+      '/* keep me */',
+      '.thing { color: hotpink; }',
+      SELECTOR('aaaaaaaa') + ' { color: red; }',
+      '.between { margin: 0; }',
+      SELECTOR('aaaaaaaa') + ' { padding-block: 1rem; }',
+      '.after { display: block; }',
+      '',
+    ].join('\n');
+
+    const after = removeMarkerBlock(css, 'aaaaaaaa');
+
+    expect(after).not.toContain('aaaaaaaa');
+    expect(after).not.toContain('color: red');
+    expect(after).not.toContain('padding-block: 1rem');
+    // Everything that was not the marker's survives, intact and in order — the assertion that a
+    // front-to-back cut fails, because it leaves a fragment of the second block behind.
+    expect(after).toContain('/* keep me */');
+    expect(after).toContain('.thing { color: hotpink; }');
+    expect(after).toContain('.between { margin: 0; }');
+    expect(after).toContain('.after { display: block; }');
+    expect(after.match(/\{/g) ?? []).toHaveLength(3);
+  });
+
   it('is a no-op when the marker owns no block', () => {
     const hand = '/* keep me */\n.thing { color: hotpink; }\n';
     expect(removeMarkerBlock(hand, 'aaaaaaaa')).toBe(hand);
+  });
+});
+
+describe('declaredProperties', () => {
+  it('names what the marker actually overrides, in the order the block declares it', () => {
+    let css = upsertDeclaration('', 'aaaaaaaa', { property: 'color', value: 'red' });
+    css = upsertDeclaration(css, 'aaaaaaaa', { property: 'padding-block', value: '1rem' });
+    css = upsertDeclaration(css, 'bbbbbbbb', { property: 'background-color', value: 'blue' });
+    expect(declaredProperties(css, 'aaaaaaaa')).toEqual(['color', 'padding-block']);
+    // And it is per marker: the other element's block is not this element's to reset.
+    expect(declaredProperties(css, 'bbbbbbbb')).toEqual(['background-color']);
+  });
+
+  it('answers [] for a file with no block for this marker, and for an empty file', () => {
+    const hand = '/* keep me */\n.thing { color: hotpink; }\n';
+    expect(declaredProperties(hand, 'aaaaaaaa')).toEqual([]);
+    expect(declaredProperties('', 'aaaaaaaa')).toEqual([]);
+  });
+
+  it('lowercases, and does not report a hand-written comment as a property', () => {
+    const css = '[data-osw-id="aaaaaaaa"][data-osw-id] {\n  /* mine */\n  COLOR: red;\n}\n';
+    expect(declaredProperties(css, 'aaaaaaaa')).toEqual(['color']);
+  });
+
+  it('refuses the same ambiguous files the writers refuse, rather than under-reporting', () => {
+    // Nested in an at-rule: `removeDeclaration` will not edit there, so reporting the property as
+    // resettable would offer a control that can only refuse.
+    const nested = '@media (min-width: 40em) {\n  [data-osw-id="aaaaaaaa"][data-osw-id] { color: red; }\n}\n';
+    expect(() => declaredProperties(nested, 'aaaaaaaa')).toThrow(/nested/);
+    const commented = '/* [data-osw-id="aaaaaaaa"] was here */\n.thing { color: red; }\n';
+    expect(() => declaredProperties(commented, 'aaaaaaaa')).toThrow(/comment/);
   });
 });

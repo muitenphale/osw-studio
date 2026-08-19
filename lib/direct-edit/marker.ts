@@ -12,6 +12,7 @@ import { readOpenTagAt } from '@/lib/preview/provenance';
  */
 
 import type { OpenTag } from '@/lib/preview/provenance';
+import { findAttributeIn } from './attributes';
 
 /**
  * The attribute name. Changing it invalidates every marker already stamped into every project's
@@ -28,11 +29,7 @@ const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 /**
  * A fresh marker id: 8 characters of `[a-z0-9]`.
  *
- * Lowercase-only and digit-inclusive so the id is safe in an attribute value, in a CSS attribute
- * selector, and in a filename, without escaping anywhere. 36^8 ≈ 2.8e12 keeps accidental collision
- * within one project negligible; uniqueness is not enforced, only made improbable — the duplicate
- * check in the §6 sweep exists because the *agent copying a marked element* is the realistic way
- * two elements end up sharing an id, not chance.
+ * 36^8 ~ 2.8 x 10^12 keeps collision negligible; not enforced, only improbable.
  */
 export function newMarkerId(): string {
   const c = globalThis.crypto;
@@ -49,67 +46,9 @@ export function newMarkerId(): string {
   return out;
 }
 
-function isSpace(ch: string | undefined): boolean {
-  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\f' || ch === '\r';
-}
-
-/**
- * Find `data-osw-id`'s value among the attributes of one open tag, or `null`.
- *
- * Walks attributes rather than regex-matching the region, because a regex matches the marker's
- * spelling wherever it appears — including inside *another attribute's value*
- * (`title=" data-osw-id='x'"`). That reads as a false positive, `stampMarker` then declares the
- * element already marked, and the rule written for it targets nothing. Attribute values are
- * consumed as values here, so they cannot be mistaken for names.
- *
- * Mustaches are opaque for the same reason they are in `findTagEnd`: `{{#if a}}title="x>y"{{/if}}`
- * is not attribute syntax and must not be tokenized as if it were.
- */
+/** Delegates to findAttributeIn. */
 function readMarkerIn(s: string, tag: OpenTag): string | null {
-  const to = tag.tagEnd;
-  let i = tag.nameEnd;
-
-  while (i < to) {
-    if (s.startsWith('{{{', i)) { const e = s.indexOf('}}}', i + 3); i = e === -1 || e >= to ? to : e + 3; continue; }
-    if (s.startsWith('{{', i))  { const e = s.indexOf('}}', i + 2);  i = e === -1 || e >= to ? to : e + 2; continue; }
-
-    const c = s[i];
-    if (isSpace(c) || c === '/') { i++; continue; }
-    // Redundant with `to` on well-formed markup — both land on the same character — and kept
-    // because each covers the other's failure mode: without `to` a truncated tag scans to end of
-    // file, and without this break a `>` at an attribute-name position advances nothing and spins.
-    if (c === '>') break;
-    // A quote where an attribute name should be is malformed markup; skip the span rather than
-    // reading its contents as names.
-    if (c === '"' || c === "'") { const e = s.indexOf(c, i + 1); i = e === -1 || e >= to ? to : e + 1; continue; }
-
-    const nameStart = i;
-    while (i < to && !isSpace(s[i]) && s[i] !== '=' && s[i] !== '/' && s[i] !== '>' &&
-           s[i] !== '"' && s[i] !== "'" && !s.startsWith('{{', i)) i++;
-    const name = s.slice(nameStart, i).toLowerCase();
-
-    while (i < to && isSpace(s[i])) i++;
-    if (s[i] !== '=') continue;              // valueless attribute — next name starts here
-    i++;
-    while (i < to && isSpace(s[i])) i++;
-
-    let value: string;
-    const q = s[i];
-    if (q === '"' || q === "'") {
-      const e = s.indexOf(q, i + 1);
-      const end = e === -1 || e >= to ? to : e;
-      value = s.slice(i + 1, end);
-      i = end + 1;
-    } else {
-      const vStart = i;
-      while (i < to && !isSpace(s[i]) && s[i] !== '>') i++;
-      value = s.slice(vStart, i);
-    }
-
-    if (name === MARKER_ATTR) return value;
-  }
-
-  return null;
+  return findAttributeIn(s, tag, MARKER_ATTR)?.value ?? null;
 }
 
 /**

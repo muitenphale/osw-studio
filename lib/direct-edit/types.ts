@@ -10,9 +10,7 @@
 /**
  * Where a preview selection came from in project source.
  *
- * `'runtime-unsupported'` is in the union although nothing emits it yet. The spec defines it, and
- * adding a member to a union later breaks every exhaustive `switch` already written against the
- * narrower type — cheaper to carry it from the start than to widen it under callers.
+ * `'runtime-unsupported'` is in the union for forward compatibility.
  */
 export type SourceResolution =
   | { kind: 'resolved'; file: string; tagStart: number }
@@ -44,17 +42,15 @@ export interface StyleDeclaration {
   value: string;
 }
 
-/**
- * What one `applyStyleOverride` call did, or why it did nothing.
- *
- * Every refusal is reported rather than thrown, because all of them are ordinary states a UI has to
- * render — a selection the compile cannot place, a shared partial awaiting confirmation, a preview
- * that has gone stale — not programmer errors.
- */
+/** Every refusal is reported rather than thrown; all are ordinary UI states. */
 export interface ApplyResult {
   ok: boolean;
+  /**
+   * Shared union across all action paths. Unrecognised reasons fall through to unresolvable.
+   */
   reason?: 'unresolvable' | 'generating' | 'needs-confirmation' | 'stale-index'
-         | 'missing-file' | 'ambiguous-stylesheet';
+         | 'missing-file' | 'ambiguous-stylesheet' | 'no-src' | 'expression-src'
+         | 'has-children' | 'has-expression' | 'unclosed' | 'void-element';
   /** The marker the override is keyed to. Present whenever one was read or stamped. */
   markerId?: string;
   /** Every path actually written, in write order. Empty on every refusal. */

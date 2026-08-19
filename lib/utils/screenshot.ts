@@ -1,5 +1,54 @@
 import html2canvas from 'html2canvas';
 import { logger } from '@/lib/utils';
+import { TOOLBAR_HOST_ATTR } from '@/lib/preview/toolbar-dom';
+
+/** Removes the toolbar and selection outline from a cloned document before capture. */
+export function prepareScreenshotClone(clonedDoc: Document): void {
+  // The selection toolbar lives inside the previewed document and stays *visible* for as long as an
+  // element is selected — the selection overlay hides itself on selection, this does not. Without
+  // this, selecting an element and then capturing bakes the toolbar into the saved thumbnail.
+  const toolbars = clonedDoc.querySelectorAll(`[${TOOLBAR_HOST_ATTR}]`);
+  toolbars.forEach((el) => el.remove());
+
+  // Remove external stylesheets that cause CORS errors
+  const externalLinks = clonedDoc.querySelectorAll('link[rel="stylesheet"]');
+  externalLinks.forEach((link) => {
+    const href = link.getAttribute('href');
+    if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+      link.remove();
+    }
+  });
+
+  // Remove ALL gradient backgrounds (not just ones with "gradient" in class name)
+  // Tailwind gradients can cause "non-finite" errors in html2canvas
+  const allElements = clonedDoc.querySelectorAll('*');
+
+  // CRITICAL: Use cloned document's window for getComputedStyle, not parent window
+  const clonedWindow = clonedDoc.defaultView;
+  if (!clonedWindow) {
+    return;
+  }
+
+  allElements.forEach((el: Element) => {
+    const htmlEl = el as HTMLElement;
+    // Read styles from CLONED document's context
+    const computedStyle = clonedWindow.getComputedStyle(htmlEl);
+    const bg = computedStyle.backgroundImage;
+
+    // Check if element has a gradient background
+    if (bg && (bg.includes('gradient') || bg.includes('linear-gradient') || bg.includes('radial-gradient'))) {
+      // Replace gradient with solid color from gradient's first color if possible
+      // or use a neutral fallback
+      const bgColor = computedStyle.backgroundColor;
+      htmlEl.style.backgroundImage = 'none';
+      if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+        htmlEl.style.backgroundColor = bgColor;
+      } else {
+        htmlEl.style.backgroundColor = '#64748b'; // slate-500 as neutral fallback
+      }
+    }
+  });
+}
 
 /**
  * Waits for document resources (fonts, images, idle) to finish loading.
@@ -101,46 +150,7 @@ async function attemptCapture(
         backgroundColor: '#ffffff',
         removeContainer: true,
         // Clean up problematic elements in the cloned document
-        onclone: (clonedDoc) => {
-          // Remove external stylesheets that cause CORS errors
-          const externalLinks = clonedDoc.querySelectorAll('link[rel="stylesheet"]');
-          externalLinks.forEach((link) => {
-            const href = link.getAttribute('href');
-            if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-              link.remove();
-            }
-          });
-
-          // Remove ALL gradient backgrounds (not just ones with "gradient" in class name)
-          // Tailwind gradients can cause "non-finite" errors in html2canvas
-          const allElements = clonedDoc.querySelectorAll('*');
-
-          // CRITICAL: Use cloned document's window for getComputedStyle, not parent window
-          const clonedWindow = clonedDoc.defaultView;
-          if (!clonedWindow) {
-            return;
-          }
-
-          allElements.forEach((el: Element) => {
-            const htmlEl = el as HTMLElement;
-            // Read styles from CLONED document's context
-            const computedStyle = clonedWindow.getComputedStyle(htmlEl);
-            const bg = computedStyle.backgroundImage;
-
-            // Check if element has a gradient background
-            if (bg && (bg.includes('gradient') || bg.includes('linear-gradient') || bg.includes('radial-gradient'))) {
-              // Replace gradient with solid color from gradient's first color if possible
-              // or use a neutral fallback
-              const bgColor = computedStyle.backgroundColor;
-              htmlEl.style.backgroundImage = 'none';
-              if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
-                htmlEl.style.backgroundColor = bgColor;
-              } else {
-                htmlEl.style.backgroundColor = '#64748b'; // slate-500 as neutral fallback
-              }
-            }
-          });
-        }
+        onclone: prepareScreenshotClone
       }),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('html2canvas timeout after 4 seconds')), 4000)

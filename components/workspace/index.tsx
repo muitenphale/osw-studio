@@ -42,8 +42,9 @@ import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
 import { FocusContextPayload } from '@/lib/preview/types';
+import { elementKind } from '@/lib/preview/toolbar-dom';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
-import type { PlacementResult, PreviewHostMessage, PreviewMessage } from '@/lib/preview/types';
+import type { PlacementResult, PreviewHostMessage, PreviewMessage, ToolbarAction } from '@/lib/preview/types';
 import { getBlockById } from '@/lib/semantic-blocks/registry';
 import { DebugPanel } from '@/components/debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
@@ -52,9 +53,18 @@ import { CheckpointPanel } from '@/components/checkpoint-panel';
 import { ProjectSettingsModal } from '@/components/project-backend';
 import { SkillsPanel } from '@/components/workspace/skills-panel';
 import { PanelDragProvider, PanelContainer, PanelHeader } from '@/components/ui/panel';
-import { ElementsPanel, type ElementsPanelHandle } from '@/components/elements-panel';
+import { ElementsPanel, type ElementsPanelHandle, type ElementsTab } from '@/components/elements-panel';
+import { buildApplyStyle, buildRemoveStyle, toPreviewSelection } from '@/components/styles-content/commit';
+import { ImagePicker } from '@/components/image-picker';
+import { applyImageSrc } from '@/lib/direct-edit/apply-image';
+import { TextPopover } from '@/components/text-popover';
+import { applyText, readSourceText } from '@/lib/direct-edit/apply-text';
+import { useProjectColorTokens } from '@/components/styles-content/use-tokens';
+import { useSelectedImageUrl } from '@/components/styles-content/use-image-url';
+import { applyStyleOverride, readOverriddenProperties, removeStyleOverride } from '@/lib/direct-edit/apply-style';
 import { ConsolePanel } from '@/components/console';
 import { drainRuntimeErrors, peekRuntimeErrors, formatRuntimeErrors } from '@/lib/preview/runtime-errors';
+import { supportsDirectEditing } from '@/lib/runtimes/registry';
 
 interface WorkspaceProps {
   project: Project;
@@ -64,28 +74,13 @@ interface WorkspaceProps {
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
-/**
- * What makes two focus selections "the same one" for the 400 ms click dedup.
- *
- * One function rather than the expression written out at each site: the click path *writes* this
- * signature and the re-resolve path has to write the same shape, or the user's next genuine click
- * dedups against something that was never spelled the same way and is silently swallowed.
- */
+/** What makes two focus selections "the same one" for the 400 ms click dedup. */
 function focusSignature(selection: FocusContextPayload): string {
   return `${selection.domPath || ''}::${selection.tagName || ''}::${selection.outerHTML ? selection.outerHTML.length : 0}`;
 }
 
 /**
  * What to do with the focus context when the preview frame announces a fresh document.
- *
- * Pure and exported so the decision is testable: `handleFrameReady` runs inside a React callback and
- * reaches the store, so the *only* way to cover this reasoning without a mock is to have the
- * reasoning live somewhere a plain function call can reach it.
- *
- * The path comparison is the part worth having. `onFrameReady` fires on **every** load, in-preview
- * navigation included, and `domPath` carries no page identity — so without it a selection made on
- * `/` silently rebinds to whatever `main > section > p` happens to be on `/about`, and *that*
- * element's `outerHTML` is what goes to the agent with the next message.
  *
  * @param selectedOnPath the preview path the selection was made on, or null when unrecorded
  * @param activePath     the path the frame has just loaded
@@ -105,6 +100,105 @@ export function focusReloadAction(
   return { kind: 'resolve', domPath: focus.domPath };
 }
 
+/** Controls whether provenance is injected into the preview. */
+export const STYLE_DISMISSES_TOOLBAR = false;
+
+/** Opens the Inspector if not already open, avoiding a redundant togglePanel call. */
+export function applyToolbarAction(
+  action: ToolbarAction,
+  layout: { showElements: boolean; togglePanel: (panel: string) => void },
+  styleDismisses: boolean = STYLE_DISMISSES_TOOLBAR,
+): {
+  tab: ElementsTab | null;
+  clearSelection: boolean;
+  include: boolean;
+  replaceImage: boolean;
+  editText: boolean;
+} {
+  const base = { tab: null, clearSelection: false, include: false, replaceImage: false, editText: false };
+  if (action === 'dismiss') {
+    return { ...base, clearSelection: true };
+  }
+  if (action === 'replace') {
+    // The picker opens over the workspace and the selection stays exactly as it is: the write it
+    // performs is resolved from *this* selection, and the recompile that follows is what brings the
+    // toolbar back. Clearing here would take away the element the dialog is about.
+    return { ...base, replaceImage: true };
+  }
+  if (action === 'text') {
+    // Same bargain as `replace`, and for the same reason: the popover reads and writes through
+    // *this* selection's provenance, so clearing it here would leave the dialog about nothing.
+    return { ...base, editText: true };
+  }
+  if (action === 'include') {
+    // The selection is untouched: including it in the message is not selecting it again, and the
+    // toolbar has to survive the send. What `include` *means* is the behaviour split.
+    return { ...base, include: true };
+  }
+  if (!layout.showElements) layout.togglePanel('elements');
+  return { ...base, tab: 'styles', clearSelection: styleDismisses };
+}
+
+/** Which preview a selection was made in. Desktop only: the mobile mount has no toolbar wiring. */
+export type SelectionSurface = 'desktop' | 'mobile';
+
+/**
+ * Where the dashed outline goes while the pointer is on the Styles tab's `Select element` button.
+ * 'panel' when the preview is already open; 'route' when closed (routed through sidebar hover).
+ */
+export type PreviewHoverHighlight = 'clear' | 'panel' | 'route';
+
+export function previewHoverHighlight(input: { hovering: boolean; previewOpen: boolean }): PreviewHoverHighlight {
+  if (!input.hovering) return 'clear';
+  return input.previewOpen ? 'panel' : 'route';
+}
+
+/** Toggles the focus picker. Both controls (header crosshair, Inspector button) share this flag. */
+export function focusToolPress(input: { armed: boolean }): { armed: boolean; openPreview: boolean } {
+  return input.armed ? { armed: false, openPreview: false } : { armed: true, openPreview: true };
+}
+
+/**
+ * Returns whether a selection should auto-include as chat context.
+ * Mobile and non-direct-edit runtimes always include; desktop includes only when the
+ * toolbar's include button was pressed and the domPath has not changed.
+ */
+export function focusInclusionAfterWrite(
+  previous: { domPath: string } | null,
+  next: { domPath: string } | null,
+  included: boolean,
+  surface: SelectionSurface,
+  directEdit: boolean = true,
+): boolean {
+  // A deselect lowers the flag on both surfaces, and it is checked first for that reason: on mobile
+  // every *selection* raises it, and reading that rule before this one would raise it on the way out.
+  if (!next) return false;
+  // The rule is not really about the surface: it is about whether a control exists that can raise
+  // the flag deliberately. Mobile has no toolbar, and neither does a runtime whose elements carry no
+  // provenance — so in both, selecting *is* the act of including, or the selection could never reach
+  // the agent at all.
+  if (surface === 'mobile' || !directEdit) return true;
+  if (!included) return false;
+  if (!previous) return false;
+  if (!previous.domPath || !next.domPath) return false;
+  return previous.domPath === next.domPath;
+}
+
+/** Desktop keeps the selection on release; mobile clears both selection and inclusion. */
+export function focusInclusionRelease(surface: SelectionSurface): { clearSelection: boolean } {
+  return { clearSelection: surface === 'mobile' };
+}
+
+/** Formats the selection as chat context only when focusIncluded is true. */
+export function focusMessageContext<T extends { domPath: string }>(
+  focus: T | null,
+  included: boolean,
+  formatBlock: (target: T) => string,
+): { promptBlock: string | null; generationFocus: T | null } {
+  if (!focus || !included) return { promptBlock: null, generationFocus: null };
+  return { promptBlock: formatBlock(focus), generationFocus: focus };
+}
+
 export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const refreshTrigger = useWorkspaceStore(s => s.refreshTrigger);
   const generating = useWorkspaceStore(s => s.generating);
@@ -118,6 +212,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   const entryPoint = useWorkspaceStore(s => s.entryPoint);
   const projectRuntime = useWorkspaceStore(s => s.projectRuntime);
   const focusContext = useWorkspaceStore(s => s.focusContext);
+  const focusIncluded = useWorkspaceStore(s => s.focusIncluded);
   const mode = useWorkspaceStore(s => s.mode);
   const activeInterview = useWorkspaceStore(s => s.activeInterview);
   const runtimeErrors = useWorkspaceStore(s => s.runtimeErrors);
@@ -181,9 +276,11 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   }, []);
   const generatingRef = useRef(false);
   const handleGenerateRef = useRef<((promptText?: string, images?: PendingImage[], audio?: PendingAudio[], files?: PendingFile[]) => Promise<void>) | null>(null);
+  // Both declared before their handlers, which the Styles tab's callbacks need and which are defined
+  // further down this component.
+  const handleFileSelectRef = useRef<((file: VirtualFile) => void) | null>(null);
   const storeSetMode = useWorkspaceStore(s => s.setMode);
   const storeSetActiveInterview = useWorkspaceStore(s => s.setActiveInterview);
-  const storeFocusContext = useWorkspaceStore(s => s.setFocusContext);
   const { state: tourState, setWorkspaceHandler } = useGuidedTour();
   const tourStep = tourState.currentStep?.id;
   const tourRunning = tourState.status === 'running';
@@ -296,6 +393,19 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
   // Gates the preview's provenance instrumentation, which is off for everyone else: the publish,
   // export and thumbnail paths must never see `data-osw-src`, and flipping this recompiles.
   const showElements = useWorkspaceStore(s => s.showElements);
+  // Subscribed, not read through `getState()`, because the Inspector's `Select element` button has
+  // to *look* armed: the flag is set from two controls in two components, so only a subscription
+  // re-renders this one when the other moves it.
+  const focusToolArmed = useWorkspaceStore(s => s.focusToolArmed);
+  // The Inspector's tab, held out here rather than inside the panel: the panel is only mounted
+  // while `showElements` is on, so anything that wants to open it *on a particular tab* has to be
+  // able to set the tab from outside — the panel's own state would not exist yet at that moment.
+  const [elementsTab, setElementsTab] = useState<ElementsTab>('tree');
+  // The toolbar's Replace dialog. Held here rather than in the preview because the write it performs
+  // needs the project and the focus context, neither of which the frame has.
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  // The toolbar's Text dialog, held here for the same reason.
+  const [textPopoverOpen, setTextPopoverOpen] = useState(false);
   const fullscreenPreview = useWorkspaceStore(s => s.fullscreenPreview);
   const panelReplacePreview = useWorkspaceStore(s => s.panelReplacePreview);
   const panelInsertPreview = useWorkspaceStore(s => s.panelInsertPreview);
@@ -604,11 +714,49 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     return lines.join('\n');
   }, [truncateHtmlAroundMarker]);
 
-  const handleFocusSelection = useCallback((selection: FocusContextPayload | null) => {
+  /**
+   * Apply the inclusion rule to a pending write of `next` over the current selection.
+   *
+   * Called *before* `setFocusContext`, because the decision reads the selection being replaced. One
+   * accessor rather than the rule spelled out at each of the four selection writers — the decision
+   * itself is `focusInclusionAfterWrite`, this is only the dispatch.
+   */
+  const carryFocusInclusion = useCallback((next: FocusContextPayload | null, surface: SelectionSurface) => {
+    const state = useWorkspaceStore.getState();
+    state.setFocusIncluded(focusInclusionAfterWrite(
+      state.focusContext,
+      next,
+      state.focusIncluded,
+      surface,
+      supportsDirectEditing(state.projectRuntime),
+    ));
+  }, []);
+
+  /** Clears both the selection and the inclusion flag together. */
+  const clearFocusSelection = useCallback((surface: SelectionSurface) => {
+    carryFocusInclusion(null, surface);
+    useWorkspaceStore.getState().setFocusContext(null);
+    lastFocusSignatureRef.current = null;
+    focusPathRef.current = null;
+  }, [carryFocusInclusion]);
+
+  /**
+   * Release the inclusion, and let the surface decide whether the selection goes with it.
+   *
+   * Shared by the composer chip's ✕ and the post-send cleanup, because they are the same event:
+   * the element's turn in the message is over.
+   */
+  const releaseFocusInclusion = useCallback((surface: SelectionSurface) => {
+    if (focusInclusionRelease(surface).clearSelection) {
+      clearFocusSelection(surface);
+      return;
+    }
+    useWorkspaceStore.getState().setFocusIncluded(false);
+  }, [clearFocusSelection]);
+
+  const handleFocusSelection = useCallback((selection: FocusContextPayload | null, surface: SelectionSurface) => {
     if (!selection) {
-      useWorkspaceStore.getState().setFocusContext(null);
-      lastFocusSignatureRef.current = null;
-      focusPathRef.current = null;
+      clearFocusSelection(surface);
       return;
     }
     const signature = focusSignature(selection);
@@ -620,42 +768,39 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       ...selection,
       timestamp: now
     };
+    carryFocusInclusion(selection, surface);
     useWorkspaceStore.getState().setFocusContext(nextTarget);
-    toast.info('Focus context set', {
-      description: describeFocusTarget(nextTarget)
-    });
     lastFocusSignatureRef.current = { signature, timestamp: now };
     // Which page the selection was made on. `domPath` carries no page identity, so this is the only
     // thing that stops a re-resolve after an in-preview navigation binding the selection to
     // whatever element the same path happens to hit on the new page.
     focusPathRef.current = desktopPreviewRef.current?.getActivePath?.() ?? null;
-  }, [describeFocusTarget]);
+  }, [carryFocusInclusion, clearFocusSelection]);
 
-  /**
-   * A re-resolved selection, taken silently.
-   *
-   * Not routed through `handleFocusSelection`, which fires `toast.info('Focus context set')` — this
-   * runs on every recompile, and the 400 ms dedup would not suppress it anyway: the signature
-   * includes `outerHTML.length`, which moves the moment `data-osw-id` is stamped on the element.
-   *
-   * It still writes `lastFocusSignatureRef`, because that ref is what the *click* path dedups
-   * against. Leaving it holding the pre-recompile signature would let the user's next genuine click
-   * on the same element be swallowed as a duplicate.
-   */
+  // One handler per mount, so the surface is stated in the JSX that already knows it rather than
+  // guessed at from a viewport. `onFocusSelection` takes a one-argument callback, so this is also
+  // the only place the extra argument can come from.
+  const handleDesktopFocusSelection = useCallback(
+    (selection: FocusContextPayload | null) => handleFocusSelection(selection, 'desktop'),
+    [handleFocusSelection]);
+  const handleMobileFocusSelection = useCallback(
+    (selection: FocusContextPayload | null) => handleFocusSelection(selection, 'mobile'),
+    [handleFocusSelection]);
+
+  /** A re-resolved selection, taken silently. Separate from the click path for dedup reasons. */
   const handleSelectionResolved = useCallback((message: Extract<PreviewMessage, { type: 'selection-resolved' }>) => {
     const payload = message.payload;
     const now = Date.now();
     if (!payload) {
       // The element is gone — edited away, or the page changed under us. Keeping the old payload
       // would send the agent the `outerHTML` of something that no longer exists.
-      useWorkspaceStore.getState().setFocusContext(null);
-      lastFocusSignatureRef.current = null;
-      focusPathRef.current = null;
+      clearFocusSelection('desktop');
       return;
     }
+    carryFocusInclusion(payload, 'desktop');
     useWorkspaceStore.getState().setFocusContext({ ...payload, timestamp: now });
     lastFocusSignatureRef.current = { signature: focusSignature(payload), timestamp: now };
-  }, []);
+  }, [carryFocusInclusion, clearFocusSelection]);
 
   // The Elements panel is a sibling of the preview in the panel map, so the frame's tree replies
   // have to be lifted through here. Stable identities: `onTreeLevel`/`onTreeStale` sit in the
@@ -667,6 +812,14 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
   const handleTreeStale = useCallback(() => {
     elementsPanelRef.current?.handleTreeStale();
+  }, []);
+
+  const handleStyleComputed = useCallback((message: Extract<PreviewMessage, { type: 'style-computed' }>) => {
+    elementsPanelRef.current?.handleStyleComputed(message);
+  }, []);
+
+  const handleStyleProbeResult = useCallback((message: Extract<PreviewMessage, { type: 'style-probe-result' }>) => {
+    elementsPanelRef.current?.handleStyleProbeResult(message);
   }, []);
 
   // Declared before `handleFrameReady`, which needs it: the frame-ready path is the one that asks
@@ -688,18 +841,214 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     );
     if (action.kind === 'none') return;
     if (action.kind === 'clear') {
-      useWorkspaceStore.getState().setFocusContext(null);
-      lastFocusSignatureRef.current = null;
-      focusPathRef.current = null;
+      clearFocusSelection('desktop');
       return;
     }
     sendToPreviewFrame({ type: 'selection-resolve', domPath: action.domPath });
-  }, [sendToPreviewFrame]);
+  }, [sendToPreviewFrame, clearFocusSelection]);
+
+  /**
+   * A button on the preview toolbar was pressed.
+   *
+   * The decision is `applyToolbarAction`, which also performs the panel side effect; this is the
+   * dispatch for everything that needs React state or the frame.
+   */
+  /** Routes through handleSidebarHover so the dashed outline matches the panel togglePanel would close. */
+  const handleToolbarHover = useCallback((message: Extract<PreviewMessage, { type: 'toolbar-hover' }>) => {
+    handleSidebarHover(message.action === 'style' ? 'elements' : null);
+  }, [handleSidebarHover]);
+
+  const handleToolbarAction = useCallback((message: Extract<PreviewMessage, { type: 'toolbar-action' }>) => {
+    const effect = applyToolbarAction(message.action, useWorkspaceStore.getState());
+    if (effect.tab) setElementsTab(effect.tab);
+    if (effect.replaceImage) setImagePickerOpen(true);
+    if (effect.editText) setTextPopoverOpen(true);
+    if (effect.clearSelection) {
+      // The toolbar is only ever mounted against the desktop preview — the mobile mount is not
+      // wired to `onToolbarAction`, so no press can reach here from it.
+      clearFocusSelection('desktop');
+      // The frame never decides a selection is over, so the toolbar outlives the tool that made it
+      // until this says otherwise.
+      sendToPreviewFrame({ type: 'selection-clear' });
+    }
+    if (effect.include) {
+      // The one place the flag is raised. Everything else either lowers it or, for a write naming
+      // the same element, carries it — see `focusInclusionAfterWrite`.
+      useWorkspaceStore.getState().setFocusIncluded(true);
+    }
+  }, [sendToPreviewFrame, clearFocusSelection]);
 
   const handleOpenPreviewPanel = useCallback(() => {
     if (!useWorkspaceStore.getState().showPreview) {
       useWorkspaceStore.getState().togglePanel('preview');
     }
+  }, []);
+
+  /** Desktop only. Arms the preview's element picker from the Inspector's empty state. */
+  const handleArmFocusTool = useCallback(() => {
+    // The hover preview belongs to the gesture that is now over. Cleared before the panel work,
+    // because opening a panel is what decides the strip's contents.
+    handleSidebarHover(null);
+    const store = useWorkspaceStore.getState();
+    // Both halves of the hover feedback end with the press, whichever way the toggle went. The
+    // button clears them on the way in too; this is the guarantee that does not depend on it.
+    store.setFocusToolHinted(false);
+    const press = focusToolPress({ armed: store.focusToolArmed });
+    if (press.openPreview) handleOpenPreviewPanel();
+    store.setFocusToolArmed(press.armed);
+  }, [handleSidebarHover, handleOpenPreviewPanel]);
+
+  /** The pointer is on that button. See {@link previewHoverHighlight} for why this is two cases. */
+  const handleSelectElementHover = useCallback((hovering: boolean) => {
+    const store = useWorkspaceStore.getState();
+    // The preview *panel* highlight below says where the press sends you; this says which control in
+    // that panel it is about. One signal drives both, so the crosshair's tint cannot outlive the
+    // panel outline — and it is written before the switch, whose every case returns.
+    store.setFocusToolHinted(hovering);
+    switch (previewHoverHighlight({ hovering, previewOpen: store.showPreview })) {
+      case 'panel':
+        store.setPanelInsertPreview(null);
+        store.setPanelReplacePreview('preview');
+        return;
+      case 'route':
+        handleSidebarHover('preview');
+        return;
+      case 'clear':
+        handleSidebarHover(null);
+        return;
+    }
+  }, [handleSidebarHover]);
+
+  /** isGenerating injected because lib/direct-edit/ must not import lib/stores/. */
+  const applyStyle = useMemo(
+    () => buildApplyStyle(project.id, {
+      apply: applyStyleOverride,
+      isGenerating: () => useWorkspaceStore.getState().isProjectGenerating(project.id),
+    }),
+    [project.id],
+  );
+
+  /** Separate from applyStyle; different arguments and independently optional. */
+  const removeStyle = useMemo(
+    () => buildRemoveStyle(project.id, {
+      remove: removeStyleOverride,
+      isGenerating: () => useWorkspaceStore.getState().isProjectGenerating(project.id),
+    }),
+    [project.id],
+  );
+
+  /**
+   * What `/overrides.css` already declares for one element — the Styles tab's Reset, after a reload.
+   *
+   * Bound to the project like the two above, but with no generation gate: it reads a file and writes
+   * nothing, and the removal it enables is gated where the race actually is.
+   */
+  const readOverrides = useMemo(
+    () => (markerId: string) => readOverriddenProperties(project.id, markerId),
+    [project.id],
+  );
+
+  // Re-read on every file change: a token the agent just renamed must not go on being offered.
+  // Only while the panel is open — the read pulls every file's content out of storage, and the
+  // panel is closed by default, so nobody who is not using this pays for it.
+  const colorTokens = useProjectColorTokens(showElements ? project.id : null, refreshTrigger);
+
+  /**
+   * The bytes behind the selected image, for the Styles tab's CONTENT preview.
+   *
+   * Gated on the element actually being an image — `elementKind` is the same decision the toolbar's
+   * middle slot and the CONTENT section are built from — so a `<script src>` or an `<iframe src>`
+   * does not send the hook looking for a picture. Gated on the panel being open for the reason
+   * `colorTokens` is: this reads a file out of storage, and nobody who is not using the Inspector
+   * should pay for it.
+   */
+  const selectedImageSrc = focusContext && elementKind(focusContext) === 'image'
+    ? focusContext.attributes?.src
+    : undefined;
+  const selectedImageUrl = useSelectedImageUrl(
+    showElements ? project.id : null,
+    selectedImageSrc,
+    refreshTrigger,
+  );
+
+  /**
+   * The Styles tab's **Replace** control, opening the picker the toolbar's `Replace` already opens.
+   *
+   * The same `imagePickerOpen` state and the same `handleReplaceImage` write, deliberately: the
+   * picker resolves its target from `focusContext` at apply time, so one mount serves both entry
+   * points and there is no second dialog to keep in step.
+   */
+  const handleOpenImagePicker = useCallback(() => setImagePickerOpen(true), []);
+
+  const handleOpenStyleFile = useCallback(async (path: string) => {
+    try {
+      handleFileSelectRef.current?.(await vfs.readFile(project.id, path));
+    } catch {
+      toast.error(`Could not open ${path}`);
+    }
+  }, [project.id]);
+
+  const handleStyleAskAgent = useCallback((prompt: string) => {
+    void handleGenerateRef.current?.(prompt);
+  }, []);
+
+  /**
+   * The toolbar's **Replace** write, bound to this project.
+   *
+   * Reads the selection at call time rather than closing over it, for the same reason the style
+   * commit does: the dialog can outlive the click that opened it, and the write must be against the
+   * element it is about. A selection that has gone away between the press and the pick is reported
+   * as `unresolvable` — the picker's banner for "nothing to replace here" — rather than written
+   * against whatever is selected now.
+   *
+   * **Not silent.** This writes a source file, so every `data-osw-src` after the edit shifts and the
+   * recompile is what makes the preview and the toolbar agree with the file again. Nothing here asks
+   * for the toolbar back: it returns through the `selection-resolve` handshake on frame-ready.
+   */
+  const handleReplaceImage = useCallback(async (path: string, confirmedMultiInstance: boolean) => {
+    const focus = useWorkspaceStore.getState().focusContext;
+    if (!focus) return { ok: false, reason: 'unresolvable' as const, filesWritten: [] };
+    return applyImageSrc(project.id, toPreviewSelection(focus), path, {
+      confirmedMultiInstance,
+      isGenerating: () => useWorkspaceStore.getState().isProjectGenerating(project.id),
+    });
+  }, [project.id]);
+
+  /**
+   * What the selected element says, for the toolbar's **Text** popover.
+   *
+   * Read from source rather than taken off the selection payload: the payload carries the *rendered*
+   * text, and the rendered text is not what will be written. A run the template computes renders
+   * perfectly well and is refused — a verdict only the source can give.
+   */
+  const handleReadText = useCallback(async () => {
+    const focus = useWorkspaceStore.getState().focusContext;
+    if (!focus) return { ok: false as const, reason: 'unresolvable' as const };
+    return readSourceText(project.id, toPreviewSelection(focus));
+  }, [project.id]);
+
+  /**
+   * The toolbar's **Text** write, bound to this project.
+   *
+   * Reads the selection at call time rather than closing over it, for the same reason the Replace
+   * write does: the dialog can outlive the click that opened it, and the write must be against the
+   * element it is about.
+   *
+   * **Not silent.** This writes a source file, so every `data-osw-src` after the edit shifts and the
+   * recompile is what makes the preview and the toolbar agree with the file again. Nothing here asks
+   * for the toolbar back: it returns through the `selection-resolve` handshake on frame-ready.
+   */
+  const handleApplyText = useCallback(async (text: string, confirmedMultiInstance: boolean) => {
+    const focus = useWorkspaceStore.getState().focusContext;
+    if (!focus) return { ok: false, reason: 'unresolvable' as const, filesWritten: [] };
+    return applyText(project.id, toPreviewSelection(focus), text, {
+      confirmedMultiInstance,
+      isGenerating: () => useWorkspaceStore.getState().isProjectGenerating(project.id),
+    });
+  }, [project.id]);
+
+  const handleRefreshPreviewForStyles = useCallback(() => {
+    useWorkspaceStore.getState().bumpRefreshTrigger();
   }, []);
 
   const handlePlacementToggle = useCallback(() => {
@@ -779,7 +1128,26 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
     }
   }, [project.id, projectRuntime]);
 
-  const focusPreviewSnippet = focusContext ? truncateHtmlSnippet(focusContext.outerHTML, 240) : '';
+  /**
+   * The selection *as the composer sees it* — the third read on the send path, and the one that is
+   * visible. Gated separately from `focusMessageContext` rather than through it, so that removing
+   * either gate leaves the other standing and the disagreement is a test failure rather than a
+   * silent leak past an empty-looking composer.
+   */
+  const includedFocus = focusIncluded ? focusContext : null;
+  const focusPreviewSnippet = includedFocus ? truncateHtmlSnippet(includedFocus.outerHTML, 240) : '';
+
+  /**
+   * The composer chip's ✕, once per mount.
+   *
+   * On desktop it is a retarget, not a deselect: the user is taking the element out of their
+   * message, not out of the Inspector, and clearing `focusContext` would take the toolbar and the
+   * Styles tab down with it. On mobile it clears the selection outright, which is both what it does
+   * today and the only coherent answer where selecting is the act of including — see
+   * `focusInclusionRelease`.
+   */
+  const handleDesktopClearFocus = useCallback(() => releaseFocusInclusion('desktop'), [releaseFocusInclusion]);
+  const handleMobileClearFocus = useCallback(() => releaseFocusInclusion('mobile'), [releaseFocusInclusion]);
 
   useEffect(() => {
     const dirty = saveManager.isDirty(project.id);
@@ -1165,6 +1533,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       }
     }
   }, []);
+  handleFileSelectRef.current = handleFileSelect;
 
   const handleFilesChange = useCallback(() => {
     useWorkspaceStore.getState().bumpRefreshTrigger();
@@ -1403,13 +1772,18 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
 
   const storeStartGeneration = useWorkspaceStore(s => s.startGeneration);
 
-  const handleGenerate = useCallback(async (promptText?: string, images?: PendingImage[], audio?: PendingAudio[], files?: PendingFile[]) => {
+  const handleGenerate = useCallback(async (promptText?: string, images?: PendingImage[], audio?: PendingAudio[], files?: PendingFile[], surface: SelectionSurface = 'desktop') => {
     // Clear runtime errors
     useWorkspaceStore.getState().setRuntimeErrors([]);
 
     let messageContent = (promptText ?? '').trim();
     const contextParts: string[] = [];
-    if (focusContext) contextParts.push(formatFocusContextBlock(focusContext));
+    // Both of the send path's reads of the selection, from one gate. `generationFocus` reaches the
+    // sent message's context card *and* `/api/server-generate` (`orchestrator.ts`, `uiMeta` and
+    // `executeOptions`), so ungating either read here puts an element the user only *selected* in
+    // front of the agent.
+    const included = focusMessageContext(focusContext, focusIncluded, formatFocusContextBlock);
+    if (included.promptBlock) contextParts.push(included.promptBlock);
     if (placedBlocks.length > 0) contextParts.push(formatPlacedBlocksContext(placedBlocks));
     if (contextParts.length > 0) messageContent = contextParts.join('\n\n') + '\n\n' + messageContent;
 
@@ -1417,7 +1791,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       mode,
       chatMode: mode === 'chat',
       projectId: project.id,
-      focusContext,
+      focusContext: included.generationFocus,
       placedBlocks,
       isTourLockingInput,
       displayPrompt: (promptText ?? '').trim(),
@@ -1428,14 +1802,31 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
       files,
     });
 
-    // Post-generation UI cleanup
+    // Post-generation UI cleanup.
+    //
+    // The inclusion is spent either way; whether the *selection* goes with it is the surface's call
+    // (`focusInclusionRelease`). On desktop it stays — the toolbar is still anchored to that element
+    // and the Styles tab is still showing it, and both would go dark on every send if this cleared
+    // `focusContext` the way it used to. On mobile it goes, exactly as it does today.
     handleFilesChange();
-    if (focusContext) useWorkspaceStore.getState().setFocusContext(null);
+    releaseFocusInclusion(surface);
     if (placedBlocks.length > 0) {
       placedBlocks.forEach(b => previewRef.current?.removePlaceholder(b.placementId));
       useWorkspaceStore.setState({ placedBlocks: [] });
     }
-  }, [storeStartGeneration, mode, activeInterview, project.id, focusContext, placedBlocks, isTourLockingInput, handleFilesChange, formatFocusContextBlock, formatPlacedBlocksContext]);
+  }, [storeStartGeneration, mode, activeInterview, project.id, focusContext, focusIncluded, placedBlocks, isTourLockingInput, handleFilesChange, formatFocusContextBlock, formatPlacedBlocksContext, releaseFocusInclusion]);
+
+  /**
+   * The mobile composer's send.
+   *
+   * The surface cannot be defaulted here the way it is for every other caller: `handleGenerate` is
+   * shared by both mounts, the runtime-error shelf and the guided tour, and only the JSX knows
+   * which composer the user pressed.
+   */
+  const handleMobileGenerate = useCallback(
+    (promptText?: string, images?: PendingImage[], audio?: PendingAudio[], files?: PendingFile[]) =>
+      handleGenerate(promptText, images, audio, files, 'mobile'),
+    [handleGenerate]);
 
   const handleStartInterview = useCallback(async (template: InterviewTemplate) => {
     if (!project.id) return;
@@ -1647,6 +2038,23 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
           onOpenChange={setPublishOpen}
         />
 
+        <ImagePicker
+          open={imagePickerOpen}
+          projectId={project.id}
+          currentSrc={focusContext?.attributes?.src}
+          onOpenChange={setImagePickerOpen}
+          onApply={handleReplaceImage}
+          onAskAgent={handleStyleAskAgent}
+        />
+
+        <TextPopover
+          open={textPopoverOpen}
+          onOpenChange={setTextPopoverOpen}
+          onRead={handleReadText}
+          onApply={handleApplyText}
+          onAskAgent={handleStyleAskAgent}
+        />
+
         <RestoreSecretsDialog
           open={pendingRestore !== null}
           description={pendingRestore?.description}
@@ -1821,7 +2229,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   onClick={() => togglePanel('elements')}
                   onMouseEnter={() => handleSidebarHover('elements')}
                   onMouseLeave={() => handleSidebarHover(null)}
-                  aria-label={showElements ? 'Close elements panel' : 'Open elements panel'}
+                  aria-label={showElements ? 'Close inspector panel' : 'Open inspector panel'}
                 >
                   <ListTree className="h-3.5 w-3.5" />
                 </button>
@@ -1838,7 +2246,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   fill: 'var(--button-elements-active)'
                 }}
               >
-                <p>Elements</p>
+                <p>Inspector</p>
               </TooltipContent>
             </Tooltip>
 
@@ -2005,8 +2413,8 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   onGenerate={handleGenerate}
                   onStop={handleStop}
                   onContinue={handleContinue}
-                  focusContext={focusContext}
-                  setFocusContext={storeFocusContext}
+                  focusContext={includedFocus}
+                  onClearFocus={handleDesktopClearFocus}
                   focusPreviewSnippet={focusPreviewSnippet}
                   mode={mode}
                   setMode={storeSetMode}
@@ -2077,7 +2485,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     ref={attachDesktopPreview}
                     projectId={project.id}
                     refreshTrigger={refreshTrigger}
-                    onFocusSelection={handleFocusSelection}
+                    onFocusSelection={handleDesktopFocusSelection}
                     hasFocusTarget={Boolean(focusContext)}
                     onClose={fullscreenPreview ? handleExitFullscreen : handleClosePreview}
                     deploymentId={selectedDeploymentId}
@@ -2089,11 +2497,15 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     onPlacementComplete={handlePlacementComplete}
                     onFullscreen={handleEnterFullscreen}
                     isFullscreen={fullscreenPreview}
-                    provenance={showElements}
+                    provenance
                     onTreeLevel={handleTreeLevel}
                     onTreeStale={handleTreeStale}
                     onSelectionResolved={handleSelectionResolved}
+                    onToolbarAction={handleToolbarAction}
+                    onToolbarHover={handleToolbarHover}
                     onFrameReady={handleFrameReady}
+                    onStyleComputed={handleStyleComputed}
+                    onStyleProbeResult={handleStyleProbeResult}
                   />
                 </div>
               )};
@@ -2106,7 +2518,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 <PanelContainer>
                   <PanelHeader
                     icon={ListTree}
-                    title="Elements"
+                    title="Inspector"
                     color="var(--button-elements-active)"
                     panelKey="elements"
                     onClose={() => useWorkspaceStore.getState().togglePanel('elements')}
@@ -2118,6 +2530,23 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                     previewOpen={showPreview}
                     onOpenPreview={handleOpenPreviewPanel}
                     sendToFrame={sendToPreviewFrame}
+                    selection={focusContext}
+                    applyStyle={applyStyle}
+                    removeStyle={removeStyle}
+                    onReadOverrides={readOverrides}
+                    colorTokens={colorTokens}
+                    onReadText={handleReadText}
+                    onApplyText={handleApplyText}
+                    onReplaceImage={handleOpenImagePicker}
+                    imageUrl={selectedImageUrl}
+                    onOpenFile={handleOpenStyleFile}
+                    onAskAgent={handleStyleAskAgent}
+                    onRefreshPreview={handleRefreshPreviewForStyles}
+                    onSelectElement={handleArmFocusTool}
+                    onSelectElementHover={handleSelectElementHover}
+                    focusToolArmed={focusToolArmed}
+                    activeTab={elementsTab}
+                    onTabChange={setElementsTab}
                   />
                 </PanelContainer>
               )};
@@ -2257,11 +2686,11 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 onRestore={handleRestoreCheckpoint}
                 onRetry={handleRetry}
                 generating={generating}
-                onGenerate={handleGenerate}
+                onGenerate={handleMobileGenerate}
                 onStop={handleStop}
                 onContinue={handleContinue}
-                focusContext={focusContext}
-                setFocusContext={storeFocusContext}
+                focusContext={includedFocus}
+                onClearFocus={handleMobileClearFocus}
                 focusPreviewSnippet={focusPreviewSnippet}
                 mode={mode}
                 setMode={storeSetMode}
@@ -2314,7 +2743,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   ref={previewRef}
                   projectId={project.id}
                   refreshTrigger={refreshTrigger}
-                  onFocusSelection={handleFocusSelection}
+                  onFocusSelection={handleMobileFocusSelection}
                   hasFocusTarget={Boolean(focusContext)}
                   onClose={handleClosePreview}
                   deploymentId={selectedDeploymentId}

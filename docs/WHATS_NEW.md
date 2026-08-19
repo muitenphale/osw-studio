@@ -6,6 +6,28 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.96.0 - Direct Editing for Static and Handlebars runtimes (2026-08-19)
+
+Selecting an element in the preview now puts a small toolbar on it: retype its text, swap its image, or open the Inspector for its spacing, type, colour and borders. Each of those used to mean writing a prompt and waiting for the agent. Style changes are written to a new `/overrides.css` in the project, so they export and publish with everything else.
+
+### In the preview
+- **A toolbar on the element you select**: Style, Edit text or Replace image, and a button to send the element to the agent instead
+- **Retype text on the page**: click, type, done. Text with a link or other tags inside it, or text that comes from a template, can't be edited this way and says so
+- **Swap an image**: pick one already in the project, or upload a new one
+
+### In the Inspector
+- **An Elements tab**: the page listed as a tree, each entry labelled with the file it came from, for picking hard to focus elements
+- **A Styles tab**: the selected element's spacing, type, colour and borders, with a section for editing its text or image
+- **Colours**: pick one the project already uses, or set your own
+- **When a change doesn't take, the panel says which rule beat it**: and offers to have the agent fix the stylesheet
+
+### Worth knowing
+- **Selecting an element does not automatically attach it as context to the next chat message**: the toolbar now has a button for attaching it to the chat panel
+
+In React, Vue, Svelte and Preact projects there is no toolbar: those pages are built in the browser, so there is no file to point at. Selecting an element there still attaches it to the next message, as before.
+
+---
+
 ## v1.95.0 - Large Projects (2026-08-14)
 
 A project of several hundred pages works in the editor now; the preview used to give up with "Compile timed out after 30000ms" before it could render anything. In Server Mode, publishing a project full of images no longer puts a second copy of them on the server. It also closes a hole that let a published project write files outside its own directory, which is reason enough to take this one if you self-host.

@@ -130,3 +130,39 @@ describe('the payload a click produces', () => {
     expect(payload.domPath).toBe('html > body > main > article');
   });
 });
+
+describe('textBearing on the payload', () => {
+  function payloadFor(el: Element): FocusContextPayload {
+    enableSelector();
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const selection = posted.find(m => m.type === 'selector-selection');
+    expect(selection, 'no selector-selection message was posted').toBeTruthy();
+    return selection!.payload as FocusContextPayload;
+  }
+
+  it('is true for a leaf whose content is one run of text', () => {
+    // The whole point of the field: the host learns "this element says something you could retype"
+    // without parsing outerHTML, which by then has been through the provenance stripper.
+    expect(payloadFor(document.querySelector('h2')!).textBearing).toBe(true);
+  });
+
+  it('is false when the text is wrapped in a child element', () => {
+    // <article> contains 't', but only inside its <h2>. Replacing the article's content would
+    // clobber the markup, so it is not a text element however much text it renders.
+    expect(payloadFor(document.querySelector('article')!).textBearing).toBe(false);
+  });
+
+  it('is false, not absent, for an element with nothing in it', () => {
+    const empty = document.createElement('p');
+    empty.textContent = '   ';
+    document.body.appendChild(empty);
+
+    const payload = payloadFor(empty);
+
+    // Stated rather than omitted: "no children and no text" is an answer, and a missing field would
+    // be indistinguishable from a payload built by something that does not report this at all.
+    expect(payload.textBearing).toBe(false);
+    expect('textBearing' in payload).toBe(true);
+    empty.remove();
+  });
+});

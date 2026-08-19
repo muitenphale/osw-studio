@@ -10,9 +10,14 @@ import {
 } from '@/lib/preview/types';
 import { vfs } from '@/lib/vfs';
 import { PreviewLifecycle } from '@/lib/preview/preview-lifecycle';
+import { FrameScrollMemory, readFrameScroll } from '@/lib/preview/scroll-memory';
+import { PreviewCompileGate, mergeCompileRequests, observePreviewRoot } from '@/lib/preview/compile-gate';
+import type { CompileRequest } from '@/lib/preview/compile-gate';
 import { STRIP_PROVENANCE_JS } from '@/lib/preview/provenance';
 import { SERIALIZE_TREE_JS } from '@/lib/preview/element-tree';
 import { STYLE_QUERY_JS, STYLE_PREVIEW_JS, STYLE_LOCATOR_JS, STYLE_PROBE_JS } from '@/lib/preview/style-preview';
+import { TOOLBAR_DOM_JS, TOOLBAR_HOST_ATTR, resolveToolbarTheme } from '@/lib/preview/toolbar-dom';
+import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,6 +43,7 @@ import { captureIframeScreenshot } from '@/lib/utils/screenshot';
 import type { ProjectRuntime } from '@/lib/vfs/types';
 import type { PlacementResult, PlacementBlockInfo } from '@/lib/preview/types';
 import { pushRuntimeError, clearRuntimeErrors } from '@/lib/preview/runtime-errors';
+import { supportsDirectEditing } from '@/lib/runtimes/registry';
 import { PalettePanel } from '@/components/semantic-blocks/palette-panel';
 import type { SemanticBlock } from '@/lib/semantic-blocks/types';
 import { useWorkspaceStore } from '@/lib/stores/workspace';
@@ -129,6 +135,16 @@ interface MultipagePreviewProps {
    */
   onSelectionResolved?: (message: Extract<PreviewMessage, { type: 'selection-resolved' }>) => void;
   /**
+   * A button on the selection toolbar was pressed inside the frame.
+   *
+   * Lifted to the workspace rather than answered here, because all three answers are workspace
+   * state: which panel is open, which tab it is on, and what goes into the next message. Same
+   * `useCallback` stability requirement as `onSelectionResolved` — it sits in the message
+   * listener's dependency array.
+   */
+  onToolbarAction?: (message: Extract<PreviewMessage, { type: 'toolbar-action' }>) => void;
+  onToolbarHover?: (message: Extract<PreviewMessage, { type: 'toolbar-hover' }>) => void;
+  /**
    * The frame has loaded the document this component wrote, verified by its load marker.
    *
    * Fires on every load, so it is also the reload signal: a `srcdoc` reassignment mints a new
@@ -168,16 +184,6 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
  * `data-osw-node` is stamped onto live elements as the tree is serialized, so anything read out of
  * the frame's DOM after an expansion carries it: the focus payload's `outerHTML` and the placement
  * request's `htmlContext` both do, and both end up in the agent's prompt.
- *
- * Authored here rather than inside the script template literals, for the reason
- * `STRIP_PROVENANCE_JS` is authored in `lib/preview/provenance.ts`: `\\s` below is `\s` in the
- * emitted JavaScript, and the same regex hand-written inside a template literal would collapse to a
- * literal `s`. The tests extract this function out of the *emitted* text and run it.
- *
- * No `:\d+` guard, unlike the provenance stripper: that guard exists because `stripProvenance`
- * writes its result back into project source via `curl -o`, where a false positive is data loss.
- * This attribute is stamped at runtime and never appears in compiled output, so it has no such
- * path.
  */
 export const STRIP_NODE_ID_JS =
   `function __oswStripNodeId(h){return String(h||'').replace(/\\s?data-osw-node="[^"]*"/g,'');}`;
@@ -185,20 +191,7 @@ export const STRIP_NODE_ID_JS =
 /**
  * Escape an element id for use inside a CSS selector, as JavaScript source for the iframe.
  *
- * **`CSS.escape` is absent in jsdom** — measured — and every test of frame script runs in jsdom, so
- * an unguarded call throws `ReferenceError` and takes the whole script down at parse-and-run time,
- * not just the one branch. That is the entire reason this is hand-written rather than a one-liner
- * delegating to the platform.
- *
- * Authored as a character loop and **not as a regex**, for this file's standing reason: a regex
- * hand-written inside the script template literals below loses one level of escaping before it is
- * emitted, and a replacement string of `'\\$1'` is exactly the shape that silently arrives as
- * `'$1'`. The backslash it emits is spelled as its code unit for the same reason — a literal one
- * would need doubling in this template literal and would still be one edit away from collapsing.
- *
- * A leading digit gets the hex form with its terminating space (`1abc` → `\31 abc`) rather than a
- * bare backslash: `\1abc` is a valid CSS escape for codepoint U+1ABC, so the cheap spelling does not
- * fail loudly — it silently selects a different id, or nothing.
+ * `CSS.escape` is absent in jsdom, so this is hand-written.
  */
 export const ESCAPE_CSS_IDENT_JS = `
 function __oswEscapeIdent(value) {
@@ -268,7 +261,12 @@ export function generatePlacementScript(): string {
              // rather than detached — so findDropTarget's fallback, which returns the last body
              // child when the pointer is over bare body, would otherwise pick it and hand the agent
              // a domPath into preview furniture.
-             el.getAttribute('data-osw-overlay') !== null;
+             el.getAttribute('data-osw-overlay') !== null ||
+             // The selection toolbar, for the same reason and more sharply: it is *appended* on
+             // every selection, so it is the last body child whenever anything is selected — which
+             // is precisely when a user is dragging a block around. The fallback walks backwards and
+             // would hand back the toolbar every time.
+             el.getAttribute('${TOOLBAR_HOST_ATTR}') !== null;
     }
 
     function getInsertPosition(el, x, y) {
@@ -417,8 +415,16 @@ export function generatePlacementScript(): string {
           clone.insertBefore(marker, cloneChildren[targetIndex].nextSibling);
         }
       }
-      // Remove any semantic placeholders/indicators from the clone
-      var placeholders = clone.querySelectorAll('[data-semantic-placeholder],[data-semantic-indicator]');
+      // Remove any semantic placeholders/indicators from the clone, and the selection toolbar with
+      // them. The toolbar's chrome is in a shadow root and never serialises, but its host is an
+      // ordinary empty div and does — and this string becomes the placement request's htmlContext.
+      //
+      // Belt and braces, measured as such: the clone root is either the target's parent or the
+      // target itself, and the toolbar host is only ever a direct child of document.body, so it can
+      // land inside this clone only when it *is* the target — which findDropTarget above no longer
+      // hands back. The same is already true of the indicator beside it, which is also body-only.
+      // Both stay, because nothing enforces "body child" as an invariant.
+      var placeholders = clone.querySelectorAll('[data-semantic-placeholder],[data-semantic-indicator],[${TOOLBAR_HOST_ATTR}]');
       for (var j = placeholders.length - 1; j >= 0; j--) {
         placeholders[j].parentNode.removeChild(placeholders[j]);
       }
@@ -491,7 +497,16 @@ export function generatePlacementScript(): string {
       }
     }
 
-    document.addEventListener('click', function() {
+    document.addEventListener('click', function(event) {
+      // A press on the selection toolbar is not a click in the page. The host reacts to this
+      // message by closing the block palette and firing onPlacementToggle, so relaying it would
+      // make a toolbar button toggle unrelated UI.
+      //
+      // One check on event.target is enough, and no composed-path walk is needed: the toolbar's
+      // chrome is inside a shadow root, so a click on a button in it arrives at this listener
+      // already retargeted to the host — the element carrying the attribute.
+      var t = event && event.target;
+      if (t && t.getAttribute && t.getAttribute('${TOOLBAR_HOST_ATTR}') !== null) return;
       window.parent.postMessage({ type: 'iframe-click' }, '*');
     });
 
@@ -528,7 +543,7 @@ export function generatePlacementScript(): string {
  * one place in this file where an authored `\s` silently collapses to a literal `s` before it is
  * ever emitted, so the emitted string — not the source — is what has to be checked.
  */
-export function generateNavigationScript(normalizedPath: string): string {
+export function generateNavigationScript(normalizedPath: string, directEdit: boolean = true): string {
   return `
       <script>
         (function() {
@@ -540,6 +555,8 @@ export function generateNavigationScript(normalizedPath: string): string {
           ${STYLE_LOCATOR_JS}
           ${STYLE_PROBE_JS}
           ${ESCAPE_CSS_IDENT_JS}
+          var __oswDirectEdit = ${directEdit ? 'true' : 'false'};
+          ${TOOLBAR_DOM_JS}
           const isInIframe = window !== window.parent;
 
           function resolveInternalPath(href) {
@@ -615,8 +632,25 @@ export function generateNavigationScript(normalizedPath: string): string {
             return node && node.nodeType === 1;
           }
 
+          // Is this event target the selection toolbar?
+          //
+          // Checking the target alone is sufficient and is not a shortcut: the toolbar's chrome
+          // lives in a shadow root, and an event that starts on a button inside it is *retargeted*
+          // before any document-level listener sees it — event.target is the host, which is the
+          // element carrying the attribute. There is no composed path to walk.
+          function isToolbarTarget(node) {
+            return !!(isElement(node) && node.getAttribute && node.getAttribute('${TOOLBAR_HOST_ATTR}') !== null);
+          }
+
           function ensureOverlay() {
             if (selectorState.overlay) {
+              // Re-attach if something replaced the body's children out from under us — a user
+              // project's own script can do it, and so can an agent edit. The node is cached, so
+              // without this the overlay stays detached and the highlight silently stops working for
+              // the rest of the document's life.
+              if (!selectorState.overlay.isConnected && document.body) {
+                document.body.appendChild(selectorState.overlay);
+              }
               return selectorState.overlay;
             }
             const overlay = document.createElement('div');
@@ -638,12 +672,16 @@ export function generateNavigationScript(normalizedPath: string): string {
             return overlay;
           }
 
-          function positionOverlay(target) {
+          // The second argument is an optional rect the caller already took. The toolbar passes the
+          // very rect it placed itself from, so the bar and the outline cannot be positioned from two
+          // different moments in a layout that is still settling. Omitted by the hover path, which has
+          // no rect of its own and wants the current one.
+          function positionOverlay(target, measured) {
             if (!isElement(target)) {
               return;
             }
             const overlay = ensureOverlay();
-            const rect = target.getBoundingClientRect();
+            const rect = measured || target.getBoundingClientRect();
             overlay.style.top = (rect.top + window.scrollY) + 'px';
             overlay.style.left = (rect.left + window.scrollX) + 'px';
             overlay.style.width = Math.max(rect.width, 1) + 'px';
@@ -659,14 +697,28 @@ export function generateNavigationScript(normalizedPath: string): string {
           // means a highlight raised while the click-selector is off has a way back down — the old
           // teardown was reachable only from disableSelector, which early-returns when the selector
           // is inactive.
-          function setOverlayVisible(target) {
+          function setOverlayVisible(target, measured) {
             if (isElement(target)) {
-              positionOverlay(target);
+              positionOverlay(target, measured);
               return;
             }
             if (selectorState.overlay) {
               selectorState.overlay.style.opacity = '0';
             }
+          }
+
+          // The outline the toolbar asks for. Selection is no longer a momentary act — the toolbar
+          // stays on the element and so must the mark saying which element it is, otherwise the two
+          // disagree about what is selected the moment the picker disarms.
+          //
+          // Hover wins while the picker is armed: handleMouseMove is writing the outline to whatever
+          // is under the pointer, and a reposition from the ResizeObserver must not yank it back to
+          // the previous selection mid-hover. disableSelector restores it on the way out.
+          function __oswToolbarOnPlace(target, measured) {
+            if (selectorState.active) {
+              return;
+            }
+            setOverlayVisible(target, measured);
           }
 
           function buildDomPath(element) {
@@ -755,6 +807,17 @@ export function generateNavigationScript(normalizedPath: string): string {
           // The guarantee has to live in this function rather than in a test comparing two copies:
           // a comparison test passes right up until the copies drift, which is the next change.
           function buildSelectionPayload(target) {
+            // The frame used to discard the selection the moment it was made — handleClick calls
+            // disableSelector, which nulls lastTarget, and neither tree-select nor selection-resolve
+            // held the element either. The toolbar has to stay anchored to it, so the one builder
+            // all three paths reach is where the element is kept. Tracking here rather than in each
+            // caller is what makes a tree selection and a click produce the same toolbar; the
+            // observer it re-targets is constructed once, at script init, so this cannot stack.
+            // No toolbar where nothing it offers can work. In a bundled runtime the framework
+            // draws the element, so it carries no provenance and Style, Text and Replace would each
+            // refuse; a bar of four dead buttons is worse than no bar. The selection itself still
+            // happens, and still reaches the agent.
+            if (__oswDirectEdit) __oswToolbarTrack(target);
             // Stamped before anything else is read, so the attribute is genuinely on the element by
             // the time outerHTML is taken — the stripper is then what keeps it out of the payload,
             // rather than the order these fields happen to be evaluated in. __oswNodeId hands back
@@ -779,12 +842,25 @@ export function generateNavigationScript(normalizedPath: string): string {
               outerHTML: __oswStripNodeId(__oswStripProv(target.outerHTML || '')),
               srcAttr: srcAttr || undefined,
               instanceCount: instanceCount || undefined,
+              // Read off the live element, not recovered from the outerHTML above: the host would
+              // have to parse a string to learn what two property accesses say here, and the string
+              // it would parse has already been through the provenance stripper. Always a boolean,
+              // because "no element children and no text" is an answer.
+              textBearing: __oswToolbarTextBearing(target),
               nodeId: nodeId
             };
           }
 
           function handleMouseMove(event) {
             if (!selectorState.active) {
+              return;
+            }
+            // The toolbar sits right beside the element it is anchored to, so reaching for one of
+            // its buttons means moving the pointer over it. Leave the highlight where it is rather
+            // than painting it onto preview furniture. lastTarget is left alone deliberately: it
+            // still names the highlighted element, so moving back off the toolbar onto that same
+            // element is correctly a no-op rather than a re-paint.
+            if (isToolbarTarget(event.target)) {
               return;
             }
             const target = isElement(event.target) ? event.target : (event.target && event.target.parentElement);
@@ -797,6 +873,13 @@ export function generateNavigationScript(normalizedPath: string): string {
 
           function handleClick(event) {
             if (!selectorState.active) {
+              return;
+            }
+            // A press on the toolbar is not a selection of the toolbar. Returned before
+            // preventDefault and before disableSelector, both deliberately: the toolbar's own
+            // button handlers live inside the shadow root and still need the event, and the tool
+            // the user armed stays armed, still waiting for the element they meant to pick.
+            if (isToolbarTarget(event.target)) {
               return;
             }
             event.preventDefault();
@@ -855,7 +938,10 @@ export function generateNavigationScript(normalizedPath: string): string {
             }
             selectorState.active = false;
             selectorState.lastTarget = null;
-            setOverlayVisible(null);
+            // Back to the selection's own outline, not blank. Clicking an element runs this
+            // immediately after tracking it, so clearing here is what used to make a click-selected
+            // element lose its mark while a tree-selected one kept it.
+            setOverlayVisible(__oswToolbarState.tracked || null);
             document.body.style.cursor = selectorState.previousCursor || '';
             document.removeEventListener('mousemove', handleMouseMove, true);
             document.removeEventListener('click', handleClick, true);
@@ -954,7 +1040,11 @@ export function generateNavigationScript(normalizedPath: string): string {
                 window.parent.postMessage({
                   type: 'style-computed',
                   nodeId: data.nodeId,
-                  values: __oswReadComputed(queried, data.properties)
+                  values: __oswReadComputed(queried, data.properties),
+                  // What one rem is worth in this document, on the same reply as the values it is
+                  // the divisor for. Sent even when the node is dead, because it is a fact about
+                  // the document rather than about the element.
+                  rootFontSize: __oswRootFontSize()
                 }, '*');
               }
               return;
@@ -969,6 +1059,11 @@ export function generateNavigationScript(normalizedPath: string): string {
               // /overrides.css carries the rule, and putting a stale copy back would mask the next
               // edit the agent makes to the same element.
               __oswApplyStylePreview(data.markerId, data.css);
+              // The element may have just changed size — padding, font-size, border-width all do it
+              // — with no scroll, no message and no recompile to prompt a new position. The
+              // ResizeObserver covers the real browser; this covers the same instant synchronously
+              // and is the only path that works where ResizeObserver is absent.
+              __oswToolbarReposition();
               return;
             }
 
@@ -985,6 +1080,66 @@ export function generateNavigationScript(normalizedPath: string): string {
                 if (outcome.winner) reply.winner = outcome.winner;
                 window.parent.postMessage(reply, '*');
               }
+              return;
+            }
+
+            if (data.type === 'toolbar-theme') {
+              // Kept whether or not a toolbar exists yet: this arrives on frame-ready, which is
+              // before any selection has mounted one for the colours to land on.
+              __oswToolbarTheme(data.colors);
+              return;
+            }
+
+            if (data.type === 'scroll-restore') {
+              // A recompile mints a new document, and a new document starts at the top. That now
+              // matters far more than it used to: every Text or Replace edit writes a source file,
+              // which recompiles, which used to throw the user back to the top of the page away from
+              // the element they were working on.
+              //
+              // The host captured this off the outgoing document and only sends it back for the same
+              // page, so navigating somewhere else cannot restore a stale position.
+              //
+              // Applied synchronously, and the host sends it *before* the selection-resolve that
+              // re-anchors the toolbar: the bar's side is chosen from the viewport, so placing it
+              // against scroll 0 and then scrolling to 500 would decide it against a viewport the
+              // user never saw.
+              //
+              // A message naming no position at all is not a request to go to the top — that is
+              // where an untouched fresh document already is, and acting on it would turn a
+              // malformed message into a jump.
+              if (typeof data.scrollY !== 'number' && typeof data.scrollX !== 'number') return;
+              var restoreY = typeof data.scrollY === 'number' ? data.scrollY : 0;
+              var restoreX = typeof data.scrollX === 'number' ? data.scrollX : 0;
+              if (typeof window.scrollTo === 'function') {
+                try {
+                  // The options form, with behavior 'instant'. Not scrollTo(x, y): the two-argument
+                  // form obeys the document's own scroll-behavior, and three of the built-in
+                  // templates set that to smooth — so restoring a position animated a scroll over a
+                  // document that had only just been replaced, which reads as a lurch rather than as
+                  // the page opening where it was left. 'instant' overrides the CSS; 'auto' defers
+                  // to it, which is the bug.
+                  window.scrollTo({ left: restoreX, top: restoreY, behavior: 'instant' });
+                } catch (err) {
+                  // A document old enough to reject the options form still scrolls the plain way.
+                  try {
+                    window.scrollTo(restoreX, restoreY);
+                  } catch (err2) {
+                    // Best effort. A frame that refuses to scroll is a frame that opens at the top,
+                    // which is exactly the behaviour this replaces — not a reason to stop.
+                  }
+                }
+              }
+              // For the case where a toolbar is somehow already up when this arrives. On the ordinary
+              // frame-ready path there is none yet, which is the point of the ordering above.
+              __oswToolbarCheckFit();
+              return;
+            }
+
+            if (data.type === 'selection-clear') {
+              // The only way the frame lets go of a selection. Nothing else releases it: the click
+              // selector disarms itself after a selection but the element stays tracked, which is
+              // the point — the toolbar outlives the tool that made it.
+              __oswToolbarRelease();
               return;
             }
 
@@ -1017,6 +1172,28 @@ export function generateNavigationScript(normalizedPath: string): string {
     `;
 }
 
+/**
+ * The extra classes the header's crosshair wears while the pointer is on the Inspector's
+ * `Select element` button, which arms the very same tool from the other side of the workspace.
+ *
+ * The classes are the ghost variant's own `hover:` rule spelled without the pseudo-class, so a
+ * remote hover and a real one land on the same colours and a restyle of `ghost` is one place, not
+ * two.
+ *
+ * **Only when the button is not already tinted.** Armed, or holding a focus target, the crosshair
+ * carries a state that means something — a hover hint painted over it would either be invisible
+ * (the tint is an inline style and wins) or, worse, read as a state change.
+ */
+export function crosshairHintClass(input: {
+  hinted: boolean;
+  armed: boolean;
+  hasFocusTarget: boolean;
+}): string | undefined {
+  if (!input.hinted) return undefined;
+  if (input.armed || input.hasFocusTarget) return undefined;
+  return 'bg-accent text-accent-foreground dark:bg-accent/50';
+}
+
 const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePreviewProps>(({
   projectId,
   refreshTrigger,
@@ -1039,8 +1216,13 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   onStyleComputed,
   onStyleProbeResult,
   onSelectionResolved,
+  onToolbarAction,
+  onToolbarHover,
   onFrameReady
 }, ref) => {
+  // Only the selection toolbar reads this: its chrome lives inside the frame, where the app's
+  // stylesheet does not reach, so the colours have to be resolved out here and posted in.
+  const { resolvedTheme } = useTheme();
   const [compiledProject, setCompiledProject] = useState<CompiledProject | null>(null);
   const [activePath, setActivePath] = useState('/');
   const [loading, setLoading] = useState(true);
@@ -1062,7 +1244,8 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   // The preview "escaped": the frame navigated somewhere that isn't the document we wrote (a form
   // submit, window.location, meta refresh, etc.). Drives the recovery overlay.
   const [escaped, setEscaped] = useState(false);
-  const [selectorActive, setSelectorActive] = useState(false);
+  /** The element picker, read out of the layout slice rather than held here. */
+  const selectorActive = useWorkspaceStore(s => s.focusToolArmed);
   const [draggingBlock, setDraggingBlock] = useState<PlacementBlockInfo | null>(null);
   const [paletteVisible, setPaletteVisible] = useState(true);
   const [localPaletteOpen, setLocalPaletteOpen] = useState(false);
@@ -1097,6 +1280,17 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     return {};
   }, [selectorActive, hasFocusTarget]);
 
+  /**
+   * The pointer is on the Inspector's `Select element` button — the other control for this same
+   * tool, in a panel with no ancestor short of the workspace. See `focusToolHinted`.
+   */
+  const crosshairHinted = useWorkspaceStore(s => s.focusToolHinted);
+  const crosshairHintClasses = crosshairHintClass({
+    hinted: crosshairHinted,
+    armed: selectorActive,
+    hasFocusTarget,
+  });
+
   useEffect(() => {
     if (placementActive) {
       setPaletteVisible(true);
@@ -1124,6 +1318,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   // loadIdCounterRef mints monotonic ids; loadPageRef lets the stable escape handler reach the
   // latest loadPage closure (for the auto-reload).
   const lifecycleRef = useRef(new PreviewLifecycle());
+  // Where the document that is about to be replaced was scrolled to. Written in `loadPage`, the one
+  // place a document is ever written, and read back on the frame-ready for the same page — so no
+  // scroll listener and no scroll message are involved at all.
+  const scrollMemoryRef = useRef(new FrameScrollMemory());
   const loadIdCounterRef = useRef(0);
   const loadPageRef = useRef<((path: string, compiled?: CompiledProject, isRecovery?: boolean) => void) | null>(null);
   // Set true once we've successfully read our own marker from the frame. Guards escape detection:
@@ -1229,10 +1427,18 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   }), [iframeReady, startBlockDrag, activePath, postMessageToIframe]);
 
   const compilingRef = useRef(false);
-  const pendingCompileOptionsRef = useRef<{ preserve: boolean; showLoading: boolean } | null>(null);
+  const pendingCompileOptionsRef = useRef<CompileRequest | null>(null);
   const compileTimeoutRef = useRef<number | null>(null);
-  const scheduledCompileOptionsRef = useRef<{ preserve: boolean; showLoading: boolean } | null>(null);
+  const scheduledCompileOptionsRef = useRef<CompileRequest | null>(null);
   const compileGeneration = useRef(0);
+
+  // Skipping the compile for a preview that has been measured at 0x0 — the duplicate mobile workspace
+  // is hidden by CSS, not unmounted, so without this every change compiles the project twice. The gate
+  // starts open and only a measurement closes it; see lib/preview/compile-gate.ts.
+  const rootElementRef = useRef<HTMLDivElement | null>(null);
+  const compileGateRef = useRef<PreviewCompileGate | null>(null);
+  if (!compileGateRef.current) compileGateRef.current = new PreviewCompileGate();
+  const rootObserverRef = useRef<ResizeObserver | null>(null);
 
   const Header = () => (
     isFullscreen ? null : <PanelHeader icon={Eye} title="Live Preview" color="var(--button-preview-active)" onClose={onClose} panelKey="preview" />
@@ -1248,6 +1454,26 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       postMessageToIframe({ type: 'selector-toggle', active: selectorActive });
     }
   }, [selectorActive, iframeReady, postMessageToIframe]);
+
+  /**
+   * Hand the frame the app's resolved colours for the selection toolbar.
+   *
+   * Sent on frame-ready and on theme change.
+   */
+  const postToolbarTheme = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    postMessageToIframe({
+      type: 'toolbar-theme',
+      colors: resolveToolbarTheme(document.documentElement, resolvedTheme),
+    });
+  }, [postMessageToIframe, resolvedTheme]);
+
+  const postToolbarThemeRef = useRef(postToolbarTheme);
+  postToolbarThemeRef.current = postToolbarTheme;
+
+  useEffect(() => {
+    if (iframeReady) postToolbarTheme();
+  }, [iframeReady, postToolbarTheme]);
 
   // Kept in a ref rather than in the load effect's dependencies: the consumer passes an inline
   // callback, so a dependency would tear down and re-add the load listener on every parent render —
@@ -1279,10 +1505,23 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
           markerReadableRef.current = true;
           lifecycleRef.current.onAck(expected);
           setEscaped(false);
+          // Before the consumer, deliberately. Frame-ready is answered with a `selection-resolve`,
+          // and resolving is what re-anchors the toolbar — whose side is chosen from the viewport. Put
+          // the document back where the user had it first, or the bar is placed against scroll 0 and
+          // the user is then shown scroll 500. Both are `postMessage` into the same frame, so the
+          // frame handles them in this order.
+          const restore = scrollMemoryRef.current.take(activePathRef.current);
+          if (restore) {
+            postMessageToIframe({ type: 'scroll-restore', scrollX: restore.x, scrollY: restore.y });
+          }
           // Only here, and only after the marker matched: this is the first moment a message posted
           // into the frame reaches the document we wrote. Announced on every load, because each one
           // invalidates whatever the consumer knows about the old document.
           onFrameReadyRef.current?.();
+          // After the consumer, not before: this document is brand new and has no toolbar colours
+          // at all until they are sent again, and the selection the consumer is about to re-resolve
+          // is what mounts the toolbar that reads them.
+          postToolbarThemeRef.current();
         } else if (typeof markerLoadId === 'number') {
           // A different load's marker: still one of our documents (a stale/rapid load), not an
           // external escape — reads work, so record that, but don't recover.
@@ -1391,12 +1630,25 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   }, [projectId, deploymentId, entryPoint, runtime, provenance]);
 
   const compileAndLoad = useCallback((preserveCurrentPath: boolean = false, showLoading: boolean = true) => {
+    // Ahead of the in-flight check on purpose: a hidden preview's request is parked in the gate's own
+    // slot, not in pendingCompileOptionsRef, which belongs to the in-flight queue and would drain into
+    // a compile when the current one finishes.
+    const gate = compileGateRef.current!;
+    let incoming = { preserve: preserveCurrentPath, showLoading };
+    if (gate.isHidden()) {
+      // Re-measure before parking again. The ResizeObserver is the primary way the gate reopens, but
+      // its callbacks are delivered with the rendering steps, so a tab that is not rendering receives
+      // none — and a CSS-only reveal (crossing the `md` breakpoint) re-renders no React, so nothing
+      // re-attaches the callback ref either. Every request is a free opportunity to find out that the
+      // box came back, and it costs one getBoundingClientRect on a preview that is not compiling.
+      const revived = gate.measure(rootElementRef.current?.getBoundingClientRect());
+      if (revived) incoming = mergeCompileRequests(revived, incoming);
+    }
+    const requested = gate.request(incoming);
+    if (!requested) return;
+
     if (compilingRef.current) {
-      const pending = pendingCompileOptionsRef.current;
-      pendingCompileOptionsRef.current = {
-        preserve: (pending?.preserve ?? false) || preserveCurrentPath,
-        showLoading: (pending?.showLoading ?? false) || showLoading
-      };
+      pendingCompileOptionsRef.current = mergeCompileRequests(pendingCompileOptionsRef.current, requested);
       return;
     }
 
@@ -1414,15 +1666,14 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       }
     };
 
-    void run(preserveCurrentPath, showLoading);
+    void run(requested.preserve, requested.showLoading);
   }, [compileAndLoadInternal]);
 
   const scheduleCompile = useCallback((preserveCurrentPath = false, showLoading = false) => {
-    const pending = scheduledCompileOptionsRef.current;
-    scheduledCompileOptionsRef.current = {
-      preserve: (pending?.preserve ?? false) || preserveCurrentPath,
-      showLoading: (pending?.showLoading ?? false) || showLoading
-    };
+    scheduledCompileOptionsRef.current = mergeCompileRequests(
+      scheduledCompileOptionsRef.current,
+      { preserve: preserveCurrentPath, showLoading }
+    );
 
     if (compileTimeoutRef.current) {
       window.clearTimeout(compileTimeoutRef.current);
@@ -1438,6 +1689,24 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     }, 150);
   }, [compileAndLoad]);
 
+  // The observer outlives any one render, so it reaches the current compileAndLoad through a ref
+  // rather than being torn down and re-established whenever that callback's identity changes.
+  const compileAndLoadRef = useRef(compileAndLoad);
+  compileAndLoadRef.current = compileAndLoad;
+
+  // Attached to whichever root this component renders (loading, error, or the preview itself). A
+  // callback ref rather than useRef + useEffect because the root element is a different node in each
+  // of those three branches, and only a callback ref is told when it is swapped.
+  const attachRoot = useCallback((node: HTMLDivElement | null) => {
+    // Kept so a compile request can re-measure without waiting for an observation. See compileAndLoad.
+    rootElementRef.current = node;
+    rootObserverRef.current?.disconnect();
+    rootObserverRef.current = observePreviewRoot(node, compileGateRef.current!, request => {
+      // observePreviewRoot probes synchronously, so this can land inside React's commit; a microtask
+      // puts the compile's setState after the commit instead of inside it.
+      queueMicrotask(() => compileAndLoadRef.current(request.preserve, request.showLoading));
+    });
+  }, []);
 
   const workspaceReadyFlag = useWorkspaceStore(s => s.workspaceReady);
   // A standalone preview owns its project, so there is no opening sequence to wait behind.
@@ -1507,8 +1776,11 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       return;
     }
 
-    if (selectorActiveRef.current) {
-      setSelectorActive(false);
+    // Read the store rather than the ref mirror: the mirror is populated by an effect, so on a fresh
+    // mount it still says `false` while the flag may already be armed, and the else-branch would
+    // leave the store armed against a document that is being replaced.
+    if (useWorkspaceStore.getState().focusToolArmed) {
+      useWorkspaceStore.getState().setFocusToolArmed(false);
     } else {
       postMessageToIframe({ type: 'selector-toggle', active: false });
     }
@@ -1599,7 +1871,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       return blobUrl ? `src="${blobUrl}"` : match;
     });
 
-    const navigationScript = generateNavigationScript(normalizedPath);
+    const navigationScript = generateNavigationScript(normalizedPath, supportsDirectEditing(runtime));
     
     const placementScript = generatePlacementScript();
     const injectedScripts = navigationScript + placementScript;
@@ -1628,6 +1900,11 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     } else {
       processedHtml = headInject + processedHtml;
     }
+
+    // Where the outgoing document was scrolled to, read off it in the last moment it exists and keyed
+    // on the page it was showing — `activePathRef` is still the old path here, and is updated below.
+    // A recompile reloads the same path and gets it back; a navigation does not, and opens at the top.
+    scrollMemoryRef.current.remember(activePathRef.current, readFrameScroll(iframeRef.current));
 
     // Clear stale runtime errors before loading new content —
     // only errors from this compilation should be in the buffer.
@@ -1684,8 +1961,16 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<PreviewMessage>) => {
-      // Only handle messages from our own iframe
-      if (iframeRef.current && event.source !== iframeRef.current.contentWindow) {
+      // Only handle messages from our own iframe.
+      //
+      // The missing-ref case is a rejection, not a pass. The workspace mounts this component twice —
+      // a desktop tree and a mobile one — and only the visible mount renders an iframe, so in the
+      // other one `iframeRef.current` is null. Guarding on `iframeRef.current &&` made that mount
+      // accept every message the *visible* frame posted: a click in the desktop preview reached the
+      // mobile mount's `onFocusSelection` as well, which carries `surface: 'mobile'`, and the mobile
+      // rule includes every selection in the next message. Selecting an element attached it to the
+      // prompt with nothing pressed.
+      if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) {
         return;
       }
       const data = event.data;
@@ -1728,13 +2013,13 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       }
 
       if (data.type === 'selector-selection' && data.payload) {
-        setSelectorActive(false);
+        useWorkspaceStore.getState().setFocusToolArmed(false);
         onFocusSelection?.(data.payload);
         return;
       }
 
       if (data.type === 'selector-cancelled') {
-        setSelectorActive(false);
+        useWorkspaceStore.getState().setFocusToolArmed(false);
         return;
       }
 
@@ -1775,6 +2060,16 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
         return;
       }
 
+      if (data.type === 'toolbar-action') {
+        onToolbarAction?.(data);
+        return;
+      }
+
+      if (data.type === 'toolbar-hover') {
+        onToolbarHover?.(data);
+        return;
+      }
+
       if (data.type === 'iframe-click') {
         const ps = paletteStateRef.current;
         if (ps.localPaletteOpen && ps.paletteVisible && !ps.draggingBlock) {
@@ -1790,7 +2085,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       window.removeEventListener('message', handleMessage);
     };
   }, [handleNavigation, onFocusSelection, onPlacementComplete, onTreeLevel, onTreeStale,
-      onStyleComputed, onStyleProbeResult, onSelectionResolved]);
+      onStyleComputed, onStyleProbeResult, onSelectionResolved, onToolbarAction, onToolbarHover]);
 
 
   useEffect(() => {
@@ -1803,7 +2098,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   useEffect(() => {
     if (placementActive && selectorActive) {
-      setSelectorActive(false);
+      useWorkspaceStore.getState().setFocusToolArmed(false);
     }
   }, [placementActive, selectorActive]);
 
@@ -1822,7 +2117,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   if (loading) {
     return (
-      <div className="h-full flex flex-col">
+      <div ref={attachRoot} className="h-full flex flex-col">
         <Header />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-2">
@@ -1836,7 +2131,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
 
   if (error) {
     return (
-      <div className="h-full flex flex-col">
+      <div ref={attachRoot} className="h-full flex flex-col">
         <Header />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center text-destructive space-y-2">
@@ -1852,7 +2147,7 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={attachRoot} className="h-full flex flex-col">
       <Header />
       {/* Mobile Layout - Single row with navigation and page selector */}
       <div className="border-b p-2 flex items-center gap-2 md:hidden">
@@ -1894,10 +2189,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
           <Button
             size="icon"
             variant="ghost"
-            className="h-5 w-5"
+            className={cn('h-5 w-5', crosshairHintClasses)}
             onClick={() => {
               const next = !selectorActive;
-              setSelectorActive(next);
+              useWorkspaceStore.getState().setFocusToolArmed(next);
               if (next && localPaletteOpen) {
                 setLocalPaletteOpen(false);
                 setTimeout(() => onPlacementToggle?.(), 0);
@@ -1995,10 +2290,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
           <Button
             size="icon"
             variant="ghost"
-            className="h-5 w-5"
+            className={cn('h-5 w-5', crosshairHintClasses)}
             onClick={() => {
               const next = !selectorActive;
-              setSelectorActive(next);
+              useWorkspaceStore.getState().setFocusToolArmed(next);
               if (next && localPaletteOpen) {
                 setLocalPaletteOpen(false);
                 setTimeout(() => onPlacementToggle?.(), 0);

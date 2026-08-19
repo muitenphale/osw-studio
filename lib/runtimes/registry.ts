@@ -110,6 +110,23 @@ const BADGE_CLASSES: Record<string, string> = {
   blue:   'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800',
 };
 
+/**
+ * Whether an element in this runtime's preview can be edited directly.
+ *
+ * Derived rather than declared, so it cannot drift from the two facts it rests on. Direct editing
+ * resolves a rendered element back to the source that produced it through the `data-osw-src`
+ * attribute stamped into HTML at compile. That needs a DOM to point at, which rules out `terminal`
+ * runtimes, and it needs the element to have come from a source file rather than from a component
+ * rendered at runtime, which rules out the bundled ones: their markup exists only after the bundle
+ * has run, so `resolveSelection` answers `unresolvable` for everything the framework draws.
+ */
+export function supportsDirectEditing(runtime: ProjectRuntime | undefined | null): boolean {
+  if (!runtime) return false;
+  const config = RUNTIME_CONFIGS.find(c => c.id === runtime);
+  if (!config) return false;
+  return config.previewMode === 'visual' && !config.bundled;
+}
+
 export function getRuntimeBadge(runtime: ProjectRuntime): { label: string; className: string } {
   const cfg = getRuntimeConfig(runtime);
   return {

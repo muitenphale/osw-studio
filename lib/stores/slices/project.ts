@@ -24,6 +24,11 @@ export interface ProjectSlice {
   promptSuggestions: PromptSuggestion[];
   modelConfigVersion: number;
   focusContext: FocusTarget | null;
+  /**
+   * Sibling of focusContext, not nested in it: recompiles rebuild focusContext wholesale,
+   * which would drop a flag carried inside the payload.
+   */
+  focusIncluded: boolean;
   mode: WorkspaceMode;
   activeInterview: ActiveInterview | null;
   backendEnabled: boolean;
@@ -46,6 +51,7 @@ export interface ProjectSlice {
   setBackendEnabled: (enabled: boolean) => void;
   setDeployment: (id: string | null) => void;
   setFocusContext: (ctx: FocusTarget | null) => void;
+  setFocusIncluded: (included: boolean) => void;
   setRuntimeErrors: (errors: string[]) => void;
   resetProject: () => void;
 }
@@ -63,6 +69,7 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
   promptSuggestions: [],
   modelConfigVersion: 0,
   focusContext: null,
+  focusIncluded: false,
   mode: 'code',
   activeInterview: null,
   backendEnabled: false,
@@ -139,6 +146,7 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
 
   setDeployment: (id: string | null) => set({ selectedDeploymentId: id }),
   setFocusContext: (ctx) => set({ focusContext: ctx }),
+  setFocusIncluded: (included) => set({ focusIncluded: included }),
   setRuntimeErrors: (errors) => set({ runtimeErrors: errors }),
 
   resetProject: () => {
@@ -153,6 +161,7 @@ export const createProjectSlice: StateCreator<CombinedState, [], [], ProjectSlic
       projectRuntime: undefined,
       promptSuggestions: [],
       focusContext: null,
+      focusIncluded: false,
       activeInterview: null,
       backendEnabled: false,
       selectedDeploymentId: null,

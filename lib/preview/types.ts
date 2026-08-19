@@ -22,16 +22,8 @@ export interface FocusContextPayload {
   domPath: string;
   tagName: string;
   /**
-   * The element's `data-osw-node` value, stamped by the frame as the payload is built.
-   *
-   * The only stable handle the host has to a *clicked* element: `domPath` is positional, `srcAttr`
-   * is ambiguous whenever `instanceCount > 1`, and before this field existed the ids
-   * `__oswResolveNode` accepts were minted only by the tree serializer — so an element the user
-   * clicked in the preview had none.
-   *
-   * Same lifetime and same alphabet as {@link TreeNode.id}, and deliberately the same counter: an
-   * element the tree already serialized keeps the id the host is holding for it. Frame-scoped, so a
-   * recompile invalidates it.
+   * Stable handle to a clicked element; `domPath` is positional and `srcAttr` is ambiguous when
+   * `instanceCount > 1`. Frame-scoped: a recompile invalidates it.
    */
   nodeId: string;
   attributes: Record<string, string>;
@@ -48,13 +40,16 @@ export interface FocusContextPayload {
    * produced many elements — a `{{#each}}` loop, or a partial included more than once.
    */
   instanceCount?: number;
+  /**
+   * Reported by the frame rather than derived from `outerHTML` in the host.
+   * Absent means "not stated", read as not text by `elementKind`.
+   */
+  textBearing?: boolean;
 }
 
 /**
  * One row of the Elements tree, as serialized inside the preview frame.
- *
- * `instances` is the same concept as `FocusContextPayload.instanceCount` and is deliberately spelled
- * differently only because that field already shipped; do not introduce a third spelling.
+ * `instances` is the same concept as `FocusContextPayload.instanceCount`.
  */
 export interface TreeNode {
   /**
@@ -120,7 +115,22 @@ export type PreviewMessage =
    * See `SHORTHAND_LONGHANDS` in `lib/preview/style-preview.ts` for why. A property the engine has
    * no value for is present with an empty string, so the key set is the request's, not the engine's.
    */
-  | { type: 'style-computed'; nodeId: string; values: Record<string, string> }
+  | {
+      type: 'style-computed';
+      nodeId: string;
+      values: Record<string, string>;
+      /**
+       * The document's root font size, as the engine resolved it — `'16px'`, `'10px'`, `''` where
+       * there is no document element.
+       *
+       * Not a property of the queried element: it is what one `rem` is worth here, and it rides on
+       * this reply because every `rem` the Styles panel shows or writes is computed through it and
+       * there is no other message that could carry it. Optional so a frame built before this reply
+       * carried it is still a valid message; the host's answer to its absence is "not known yet",
+       * never 16.
+       */
+      rootFontSize?: string;
+    }
   /**
    * The answer to a `style-probe`: which of the asked-about properties the override did **not**
    * actually produce, and — when something did beat it — where the winning declaration came from.
@@ -135,14 +145,23 @@ export type PreviewMessage =
    * cannot name (a UA default, or a rule inside an `@media` block, which is deliberately not walked).
    */
   | { type: 'style-probe-result'; nodeId: string; lost: string[]; winner?: string }
+  /** A fresh payload for a `selection-resolve`, or `null` when that `domPath` no longer resolves. */
+  | { type: 'selection-resolved'; payload: FocusContextPayload | null }
   /**
-   * A fresh payload for a `selection-resolve`, or `null` when that `domPath` no longer resolves.
-   *
-   * A full payload rather than the rectangle the spec first asked for: what the recompile actually
-   * invalidated is `nodeId`, which is frame-scoped and is what every node-keyed message is keyed on.
-   * A rectangle would leave the host holding a selection it could no longer ask anything about.
+   * Relayed to the host because every action depends on host state (panels, tabs, message inclusion).
    */
-  | { type: 'selection-resolved'; payload: FocusContextPayload | null };
+  | { type: 'toolbar-action'; action: ToolbarAction; nodeId: string }
+  /**
+   * The pointer entered or left a toolbar button, so the host can show what pressing it would do.
+   *
+   * `action` is null on leave. Only the buttons whose consequence is invisible until it happens are
+   * worth announcing: `style` rearranges the panels, and which panel it closes is not guessable from
+   * the button.
+   */
+  | { type: 'toolbar-hover'; action: ToolbarAction | null };
+
+/** The kind-specific slot: `text` or `replace`, decided per selection. */
+export type ToolbarAction = 'style' | 'text' | 'replace' | 'include' | 'dismiss';
 
 export type PreviewHostMessage =
   | { type: 'selector-toggle'; active: boolean }
@@ -167,43 +186,26 @@ export type PreviewHostMessage =
    */
   | { type: 'style-query'; nodeId: string; properties: string[] }
   /**
-   * Show an uncommitted style change on the element carrying this marker, or clear it with
-   * `css: null`.
-   *
-   * `markerId` and a block body rather than a selector: the frame builds the selector itself, from
-   * the pattern `lib/direct-edit/overrides-css.ts` writes the file with, so the two cannot drift.
-   *
-   * `css` is the element's **whole accumulated block**, not the one declaration that just changed —
-   * the transient style is replaced on every send, so a single declaration would visually revert
-   * every earlier edit in the session.
-   *
-   * Needed because a repeat edit writes `/overrides.css` silently, without a recompile: the live
-   * document would otherwise never see the new rule and the edit would look like it did nothing.
+   * `markerId` identifies the rule; `css` is the element's whole accumulated block (needed because
+   * silent writes skip recompile). `null` clears the transient style.
    */
   | { type: 'style-preview'; markerId: string; css: string | null }
   /**
-   * Ask whether the override on `markerId` is actually producing these properties on this node, and
-   * what beat it if not.
-   *
-   * Both ids, because they answer different halves: `nodeId` says *which element* to measure,
-   * `markerId` says *which rule* to lift out. They are not derivable from one another — a marker can
-   * be carried by several rendered elements, and an element the user clicked has a `nodeId` long
-   * before anything writes a marker block for it.
-   *
-   * The frame answers by removing the rule and looking, so this is only meaningful once the rule is
-   * in the document: after a silent `/overrides.css` write the transient `<style>` carries it, and
-   * after a recompile the file does. Probing between a non-silent write and the recompile it
-   * triggers reports a loss on every property, because the marker is not in the document yet.
+   * Both `nodeId` and `markerId` needed: one identifies the element, the other identifies the rule
+   * to lift out.
    */
   | { type: 'style-probe'; nodeId: string; markerId: string; properties: string[] }
+  /** Uses `domPath` because a recompile mints new `nodeId`s but `domPath` survives. */
+  | { type: 'selection-resolve'; domPath: string }
+  /** Clears the toolbar anchor. Not needed after a recompile (the new document has no selection). */
+  | { type: 'selection-clear' }
   /**
-   * Find the element this `domPath` names and send back a fresh payload for it, or `null`.
-   *
-   * The recompile a first edit triggers mints a new document, and with it a new set of node ids —
-   * so the host's `nodeId` is dead while its `focusContext` is not. `domPath` is the only handle
-   * that survives, and this is how it is turned back into one that can be asked questions.
-   *
-   * It carries no page identity, so the host must not send it after the preview has navigated: the
-   * same path resolves perfectly well to a different element on another page.
+   * The frame cannot read the app's CSS variables; colours sent explicitly as resolved values.
+   * Re-sent on every frame-ready and on theme change.
    */
-  | { type: 'selection-resolve'; domPath: string };
+  | { type: 'toolbar-theme'; colors: Record<string, string> }
+  /**
+   * Restores scroll position after a `srcdoc` reassignment. Only sent for the same `activePath`;
+   * sent before `selection-resolve` so the toolbar anchors at the restored position.
+   */
+  | { type: 'scroll-restore'; scrollX: number; scrollY: number };

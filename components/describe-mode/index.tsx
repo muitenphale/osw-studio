@@ -359,7 +359,7 @@ export function DescribeMode({ onProjectCreated, onDirtyChange }: DescribeModePr
           onStop={handleStop}
           onContinue={() => orchestratorRef.current?.continue()}
           focusContext={null}
-          setFocusContext={() => {}}
+          onClearFocus={() => {}}
           mode="code"
           setMode={() => {}}
           activeInterview={null}

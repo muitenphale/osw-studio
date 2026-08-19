@@ -1,25 +1,9 @@
 /**
- * The direct-edit orchestrator — the only module in `lib/direct-edit/` that touches the VFS.
+ * Direct-edit orchestrator — the only module in `lib/direct-edit/` that touches the VFS.
  *
- * One call turns "this element, this declaration" into durable project files: a `data-osw-id`
- * stamped into source, a rule in `/overrides.css`, and a `<link>` to it in every page. Everything
- * it needs to locate the element comes from the selection payload's `data-osw-src`; nothing here
- * matches positions between the rendered tree and the source tree.
- *
- * **The order of operations is the design.** Two parts of it are load-bearing and invisible when
- * wrong:
- *
- * 1. *The source file is read once and written once.* The marker stamp and the `<link>` insertion
- *    are applied to the same string. Two writes would clobber — the second write's content was read
- *    before the first landed — and doing the link first would shift every index after `<head>`,
- *    including the `tagStart` the stamp needs.
- * 2. *`/overrides.css` is written silently; source files are not.* That file carries no provenance
- *    indices, so a silent write invalidates nothing and avoids a recompile. A source write shifts
- *    every `data-osw-src` after the insertion point, and those indices are already rendered into the
- *    live document with nothing to correct them — so it must announce itself. Getting this backwards
- *    produces identical file content and breaks the *next* edit.
- *
- * Nothing calls this yet; the shelf UI is a later plan.
+ * 1. Source file is read once and written once (stamp marker, then insert `<link>`, on the same string).
+ * 2. `/overrides.css` is written silently (no provenance indices); source files are not.
+ * 3. Link sweep runs on every apply so pages the agent adds later pick up the stylesheet.
  */
 
 import { vfs } from '@/lib/vfs';
@@ -27,18 +11,14 @@ import { readOpenTagAt } from '@/lib/preview/provenance';
 import { resolveSelection } from './resolution';
 import { MARKER_ATTR, newMarkerId, readMarkerAt, stampMarker } from './marker';
 import { ensureOverridesLink } from './link-invariant';
-import { upsertDeclaration } from './overrides-css';
+import { declaredProperties, removeDeclaration, upsertDeclaration } from './overrides-css';
 import type { ApplyResult, PreviewSelection, StyleDeclaration } from './types';
+import { asText } from '@/lib/vfs/as-text';
 
 /** Where the override stylesheet lives. Root and undotted, so no export filter drops it. */
 export const OVERRIDES_PATH = '/overrides.css';
 
-/**
- * Elements whose content is text rather than markup, so the duplicate scan must jump to the closing
- * tag. Not imported from `lib/preview/provenance.ts`, which keeps its copy private; the two lists
- * are independent by intent — provenance's exists to avoid *tagging* inside raw text, this one to
- * avoid *counting* a marker that is only a string in a script.
- */
+/** Tags whose content is not element text. Independent of the provenance copy. */
 const RAW_TEXT_TAGS = new Set(['script', 'style', 'title', 'textarea']);
 
 /** Pages that can hold a `<head>`. `.hbs` partials are swept by nothing: they have no head. */
@@ -58,26 +38,11 @@ function isPage(path: string): boolean {
 }
 
 /**
- * File content as text.
- *
- * A markup or CSS file is stored as a string by every writer in the codebase; the ArrayBuffer arm
- * exists because `VirtualFile.content` permits one and decoding is strictly better than the
- * alternative, which is treating the file as empty and overwriting it.
- */
-function asText(content: string | ArrayBuffer): string {
-  return typeof content === 'string' ? content : new TextDecoder().decode(content);
-}
-
-/**
  * Apply one CSS declaration to the selected element, durably.
  *
- * `isGenerating` is injected rather than imported: `lib/stores/` pulls in the orchestrator, sonner,
- * telemetry and the provider registry, and nothing under `lib/` imports the store today. The UI
- * passes `() => useWorkspaceStore.getState().isProjectGenerating(projectId)`.
+ * `confirmedMultiInstance` is required when the element resolves to a shared partial.
  *
- * `confirmedMultiInstance` is required — not advisory — when the element resolves to a shared
- * partial. Editing one is a global effect from a local gesture, so the refusal lives at the API
- * rather than in whichever UI happens to remember.
+ * `isGenerating` is injected to keep `lib/direct-edit/` free of store imports.
  */
 export async function applyStyleOverride(
   projectId: string,
@@ -202,14 +167,79 @@ export async function applyStyleOverride(
   };
 }
 
+/** Removes one declaration. Does not remove the marker or update provenance. */
+export async function removeStyleOverride(
+  projectId: string,
+  selection: PreviewSelection,
+  markerId: string,
+  property: string,
+  opts?: { confirmedMultiInstance?: boolean; isGenerating?: () => boolean },
+): Promise<ApplyResult> {
+  if (opts?.isGenerating?.()) return { ok: false, reason: 'generating', filesWritten: [] };
+
+  const resolution = resolveSelection(selection);
+  if (resolution.kind === 'one-to-many' && !opts?.confirmedMultiInstance) {
+    return {
+      ok: false,
+      reason: 'needs-confirmation',
+      file: resolution.file,
+      instances: resolution.instances,
+      filesWritten: [],
+    };
+  }
+
+  let current: string;
+  try {
+    // No file means no override, which is the outcome asked for rather than a failure.
+    if (!(await vfs.fileExists(projectId, OVERRIDES_PATH))) {
+      return { ok: true, markerId, filesWritten: [] };
+    }
+    current = asText((await vfs.readFile(projectId, OVERRIDES_PATH)).content);
+  } catch {
+    return { ok: false, reason: 'missing-file', file: OVERRIDES_PATH, filesWritten: [] };
+  }
+
+  let next: string;
+  try {
+    next = removeDeclaration(current, markerId, property);
+  } catch (error) {
+    // Same refusal as the write path: the block cannot be proved to be ours, so it is not touched.
+    return {
+      ok: false,
+      reason: 'ambiguous-stylesheet',
+      message: error instanceof Error ? error.message : String(error),
+      markerId,
+      filesWritten: [],
+    };
+  }
+
+  const filesWritten: string[] = [];
+  if (next !== current) {
+    await vfs.updateFile(projectId, OVERRIDES_PATH, next, { silent: true });
+    filesWritten.push(OVERRIDES_PATH);
+  }
+  return { ok: true, markerId, filesWritten };
+}
+
+/** Returns the properties this element has in /overrides.css, so Reset survives a reload. */
+export async function readOverriddenProperties(
+  projectId: string,
+  markerId: string,
+): Promise<string[]> {
+  try {
+    if (!(await vfs.fileExists(projectId, OVERRIDES_PATH))) return [];
+    const css = asText((await vfs.readFile(projectId, OVERRIDES_PATH)).content);
+    return declaredProperties(css, markerId);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * How many elements in the project carry `markerId`.
  *
- * The one case where direct editing's inert-failure property does not hold: an override whose
- * element was deleted does nothing, but an override whose element the agent *duplicated* applies to
- * both copies. Only the second is worth warning about, so this counts elements rather than
- * substrings — a false positive here is a warning the user cannot act on, which teaches them to
- * ignore the real one.
+ * The one case where inert failure does not hold; a false positive teaches the user to ignore
+ * real warnings.
  */
 export async function countMarkerOccurrences(projectId: string, markerId: string): Promise<number> {
   let count = 0;

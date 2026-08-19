@@ -8,7 +8,7 @@ vi.stubGlobal('localStorage', {
 });
 
 import { createStore } from 'zustand/vanilla';
-import { createLayoutSlice, LayoutSlice, PANEL_MAP, visiblePanelKeys } from '../slices/layout';
+import { createLayoutSlice, LayoutSlice, PANEL_MAP, pickEvictionTarget, visiblePanelKeys } from '../slices/layout';
 
 function createLayoutStore() {
   return createStore<LayoutSlice>()((...a) => ({
@@ -149,6 +149,119 @@ describe('layout slice', () => {
       store.getState().togglePanel('elements');
       expect(store.getState().showElements).toBe(false);
       expect(visiblePanelKeys(store.getState())).toEqual(before);
+    });
+  });
+
+  /**
+   * The element picker's armed flag.
+   *
+   * It is here rather than in `multipage-preview`'s own `useState` so that a *second* control can arm
+   * it — the Styles tab's `Select element` button, which cannot reach a ref that is still null at the
+   * moment it opens the panel that mounts the preview. These assertions are what stop it drifting
+   * back into being persisted layout or surviving a project switch.
+   */
+  describe('pickEvictionTarget', () => {
+    /**
+     * Which panel makes way, asserted directly.
+     *
+     * The panel tests above can only see that *something* closed and the count held at three, which
+     * every candidate satisfies equally — so the rule itself, rightmost-first, was never pinned.
+     */
+    const open = (...keys: string[]) =>
+      ['chat', 'files', 'editor', 'preview', 'console'].map(key => ({ key, open: keys.includes(key) }));
+
+    it('closes the rightmost open panel, not the leftmost', () => {
+      expect(pickEvictionTarget(open('chat', 'files', 'console'), 'elements')).toBe('console');
+      expect(pickEvictionTarget(open('chat', 'editor'), 'elements')).toBe('editor');
+    });
+
+    it('spares the companion of the panel being opened', () => {
+      // Elements reads the preview's document, so opening it must never be what unmounts the iframe.
+      expect(pickEvictionTarget(open('chat', 'files', 'preview'), 'elements')).toBe('files');
+    });
+
+    it('falls back to the companion when it is the only thing left to close', () => {
+      // Better a preview that closes than an open that silently does nothing.
+      expect(pickEvictionTarget(open('preview'), 'elements')).toBe('preview');
+    });
+
+    it('never picks the panel being opened', () => {
+      expect(pickEvictionTarget(open('chat', 'editor'), 'editor')).toBe('chat');
+    });
+
+    it('answers null when there is nothing to close', () => {
+      expect(pickEvictionTarget(open(), 'elements')).toBeNull();
+      expect(pickEvictionTarget(open('elements'), 'elements')).toBeNull();
+    });
+  });
+
+  describe('focusToolArmed', () => {
+    it('starts disarmed and is set by setFocusToolArmed', () => {
+      expect(store.getState().focusToolArmed).toBe(false);
+      store.getState().setFocusToolArmed(true);
+      expect(store.getState().focusToolArmed).toBe(true);
+      store.getState().setFocusToolArmed(false);
+      expect(store.getState().focusToolArmed).toBe(false);
+    });
+
+    it('is never persisted, so a reload does not come up armed', () => {
+      store.getState().setFocusToolArmed(true);
+      // Something else has to write the panels key, since arming must not write it itself.
+      store.getState().togglePanel('editor');
+      expect(JSON.parse(mockLocalStorage['osw-workspace-panels'])).not.toHaveProperty('focusToolArmed');
+      expect(createLayoutStore().getState().focusToolArmed).toBe(false);
+    });
+
+    it('is cleared by resetLayout, so it cannot follow you to the next project', () => {
+      // resetLayout runs unconditionally in the workspace's unmount cleanup. An armed picker left
+      // behind would make the next project's preview swallow its first click.
+      store.getState().setFocusToolArmed(true);
+      store.getState().resetLayout();
+      expect(store.getState().focusToolArmed).toBe(false);
+    });
+  });
+
+  /**
+   * The hover hint that links the Inspector's `Select element` button to the preview header's
+   * crosshair — two controls for one tool, in components whose nearest common ancestor is the
+   * workspace, which is why a hover has to travel through the store at all.
+   *
+   * Nothing behaves differently while it is true; it is a tint. That is exactly why it needs these
+   * assertions: a stuck hint is invisible to every other test in the suite and shows up only as a
+   * crosshair that is mysteriously highlighted with the pointer nowhere near it.
+   */
+  describe('focusToolHinted', () => {
+    it('starts clear and is set by setFocusToolHinted', () => {
+      expect(store.getState().focusToolHinted).toBe(false);
+      store.getState().setFocusToolHinted(true);
+      expect(store.getState().focusToolHinted).toBe(true);
+      store.getState().setFocusToolHinted(false);
+      expect(store.getState().focusToolHinted).toBe(false);
+    });
+
+    it('is never persisted — a reload cannot come up hinting at a pointer that is gone', () => {
+      store.getState().setFocusToolHinted(true);
+      // Something else has to write the panels key, since hinting must not write it itself.
+      store.getState().togglePanel('editor');
+      expect(JSON.parse(mockLocalStorage['osw-workspace-panels'])).not.toHaveProperty('focusToolHinted');
+      expect(createLayoutStore().getState().focusToolHinted).toBe(false);
+    });
+
+    it('is cleared by resetLayout', () => {
+      store.getState().setFocusToolHinted(true);
+      store.getState().resetLayout();
+      expect(store.getState().focusToolHinted).toBe(false);
+    });
+
+    it('is independent of the armed flag — arming is not hinting', () => {
+      // They travel together through one handler but mean different things: one is a mode the next
+      // click obeys, the other is a pointer's whereabouts. Tying them would tint the crosshair for
+      // as long as the picker stayed armed.
+      store.getState().setFocusToolHinted(true);
+      expect(store.getState().focusToolArmed).toBe(false);
+      store.getState().setFocusToolArmed(true);
+      store.getState().setFocusToolHinted(false);
+      expect(store.getState().focusToolArmed).toBe(true);
     });
   });
 

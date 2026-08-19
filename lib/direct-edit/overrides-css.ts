@@ -4,19 +4,8 @@ import { MARKER_ATTR } from './marker';
 /**
  * `/overrides.css` — the stylesheet direct editing accumulates into.
  *
- * The file is a normal project file: it ships, it is exported, and it is hand-editable. Everything
- * here is therefore written to be conservative about content it did not author. It edits exactly
- * one top-level block per marker and refuses — by throwing — in every case where it cannot prove
- * which block is its own.
- *
- * **Why not `indexOf` plus brace counting.** That approach corrupts real files four ways:
- * a selector mentioned in a comment sends the next `{` search into an unrelated hand-written rule
- * and rewrites *its* declarations; a `{` or `}` inside a string (`content: "}"`) desynchronises the
- * depth count; locating by the exact emitted string misses a minified or reformatted copy of our
- * own block and appends a duplicate that shadows it; and a block a user moved inside `@media` gets
- * edited there, silently making the override breakpoint-only. The scan below is not a CSS parser —
- * it is just enough state (comment, string, paren, brace depth) to know whether a `{` is real and
- * whether a block is top-level.
+ * Line-oriented parser; indexOf plus brace counting corrupts comments, strings, nested blocks
+ * and media queries.
  */
 
 /**
@@ -41,16 +30,7 @@ const PROPERTY_RE = /^-{0,2}[a-zA-Z][a-zA-Z0-9-]*$/;
 /** Marker ids safe inside both an HTML attribute and a CSS attribute selector. */
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
-/**
- * The canonical selector for one marker, with `{id}` where the marker id goes.
- *
- * The *pattern* is exported rather than {@link selectorFor} because the preview frame needs the
- * same selector and cannot have the function: the frame script is a **string** (see
- * `lib/preview/style-preview.ts`) and the marker id arrives at runtime over postMessage, so neither
- * an import nor a build-time interpolation reaches it. Exporting the function would leave the frame
- * hand-writing the selector anyway — and a second spelling of a selector whose (0,2,0) specificity
- * is what the whole override mechanism balances on is the failure worth one indirection to avoid.
- */
+/** Exported as a pattern (not a function) because the frame script needs the same selector as a string. */
 export const MARKER_SELECTOR_TEMPLATE = `[${MARKER_ATTR}="{id}"][${MARKER_ATTR}]`;
 
 /** The canonical selector for one marker. Doubled — see OVERRIDES_HEADER. */
@@ -354,15 +334,61 @@ export function upsertDeclaration(
   return css + (css.endsWith('\n') ? '' : '\n') + rendered + '\n';
 }
 
+/** Cut one block out of the file, taking the newline that terminated it. */
+function cutBlock(css: string, block: TopLevelBlock): string {
+  const end = css[block.end] === '\n' ? block.end + 1 : block.end;
+  return css.slice(0, block.start) + css.slice(end);
+}
+
 /**
- * Delete a marker's block entirely.
- *
- * **No caller in this plan.** It is built now for the dead-rule sweep in §6 of the design (an
- * override whose element the agent has since deleted leaves an inert block behind), and because
- * writing it alongside `upsertDeclaration` is what keeps the two agreeing on what "owned" means.
+ * Removes one declaration from a marker block; removes the block if empty.
+ * Does not remove the marker from source. Returns input unchanged when no match.
+ */
+export function removeDeclaration(css: string, markerId: string, property: string): string {
+  assertSafeMarkerId(markerId);
+  if (!PROPERTY_RE.test(property)) {
+    throw new Error(`Refusing unsafe CSS property ${JSON.stringify(property)}`);
+  }
+
+  const owned = ownedBlocks(css, markerId);
+  if (owned.length === 0) return css;
+  const wanted = property.toLowerCase();
+
+  let out = css;
+  // Back to front, so an earlier block's indices are still valid after a later one is rewritten.
+  for (let i = owned.length - 1; i >= 0; i--) {
+    const block = owned[i];
+    const items = parseBody(out.slice(block.braceOpen + 1, block.end - 1));
+    const kept = items.filter(
+      (item) => !(item.kind === 'decl' && item.property.toLowerCase() === wanted),
+    );
+    if (kept.length === items.length) continue;
+    out = kept.some((item) => item.kind === 'decl')
+      ? out.slice(0, block.start) + renderBlock(selectorFor(markerId), kept) + out.slice(block.end)
+      : cutBlock(out, block);
+  }
+  return out;
+}
+
+/** What properties this element has in /overrides.css. Throws on parse failure rather than returning []. */
+export function declaredProperties(css: string, markerId: string): string[] {
+  assertSafeMarkerId(markerId);
+  const seen: string[] = [];
+  for (const block of ownedBlocks(css, markerId)) {
+    for (const item of parseBody(css.slice(block.braceOpen + 1, block.end - 1))) {
+      if (item.kind !== 'decl') continue;
+      const property = item.property.toLowerCase();
+      if (!seen.includes(property)) seen.push(property);
+    }
+  }
+  return seen;
+}
+
+/**
+ * Removes the entire block for a marker.
  *
  * Returns the input unchanged when the marker owns nothing. Throws on the same ambiguity cases as
- * `upsertDeclaration` — refusing to delete a rule we cannot prove is ours.
+ * `upsertDeclaration`.
  */
 export function removeMarkerBlock(css: string, markerId: string): string {
   assertSafeMarkerId(markerId);
@@ -372,9 +398,7 @@ export function removeMarkerBlock(css: string, markerId: string): string {
   let out = css;
   // Back to front, so an earlier block's indices are still valid after a later one is removed.
   for (let i = owned.length - 1; i >= 0; i--) {
-    const block = owned[i];
-    const end = out[block.end] === '\n' ? block.end + 1 : block.end;
-    out = out.slice(0, block.start) + out.slice(end);
+    out = cutBlock(out, owned[i]);
   }
   return out;
 }

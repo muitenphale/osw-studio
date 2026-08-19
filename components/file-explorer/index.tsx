@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { VirtualFile, Project, FILE_SIZE_LIMITS, getFileTypeFromPath, isTextExtension } from '@/lib/vfs/types';
+import { VirtualFile, Project, FILE_SIZE_LIMITS, getFileTypeFromPath } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
-import { collectEntryFiles, ensureAncestorDirs } from '@/lib/vfs/archive/read-folder';
+import { collectEntryFiles } from '@/lib/vfs/archive/read-folder';
+import { uploadFileToProject, type UploadFileOptions, type UploadOutcome } from '@/lib/vfs/upload-file';
 import { logger, cn } from '@/lib/utils';
 import {
   ChevronRight,
@@ -53,13 +54,7 @@ interface FileExplorerProps {
   entryPoint?: string;
   onSetEntryPoint?: (path: string) => void;
   onAddPromptFile?: () => void;
-  /**
-   * The project row changed underneath the workspace — currently only an import can do that from
-   * in here. `vfs.updateProject` dispatches no event, so nothing else finds out: the runtime and
-   * the entry point the preview compiles with live in the workspace store, and an import that
-   * writes them to storage alone leaves the preview building the project the old way until it is
-   * reopened. The workspace hands its own settings handler down for this.
-   */
+  /** vfs.updateProject fires no event; this callback syncs the workspace store after an import changes runtime or entry point. */
   onProjectUpdate?: (project: Project) => void;
 }
 
@@ -401,10 +396,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
       URL.revokeObjectURL(url);
 
       if (warnings.length > 0) {
-        // Each warning names the thing that was left out and why. A bare count would tell the
-        // user something is missing without telling them what, which is the half that matters —
-        // and the messages are written for exactly this, so showing only the number throws them
-        // away. Held longer than a success toast because there is something here to read.
+        // Each warning names what was left out and why. Held longer because there is something to read.
         logger.warn('Archive export warnings:', warnings);
         toast.warning(
           warnings.length === 1
@@ -486,8 +478,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
         }
       }
 
-      // A dropped zip is an archive to import, not a file to keep. Storing it left a binary blob in
-      // the tree that nothing in the app could open.
+      // A dropped zip is an archive to import, not a file to keep.
       if (!hasFolder && collected.length === 1 && /\.zip$/i.test(collected[0].file.name)) {
         openImport({ kind: 'zip', file: collected[0].file });
         return;
@@ -570,92 +561,15 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
   };
 
+  /** uploadFileToProject, bound to this project and tree's refresh. */
   const uploadFile = async (
     file: File,
     targetDir: string | undefined,
-    options?: { explicitPath?: string; silent?: boolean; skipReload?: boolean; quiet?: boolean }
-  ): Promise<'ok' | 'too-large' | 'cancelled' | 'error'> => {
-    const silent = options?.silent === true;
-    // `silent` also means "never prompt", which a caller that just wants to report the outcome
-    // itself must not inherit — declining a prompt nobody saw is not a refusal.
-    const quiet = silent || options?.quiet === true;
-    const skipReload = options?.skipReload === true;
+    options?: UploadFileOptions
+  ): Promise<UploadOutcome> =>
+    uploadFileToProject(projectId, file, targetDir, { ...options, onReload: loadFiles });
 
-    const fileType = getFileTypeFromPath(file.name);
-    const sizeLimit = FILE_SIZE_LIMITS[fileType];
-    if (file.size > sizeLimit) {
-      if (!quiet) toast.error(`File too large: ${file.name}. Maximum size is ${Math.round(sizeLimit / 1024 / 1024)}MB`);
-      return 'too-large';
-    }
-
-    const filePath = options?.explicitPath
-      ?? (targetDir === '/' || !targetDir ? `/${file.name}` : `${targetDir}/${file.name}`);
-    const isLarge = file.size > 512 * 1024; // 512KB threshold
-
-    const doUpload = async () => {
-      // Bytes unless this is a known text format. Reading an unrecognised file as text would
-      // silently corrupt it, so anything not positively identified as text keeps its bytes.
-      const content: string | ArrayBuffer = isTextExtension(file.name)
-        ? await file.text()
-        : await file.arrayBuffer();
-
-      await ensureAncestorDirs(projectId, filePath);
-      await vfs.createFile(projectId, filePath, content);
-      if (!skipReload) await loadFiles();
-    };
-
-    try {
-      if (isLarge) {
-        const sizeMB = (file.size / 1e6).toFixed(1);
-        await toast.promise(doUpload(), {
-          loading: `Uploading ${file.name} (${sizeMB} MB)…`,
-          success: quiet ? null as unknown as string : `Uploaded ${file.name}`,
-          error: () => {
-            // Suppress toast — error is handled in the outer catch
-            return null as unknown as string;
-          },
-        });
-      } else {
-        await doUpload();
-        if (!quiet) toast.success(`Uploaded ${file.name}`);
-      }
-      return 'ok';
-    } catch (error: any) {
-      if (error.message?.includes('already exists')) {
-        if (silent) {
-          // Folder upload: don't prompt, skip duplicates silently.
-          return 'error';
-        }
-        if (confirm(`File "${file.name}" already exists. Overwrite?`)) {
-          try {
-            await vfs.deleteFile(projectId, filePath);
-            return await uploadFile(file, targetDir, options);
-          } catch (deleteError) {
-            logger.error('Failed to overwrite file:', deleteError);
-            if (!quiet) toast.error('Failed to overwrite file');
-            return 'error';
-          }
-        }
-        // Declined, not failed. The distinction is the whole difference between 'nothing happened
-        // because you said so' and 'nothing happened and nobody knows why', and only the caller
-        // knows which words fit its surface.
-        return 'cancelled';
-      }
-      logger.error('Failed to upload file:', error);
-      if (!quiet) toast.error(`Failed to upload ${file.name}: ${error.message}`);
-      return 'error';
-    }
-  };
-
-  /**
-   * After an import wrote something. The file tree is the obvious half; the project row is the
-   * half nothing else watches.
-   *
-   * `applyImport` can change the runtime, the entry point, the global styles and the name, all via
-   * `vfs.updateProject`, which fires no event. The workspace store holds the runtime and the entry
-   * point the preview compiles with, so re-reading the row and handing it up is what keeps the
-   * preview and the '(entry)' marker from describing the project as it was before the import.
-   */
+  /** Re-reads the project row after import and hands it up so the workspace store stays current. */
   const handleImportComplete = async () => {
     await loadFiles();
     try {
@@ -668,15 +582,7 @@ export function FileExplorer({ projectId, onFileSelect, onClose, entryPoint, onS
     }
   };
 
-  /**
-   * 'Add as a file instead'. `uploadFile` reports its outcome rather than throwing — every path is
-   * caught inside it — so the dialog, which reads a throw as failure, has to be told. Without this
-   * a zip over the size limit and a declined overwrite both closed the dialog as though they had
-   * worked, the second one without saying anything at all.
-   *
-   * Quiet, because the words below are better ones for this surface than uploadFile's generic
-   * toasts, and two toasts for one click is one too many.
-   */
+  /** Reports the upload outcome to the import dialog. Quiet, to avoid double toasts. */
   const handleKeepArchiveAsFile = async (file: File) => {
     const outcome = await uploadFile(file, '/', { quiet: true });
     if (outcome === 'ok') return;

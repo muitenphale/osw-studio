@@ -138,7 +138,7 @@ export function DebugPanel({ events, onClear, onClose }: DebugPanelProps) {
           <button
             key={key}
             onClick={() => setActiveTab(key)}
-            className={`px-3 py-1.5 border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex-1 px-3 py-1.5 border-b-2 -mb-px whitespace-nowrap ${
               activeTab === key
                 ? 'border-primary text-foreground font-semibold'
                 : 'border-transparent text-muted-foreground hover:text-foreground'

@@ -3,20 +3,21 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { STYLE_QUERY_JS, STYLE_PREVIEW_JS, STYLE_LOCATOR_JS, STYLE_PROBE_JS } from '../style-preview';
 
 /**
- * The probe — remove our rule, look, put it back — run out of the *emitted* text.
+ * The probe — rank every declaration of a property, and see whether ours is the one that wins —
+ * run out of the *emitted* text.
  *
  * ## What is deliberately NOT in this file, and why
  *
- * **jsdom detects exactly one loss: an inline `style` attribute.** Measured, not reasoned: jsdom
- * ranks specificity above importance, so the override's doubled `(0,2,0)` selector beats an
- * `!important` rule and beats `#id`, and every rule-based loss therefore reports as a *success*
- * here. A test asserting "`!important` wins" in this environment would fail against a correct probe
- * and pass against a faked one, which is why the whole toggle-and-compare matrix lives in
- * `e2e/style-probe.test.ts` and runs in Chrome.
+ * **jsdom's own cascade detects exactly one loss: an inline `style` attribute.** Measured, not
+ * reasoned: jsdom ranks specificity above importance, so the override's doubled `(0,2,0)` selector
+ * beats an `!important` rule and beats `#id` there. The probe no longer *reads* jsdom's cascade —
+ * it ranks declarations itself with {@link __oswBeats}, which gets importance right — but the
+ * assertions in this file still have to be ones a reader can confirm against the environment, so
+ * the full matrix of what beats an override lives in `e2e/style-probe.test.ts` and runs in Chrome.
  *
- * What jsdom *can* prove is the mechanism, and the mechanism is where the two real hazards are:
- * the page must be left byte-identical, and the winner must be looked for while our rule is out.
- * Both are environment-independent, and both are checked below.
+ * What jsdom *can* prove is exactly the part that was wrong: an override whose value agrees with
+ * what the element already had is **in force**, not lost. That is a property of the ranking, not of
+ * the engine, and it is checked below.
  */
 const frame = new Function(
   `${STYLE_QUERY_JS}${STYLE_PREVIEW_JS}${STYLE_LOCATOR_JS}${STYLE_PROBE_JS}\nreturn {
@@ -37,7 +38,8 @@ function marked(): Element {
 /**
  * A stylesheet that is NOT the transient one — the shape our rule has after a recompile, when
  * `/overrides.css` carries it. jsdom never loads `<link>`, so a `<style>` stands in; what it stands
- * in for is "a sheet `__oswIdentifyWinner` does not skip", which is the whole point.
+ * in for is "a sheet nothing about its element marks as ours", which is the whole point: the
+ * ranking recognises our declaration by its marker selector, wherever it happens to live.
  */
 function pageSheet(css: string): HTMLStyleElement {
   const el = document.createElement('style');
@@ -71,6 +73,16 @@ describe('answering when there is nothing to answer about', () => {
     expect(frame.probe(marked(), 'm1', ['color'])).toEqual({ lost: [], winner: null });
   });
 
+  it('reports nothing lost for a property nothing reachable declares', () => {
+    // Our rule is in the document — the gate above is satisfied — and it says nothing about this
+    // property. Neither does anything else, so the value comes from the UA default or from an
+    // ancestor and there is no declaration to have beaten. "Lost, to something the preview cannot
+    // name" is the shape of message the panel exists to stop showing.
+    frame.apply('m1', 'color: rgb(1, 2, 3);');
+
+    expect(frame.probe(marked(), 'm1', ['padding-left'])).toEqual({ lost: [], winner: null });
+  });
+
   it('reports nothing lost for an empty or malformed property list', () => {
     frame.apply('m1', 'color: rgb(1, 2, 3);');
 
@@ -96,7 +108,11 @@ describe('the one loss jsdom gets right', () => {
   });
 
   it('reports nothing lost when the override is the thing in force', () => {
-    // The control. A probe hard-wired to "lost" fails here; one hard-wired to "not lost" fails above.
+    // The control. A probe hard-wired to "lost" fails here; one hard-wired to "not lost" fails
+    // above. The competing rule is not decoration: without something for the override to *beat*,
+    // a ranking that left our own declaration out would find no candidate at all and answer "not
+    // lost" for the wrong reason, which is a fake pass on the case the panel is built around.
+    pageSheet('.card { color: rgb(7, 7, 7); }');
     frame.apply('m1', 'color: rgb(1, 2, 3);');
     expect(computed('color')).toBe('rgb(1, 2, 3)');
 
@@ -104,56 +120,53 @@ describe('the one loss jsdom gets right', () => {
   });
 });
 
-describe('who beat us is asked with our own rule out of the document', () => {
-  it('does not name our own override as the thing that beat our override', () => {
-    // The post-recompile shape: our rule sits in an ordinary sheet (`/overrides.css`), which
-    // `__oswIdentifyWinner` skips — it skips the *transient* style and nothing else. So the order of
-    // the two operations is the whole test.
+describe('an override that agrees with what the element already had', () => {
+  it('is in force, not lost — the false positive the whole rewrite is about', () => {
+    // The maintainer's report, at its smallest: padding 0 on an element already at 0, or a margin
+    // stepped away and back to 0. The old probe removed our rule, saw the value not move, and
+    // called it lost. Nothing had beaten it; it simply agreed with the element's natural value.
     //
-    // Our rule here sets the colour the element already had, so removing it changes nothing and the
-    // property is genuinely lost — but to *nothing nameable*. Ask before the removal and our own
-    // rule is the highest-ranked candidate in the document and gets named.
-    pageSheet(`${SELECTOR} { color: rgb(0, 0, 0); }`);
-    expect(computed('color')).toBe('rgb(0, 0, 0)');
+    // Staged as the post-recompile shape — our rule in an ordinary sheet rather than the transient
+    // <style> — because that is where the report came from, and because a scan that recognises our
+    // rule only by which element carries it would answer wrongly here.
+    pageSheet(`${SELECTOR} { padding-left: 0px; }`);
+    expect(computed('padding-left')).toBe('0px');
+
+    expect(frame.probe(marked(), 'm1', ['padding-left'])).toEqual({ lost: [], winner: null });
+  });
+
+  it('is still lost when something else is the reason the values agree', () => {
+    // The converse, and the reason "the values are equal" is not a shortcut for "not lost": an
+    // inline declaration of the very same colour still beats us, and the user's next edit to this
+    // property will do nothing.
+    frame.apply('m1', 'color: rgb(3, 3, 3);');
+    (marked() as HTMLElement).style.color = 'rgb(3, 3, 3)';
 
     const out = frame.probe(marked(), 'm1', ['color']);
 
     expect(out.lost).toEqual(['color']);
-    expect(out.winner).toBeNull();
+    expect(out.winner).toBe('inline style');
   });
 });
 
 describe('the page is left exactly as it was found', () => {
-  it('puts our rule back in its own position, not at the end of head', () => {
-    // Reinsertion at the end would newly outrank every sheet after it — a silent edit to the page,
-    // made by an operation whose entire job is to read it.
-    //
-    // Checked on the DOM, not on a computed value, and that is a jsdom limit rather than a
-    // preference: measured, jsdom's `document.styleSheets` order is *insertion* order, not document
-    // order, so a reinserted sheet moves to the end of the cascade here however carefully the
-    // element is put back. The competing sheet below therefore sets a property nobody probes, so
-    // that artefact cannot be mistaken for a finding. Cascade order after a probe is Chrome's job,
-    // and `e2e/style-probe.test.ts` asserts it.
-    const ours = pageSheet(`${SELECTOR} { color: rgb(1, 2, 3); }`);
+  it('touches neither the document nor a computed value', () => {
+    // Guaranteed by construction now — the probe ranks declarations and mutates nothing — and
+    // asserted anyway, because the hazard the previous remove-and-reinsert implementation carried
+    // was not hypothetical: a probe that removes our rule and fails to put it back has silently
+    // deleted the user's edit, and the only symptom is the preview reverting a moment later.
+    const ours = pageSheet(`${SELECTOR} { color: rgb(1, 2, 3); padding-left: 7px; }`);
     const later = pageSheet(`.card { font-weight: 700; }`);
     const orderBefore = Array.from(document.head.children);
+    const before = ['color', 'padding-left', 'display', 'font-weight'].map(computed);
     expect(orderBefore).toEqual([ours, later]);
-
-    frame.probe(marked(), 'm1', ['color']);
-
-    // Present at all — a probe that removes and forgets has silently deleted the user's change.
-    expect(ours.isConnected).toBe(true);
-    expect(Array.from(document.head.children)).toEqual(orderBefore);
-    expect(computed('color')).toBe('rgb(1, 2, 3)');
-  });
-
-  it('leaves every probed value byte-identical', () => {
-    frame.apply('m1', 'color: rgb(1, 2, 3); padding-left: 7px;');
-    const before = ['color', 'padding-left', 'display'].map(computed);
 
     frame.probe(marked(), 'm1', ['color', 'padding-left']);
 
-    expect(['color', 'padding-left', 'display'].map(computed)).toEqual(before);
+    expect(ours.isConnected).toBe(true);
+    expect(Array.from(document.head.children)).toEqual(orderBefore);
+    expect(['color', 'padding-left', 'display', 'font-weight'].map(computed)).toEqual(before);
+    expect(computed('color')).toBe('rgb(1, 2, 3)');
   });
 });
 

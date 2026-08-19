@@ -105,9 +105,20 @@ interface ChatPanelProps {
   onGenerate: (prompt: string, images?: PendingImage[], audio?: PendingAudio[], files?: PendingFile[]) => void;
   onStop: () => void;
   onContinue?: () => void;
-  // Focus context
+  /**
+   * The selected element **as included in the next message**, not merely as selected.
+   *
+   * Selecting an element in the preview shows its toolbar and feeds the Inspector; only the
+   * toolbar's include button puts it here. The owner gates this prop — the chat panel has no view
+   * of the distinction and must not try to reconstruct one.
+   */
   focusContext: FocusTarget | null;
-  setFocusContext: (context: FocusTarget | null) => void;
+  /**
+   * The chip's ✕. Takes the element out of the *message*, and deliberately cannot take it out of
+   * the selection: this is not a setter, because clearing `focusContext` from here would tear down
+   * the preview toolbar and empty the Inspector's Styles tab.
+   */
+  onClearFocus: () => void;
   focusPreviewSnippet?: string;
   // Settings
   mode: WorkspaceMode;
@@ -174,7 +185,7 @@ export function ChatPanel({
   onStop,
   onContinue,
   focusContext,
-  setFocusContext,
+  onClearFocus,
   focusPreviewSnippet,
   mode,
   setMode,
@@ -261,11 +272,7 @@ export function ChatPanel({
   }, []);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
-  // Resolve the single global active assignment: drives the trigger label and the
-  // voice-input (mic) gating below. Keyed off modelConfigVersion so it recomputes when a
-  // provider connects (apiKeyUpdated) or the global template/default/provider-model changes.
-  // modelConfigVersion is bumped by the root-mounted useModelConfigSignal, so this reacts for
-  // any ChatPanel host, including describe-mode outside the Workspace.
+  // Recomputes on modelConfigVersion changes.
   const resolvedAssignment = useMemo(
     () => resolveActiveAssignment(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -292,14 +299,7 @@ export function ChatPanel({
   const [prompt, setPrompt] = useState('');
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  /**
-   * The starters offered above the composer.
-   *
-   * A project's own suggestions replace the generic ones rather than joining them: they were
-   * seeded by the template that made the project, and "Personal portfolio (one page)" is noise in
-   * a Spring Boot service. A project without any falls back to the generic set, which is what a
-   * blank project gets.
-   */
+  /** Project-specific suggestions replace the generic set; blank projects fall back to generic. */
   const projectSuggestions = useWorkspaceStore(s => s.promptSuggestions);
   const suggestions = projectSuggestions.length > 0 ? projectSuggestions : SUGGESTION_PILLS;
   const inlineSuggestions = suggestions.slice(0, INLINE_SUGGESTION_COUNT);
@@ -309,10 +309,6 @@ export function ChatPanel({
     setPrompt(text);
     composerTextareaRef.current?.focus();
   }, []);
-
-  // Connection/model-config changes re-render this panel via the store's modelConfigVersion
-  // (bumped on apiKeyUpdated + modelConfigChanged by the root-mounted useModelConfigSignal), so
-  // the pills' hasAnyConnectedProvider() is re-evaluated without a second local counter.
 
   // Clear prompt when generation starts
   const prevGenerating = useRef(generating);
@@ -860,9 +856,6 @@ export function ChatPanel({
                   {pill.label}
                 </button>
               ))}
-              {/* The rest, when a project brought more than fit on the row. A menu rather than a
-                  wider wrap: these sit directly above the composer, and a growing block of
-                  buttons pushes the thing you came here to type off the screen. */}
               {overflowSuggestions.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -898,7 +891,7 @@ export function ChatPanel({
           files={pendingFiles}
           audioClips={pendingAudio}
           systemNote={systemNote}
-          onClearFocus={() => setFocusContext(null)}
+          onClearFocus={onClearFocus}
           onRemoveBlock={onRemovePlacedBlock}
           onClearBlocks={onClearPlacedBlocks}
           onRemoveImage={removeImage}

@@ -6,9 +6,14 @@ import type { OverrideRuleLocation } from '../style-preview';
 /**
  * The two lookups, run out of the *emitted* text against a live document.
  *
- * They are two, and they answer different questions. `__oswLocateOverrideRule` finds **our** rule so
- * the probe can lift it out; `__oswIdentifyWinner` finds the **competing** declaration that beat us
- * so the message can name it. Neither is a step of the other.
+ * They are two, and they answer different questions. `__oswLocateOverrideRule` finds **our** rule,
+ * so the probe can tell that one is in the document at all; `__oswRankDeclaration` ranks every
+ * declaration of a property that reaches the element — ours included — and hands back the one the
+ * cascade picks, flagged `ours` when it is the override's own. Neither is a step of the other.
+ *
+ * `ours` is the load-bearing field. "Did the override apply" is that flag and nothing else: a
+ * comparison of rendered values before and against after cannot tell an override in force from one
+ * that happens to agree with what the element already had.
  *
  * ## What jsdom can and cannot stand in for — measured, not assumed
  *
@@ -17,21 +22,32 @@ import type { OverrideRuleLocation } from '../style-preview';
  *   for the real thing: what it proves is that the scan reaches past the transient element and
  *   hands back the right element and rule, not that a blob `<link>` behaves the same way. The
  *   `<link>` case is Chrome-only and belongs to the e2e spec.
+ * - **`window.matchMedia` answers `false` for everything in jsdom** — measured — so the `@media`
+ *   arm of the ranking cannot be exercised here at all. It is asserted in e2e.
  * - **`sheet.ownerNode` and `sheet.href` are `undefined` in jsdom**, correct in Chrome. The first is
- *   why the locator is element-first at all — a `document.styleSheets` walk could not hand back
- *   anything removable here. The second is why the sheet-to-origin *wiring* is not tested in this
- *   file: no jsdom sheet can carry a blob href, and faking one would be a test of the fake. The
- *   pure mapping is tested directly instead, and the wiring is covered only in e2e.
+ *   why the locator is element-first at all — a `document.styleSheets` walk could not hand back an
+ *   element here. The second is why the sheet-to-origin *wiring* is not tested in this file: no
+ *   jsdom sheet can carry a blob href, and faking one would be a test of the fake. The pure mapping
+ *   is tested directly instead, and the wiring is covered only in e2e.
  * - **Every page stylesheet in this environment resolves to the same origin string** (`a
  *   stylesheet`, since none has an href), so which of two competing *sheets* won is not observable
  *   here. The ranking is exercised through the cases whose origins do differ — inline against a
  *   normal rule, and inline against an `!important` one — and through the comparator directly.
  */
+interface RankedDeclaration {
+  important: boolean;
+  specificity: number;
+  order: number;
+  origin: string;
+  /** The winner is the override's own declaration — the definition of "the change applied". */
+  ours: boolean;
+}
+
 const frame = new Function(
   `${STYLE_PREVIEW_JS}${STYLE_LOCATOR_JS}\nreturn {
      apply: __oswApplyStylePreview,
      locate: __oswLocateOverrideRule,
-     winner: __oswIdentifyWinner,
+     rank: __oswRankDeclaration,
      resolveOrigin: __oswResolveSheetOrigin,
      specificity: __oswSpecificity,
      beats: __oswBeats
@@ -41,13 +57,18 @@ const frame = new Function(
   /** Typed against the declared contract, so a locator that stopped returning an element is a
    *  type error here as well as a failing assertion. */
   locate: (markerId: string) => OverrideRuleLocation | null;
-  winner: (el: Element | null, property: string) => string | null;
+  rank: (el: Element | null, property: string, ourSelector: string | null) => RankedDeclaration | null;
   resolveOrigin: (href: unknown, blobMap: unknown) => string | null;
   specificity: (selector: string) => number;
   beats: (candidate: unknown, best: unknown) => boolean;
 };
 
 const SELECTOR = '[data-osw-id="m1"][data-osw-id]';
+
+/** The winner's origin, or `null` when nothing reachable declares the property. */
+function winnerOf(el: Element | null, property: string): string | null {
+  return frame.rank(el, property, SELECTOR)?.origin ?? null;
+}
 
 function marked(): Element {
   return document.querySelector('[data-osw-id="m1"]')!;
@@ -92,8 +113,9 @@ describe('locating our own rule', () => {
   });
 
   it('hands back the owning ELEMENT, not just the sheet', () => {
-    // The probe removes what it is given and puts it back. `sheet.ownerNode` is undefined in jsdom,
-    // so a locator that returned only a sheet would have nothing removable here — and the caller
+    // The probe's gate is "our rule is in the document", and only the element answers that — a
+    // `CSSStyleSheet` handle outlives its node. `sheet.ownerNode` is undefined in jsdom, so a
+    // locator that returned only a sheet could not be turned back into one here, and the caller
     // could not tell, because the sheet handle itself looks fine.
     pageSheet(`${SELECTOR} { color: rgb(7, 7, 7); }`);
     const found = frame.locate('m1')!;
@@ -110,8 +132,10 @@ describe('locating our own rule', () => {
 
     const found = frame.locate('m1')!;
 
-    // The transient is last in <head> and therefore the rule actually in force. Removing the
-    // /overrides.css copy instead would change nothing on screen and report a false "not lost".
+    // The transient is last in <head> and therefore the rule actually in force, so it is the one
+    // whose origin the probe should be able to name. Both copies are ours either way — the ranking
+    // recognises them by selector — so this is about which one the locator reports, not about
+    // whether the override applied.
     expect(found.origin).toBe('transient style');
     expect(found.rule.style.getPropertyValue('color')).toBe('rgb(1, 2, 3)');
   });
@@ -190,46 +214,69 @@ describe('resolving a sheet to something a person recognises', () => {
   });
 });
 
-describe('identifying what beat us', () => {
+describe('ranking who wins the cascade', () => {
   it('names the inline style attribute', () => {
     pageSheet('.card { color: rgb(7, 7, 7); }');
     (marked() as HTMLElement).style.color = 'rgb(3, 3, 3)';
 
     // The one loss jsdom gets right — and it outranks every normal rule whatever its specificity.
-    expect(frame.winner(marked(), 'color')).toBe('inline style');
+    expect(winnerOf(marked(), 'color')).toBe('inline style');
   });
 
   it('lets an !important rule outrank an inline declaration', () => {
     pageSheet('.card { color: rgb(7, 7, 7) !important; }');
     (marked() as HTMLElement).style.color = 'rgb(3, 3, 3)';
 
-    expect(frame.winner(marked(), 'color')).toBe('a stylesheet');
+    expect(winnerOf(marked(), 'color')).toBe('a stylesheet');
   });
 
   it('names a plain rule when there is no inline declaration', () => {
     pageSheet('.card { color: rgb(7, 7, 7); }');
 
-    expect(frame.winner(marked(), 'color')).toBe('a stylesheet');
+    expect(winnerOf(marked(), 'color')).toBe('a stylesheet');
   });
 
-  it('never names our own transient style', () => {
-    // Ours is the rule that lost. Reporting it as the winner would say "your change was beaten by
-    // your change" on every genuine loss.
+  it('flags our own rule as ours rather than pretending it is not there', () => {
+    // The change from the toggle-based probe, and the whole fix. Our declaration is ranked like
+    // any other; `ours` is what turns "who won" into "did the override apply". Excluding it —
+    // which the old winner scan did — leaves nothing to compare the answer against.
     frame.apply('m1', 'color: rgb(1, 2, 3);');
 
-    expect(frame.winner(marked(), 'color')).toBeNull();
+    const best = frame.rank(marked(), 'color', SELECTOR)!;
+
+    expect(best).not.toBeNull();
+    expect(best.ours).toBe(true);
+    expect(best.origin).toBe('transient style');
+  });
+
+  it('flags a rule that is not ours, whatever sheet it is in', () => {
+    // The post-recompile shape: our rule sits in an ordinary sheet, and so does the competitor.
+    // Nothing about the *sheet* says which is which — only the marker selector does.
+    pageSheet(`${SELECTOR} { color: rgb(1, 2, 3); }`);
+    (marked() as HTMLElement).style.color = 'rgb(3, 3, 3)';
+
+    const best = frame.rank(marked(), 'color', SELECTOR)!;
+
+    expect(best.ours).toBe(false);
+    expect(best.origin).toBe('inline style');
+  });
+
+  it('recognises our rule in an ordinary sheet, not only in the transient style', () => {
+    pageSheet(`${SELECTOR} { color: rgb(1, 2, 3); }`);
+
+    expect(frame.rank(marked(), 'color', SELECTOR)!.ours).toBe(true);
   });
 
   it('ignores a rule that does not match, and one that does not set the property', () => {
     pageSheet('.elsewhere { color: rgb(7, 7, 7); }');
     pageSheet('.card { font-weight: 700; }');
 
-    expect(frame.winner(marked(), 'color')).toBeNull();
+    expect(frame.rank(marked(), 'color', SELECTOR)).toBeNull();
   });
 
   it('answers null rather than throwing for a missing element or property', () => {
-    expect(frame.winner(null, 'color')).toBeNull();
-    expect(frame.winner(marked(), '')).toBeNull();
+    expect(frame.rank(null, 'color', SELECTOR)).toBeNull();
+    expect(frame.rank(marked(), '', SELECTOR)).toBeNull();
   });
 
   it('survives a selector the engine refuses', () => {
@@ -238,13 +285,22 @@ describe('identifying what beat us', () => {
     pageSheet(':has(> .nope) { color: rgb(7, 7, 7); }');
     pageSheet('.card { color: rgb(5, 5, 5); }');
 
-    expect(frame.winner(marked(), 'color')).toBe('a stylesheet');
+    expect(winnerOf(marked(), 'color')).toBe('a stylesheet');
+  });
+
+  it('leaves a rule inside a group it cannot vouch for out of the ranking', () => {
+    // `@supports` and `@layer` are not walked: their conditions cannot be re-evaluated here
+    // cheaply and honestly, and @layer would need __oswBeats to model layer order, which it does
+    // not. Naming a rule that is not in force is worse than naming nothing.
+    pageSheet('@supports (color: red) { .card { color: rgb(7, 7, 7); } }');
+
+    expect(frame.rank(marked(), 'color', SELECTOR)).toBeNull();
   });
 });
 
 describe('the ranking the winner scan uses', () => {
   // Two page stylesheets resolve to the same origin string here, so which of them won is not
-  // observable through `__oswIdentifyWinner` in jsdom. The comparator it ranks with is, and it is
+  // observable through `__oswRankDeclaration` in jsdom. The comparator it ranks with is, and it is
   // the part that can be got wrong.
   const at = (important: boolean, specificity: number, order: number) =>
     ({ important, specificity, order, origin: 'x' });

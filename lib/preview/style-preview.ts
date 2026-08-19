@@ -1,34 +1,10 @@
 import { MARKER_SELECTOR_TEMPLATE } from '@/lib/direct-edit/overrides-css';
 
-/**
- * Reading an element's rendered style out of the preview frame.
- *
- * The host cannot reach into the frame's `contentDocument`, so anything derived from the live DOM —
- * `getComputedStyle` included — has to run inside the frame and be posted back. That means the
- * reader cannot be an imported module: it is interpolated into the script template literals in
- * `components/preview/multipage-preview.tsx` as text.
- *
- * It is authored here, as a constant, for the reason `STRIP_PROVENANCE_JS` and `SERIALIZE_TREE_JS`
- * are: the emitted text is the only thing that runs, and the tests can execute *this* string.
- * **No regex literals** — anything hand-written inside those template literals loses one level of
- * escaping before it is emitted, so `\s` arrives as a literal `s`. This file needs none.
- */
+/** Style-reading scripts injected into the preview frame as source text. */
 
 /**
- * Shorthand → the longhands a style control needs, and the single source both sides read.
- *
- * Shorthands resolve perfectly well in `getComputedStyle` — `padding` comes back as `"10px"`, in
- * jsdom and in Chrome alike — so this table does not exist to work around an empty value. It exists
- * because a control that edits one side needs that side's own number, and `"10px 12px"` is not four
- * numbers until something splits it. Splitting a shorthand string correctly means implementing the
- * CSS 1/2/3/4-value rules per property; asking for the longhands means the engine does it.
- *
- * Explicit rather than derived from a scratch element's `style.setProperty`, which was the obvious
- * shortcut: measured, that expands `padding` and `margin` into their longhands in jsdom but leaves
- * `border-radius`, `gap` and `inset` unexpanded. A `setProperty`-based expander therefore passes a
- * test written against `padding` alone and silently returns the shorthand for half this table.
- *
- * Anything absent here passes through untouched, so a longhand or a non-box property costs nothing.
+ * Maps CSS shorthands to their longhands for `getComputedStyle` expansion.
+ * Absent properties pass through untouched.
  */
 export const SHORTHAND_LONGHANDS: Readonly<Record<string, readonly string[]>> = {
   margin: ['margin-top', 'margin-right', 'margin-bottom', 'margin-left'],
@@ -47,19 +23,11 @@ export const SHORTHAND_LONGHANDS: Readonly<Record<string, readonly string[]>> = 
 };
 
 /**
- * The computed-value reader, as JavaScript source for injection into the preview iframe.
+ * Computed-value reader injected into the preview iframe.
  *
- * `__oswReadComputed(el, properties)` returns a plain object keyed by the *expanded* property names.
- * Two deliberate choices in it:
- *
- * - A null element yields `{}`. The host is waiting on a reply, and silence is indistinguishable
- *   from a slow frame — an id that no longer resolves has to answer, not vanish.
- * - Every requested key is present, `''` when the engine has no value for it. Dropping empties would
- *   make the reply's shape depend on the engine: jsdom resolves `padding-top` but not
- *   `border-top-left-radius`, so a caller could not tell "no such property" from "not asked for".
- *
- * The longhand table is interpolated from {@link SHORTHAND_LONGHANDS} rather than restated, so there
- * is one list to keep correct.
+ * `__oswReadComputed(el, properties)` returns values keyed by expanded property names (null element
+ * yields `{}`; missing values are `''`). `__oswRootFontSize()` returns the document's root font
+ * size for rem conversion -- read from the frame because the host has no id for `<html>`.
  */
 export const STYLE_QUERY_JS = `
 var __oswLonghands = ${JSON.stringify(SHORTHAND_LONGHANDS)};
@@ -96,6 +64,13 @@ function __oswReadComputed(el, properties) {
   }
   return values;
 }
+
+function __oswRootFontSize() {
+  var root = document.documentElement;
+  if (!root) return '';
+  var value = window.getComputedStyle(root).getPropertyValue('font-size');
+  return value == null ? '' : String(value);
+}
 `;
 
 /**
@@ -106,23 +81,7 @@ function __oswReadComputed(el, properties) {
  */
 export const TRANSIENT_STYLE_ATTR = 'data-osw-style';
 
-/**
- * The marker-selector builder, frame-side.
- *
- * A separate piece rather than a copy in each constant that needs it, so that emitting both does
- * not declare `__oswSelectorFor` twice. Not exported: {@link STYLE_PREVIEW_JS} carries it, and
- * {@link STYLE_LOCATOR_JS} is documented as requiring that constant before it, so no caller ever
- * needs this one on its own.
- *
- * The selector itself comes from {@link MARKER_SELECTOR_TEMPLATE}, the same pattern
- * `lib/direct-edit/overrides-css.ts` writes the file's blocks with. The doubling is not cosmetic:
- * `(0,2,0)` is what lets an override beat an ordinary compound selector on source order without
- * `!important`, so a second hand-written spelling here would silently change what wins.
- *
- * The id is validated to the same alphabet the CSS writer enforces before it is substituted. It
- * arrives over postMessage, so the frame is not the only writer, and a `"` in it would close the
- * attribute selector and let the rest be read as CSS of its own.
- */
+/** Shared selector template emitted once so multiple constants don't redeclare `__oswSelectorFor`. */
 const SELECTOR_FOR_JS = `
 var __oswSelectorTemplate = ${JSON.stringify(MARKER_SELECTOR_TEMPLATE)};
 
@@ -146,29 +105,9 @@ function __oswSelectorFor(markerId) {
 `;
 
 /**
- * The transient `<style>` — an uncommitted style change, live in the document.
- *
- * It exists because of how the committed path writes: a repeat edit rewrites `/overrides.css` with
- * `{ silent: true }` so the preview does **not** recompile, which means the live document never
- * receives the new rule. Without this element a second edit to the same element would appear to do
- * nothing at all.
- *
- * Three things about it are load-bearing:
- *
- * - **It is appended at the END of `<head>`.** `<link>` order does not beat a later `<style>`, so
- *   sitting last is the whole reason the transient wins over `/overrides.css`. Inserting before
- *   `head.firstChild` would lose the cascade silently, and `appendChild` on the element we are
- *   reusing moves it back to the end after a recompile has inserted a fresh `<link>` behind it.
- * - **It is replaced, never appended to.** The host sends the element's whole accumulated
- *   declaration block each time; `textContent =` is what makes the second send supersede the first
- *   rather than stack a second rule the first still shadows in reverse.
- * - **It is never re-injected on frame-ready.** A `srcdoc` reassignment mints a new document and
- *   takes the element with it, so clearing after a recompile is free — and putting it back would
- *   mask a later agent edit, since `/overrides.css` carries the rule by then.
- *
- * `css` is the block body, without braces. It is not re-validated here: `assertSafeDeclaration` in
- * `lib/direct-edit/overrides-css.ts` is the validator on the write path, and whatever the host is
- * previewing has to be a thing it could write.
+ * Applies a transient style rule in-frame so edits render before the file is written.
+ * Appended last in `<head>` to win the cascade; replaced (not appended to) on each send;
+ * never re-injected on frame-ready -- a `srcdoc` reassignment clears it naturally.
  */
 export const STYLE_PREVIEW_JS = `${SELECTOR_FOR_JS}
 var __oswTransientStyleAttr = ${JSON.stringify(TRANSIENT_STYLE_ATTR)};
@@ -205,9 +144,10 @@ export interface OverrideRuleLocation {
   /**
    * The `<style>` or `<link>` the rule came from.
    *
-   * The element and not just the sheet, because removing the rule is what the probe does and
-   * `sheet.ownerNode` is `undefined` in jsdom — measured — so a sheet handle cannot be turned back
-   * into something removable there.
+   * The element and not just the sheet, because a `CSSStyleSheet` handle outlives its owning node:
+   * the probe's gate is "our rule is *in the document*", and only the element answers that. Turning
+   * a sheet back into its node is not an option either — `sheet.ownerNode` is `undefined` in jsdom,
+   * measured, so that direction is unavailable exactly where the unit tests run.
    */
   element: Element;
   sheet: CSSStyleSheet;
@@ -217,26 +157,13 @@ export interface OverrideRuleLocation {
 }
 
 /**
- * The two lookups the probe needs — and they are two, not one.
+ * Finds which CSS rule overrides the override (`__oswLocateOverrideRule`) and ranks every
+ * declaration that reaches the element (`__oswRankDeclaration`).
  *
- * `__oswLocateOverrideRule(markerId)` finds **our** rule, so it can be removed and put back.
- * `__oswIdentifyWinner(el, property)` finds the **competing** declaration that beat us, so the
- * message can name it. Different scans, different answers; an implementation that only had the
- * first would have nothing to say about why an edit did not take.
+ * Requires {@link STYLE_PREVIEW_JS} in scope (uses `__oswSelectorFor`, `__oswTransientStyleElement`).
  *
- * Both walk `<style>` and `<link>` **elements** rather than `document.styleSheets`. That is not a
- * stylistic preference: `sheet.ownerNode` is `undefined` in jsdom, so a `document.styleSheets` walk
- * cannot hand back the element the probe has to remove; and a sheet with no owning element (an
- * `@import`ed or adopted one) could not be removed anyway, so it is deliberately outside this
- * scan's world. Element order in the document is the same order `document.styleSheets` reports.
- *
- * Requires {@link STYLE_PREVIEW_JS} in scope before it: `__oswSelectorFor` and
- * `__oswTransientStyleElement` are both defined there, and both are the reason our own rule is
- * recognisable as ours.
- *
- * Known limits, both deliberate: rules nested in `@media` and friends are not walked, because
- * naming a rule that may not apply at the current viewport is worse than naming nothing; and
- * `:not()` / `:is()` arguments do not contribute to the specificity tiebreak.
+ * Known limits: only `@media` grouping rules are walked (and only while matching);
+ * `:not()`/`:is()` arguments do not contribute to specificity; UA defaults are not walked.
  */
 export const STYLE_LOCATOR_JS = `
 function __oswNormalizeSelectorText(text) {
@@ -411,82 +338,90 @@ function __oswBeats(candidate, best) {
   return candidate.order >= best.order;
 }
 
-function __oswIdentifyWinner(el, property) {
+function __oswOriginOf(entry, transientEl) {
+  return entry.element === transientEl ? 'transient style' : __oswSheetOrigin(entry);
+}
+
+function __oswGroupApplies(rule) {
+  // See the "known limits" note above: @media only, and only while it matches right now. Anything
+  // else answers false and its rules are left out of the ranking.
+  var text = null;
+  try { text = rule.media ? rule.media.mediaText : null; } catch (e) { text = null; }
+  if (typeof text !== 'string' || text === '') return false;
+  try { return window.matchMedia(text).matches; } catch (e) { return false; }
+}
+
+function __oswRankRules(el, property, ourSelector, rules, entry, transientEl, state) {
+  for (var i = 0; i < rules.length; i++) {
+    var rule = rules[i];
+    if (!rule) continue;
+    if (typeof rule.selectorText !== 'string' || !rule.style) {
+      // A grouping rule — @media, @supports, @layer. Its children are ordinary style rules and
+      // belong in the ranking whenever the group is in force.
+      var nested = null;
+      try { nested = rule.cssRules; } catch (e) { nested = null; }
+      if (nested && nested.length > 0 && __oswGroupApplies(rule)) {
+        __oswRankRules(el, property, ourSelector, nested, entry, transientEl, state);
+      }
+      continue;
+    }
+    // Counted before the two filters, so order is document order over every style rule and does
+    // not shift as rules stop declaring the property being asked about.
+    state.order++;
+    if (rule.style.getPropertyValue(property) === '') continue;
+    var matched = false;
+    // An invalid or unsupported selector throws here rather than returning false.
+    try { matched = el.matches(rule.selectorText); } catch (e) { matched = false; }
+    if (!matched) continue;
+    var candidate = {
+      important: rule.style.getPropertyPriority(property) === 'important',
+      specificity: __oswSpecificity(rule.selectorText),
+      order: state.order,
+      // Resolved here rather than per sheet: inverting the blob map is a scan of its own, and
+      // most sheets contribute no candidate at all.
+      origin: __oswOriginOf(entry, transientEl),
+      // Ours by selector, not by sheet: the same doubled marker selector is in the transient
+      // <style> before a recompile and in /overrides.css after one, and both are the override.
+      // Nothing else writes that selector — it names one marker on one element — so a rule
+      // carrying it is the override wherever it turns up, including a hand-edit of the file.
+      ours: __oswNormalizeSelectorText(rule.selectorText) === ourSelector
+    };
+    if (__oswBeats(candidate, state.best)) state.best = candidate;
+  }
+}
+
+function __oswRankDeclaration(el, property, ourSelector) {
   if (!el || typeof property !== 'string' || property === '') return null;
-  var best = null;
+  var state = { order: 0, best: null };
   // The element's own style attribute, as a candidate rather than an early return: it outranks
   // every normal rule whatever their specificity, but an !important rule still outranks it.
   var inline = '';
   try { inline = el.style ? el.style.getPropertyValue(property) : ''; } catch (e) { inline = ''; }
   if (inline !== '') {
-    best = {
+    state.best = {
       important: el.style.getPropertyPriority(property) === 'important',
       specificity: Infinity,
       order: -1,
-      origin: 'inline style'
+      origin: 'inline style',
+      ours: false
     };
   }
   var entries = __oswStyleSheetEntries();
   var transientEl = __oswTransientStyleElement();
-  var order = 0;
   for (var i = 0; i < entries.length; i++) {
-    // Ours is not a competitor. Skipping it is what stops the probe reporting our own override as
-    // the thing that beat our own override.
-    if (entries[i].element === transientEl) continue;
-    var rules = __oswRulesOf(entries[i].sheet);
-    for (var j = 0; j < rules.length; j++) {
-      var rule = rules[j];
-      if (!rule || typeof rule.selectorText !== 'string' || !rule.style) continue;
-      order++;
-      if (rule.style.getPropertyValue(property) === '') continue;
-      var matched = false;
-      // An invalid or unsupported selector throws here rather than returning false.
-      try { matched = el.matches(rule.selectorText); } catch (e) { matched = false; }
-      if (!matched) continue;
-      var candidate = {
-        important: rule.style.getPropertyPriority(property) === 'important',
-        specificity: __oswSpecificity(rule.selectorText),
-        order: order,
-        // Resolved here rather than per sheet: inverting the blob map is a scan of its own, and
-        // most sheets contribute no candidate at all.
-        origin: __oswSheetOrigin(entries[i])
-      };
-      if (__oswBeats(candidate, best)) best = candidate;
-    }
+    __oswRankRules(
+      el, property, ourSelector, __oswRulesOf(entries[i].sheet), entries[i], transientEl, state
+    );
   }
-  return best === null ? null : best.origin;
+  return state.best;
 }
 `;
 
 /**
- * Did the override actually take effect? — remove the rule, look, put it back.
- *
- * There is no way to ask the engine "is this declaration the one in force". `getComputedStyle`
- * reports the winner without naming it, and comparing the override's own text against the computed
- * value fails on every unit the engine normalises (`4px` vs `4px`, but `red` vs `rgb(255, 0, 0)`,
- * `50%` vs a resolved pixel length). So the question is asked by changing the document: lift our
- * rule out, read again, and see whether anything moved. Nothing moved means something else was
- * winning all along.
- *
- * **The mechanism is remove-and-reinsert of the owning ELEMENT**, and each half of that is forced:
- *
- * - `sheet.disabled = true` and `sheet.deleteRule(0)` are both **no-ops on the cascade in jsdom** —
- *   measured. A probe built on either reports "not lost" for everything in every unit test, which is
- *   indistinguishable from a probe that works.
- * - Reinsertion of a blob `<link>` restores synchronously with no refetch — also measured — so the
- *   post-recompile shape, where our rule lives in `/overrides.css` rather than the transient
- *   `<style>`, is safe to toggle. The `finally` is the load-bearing part: a probe that removes and
- *   forgets to put back has silently deleted the user's change.
- *
- * `__oswIdentifyWinner` is called **inside the removed window**, and that is not an implementation
- * detail. It skips the *transient* style only, exactly as its own contract says — but after a
- * recompile our rule is in `/overrides.css`, which it does not skip. Asking it who won while that
- * element is still in the document answers `/overrides.css`: our own override, named as the thing
- * that beat our own override.
+ * Compares declared vs computed to detect overridden declarations: ranks every declaration of
+ * the property that reaches the element and checks whether the cascade winner is ours.
  *
  * Requires {@link STYLE_QUERY_JS} (`__oswExpandProperties`) and {@link STYLE_LOCATOR_JS} in scope.
- * Properties are expanded the same way `style-query` expands them, so `lost` is keyed on the same
- * names the computed reply is — a control that asked about `padding` is told which *side* lost.
  */
 export const STYLE_PROBE_JS = `
 function __oswProbeStyleLoss(el, markerId, properties) {
@@ -498,30 +433,17 @@ function __oswProbeStyleLoss(el, markerId, properties) {
   // probed before its rule has been written.
   if (!located || !located.element || !located.element.parentNode) return { lost: [], winner: null };
 
-  var before = [];
-  var i;
-  for (i = 0; i < wanted.length; i++) {
-    before.push(window.getComputedStyle(el).getPropertyValue(wanted[i]));
-  }
-
-  var parent = located.element.parentNode;
-  // The node to insert before, so the element lands back in its own place rather than at the end of
-  // <head> — where it would newly outrank sheets that had been beating it, which is a silent edit to
-  // the page the probe is only supposed to be reading.
-  var nextSibling = located.element.nextSibling;
+  var ourSelector = __oswSelectorFor(markerId);
   var lost = [];
   var winner = null;
-  try {
-    parent.removeChild(located.element);
-    for (i = 0; i < wanted.length; i++) {
-      // Unchanged with our rule gone means our rule was never what produced the value.
-      if (window.getComputedStyle(el).getPropertyValue(wanted[i]) === before[i]) lost.push(wanted[i]);
-    }
-    for (i = 0; i < lost.length && winner === null; i++) {
-      winner = __oswIdentifyWinner(el, lost[i]);
-    }
-  } finally {
-    parent.insertBefore(located.element, nextSibling);
+  for (var i = 0; i < wanted.length; i++) {
+    var best = __oswRankDeclaration(el, wanted[i], ourSelector);
+    // best === null: nothing reachable declares this longhand — not even ours, which happens when
+    // the engine does not expand the shorthand we wrote under the name we are asking about. There
+    // is no verdict to give, and "lost" would be a guess dressed as a measurement.
+    if (best === null || best.ours) continue;
+    lost.push(wanted[i]);
+    if (winner === null) winner = best.origin;
   }
   return { lost: lost, winner: winner };
 }

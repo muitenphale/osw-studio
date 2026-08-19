@@ -26,6 +26,16 @@ export interface LayoutSlice {
   hasUnreadConsole: boolean;
   placedBlocks: any[];
   paletteOpen: boolean;
+  /**
+   * In the store (not useState) because both the preview crosshair and the Inspector's
+   * Select element button need to read and write it.
+   */
+  focusToolArmed: boolean;
+  /**
+   * Hint for the crosshair tint while hovering the Select element button.
+   * Cleared on press, unmount, and leave.
+   */
+  focusToolHinted: boolean;
 
   togglePanel: (panel: string) => void;
   setPanelOrder: (order: string[]) => void;
@@ -40,6 +50,8 @@ export interface LayoutSlice {
   setMobileOverflowOpen: (v: boolean) => void;
   setPanelReplacePreview: (panel: string | null) => void;
   setPanelInsertPreview: (idx: number | null) => void;
+  setFocusToolArmed: (armed: boolean) => void;
+  setFocusToolHinted: (hinted: boolean) => void;
   initLayout: () => void;
   resetLayout: () => void;
 }
@@ -90,24 +102,10 @@ export const PANEL_MAP: Record<string, keyof LayoutSlice> = {
   debug: 'showDebugPanel', skills: 'showSkillsPanel',
 };
 
-/**
- * Panels that cannot do their job unless a companion panel is also open.
- *
- * The Elements tree is serialized inside the preview iframe and posted to the host, so a layout
- * without the preview leaves the tree with nothing to query. Since the workspace shows at most
- * three panels and the preview is open by default, the eviction rule below would otherwise close
- * the preview to make room for Elements — opening the panel straight onto the empty state it
- * exists to avoid.
- */
+/** Elements needs Preview open; opening Elements must not evict Preview. */
 const PANEL_COMPANION: Record<string, string> = { elements: 'preview' };
 
-/**
- * The panel keys in `order` that are currently open, in order.
- *
- * PANEL_MAP is the single list of panels; deriving visibility from it keeps the workspace's
- * drag-reorder and panel-sizing paths in step with panel registration instead of repeating the
- * key→flag mapping as a hardcoded chain that a new panel can silently fall out of.
- */
+/** Single panel registry; visibility derived from it. */
 export function visiblePanelKeys(state: LayoutSlice, order: string[] = state.panelOrder): string[] {
   return order.filter(k => {
     const flag = PANEL_MAP[k];
@@ -156,6 +154,8 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
     hasUnreadConsole: false,
     placedBlocks: [],
     paletteOpen: false,
+    focusToolArmed: false,
+    focusToolHinted: false,
 
     togglePanel: (panel: string) => {
       const key = PANEL_MAP[panel];
@@ -225,6 +225,8 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
     setMobileOverflowOpen: (v) => set({ mobileOverflowOpen: v }),
     setPanelReplacePreview: (panel) => set({ panelReplacePreview: panel }),
     setPanelInsertPreview: (idx) => set({ panelInsertPreview: idx }),
+    setFocusToolArmed: (armed) => set({ focusToolArmed: armed }),
+    setFocusToolHinted: (hinted) => set({ focusToolHinted: hinted }),
 
     initLayout: () => {
       set({ panelOrder: loadPanelOrder() });
@@ -240,6 +242,8 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
         showProjectSettingsModal: false,
         fullscreenPreview: false,
         paletteOpen: false,
+        focusToolArmed: false,
+        focusToolHinted: false,
       });
     },
   };

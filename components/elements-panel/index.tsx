@@ -2,8 +2,14 @@
 
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ElementsTreeRow } from './tree-node';
-import type { PreviewHostMessage, PreviewMessage, TreeNode } from '@/lib/preview/types';
+import { StylesContent, type StylesContentHandle } from '@/components/styles-content';
+import type { ApplyStyle, ReadOverrides, RemoveStyle } from '@/components/styles-content/commit';
+import type { ColorToken } from '@/components/styles-content/tokens';
+import type { ApplyResult } from '@/lib/direct-edit/types';
+import type { TextReadResult } from '@/lib/direct-edit/apply-text';
+import type { FocusContextPayload, PreviewHostMessage, PreviewMessage, TreeNode } from '@/lib/preview/types';
 import type { ProjectRuntime } from '@/lib/vfs/types';
 import { getRuntimeConfig, isRuntimeBundled } from '@/lib/runtimes/registry';
 
@@ -58,28 +64,8 @@ const REQUEST_ROOT: PreviewHostMessage[] = [{ type: 'tree-request', nodeId: null
 /**
  * The whole panel's logic, as one pure function over {@link TreeState}.
  *
- * Extracted from the component rather than written inside it because this is the part with
- * behaviour worth testing — the reload collapse, the empty-level collapse, which gestures cost a
- * round trip — and there is no React Testing Library in this repo to reach it through a render.
- *
- * ## Reload collapses to root
- *
- * `frame-ready` fires on every load, and every id the panel holds belongs to the document that has
- * just been replaced. There is no correlation mechanism that survives that: re-expanding the
- * previously expanded paths would mean matching by tag and position, which is exactly the
- * positional identity this design rejects everywhere else, and would need one sequential round trip
- * per level with nothing to check the answers against. Collapsing to root is honest, and the tree
- * recovers on the next expansion.
- *
- * ## An empty level collapses the branch
- *
- * The frame answers a `tree-request` for an id that no longer resolves with an *empty* `tree-level`
- * naming that parent, not with `tree-stale` — so the panel is never left waiting, but it does have
- * to decide what an empty answer means. A caret is only offered when the serializer saw
- * provenance-carrying children, so an empty answer means the element or its children are gone.
- * Rendering an expanded branch with nothing under it looks like a bug in the panel; the branch is
- * collapsed and its caret removed instead, and the row goes on being selectable in case it is still
- * there.
+ * Collapse resets to root on reload (all ids die with the replaced document);
+ * cached levels survive re-expand without a round trip.
  */
 export function reduceTree(state: TreeState, event: TreeEvent): TreeTransition {
   switch (event.type) {
@@ -213,6 +199,46 @@ export function describeUnavailable(input: {
   return null;
 }
 
+export interface UnavailableCopy {
+  title: string;
+  hint: string;
+  /** The only reason with something the user can do about it from here. */
+  offersOpenPreview: boolean;
+}
+
+/** What the panel says when neither tab can work. */
+export function unavailableCopy(unavailable: TreeUnavailable, runtime: ProjectRuntime): UnavailableCopy {
+  switch (unavailable) {
+    case 'no-project':
+      return {
+        title: 'No project open',
+        hint: 'Open a project to inspect its rendered elements.',
+        offersOpenPreview: false,
+      };
+    case 'terminal-runtime':
+      return {
+        title: 'No document to inspect',
+        hint: `${getRuntimeConfig(runtime).label} projects run in a terminal preview and render no HTML document.`,
+        offersOpenPreview: false,
+      };
+    case 'bundled-runtime':
+      return {
+        title: 'Not supported for this runtime',
+        hint: `${getRuntimeConfig(runtime).label} builds its DOM at runtime, so no element can be traced back to a source file yet.`,
+        offersOpenPreview: false,
+      };
+    case 'preview-closed':
+      return {
+        title: 'Preview is closed',
+        hint: 'The tree and the style controls are both read out of the live preview, so they need the preview panel open.',
+        offersOpenPreview: true,
+      };
+  }
+}
+
+/** The panel's two tabs. The workspace holds the current one and owns the `'tree'` default. */
+export type ElementsTab = 'tree' | 'styles';
+
 export interface ElementsPanelHandle {
   /** A level arrived from the frame, lifted through the workspace. */
   handleTreeLevel: (message: Extract<PreviewMessage, { type: 'tree-level' }>) => void;
@@ -220,6 +246,10 @@ export interface ElementsPanelHandle {
   handleTreeStale: () => void;
   /** The frame loaded a document — the reload signal, and the only safe moment to send. */
   handleFrameReady: () => void;
+  /** The computed values a `style-query` asked for, for the Styles tab. */
+  handleStyleComputed: (message: Extract<PreviewMessage, { type: 'style-computed' }>) => void;
+  /** Which properties an override failed to produce, and what beat it. */
+  handleStyleProbeResult: (message: Extract<PreviewMessage, { type: 'style-probe-result' }>) => void;
 }
 
 export interface ElementsPanelProps {
@@ -230,6 +260,78 @@ export interface ElementsPanelProps {
   onOpenPreview: () => void;
   /** Post into the preview frame. A no-op when no frame is mounted. */
   sendToFrame: (message: PreviewHostMessage) => void;
+  /**
+   * The element the Styles tab acts on.
+   *
+   * The panel does not learn this from the tree: a `tree-select` goes to the *frame*, which answers
+   * with `selector-selection` — the same message a click in the preview produces — and the workspace
+   * lifts it into `focusContext`. That round trip is what makes a tree row and a preview click the
+   * same gesture, so the payload has to come back down as a prop rather than be synthesised here.
+   */
+  selection: FocusContextPayload | null;
+  /** The durable write, bound to the project. `null` disables the Styles tab's controls. */
+  applyStyle: ApplyStyle | null;
+  /**
+   * The durable removal, bound to the project — the Styles tab's Reset.
+   *
+   * Optional and passed straight through, like the CONTENT section's halves: a host that omits it
+   * gets no Reset control rather than one that refuses.
+   */
+  removeStyle?: RemoveStyle | null;
+  /**
+   * What `/overrides.css` already declares for an element — what makes the Styles tab's Reset
+   * survive a reload. Optional and passed straight through, like the removal beside it.
+   */
+  onReadOverrides?: ReadOverrides;
+  /** The project's own colour tokens. */
+  colorTokens: readonly ColorToken[];
+  /**
+   * The Styles tab's CONTENT section: read and write the selected element's text, and open the
+   * project's image picker for a selected image.
+   *
+   * Threaded down rather than performed here for the same reason `applyStyle` is: the workspace owns
+   * the write path, the picker's mount and the generation gate, and this panel imports neither
+   * `lib/vfs` nor `lib/stores`.
+   *
+   * Optional, and passed straight through — a host that omits them gets a Styles tab with no CONTENT
+   * section, which is the same absence a container already produces. See `contentSection` in
+   * `components/styles-content/content-state.ts`.
+   */
+  onReadText?: () => Promise<TextReadResult>;
+  onApplyText?: (text: string, confirmedMultiInstance: boolean) => Promise<ApplyResult>;
+  onReplaceImage?: () => void;
+  /** A URL the app's document can load for the selected image, or `null`. */
+  imageUrl?: string | null;
+  onOpenFile: (path: string) => void;
+  onAskAgent: (prompt: string) => void;
+  onRefreshPreview: () => void;
+  /**
+   * The Styles tab's empty state offers to arm the preview's element picker. Both passed straight
+   * through, and both optional for the same reason the CONTENT section's props are: the workspace is
+   * the only host that can honour them, since arming means putting the *preview* where the user can
+   * use it and only the mount knows which surface that is.
+   *
+   * See `onSelectElement` in `components/styles-content/index.tsx`.
+   */
+  onSelectElement?: () => void;
+  onSelectElementHover?: (hovering: boolean) => void;
+  /**
+   * The picker is armed right now, so that button can show it and say that pressing it cancels.
+   *
+   * Passed down rather than read from the store for the reason `StylesContent` imports no store at
+   * all: the flag is the host's, and a host that does not offer `onSelectElement` has no armed state
+   * to report. Optional, defaulting to disarmed, so every fixture that renders this panel without it
+   * keeps the markup it had.
+   */
+  focusToolArmed?: boolean;
+  /**
+   * Which tab is showing. Controlled, and owned by the workspace — the preview toolbar's `Style`
+   * action has to open this panel *on the Styles tab*, and it cannot do that through the handle:
+   * `if (showElements) panelMap['elements']` means opening the panel is what mounts it, so the ref
+   * is still null at the moment the toggle runs and an imperative call is a silent no-op.
+   */
+  activeTab: ElementsTab;
+  onTabChange: (tab: ElementsTab) => void;
 }
 
 function Unavailable({ title, hint, action }: { title: string; hint: string; action?: React.ReactNode }) {
@@ -254,10 +356,45 @@ function Unavailable({ title, hint, action }: { title: string; hint: string; act
  * preview always reaches here, because opening this panel switches provenance on and that
  * recompiles.
  */
+function panelTab(active: boolean): string {
+  return [
+    'flex-1 h-7 rounded-none px-2 -mb-px text-[10px] uppercase tracking-wider',
+    'border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none',
+    // Conditional class avoids a specificity tie between border-color utilities.
+    active
+      ? 'border-primary text-foreground font-semibold'
+      : 'border-transparent text-muted-foreground hover:text-foreground',
+  ].join(' ');
+}
+
 export const ElementsPanel = forwardRef<ElementsPanelHandle, ElementsPanelProps>(function ElementsPanel(
-  { projectId, runtime, previewOpen, onOpenPreview, sendToFrame },
+  {
+    projectId,
+    runtime,
+    previewOpen,
+    onOpenPreview,
+    sendToFrame,
+    selection,
+    applyStyle,
+    removeStyle,
+    onReadOverrides,
+    colorTokens,
+    onReadText,
+    onApplyText,
+    onReplaceImage,
+    imageUrl,
+    onOpenFile,
+    onAskAgent,
+    onRefreshPreview,
+    onSelectElement,
+    onSelectElementHover,
+    focusToolArmed,
+    activeTab,
+    onTabChange,
+  },
   ref
 ) {
+  const stylesRef = useRef<StylesContentHandle>(null);
   const [state, setState] = useState<TreeState>(emptyTreeState);
   // The reducer runs against this rather than against a `setState` updater: the transition emits
   // messages, and an updater is not allowed to have side effects (StrictMode invokes it twice).
@@ -282,10 +419,16 @@ export const ElementsPanel = forwardRef<ElementsPanelHandle, ElementsPanelProps>
       });
     },
     handleTreeStale: () => dispatch({ type: 'stale' }),
-    handleFrameReady: () => dispatch({ type: 'frame-ready' }),
+    handleFrameReady: () => {
+      dispatch({ type: 'frame-ready' });
+      stylesRef.current?.handleFrameReady();
+    },
+    handleStyleComputed: (message) => stylesRef.current?.handleStyleComputed(message),
+    handleStyleProbeResult: (message) => stylesRef.current?.handleStyleProbeResult(message),
   }), [dispatch]);
 
   const unavailable = describeUnavailable({ hasProject: Boolean(projectId), previewOpen, runtime });
+  const copy = unavailable ? unavailableCopy(unavailable, runtime) : null;
 
   // Drop the tree when there is nothing behind it — a closed preview unmounts the frame, and its
   // ids die with it. Keeping the rows on screen would offer selections that all resolve to nothing.
@@ -304,57 +447,11 @@ export const ElementsPanel = forwardRef<ElementsPanelHandle, ElementsPanelProps>
     };
   }, []);
 
-  if (unavailable === 'no-project') {
-    return (
-      <div className="flex-1 min-h-0">
-        <Unavailable title="No project open" hint="Open a project to inspect its rendered elements." />
-      </div>
-    );
-  }
-
-  if (unavailable === 'terminal-runtime') {
-    return (
-      <div className="flex-1 min-h-0">
-        <Unavailable
-          title="No document to inspect"
-          hint={`${getRuntimeConfig(runtime).label} projects run in a terminal preview and render no HTML document.`}
-        />
-      </div>
-    );
-  }
-
-  if (unavailable === 'bundled-runtime') {
-    return (
-      <div className="flex-1 min-h-0">
-        <Unavailable
-          title="Not supported for this runtime"
-          hint={`${getRuntimeConfig(runtime).label} builds its DOM at runtime, so no element can be traced back to a source file yet.`}
-        />
-      </div>
-    );
-  }
-
-  if (unavailable === 'preview-closed') {
-    return (
-      <div className="flex-1 min-h-0">
-        <Unavailable
-          title="Preview is closed"
-          hint="The tree is read out of the live preview, so it needs the preview panel open."
-          action={
-            <Button variant="outline" size="sm" onClick={onOpenPreview}>
-              Open preview
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-
   const rows = flattenTree(state);
 
-  return (
+  const tree = (
     <div
-      className="flex-1 min-h-0 overflow-auto p-1"
+      className="h-full overflow-auto p-1"
       onMouseLeave={() => dispatch({ type: 'hover', nodeId: null })}
     >
       {rows.length === 0 ? (
@@ -406,5 +503,79 @@ export const ElementsPanel = forwardRef<ElementsPanelHandle, ElementsPanelProps>
         })
       )}
     </div>
+  );
+
+  return (
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => onTabChange(value === 'styles' ? 'styles' : 'tree')}
+      className="flex-1 min-h-0 flex flex-col"
+    >
+      <TabsList className="h-7 w-full shrink-0 justify-stretch gap-0 rounded-none border-b bg-transparent p-0 text-muted-foreground">
+        <TabsTrigger value="tree" className={panelTab(activeTab === 'tree')}>
+          Elements
+        </TabsTrigger>
+        <TabsTrigger value="styles" className={panelTab(activeTab === 'styles')}>
+          Styles
+        </TabsTrigger>
+      </TabsList>
+
+      {copy ? (
+        // Both tabs read the rendered document, so one unavailable message covers both.
+        <div className="flex-1 min-h-0">
+          <Unavailable
+            title={copy.title}
+            hint={copy.hint}
+            action={copy.offersOpenPreview ? (
+              <Button variant="outline" size="sm" onClick={onOpenPreview}>
+                Open preview
+              </Button>
+            ) : undefined}
+          />
+        </div>
+      ) : (
+        <>
+          {/*
+            Both tabs force-mounted so the Styles tab keeps its state and receives style-computed
+            replies while hidden. hidden attribute set explicitly because forceMount disables
+            Radix's own hiding.
+          */}
+          <TabsContent
+            value="tree"
+            forceMount
+            hidden={activeTab !== 'tree'}
+            className="flex-1 min-h-0 mt-0"
+          >
+            {tree}
+          </TabsContent>
+          <TabsContent
+            value="styles"
+            forceMount
+            hidden={activeTab !== 'styles'}
+            className="flex-1 min-h-0 mt-0"
+          >
+            <StylesContent
+              ref={stylesRef}
+              selection={selection}
+              sendToFrame={sendToFrame}
+              applyStyle={applyStyle}
+              removeStyle={removeStyle}
+              onReadOverrides={onReadOverrides}
+              tokens={colorTokens}
+              onReadText={onReadText}
+              onApplyText={onApplyText}
+              onReplaceImage={onReplaceImage}
+              imageUrl={imageUrl}
+              onOpenFile={onOpenFile}
+              onAskAgent={onAskAgent}
+              onRefreshPreview={onRefreshPreview}
+              onSelectElement={onSelectElement}
+              onSelectElementHover={onSelectElementHover}
+              focusToolArmed={focusToolArmed}
+            />
+          </TabsContent>
+        </>
+      )}
+    </Tabs>
   );
 });

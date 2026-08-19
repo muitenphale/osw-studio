@@ -28,6 +28,7 @@ interface PostedMessage {
   type?: string;
   nodeId?: string;
   values?: Record<string, string>;
+  rootFontSize?: string;
   payload?: FocusContextPayload;
 }
 
@@ -61,6 +62,9 @@ function query(nodeId: string, properties: unknown): PostedMessage {
 beforeAll(() => {
   document.head.innerHTML =
     '<style>' +
+      // A root that is not the browser default, so the reply's root font size is a measurement
+      // rather than a coincidence: 16 is what a hardcoded answer would also produce.
+      'html { font-size: 10px; }' +
       '.card { padding: 10px 12px; color: rgb(20, 30, 40); border-radius: 4px; display: flex; }' +
     '</style>';
   document.body.innerHTML = '<main data-osw-src="/index.hbs:0"><div class="card" data-osw-src="/index.hbs:8">c</div></main>';
@@ -86,6 +90,21 @@ describe('style-query', () => {
     expect(reply.nodeId).toBe(nodeId);
     // Real cascaded values from the stylesheet above, not the element's (empty) inline style.
     expect(reply.values).toEqual({ color: 'rgb(20, 30, 40)', display: 'flex' });
+  });
+
+  it('reports what one rem is worth in this document, on the same reply', () => {
+    // The panel converts every rem it shows or writes through this. There is no other message that
+    // could carry it — style-query is per node and the host holds no id for <html> — and without
+    // it the panel has to assume 16, which this document makes wrong by 60%.
+    const nodeId = selectCard();
+
+    expect(query(nodeId, ['color']).rootFontSize).toBe('10px');
+  });
+
+  it('reports it even for a node that no longer resolves', () => {
+    // It is a fact about the document, not about the element, and the panel's unit selector should
+    // not go dead because the selection went stale.
+    expect(query('999', ['color']).rootFontSize).toBe('10px');
   });
 
   it('answers a stale nodeId with an empty map rather than silence', () => {

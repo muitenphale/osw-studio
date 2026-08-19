@@ -84,7 +84,17 @@ describe('the highlight overlay is identifiable and has one visibility control',
     expect(count(NAV, 'function setOverlayVisible(')).toBe(1);
     expect(functionText(NAV, 'handleMouseMove')).toContain('setOverlayVisible(target)');
     expect(functionText(NAV, 'handleMouseMove')).not.toContain('positionOverlay(');
-    expect(functionText(NAV, 'disableSelector')).toContain('setOverlayVisible(null)');
+    // Restores the selection's outline rather than blanking it. Clicking an element runs
+    // disableSelector immediately after the toolbar starts tracking it, so 'setOverlayVisible(null)'
+    // here is what used to leave a click-selected element unmarked while a tree-selected one kept
+    // its outline. The behaviour is asserted in toolbar-chrome-dom.test.ts; this only pins that the
+    // one visibility control is still the only route.
+    expect(functionText(NAV, 'disableSelector')).toContain('setOverlayVisible(__oswToolbarState.tracked');
+    expect(functionText(NAV, '__oswToolbarOnPlace')).toContain('setOverlayVisible(target, measured)');
+    // The outline reuses the rect the toolbar placed itself from rather than measuring again. Two
+    // measurements in one pass drift apart whenever layout is still settling — an image swap does
+    // exactly that — and the bar and the outline then mark the element from different moments.
+    expect(functionText(NAV, 'positionOverlay')).toContain('measured || target.getBoundingClientRect()');
   });
 
   it('never detaches the overlay', () => {

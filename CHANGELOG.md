@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.96.0 - 2026-08-19
+
+### Preview direct editing
+- **Compiled preview HTML stamps each element with its source file and offset**: `injectProvenance` (`lib/preview/provenance.ts`) writes `data-osw-src="<path>:<index>"` onto each eligible open tag, the index a UTF-16 code unit rather than a byte offset, and `resolveSelection` (`lib/direct-edit/resolution.ts`) reads it back. Per `VirtualServer` instance and off by default, so publish, export, thumbnails and the `build` shell command never see it; `curl` strips it with `stripProvenance` regardless.
+- **Styles set in the preview are written to `/overrides.css`**: `stampMarker` (`lib/direct-edit/marker.ts`) puts `data-osw-id` on the open tag, `upsertDeclaration` (`lib/direct-edit/overrides-css.ts`) keys a block to that marker, and `ensureOverridesLink` (`link-invariant.ts`) keeps the stylesheet linked from every page.
+- **A style change renders in the preview before the file is written**: `STYLE_PREVIEW_JS` (`lib/preview/style-preview.ts`) applies it in-frame as a transient `data-osw-style` rule, and `STYLE_QUERY_JS` reads the computed values the controls display.
+- **A declaration the page's own CSS overrules is reported at the foot of the Styles panel**: `STYLE_PROBE_JS` compares what was written against what the element computes, and `STYLE_LOCATOR_JS` finds the rule that won.
+- **Selecting an element in the preview shows a toolbar anchored to it**: built inside the frame (`lib/preview/toolbar-dom.ts`), positioned in document coordinates with its chrome in a shadow root, and mounted only where `supportsDirectEditing` (`lib/runtimes/registry.ts`) holds: `static` and `handlebars`, not the bundled or terminal runtimes. Icon actions for Style, a kind-specific Edit text or Replace image, include-in-message and dismiss, each labelled by a shadow-root tooltip built from `aria-label` with `attr()`. Excluded from drop-target detection, the selector, `buildHtmlContext` and `screenshot.ts`'s `onclone`.
+- **The Inspector lists the rendered document as a tree in an Elements tab**: `components/elements-panel/` annotates each element with the source file that produced it, serialized in-frame by `SERIALIZE_TREE_JS` (`lib/preview/element-tree.ts`). Opening it no longer closes the preview: `pickEvictionTarget` (`lib/stores/slices/layout.ts`) skips the companion of the panel being opened, otherwise still closing the rightmost open one.
+- **Text content is edited from the toolbar and the Inspector**: `readTextRange` and `writeTextRange` (`lib/direct-edit/apply-text.ts`) splice the source range `data-osw-src` points at. Child elements, `{{ }}` expressions and a source tag shared by several elements are refused with a reason.
+- **An image is replaced from the project's own images or an upload**: `replaceSrcAt` (`lib/direct-edit/apply-image.ts`) rewrites the one `src` at the provenance index, refusing a value built from a template expression. `uploadFile` moved to `lib/vfs/upload-file.ts` as `uploadFileToProject`.
+- **The Styles tab edits the element's text and image, not only its CSS**: a Content section above Spacing holds the text inline, or an image tile and Replace (`components/styles-content/content-state.ts`).
+- **Colour is chosen from a popover listing the project's tokens**: `sameColor` (`components/styles-content/tokens.ts`) matches the element's computed colour against a token's declared value across spellings, so the current one is marked. Every token is offered rather than the first six. Reset drops the element's own declaration through `removeDeclaration` (`lib/direct-edit/overrides-css.ts`).
+- **Length controls take a typed value, a unit menu and per-side longhands**: the unit converts against the frame's reported root font size, and padding, margin, border width and corner radius expand to their longhands through `partEntry` (`components/styles-content/properties.ts`). `margin-inline` is offered.
+- **`Select element` in the empty Styles tab arms the picker**: `focusToolArmed` (`lib/stores/slices/layout.ts`) is shared with the preview header's crosshair, so either toggles it and both show the armed state.
+- **Selecting an element no longer attaches it to the next message**: `focusIncluded` (`lib/stores/slices/project.ts`) gates the prompt text, the generation options and the composer chip; the toolbar's include button raises it. Where there is no toolbar to press (mobile, and the runtimes without direct editing) selecting still includes.
+
+### Preview
+- **A preview mount handles only its own frame's messages**: the workspace mounts the preview twice and only the visible mount renders an iframe, so `iframeRef.current` was null in the other one and the `iframeRef.current &&` guard let it accept every message the visible frame posted. Both mounts therefore acted on one frame's clicks, each with its own surface.
+- **The hidden preview does not compile**: the workspace mounts the preview twice and hides one by CSS, so every change compiled and rendered the project twice. `PreviewCompileGate` (`lib/preview/compile-gate.ts`) parks the request until the mount is measured at a non-zero size.
+- **A recompile keeps the frame's scroll position**: `FrameScrollMemory` (`lib/preview/scroll-memory.ts`) reads `scrollY` off the outgoing document and restores it on frame-ready for the same path. Restored with `behavior: 'instant'`, since `scrollTo(x, y)` obeys a document's own `scroll-behavior` and three templates set it to `smooth`.
+
+### UI
+- **The Debug Events tabs fill the strip**: Events and Messages stretch to half each, matching the panel tabs the Inspector introduces.
+
 ## v1.95.1 - 2026-08-15
 
 ### Server Mode
