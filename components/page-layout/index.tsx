@@ -42,7 +42,6 @@ export function PageLayout({
   const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
-  const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
 
   // Set workspace context for auto-sync and sync-manager, check quota
   useEffect(() => {
@@ -61,7 +60,6 @@ export function PageLayout({
     void refreshProjectSyncState();
 
     async function checkQuota() {
-      if (!isManagedMode) return;
       try {
         const data = await fetchSyncStatus();
         if (!data?.quota?.storage) return;

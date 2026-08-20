@@ -170,10 +170,7 @@ GET /api/workspaces -- list workspaces the current user has access to
 
 ## Quotas
 
-Each workspace has configurable limits. Defaults:
-- 3 projects
-- 1 published deployment
-- 100 MB storage
+Each workspace has configurable limits (max projects, max deployments, max storage). New workspaces default to unlimited. The admin can lower limits per workspace via the admin UI or API.
 
 Enforced at:
 - **Project creation** — rejects sync push when at project limit
@@ -182,7 +179,7 @@ Enforced at:
 
 A warning banner appears in the workspace UI when storage usage exceeds 80%.
 
-Configurable per-workspace via the admin UI or API. An agency might give basic clients 1 project / 1 deployment and premium clients 10 / 5.
+An agency might give basic clients 1 project / 1 deployment and premium clients 10 / 5.
 
 ## Upgrading from Single-User Mode
 

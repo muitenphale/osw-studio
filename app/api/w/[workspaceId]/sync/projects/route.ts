@@ -58,9 +58,7 @@ export async function POST(
     // Check if project exists
     const existing = await adapter.getProject(project.id);
 
-    // Quota enforcement for new projects (managed mode only)
-    const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
-    if (!existing && isManagedMode) {
+    if (!existing) {
       const workspace = getWorkspaceById(workspaceId);
       if (workspace) {
         const projects = await adapter.listProjects();

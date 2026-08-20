@@ -21,20 +21,16 @@ export async function POST(
     const { adapter, workspaceId } = await getWorkspaceContext(params);
     const { id } = await params;
 
-    // Quota enforcement (managed mode only — standalone has no limits)
-    const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
-    if (isManagedMode) {
-      const workspace = getWorkspaceById(workspaceId);
-      if (workspace) {
-        const actualDeployments = await adapter.listDeployments?.() || [];
-        const quota = checkDeploymentQuota({
-          isAlreadyRegistered: !!getDeploymentWorkspace(id),
-          maxDeployments: workspace.max_deployments,
-          actualDeploymentCount: actualDeployments.length,
-        });
-        if (!quota.allowed) {
-          return NextResponse.json({ error: quota.error }, { status: 403 });
-        }
+    const workspace = getWorkspaceById(workspaceId);
+    if (workspace) {
+      const actualDeployments = await adapter.listDeployments?.() || [];
+      const quota = checkDeploymentQuota({
+        isAlreadyRegistered: !!getDeploymentWorkspace(id),
+        maxDeployments: workspace.max_deployments,
+        actualDeploymentCount: actualDeployments.length,
+      });
+      if (!quota.allowed) {
+        return NextResponse.json({ error: quota.error }, { status: 403 });
       }
     }
 

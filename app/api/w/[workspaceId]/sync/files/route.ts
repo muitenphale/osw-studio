@@ -91,12 +91,10 @@ export async function POST(
       );
     }
 
-    // Check storage quota before writing (managed mode only). Once per push rather than once per
-    // batch: `combinedDirectorySize` walks the whole workspace synchronously, which blocks the event loop for
-    // every workspace on the instance, and a chunked push would repeat that walk per batch. The
-    // first batch is the one that carries `replace`.
-    const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
-    if (isManagedMode && replace) {
+    // Check storage quota before writing. Once per push rather than once per batch:
+    // `combinedDirectorySize` walks the whole workspace synchronously, and a chunked push
+    // would repeat that walk per batch. The first batch is the one that carries `replace`.
+    if (replace) {
       const workspace = getWorkspaceById(workspaceId);
       if (workspace) {
         const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');

@@ -20,7 +20,6 @@ import {
   setDefaultWorkspace,
   getUserDefaultWorkspace,
   getUserById,
-  updateWorkspace,
   getWorkspaceById,
   getDeploymentBySlug,
 } from './system-database';
@@ -77,13 +76,7 @@ export async function ensureDefaultWorkspace(userId: string): Promise<string> {
     `).run(userId, `${userId}@localhost`, hash, userId === 'desktop' ? 'Desktop' : 'Admin');
   }
 
-  // Create default workspace with high limits for admin/desktop
   const workspaceId = createWorkspace(DEFAULT_WORKSPACE_NAME, userId);
-  updateWorkspace(workspaceId, {
-    max_projects: 9999,
-    max_deployments: 9999,
-    max_storage_mb: 99999,
-  });
   setDefaultWorkspace(userId, workspaceId);
 
   // Migrate legacy data on standalone instances

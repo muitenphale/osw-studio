@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createSession } from '@/lib/auth/session';
-import { createUser, getUserByEmail, getUserCount, createWorkspace, setDefaultWorkspace, updateWorkspace } from '@/lib/auth/system-database';
+import { createUser, getUserByEmail, getUserCount, createWorkspace, setDefaultWorkspace } from '@/lib/auth/system-database';
 import { hashPassword } from '@/lib/auth/passwords';
 import { logger } from '@/lib/utils';
 import { getSystemDatabase } from '@/lib/auth/system-database';
@@ -58,15 +58,6 @@ export async function POST(request: NextRequest) {
     // Create default workspace
     const workspaceName = displayName ? `${displayName}'s Workspace` : 'My Workspace';
     const workspaceId = createWorkspace(workspaceName, userId);
-
-    // First user gets unlimited workspace
-    if (isFirstUser) {
-      updateWorkspace(workspaceId, {
-        max_projects: 9999,
-        max_deployments: 9999,
-        max_storage_mb: 99999,
-      });
-    }
 
     setDefaultWorkspace(userId, workspaceId);
 

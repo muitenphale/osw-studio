@@ -403,7 +403,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
       return;
     }
 
-    if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true' && !!process.env.NEXT_PUBLIC_GATEWAY_URL) {
+    if (process.env.NEXT_PUBLIC_SERVER_MODE === 'true') {
       try {
         const { getAutoSyncApiUrl } = await import('@/lib/vfs/auto-sync');
         const { apiFetch } = await import('@/lib/api/backend-status');

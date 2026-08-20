@@ -114,9 +114,9 @@ function initSystemSchema(db: Database.Database): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       owner_id TEXT NOT NULL,
-      max_projects INTEGER NOT NULL DEFAULT 3,
-      max_deployments INTEGER NOT NULL DEFAULT 1,
-      max_storage_mb INTEGER NOT NULL DEFAULT 100,
+      max_projects INTEGER NOT NULL DEFAULT 9999,
+      max_deployments INTEGER NOT NULL DEFAULT 9999,
+      max_storage_mb INTEGER NOT NULL DEFAULT 99999,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (owner_id) REFERENCES users(id)
@@ -167,6 +167,16 @@ function initSystemSchema(db: Database.Database): void {
     db.prepare('ALTER TABLE deployment_routing ADD COLUMN custom_domain TEXT').run();
     db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_deployment_routing_domain ON deployment_routing(custom_domain)').run();
   }
+
+  // Migration: raise old restrictive workspace defaults (3/1/100) to generous values.
+  // Quota enforcement now runs in all server mode, not only managed mode, so workspaces
+  // created with the old defaults would hit limits their admin never chose. Managed
+  // instances are unaffected — the gateway sets explicit quotas on every workspace.
+  db.prepare(`
+    UPDATE workspaces
+    SET max_projects = 9999, max_deployments = 9999, max_storage_mb = 99999
+    WHERE max_projects = 3 AND max_deployments = 1 AND max_storage_mb = 100
+  `).run();
 }
 
 // ---------------------------------------------------------------------------

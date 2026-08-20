@@ -32,6 +32,7 @@ import { useProjectSyncState } from '@/lib/hooks/use-project-sync-state';
 import { useRouter, useSearchParams } from 'next/navigation';
 import pkg from '@/package.json';
 import { WorkspaceSwitcher } from '@/components/workspace-switcher';
+import { getExternalAccountUrl } from '@/lib/config/deployment-mode';
 
 // Collapsed sidebar width
 export const COLLAPSED_SIDEBAR_WIDTH = 56; // Width in pixels for icon-only buttons
@@ -45,8 +46,7 @@ interface SidebarItem {
   href?: string;
   serverModeOnly?: boolean;
   adminOnly?: boolean;
-  managedOnly?: boolean;
-  hasRecentProjects?: boolean; // Special flag for Projects to show recent projects as sub-items
+  hasRecentProjects?: boolean;
   subItems?: {
     id: string;
     label: string;
@@ -62,7 +62,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'templates', label: 'Templates', icon: LayoutTemplate, path: 'templates' },
   { id: 'skills', label: 'Skills', icon: Sparkles, path: 'skills' },
   { id: 'interviews', label: 'Interviews', icon: ClipboardList, path: 'interviews' },
-  { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true, adminOnly: true, managedOnly: true },
+  { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true, adminOnly: true },
   {
     id: 'docs',
     label: 'Docs',
@@ -92,11 +92,11 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'github', label: 'GitHub', icon: Github, href: 'https://github.com/o-stahl/osw-studio' },
 ];
 
-const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL;
+const ACCOUNT_URL = getExternalAccountUrl();
 
 const SYSTEM_ACTIONS: SidebarItem[] = [
   { id: 'sync', label: 'Server Sync', icon: Cloud, action: 'server-sync' },
-  ...(GATEWAY_URL ? [{ id: 'account', label: 'Account', icon: UserCircle, href: `${GATEWAY_URL}/account` }] : []),
+  ...(ACCOUNT_URL ? [{ id: 'account', label: 'Account', icon: UserCircle, href: ACCOUNT_URL }] : []),
   { id: 'logout', label: 'Logout', icon: LogOut, action: 'logout' },
 ];
 
@@ -251,11 +251,9 @@ function SidebarContent({
     onCollapsedChange?.(collapsed);
   }, [collapsed, onCollapsedChange]);
 
-  const isManagedMode = !!GATEWAY_URL;
-
   // Filter sidebar items based on Server Mode
   const visibleSidebarItems = SIDEBAR_ITEMS.filter(
-    item => (!item.serverModeOnly || isServerMode) && (!item.adminOnly || isAdmin) && (!item.managedOnly || isManagedMode)
+    item => (!item.serverModeOnly || isServerMode) && (!item.adminOnly || isAdmin)
   );
 
   const toggleExpanded = (itemId: string) => {
@@ -415,8 +413,7 @@ function SidebarContent({
         )}
       </button>
 
-      {/* Workspace Switcher (Managed Mode only — standalone has a single implicit workspace) */}
-      {isServerMode && isManagedMode && !collapsed && (
+      {isServerMode && !collapsed && (
         <WorkspaceSwitcher workspaceId={workspaceId} />
       )}
 

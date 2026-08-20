@@ -985,7 +985,7 @@ export function ConnectionsPane() {
     }
   };
 
-  const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
+  const showLocalProviders = !process.env.NEXT_PUBLIC_GATEWAY_URL;
   const allProviders = getAllProviders();
   const connectedProviders = allProviders.filter((p) => isProviderConnected(p.id));
 
@@ -1092,7 +1092,7 @@ export function ConnectionsPane() {
       )}
 
       {/* Local section — hidden on the managed gateway (no local inference there) */}
-      {!isManagedMode && (
+      {showLocalProviders && (
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
             Local

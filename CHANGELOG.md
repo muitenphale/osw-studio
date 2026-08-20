@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.96.1 - 2026-08-20
+
+### Server Mode
+- **Workspace quotas are enforced on all server mode instances**: `sync/projects`, `sync/files` and `deployments/[id]/publish` checked quotas only when `NEXT_PUBLIC_GATEWAY_URL` was set, so standalone instances stored the fields but never enforced them. The page-layout storage warning and the project-manager project-count check were likewise gated.
+- **New workspace defaults are unlimited**: SQL defaults in `system-database.ts` changed from 3 / 1 / 100 to 9999 / 9999 / 99999. A migration raises existing workspaces still at the old 3/1/100 values. Redundant `updateWorkspace` calls removed from `default-workspace.ts` and `register/route.ts`.
+- **WorkspaceSwitcher and Users page visible on all server mode instances**: both were gated by `isManagedMode` (`!!process.env.NEXT_PUBLIC_GATEWAY_URL`). `managedOnly` field removed from `SidebarItem`.
+
 ## v1.96.0 - 2026-08-19
 
 ### Preview direct editing

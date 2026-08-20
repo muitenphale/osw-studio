@@ -90,7 +90,7 @@ export function UsersView() {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
-  const isManagedMode = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
+  const externalIdentity = !!process.env.NEXT_PUBLIC_GATEWAY_URL;
 
   useEffect(() => {
     loadUsers();
@@ -300,7 +300,7 @@ export function UsersView() {
         {/* Toolbar */}
         <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
           <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
-            {!isManagedMode && (
+            {!externalIdentity && (
               <div className="flex items-center shrink-0">
                 <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
                   <Plus className="h-4 w-4" />
@@ -320,7 +320,7 @@ export function UsersView() {
               />
             </div>
 
-            {isManagedMode && (
+            {externalIdentity && (
               <div className="flex items-center gap-2">
                 <p className="text-sm text-muted-foreground">
                   Users are managed externally
