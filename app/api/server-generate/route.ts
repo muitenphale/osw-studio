@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
       return serverVFS;
     },
     apiBaseUrl,
-  }).catch((err) => {
-    console.error(`Server generation failed for task ${taskId}:`, err);
+  }).catch((err: any) => {
+    console.error(`Server generation failed for task ${taskId}:`, err?.message ?? 'unknown error');
   });
 
   return NextResponse.json({ taskId });

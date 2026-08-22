@@ -140,10 +140,10 @@ describe('CostCalculator.getPricing', () => {
 
 describe('CostCalculator.estimateCost', () => {
   it('estimates input cost from text', () => {
-    const text = 'hello world foo bar baz'; // 5 words ~= 6.5 tokens
+    const text = 'hello world foo bar baz'; // 5 words → ceil(5*1.3)=7 tokens
     const cost = CostCalculator.estimateCost(text, 'openai', 'gpt-4o', true);
-    expect(cost).toBeGreaterThan(0);
-    expect(cost).toBeLessThan(0.001);
+    // (7 / 1_000_000) * 2.50 = 0.0000175
+    expect(cost).toBeCloseTo(0.0000175, 7);
   });
 
   it('uses output pricing when isInput=false', () => {

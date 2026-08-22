@@ -23,67 +23,55 @@ describe('ServerConfigManager', () => {
     config = new ServerConfigManager(baseParams, 'task-123');
   });
 
-  it('returns provider from params', () => {
-    expect(config.getSelectedProvider()).toBe('openai');
-  });
-
-  it('returns API key from params', () => {
+  it('returns API key only for the configured provider', () => {
     expect(config.getProviderApiKey('openai')).toBe('sk-test-key');
-  });
-
-  it('returns null API key for non-matching provider', () => {
     expect(config.getProviderApiKey('anthropic')).toBeNull();
   });
 
-  it('returns model from params', () => {
+  it('returns model only for the configured provider', () => {
     expect(config.getProviderModel('openai')).toBe('gpt-4o');
+    expect(config.getProviderModel('anthropic')).toBeNull();
   });
 
-  it('returns cached models', () => {
+  it('returns cached models only for the configured provider', () => {
     const cached = config.getCachedModels('openai');
     expect(cached).not.toBeNull();
     expect(cached!.models).toHaveLength(1);
     expect(cached!.models[0].id).toBe('gpt-4o');
-  });
-
-  it('returns null cached models for non-matching provider', () => {
     expect(config.getCachedModels('anthropic')).toBeNull();
   });
 
-  it('returns model pricing', () => {
-    const pricing = config.getModelPricing('openai', 'gpt-4o');
-    expect(pricing).toEqual({ prompt: 2.5, completion: 10 });
-  });
-
-  it('returns null pricing for unknown model', () => {
+  it('returns model pricing by model id', () => {
+    expect(config.getModelPricing('openai', 'gpt-4o')).toEqual({ prompt: 2.5, completion: 10 });
     expect(config.getModelPricing('openai', 'gpt-3.5')).toBeNull();
   });
 
-  it('returns reasoning enabled', () => {
-    expect(config.getReasoningEnabled('gpt-4o')).toBe(false);
+  it('defaults reasoningEnabled to false when omitted', () => {
+    const sparse = new ServerConfigManager({ ...baseParams, reasoningEnabled: undefined } as any, 't');
+    expect(sparse.getReasoningEnabled('gpt-4o')).toBe(false);
   });
 
-  it('returns debug stream enabled', () => {
-    expect(config.getDebugStreamEnabled()).toBe(false);
+  it('defaults debugStreamEnabled to false when omitted', () => {
+    const sparse = new ServerConfigManager({ ...baseParams, debugStreamEnabled: undefined } as any, 't');
+    expect(sparse.getDebugStreamEnabled()).toBe(false);
   });
 
-  it('returns compaction enabled', () => {
-    expect(config.isCompactionEnabled('openai')).toBe(true);
+  it('defaults compactionEnabled to true when omitted', () => {
+    const sparse = new ServerConfigManager({ ...baseParams, compactionEnabled: undefined } as any, 't');
+    expect(sparse.isCompactionEnabled('openai')).toBe(true);
   });
 
-  it('returns compaction limit', () => {
-    expect(config.getCompactionLimit('openai')).toBe(80000);
+  it('respects explicit compactionEnabled false', () => {
+    const disabled = new ServerConfigManager({ ...baseParams, compactionEnabled: false }, 't');
+    expect(disabled.isCompactionEnabled('openai')).toBe(false);
   });
 
   it('returns context length from cached models', () => {
     expect(config.getModelContextLengthFromCache('openai', 'gpt-4o')).toBe(128000);
-  });
-
-  it('returns undefined context length for unknown model', () => {
     expect(config.getModelContextLengthFromCache('openai', 'gpt-3.5')).toBeUndefined();
   });
 
-  it('tracks session cost', () => {
+  it('tracks session cost across multiple updates', () => {
     config.updateSessionCost({ promptTokens: 100, completionTokens: 50 }, 0.01);
     config.updateSessionCost({ promptTokens: 200, completionTokens: 100 }, 0.02);
     const session = config.getCurrentSession();

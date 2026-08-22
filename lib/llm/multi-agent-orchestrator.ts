@@ -281,7 +281,7 @@ export class MultiAgentOrchestrator {
 
       const serverCtxMeta = this.getVFS().getServerContextMetadata();
       const modelSupportsTools = this.checkModelSupportsTools();
-      let systemPrompt = await buildSystemPrompt(this.chatMode, serverCtxMeta, this.projectId, this.rootAgent.type, modelSupportsTools, this.isImageGenAvailable(), this.isWebSearchAvailable());
+      let systemPrompt = await buildSystemPrompt(this.chatMode, serverCtxMeta, this.projectId, this.rootAgent.type, modelSupportsTools, this.isImageGenAvailable(), this.isWebSearchAvailable(), !!this.serverContext);
       if (this.rootAgent.type === 'interview') {
         systemPrompt = withInterviewAgenda(systemPrompt, this.interviewTemplateId, this.interviewTemplate);
       }
@@ -480,7 +480,7 @@ export class MultiAgentOrchestrator {
         } catch { /* ignore */ }
         const serverCtxMeta = this.getVFS().getServerContextMetadata();
         const systemPrompt = await buildSystemPrompt(
-          this.chatMode, serverCtxMeta, this.projectId, this.rootAgent.type, this.checkModelSupportsTools(), this.isImageGenAvailable(), this.isWebSearchAvailable()
+          this.chatMode, serverCtxMeta, this.projectId, this.rootAgent.type, this.checkModelSupportsTools(), this.isImageGenAvailable(), this.isWebSearchAvailable(), !!this.serverContext
         );
         const projectContext = await buildProjectContext(fileTreeStr, serverCtxMeta);
         return { systemPrompt, projectContext };
@@ -605,6 +605,7 @@ export class MultiAgentOrchestrator {
         permissionMode: this.permissionMode,
         permissionOverrides: this.permissionOverrides,
         readVersions: this.readVersions,
+        onBuildRequested: this.serverContext?.onBuildRequested,
       });
       executor.onAfterExecute = async (toolCall, result, durationMs) => {
         track('tool_call', {
@@ -643,7 +644,7 @@ export class MultiAgentOrchestrator {
         const serverCtxMeta = this.getVFS().getServerContextMetadata();
         return buildSystemPrompt(
           this.chatMode || agentType === 'explore' || agentType === 'plan',
-          serverCtxMeta, this.projectId, agentType as AgentType, true, this.isImageGenAvailable(), this.isWebSearchAvailable()
+          serverCtxMeta, this.projectId, agentType as AgentType, true, this.isImageGenAvailable(), this.isWebSearchAvailable(), !!this.serverContext
         );
       },
     });

@@ -12,6 +12,6 @@ describe('htmlToMarkdown', () => {
 
   it('falls back to raw text when extraction yields nothing', () => {
     const md = htmlToMarkdown('<div>bare</div>', 'https://example.com');
-    expect(md.length).toBeGreaterThan(0);
+    expect(md).toContain('bare');
   });
 });

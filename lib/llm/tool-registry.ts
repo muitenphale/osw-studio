@@ -82,6 +82,8 @@ export interface ToolExecutionContext {
    *  Threaded to the shell so whole-chunk writes can be checked against the agent's
    *  last full read. Absent on callers that don't track it (guard disabled). */
   readVersions?: Map<string, number>;
+  /** Delegate a build to the browser (server-side generation only). */
+  onBuildRequested?: () => Promise<{ success: boolean; errors?: string[] }>;
 }
 
 interface RegisteredTool {
@@ -645,6 +647,7 @@ async function executeShellSegment(
     onProgress: context.onProgress,
     generateImage: context.generateImage,
     readVersions: context.readVersions,
+    onBuildRequested: context.onBuildRequested,
   });
 
   // Refresh server context if shell command modified .server/ files

@@ -8,7 +8,11 @@ function fakeVfs(runtime: string) {
 }
 
 describe('compileStaticSite', () => {
-  it('throws TerminalRuntimeError for terminal runtimes (python/lua)', async () => {
+  it('throws TerminalRuntimeError for python runtime', async () => {
     await expect(compileStaticSite(fakeVfs('python'), 'p1')).rejects.toBeInstanceOf(TerminalRuntimeError);
+  });
+
+  it('throws TerminalRuntimeError for lua runtime', async () => {
+    await expect(compileStaticSite(fakeVfs('lua'), 'p1')).rejects.toBeInstanceOf(TerminalRuntimeError);
   });
 });

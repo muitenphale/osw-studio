@@ -325,9 +325,9 @@ export class VirtualServer {
 
     const result = await bundleProject({ files, entryPoint, runtime: this.runtime, minify: this.minify });
 
-    // Push errors through the compile-errors system
     for (const err of result.errors) {
-      pushCompileError(entryPoint, err);
+      const fileMatch = err.match(/^\[esbuild\] (\/[^:]+)/);
+      pushCompileError(fileMatch ? fileMatch[1] : entryPoint, err);
     }
 
     if (result.errors.length > 0) {

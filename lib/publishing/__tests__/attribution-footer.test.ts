@@ -11,7 +11,8 @@ describe('injectAttributionFooter', () => {
   it('appends to the end when there is no </body>', () => {
     const out = injectAttributionFooter('<h1>Hi</h1>');
     expect(out).toContain('Built with');
-    expect(out.trim().endsWith('</html>')).toBe(false);
+    expect(out).toContain('<h1>Hi</h1>');
+    expect(out.indexOf('Built with')).toBeGreaterThan(out.indexOf('<h1>Hi</h1>'));
   });
   it('does not inject twice if a marker is already present', () => {
     const once = injectAttributionFooter('<body></body>');

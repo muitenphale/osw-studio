@@ -40,6 +40,9 @@ describe('publishToSpace', () => {
     expect(paths).toContain('index.html');
     expect(paths).toContain('README.md');
     expect(commitArg.operations[0].content).toBeInstanceOf(Blob);
+    const indexOp = commitArg.operations.find((o: any) => o.path === 'index.html');
+    const html = await indexOp.content.text();
+    expect(html).toContain('data-osw-credit');
     expect(res).toEqual({ repoId: 'alice/my-site', url: 'https://huggingface.co/spaces/alice/my-site' });
   });
 

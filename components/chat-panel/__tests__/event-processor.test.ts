@@ -960,7 +960,7 @@ describe('conversation_message role=tool status transition', () => {
     expect(toolItem!.data.result).toBe('test');
   });
 
-  it('does not regress a completed tool back to completed (no-op on already completed)', () => {
+  it('keeps status completed when conversation_message arrives for an already-completed tool', () => {
     const events = [
       userMsg('list'),
       evt('toolCalls', {
@@ -978,7 +978,6 @@ describe('conversation_message role=tool status transition', () => {
     const turns = proc.process(events);
     const toolItem = turns[0].items.find(i => i.type === 'tool');
     expect(toolItem!.data.status).toBe('completed');
-    // Result gets updated since conversation_message sets it unconditionally
     expect(toolItem!.data.result).toBe('new result from conversation');
   });
 });

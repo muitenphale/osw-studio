@@ -23,7 +23,9 @@ describe('interview template registry', () => {
   });
 
   it('every built-in item is well-formed (id, elicit, completion)', () => {
-    for (const t of listInterviewTemplates()) {
+    const templates = listInterviewTemplates();
+    expect(templates.length).toBeGreaterThan(0);
+    for (const t of templates) {
       expect(t.artifacts.length).toBeGreaterThan(0);
       expect(t.items.length).toBeGreaterThan(0);
       for (const item of t.items) {

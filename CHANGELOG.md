@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.96.2 - 2026-08-22
+
+### Server Mode
+- **`build` delegates to the browser during server-side generation**: `buildCommand` (`lib/vfs/shell/commands/build.ts`) sends a `build_requested` SSE event to the connected browser session, which compiles with esbuild-wasm and POSTs the result back via `awaitBuildResult` (`server-orchestrator-runner.ts`). Without a connected session, the command returns an explicit error instead of silently failing.
+- **Python and lua runtimes hidden from the agent during server-side generation**: `buildCodeModePrompt` omits python and lua from the runtime list and adds a caveat. `getDefinitions` strips them from the bash tool description. `buildToolAccessError` uses a filtered command list.
+
+### Security
+- **Server-side generation error logging no longer risks leaking the API key**: the `.catch` in the generation route logged the full error object, which for provider failures could include request headers. It now logs only `err.message`.
+
+### Fixes
+- **esbuild cache invalidated on service-level failures**: `bundleProject` (`lib/preview/esbuild-bundler.ts`) now clears `esbuildInstance` and `initPromise` when the thrown error has no `.errors` property, distinguishing a WASM crash from a source error. The next build attempt re-initializes instead of reusing a dead instance.
+- **Compile error attributed to the file that caused it**: `pushCompileError` in `virtual-server.ts` extracts the actual file path from `[esbuild] /path:line:col` format instead of always blaming the entry point.
+- **Admin Users page can reset a password**: `updateUser` in `system-database.ts` accepts `password_hash`, the PUT route at `/api/admin/users/[id]` hashes an optional `password` field, and the Users view adds a Reset Password dialog with generate and show/hide controls. Hidden when identity is managed externally.
+
+### Tests
+- **Hollow test audit across the full suite**: 13 findings fixed across 11 test files. Deleted 3 live-reference and tautological tests. Strengthened 5 loose assertions (`toBeGreaterThan(0)` → exact values, `endsWith` → positional checks). Added floor guards before loops that would pass vacuously on empty arrays. Renamed a misleading test description. Added missing positive and negative test cases.
+
 ## v1.96.1 - 2026-08-20
 
 ### Server Mode

@@ -91,6 +91,7 @@ export async function runServerGeneration(
       eventBus.emit(taskId, request.projectId, event, data, task.sessionId);
     },
     dirtyPaths,
+    onBuildRequested: () => awaitBuildResult(taskId, deps),
   };
 
   const flushDirtyPaths = () => {

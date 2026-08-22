@@ -23,6 +23,8 @@ export interface ShellContext {
    *  read (or whole-chunk write) of that file. Powers the read-before-edit staleness
    *  guard. Absent for direct/test callers, which disables the guard. */
   readVersions?: Map<string, number>;
+  /** Delegate a build to the browser (server-side generation only). */
+  onBuildRequested?: () => Promise<{ success: boolean; errors?: string[] }>;
 }
 
 export type ShellResult = {

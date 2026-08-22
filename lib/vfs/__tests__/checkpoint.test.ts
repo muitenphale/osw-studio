@@ -539,8 +539,6 @@ describe('CheckpointManager', () => {
 
       checkpointManager.unloadProject('proj1');
 
-      // proj1 metadata cleared from RAM (getCheckpoints will reload from DB)
-      // proj2 still in memory
       const p2 = await checkpointManager.getCheckpoints('proj2');
       expect(p2).toHaveLength(1);
     });

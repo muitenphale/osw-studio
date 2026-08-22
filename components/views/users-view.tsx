@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { getLoginUrl } from '@/lib/config/storage';
-import { Users, Plus, Search, MoreHorizontal, UserCheck, UserX, Trash2, Pencil, ChevronRight, ChevronDown, HardDrive, Eye, EyeOff } from 'lucide-react';
+import { Users, Plus, Search, MoreHorizontal, UserCheck, UserX, Trash2, Pencil, ChevronRight, ChevronDown, HardDrive, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
@@ -84,6 +84,12 @@ export function UsersView() {
   });
   const [showPassword, setShowPassword] = useState(false);
 
+  // Reset password state
+  const [resetUser, setResetUser] = useState<UserInfo | null>(null);
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
   const [availableWorkspaces, setAvailableWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
 
   // Expandable workspace detail state
@@ -135,6 +141,42 @@ export function UsersView() {
       active: user.active,
     });
     setShowEditDialog(true);
+  };
+
+  const handleOpenReset = (user: UserInfo) => {
+    setResetUser(user);
+    setResetPassword('');
+    setShowResetPassword(false);
+    setShowResetDialog(true);
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetUser) return;
+    if (resetPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/users/${resetUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: resetPassword }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to reset password');
+      }
+      toast.success(`Password reset for ${resetUser.email}`);
+      setShowResetDialog(false);
+      setResetUser(null);
+      setResetPassword('');
+    } catch (err) {
+      logger.error('[UsersView] Failed to reset password:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to reset password');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -417,6 +459,12 @@ export function UsersView() {
                               <Pencil className="h-4 w-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
+                            {!externalIdentity && (
+                              <DropdownMenuItem onClick={() => handleOpenReset(user)}>
+                                <KeyRound className="h-4 w-4 mr-2" />
+                                Reset Password
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => handleToggleActive(user)}>
                               {user.active ? (
                                 <>
@@ -513,6 +561,62 @@ export function UsersView() {
             <Button variant="outline" onClick={() => { setShowEditDialog(false); setEditUser(null); }}>Cancel</Button>
             <Button onClick={handleSaveEdit} disabled={saving}>
               {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={showResetDialog} onOpenChange={(open) => { setShowResetDialog(open); if (!open) setResetUser(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Set a new password for <span className="font-medium text-foreground">{resetUser?.email}</span>
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="reset-password">New Password</Label>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:text-primary/80 transition-colors"
+                  onClick={() => {
+                    const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*';
+                    let pw = '';
+                    const rng = new Uint32Array(16); crypto.getRandomValues(rng);
+                    for (let i = 0; i < 16; i++) pw += chars[rng[i] % chars.length];
+                    setResetPassword(pw);
+                    setShowResetPassword(true);
+                  }}
+                >
+                  Generate
+                </button>
+              </div>
+              <div className="relative">
+                <Input
+                  id="reset-password"
+                  type={showResetPassword ? 'text' : 'password'}
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                  placeholder="Minimum 8 characters"
+                  className="pr-9"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowResetPassword(!showResetPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowResetDialog(false); setResetUser(null); }}>Cancel</Button>
+            <Button onClick={handleResetPassword} disabled={saving || resetPassword.length < 8}>
+              {saving ? 'Resetting...' : 'Reset Password'}
             </Button>
           </DialogFooter>
         </DialogContent>

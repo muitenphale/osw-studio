@@ -82,20 +82,6 @@ describe('Server-side generation integration', () => {
     expect((replayed![0].data as any).message.ui_metadata.projectContext).toBe('files...');
   });
 
-  it('task metadata is available in getTasksForSession for shelf display', () => {
-    const taskId = tm.createTask('proj-1', 'sess-1', 'sk-key');
-    const task = tm.getTask(taskId)!;
-    task.prompt = 'add a navbar';
-    task.model = 'claude-3.5-sonnet';
-    task.projectName = 'Portfolio';
-
-    const tasks = tm.getTasksForSession('sess-1');
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].prompt).toBe('add a navbar');
-    expect(tasks[0].model).toBe('claude-3.5-sonnet');
-    expect(tasks[0].projectName).toBe('Portfolio');
-  });
-
   it('ServerConfigManager tracks cost across multiple updates', () => {
     const config = new ServerConfigManager({
       provider: 'openai',

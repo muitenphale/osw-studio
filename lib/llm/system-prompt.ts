@@ -77,7 +77,7 @@ function searchCommandDoc(modelSupportsTools: boolean): string {
 Optional flags: -n <count> (default 5), --markdown (include extracted page content per result). Returns numbered results (title, URL, snippet). To read a result in full, use: curl --markdown <url>.`;
 }
 
-export async function buildSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string, agentType?: AgentType, modelSupportsTools = true, imageGenAvailable = false, webSearchAvailable = false): Promise<string> {
+export async function buildSystemPrompt(chatMode?: boolean, serverContext?: ServerContextMetadata | null, projectId?: string, agentType?: AgentType, modelSupportsTools = true, imageGenAvailable = false, webSearchAvailable = false, isServerSideGeneration = false): Promise<string> {
   if (agentType === 'setup') return SETUP_SYSTEM_PROMPT;
   if (agentType === 'interview') return INTERVIEW_SYSTEM_PROMPT;
   if (agentType === 'explore') return buildExplorePrompt(serverContext, projectId);
@@ -86,7 +86,7 @@ export async function buildSystemPrompt(chatMode?: boolean, serverContext?: Serv
   if (chatMode) {
     return buildChatModePrompt(serverContext, projectId);
   }
-  return await buildCodeModePrompt(serverContext, projectId, modelSupportsTools, imageGenAvailable, webSearchAvailable);
+  return await buildCodeModePrompt(serverContext, projectId, modelSupportsTools, imageGenAvailable, webSearchAvailable, isServerSideGeneration);
 }
 
 /**
@@ -379,7 +379,7 @@ Focus on exploration, analysis, and planning.`;
   return prompt;
 }
 
-async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string, modelSupportsTools = true, imageGenAvailable = false, webSearchAvailable = false): Promise<string> {
+async function buildCodeModePrompt(serverContext?: ServerContextMetadata | null, projectId?: string, modelSupportsTools = true, imageGenAvailable = false, webSearchAvailable = false, isServerSideGeneration = false): Promise<string> {
   let prompt = buildSharedPreamble(false, !!serverContext, modelSupportsTools);
 
   if (modelSupportsTools) {
@@ -405,8 +405,8 @@ Run build after writing a batch of files to verify they compile. Do not inspect 
 
 Runtime command (change project runtime):
   ${modelSupportsTools ? 'bash({ command: "runtime react" })' : '```bash\nruntime react\n```'}
-Valid runtimes: static, handlebars, react, preact, svelte, vue, python, lua.
-Changes the project runtime and updates .PROMPT.md if it hasn't been customized.
+Valid runtimes: static, handlebars, react, preact, svelte, vue${isServerSideGeneration ? '' : ', python, lua'}.
+Changes the project runtime and updates .PROMPT.md if it hasn't been customized.${isServerSideGeneration ? '\nNote: python and lua runtimes are not available during server-side generation. Scripts in those runtimes will run when the user opens the preview in their browser.' : ''}
 
 ${imageGenAvailable ? imageGenCommandDoc(modelSupportsTools) + '\n\n' : ''}${webSearchAvailable ? searchCommandDoc(modelSupportsTools) + '\n\n' : ''}Status command (always run before finishing):
   ${modelSupportsTools ? 'bash({ command: "status --task \'the original request\' --done \'work completed\' --remaining \'none\' --complete" })' : '```bash\nstatus --task \'the original request\' --done \'work completed\' --remaining \'none\' --complete\n```'}

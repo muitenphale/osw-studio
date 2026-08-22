@@ -3,11 +3,29 @@ import { drainCompileErrors, formatCompileErrors } from '@/lib/preview/compile-e
 
 /** `build` — compile the project and report errors. */
 export async function buildCommand(env: ShellEnv): Promise<ShellResult> {
-  const { vfs, projectId } = env;
+  const { vfs, projectId, ctx } = env;
 
-  // Build command — triggers its own compilation for reliable results.
-  // Previously piggybacked on the preview's debounced compile, causing race
-  // conditions when the AI writes multiple files before calling build.
+  if (typeof window === 'undefined' && ctx?.onBuildRequested) {
+    try {
+      const result = await ctx.onBuildRequested();
+      if (result.success) {
+        return { stdout: 'Build successful — 0 errors', stderr: '', exitCode: 0 };
+      }
+      const stderr = (result.errors || ['Build failed']).join('\n');
+      return { stdout: '', stderr, exitCode: 1 };
+    } catch (err: any) {
+      return { stdout: '', stderr: `Build failed: ${err.message}`, exitCode: 1 };
+    }
+  }
+
+  if (typeof window === 'undefined') {
+    return {
+      stdout: '',
+      stderr: 'Error: build requires the browser runtime (esbuild-wasm). This command is not available during server-side generation without a connected browser session.',
+      exitCode: 1,
+    };
+  }
+
   try {
     const { VirtualServer } = await import('@/lib/preview/virtual-server');
     const buildProject = await vfs.getProject(projectId);

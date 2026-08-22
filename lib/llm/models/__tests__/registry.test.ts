@@ -3,6 +3,7 @@ import { BUILT_IN_MODEL_TEMPLATES, isBuiltInTemplateId } from '@/lib/llm/models/
 
 describe('BUILT_IN_MODEL_TEMPLATES', () => {
   it('every preset has a valid, well-formed shape', () => {
+    expect(BUILT_IN_MODEL_TEMPLATES.length).toBeGreaterThan(0);
     for (const t of BUILT_IN_MODEL_TEMPLATES) {
       expect(t.id).toBeTruthy();
       expect(t.name).toBeTruthy();

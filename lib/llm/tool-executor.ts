@@ -36,6 +36,8 @@ export interface OswsToolExecutorConfig {
    *  Owned by the orchestrator (persists across messages) and shared with child
    *  executors, so a baseline recorded in one task survives into the next. */
   readVersions?: Map<string, number>;
+  /** Delegate a build to the browser (server-side generation only). */
+  onBuildRequested?: () => Promise<{ success: boolean; errors?: string[] }>;
 }
 
 export class OswsToolExecutor implements ToolExecutor {
@@ -46,11 +48,20 @@ export class OswsToolExecutor implements ToolExecutor {
   getDefinitions(agentType: string): ToolDef[] {
     const agent = this.config.getAgent();
     const defs = toolRegistry.getDefinitions(agent.tools, agentType);
-    return defs.map(d => ({
-      name: d.name,
-      description: d.description,
-      parameters: d.parameters as Record<string, unknown>,
-    }));
+    const isServerSide = !!this.config.onBuildRequested || typeof window === 'undefined';
+    return defs.map(d => {
+      let description = d.description;
+      if (isServerSide && d.name === 'bash') {
+        description = description
+          .replace(/, python, python3, lua/, '')
+          .replace(/Run scripts: python[^\n]*\n/g, '');
+      }
+      return {
+        name: d.name,
+        description,
+        parameters: d.parameters as Record<string, unknown>,
+      };
+    });
   }
 
   async execute(toolCall: ToolCall, context: ToolExecContext): Promise<ToolResult> {
@@ -107,6 +118,7 @@ export class OswsToolExecutor implements ToolExecutor {
       permissionMode: this.config.permissionMode,
       permissionOverrides: this.config.permissionOverrides,
       readVersions: this.config.readVersions,
+      onBuildRequested: this.config.onBuildRequested,
     };
 
     try {
@@ -295,9 +307,12 @@ export class OswsToolExecutor implements ToolExecutor {
       return `Error: "${toolId}" is not a tool — it is a bash command. Use the bash tool to run it:\n\n  bash({ command: "${toolId} ..." })`;
     }
 
+    const isServerSide = !!this.config.onBuildRequested || typeof window === 'undefined';
     const commandList = agentType === 'setup'
       ? 'brief, spec, ask, propose-create'
-      : 'ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, ss, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status';
+      : isServerSide
+        ? 'ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, ss, wc, sort, uniq, tr, curl, sqlite3, preview, build, status'
+        : 'ls, tree, cat, head, tail, rg, grep, find, mkdir, touch, rm, mv, cp, echo, sed, ss, wc, sort, uniq, tr, curl, sqlite3, python, python3, lua, preview, build, status';
 
     return `Error: Unknown tool "${toolId}". Available tools: bash.\n\nThe bash tool supports these commands: ${commandList}`;
   }

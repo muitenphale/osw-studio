@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, verifyInstanceApiKey } from '@/lib/auth/session';
 import { getUserById, updateUser, deactivateUser, listUserWorkspaces } from '@/lib/auth/system-database';
+import { hashPassword } from '@/lib/auth/passwords';
 
 
 export async function GET(
@@ -64,9 +65,18 @@ export async function PUT(
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    let passwordHash: string | undefined;
+    if (body.password) {
+      if (typeof body.password !== 'string' || body.password.length < 8) {
+        return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+      }
+      passwordHash = await hashPassword(body.password);
+    }
+
     updateUser(id, {
       active: body.active !== undefined ? (body.active ? 1 : 0) : undefined,
       display_name: body.displayName,
+      password_hash: passwordHash,
     });
 
     return NextResponse.json({ success: true });

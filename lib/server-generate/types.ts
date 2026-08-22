@@ -11,6 +11,8 @@ export interface ServerOrchestratorContext {
   onEvent: (event: string, data: Record<string, unknown>) => void;
   /** Paths mutated since last flush — populated by VFS mutation proxy */
   dirtyPaths: Set<string>;
+  /** Delegate a build to the connected browser session. */
+  onBuildRequested?: () => Promise<BuildResult>;
 }
 
 /** All config the server needs from the client to run generation */

@@ -575,12 +575,17 @@ export async function bundleProject(input: BundleInput): Promise<BundleOutput> {
       logLevel: 'silent',
     });
   } catch (buildError: any) {
-    // esbuild throws on build failures — extract structured errors
+    if (!buildError.errors) {
+      // Service-level failure (WASM died, not a source error) — reset the
+      // cached instance so the next build attempt can re-initialize.
+      esbuildInstance = null;
+      initPromise = null;
+    }
     const errors = (buildError.errors || []).map(
       (e: any) => `[esbuild] ${e.location ? `${e.location.file}:${e.location.line}:${e.location.column} ` : ''}${e.text}`
     );
     if (errors.length === 0) {
-      errors.push(`[esbuild] ${buildError.message}`);
+      errors.push(`Build failed: ${buildError.message}`);
     }
     return { js: '', css: null, errors, warnings: [] };
   }

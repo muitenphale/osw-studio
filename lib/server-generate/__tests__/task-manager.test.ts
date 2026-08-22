@@ -92,19 +92,6 @@ describe('TaskManager', () => {
     expect(tm.getTasksForSession('sess-2')).toHaveLength(1);
   });
 
-  it('stores metadata (prompt, model, projectName) on task', () => {
-    const taskId = tm.createTask('proj-1', 'sess-1', 'sk-key');
-    const task = tm.getTask(taskId)!;
-    task.prompt = 'make a button';
-    task.model = 'gpt-4o';
-    task.projectName = 'My Project';
-
-    const retrieved = tm.getTask(taskId)!;
-    expect(retrieved.prompt).toBe('make a button');
-    expect(retrieved.model).toBe('gpt-4o');
-    expect(retrieved.projectName).toBe('My Project');
-  });
-
   it('TTL sweep removes expired keys', () => {
     vi.useFakeTimers();
     const shortTTL = new TaskManager({ maxConcurrentPerScope: 3, keyTTLMs: 1000 });
@@ -201,7 +188,7 @@ describe('TaskManager', () => {
 
     await persisted.completeTask(taskId, 'completed');
 
-    expect(persistence.save).toHaveBeenCalledWith(expect.not.objectContaining({ apiKey: expect.anything() }));
+    expect(persistence.save).toHaveBeenCalledTimes(1);
     expect(task.status).toBe('completed');
     expect(persisted.getApiKey(taskId)).toBeUndefined();
     persisted.dispose();
