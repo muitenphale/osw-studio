@@ -23,7 +23,7 @@ type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'interviews' | '
 interface PageWrapperProps {
   view: View;
   workspaceId?: string;
-  settingsTab?: 'model' | 'application';
+  settingsTab?: string;
   autoCreateProject?: boolean;
 }
 

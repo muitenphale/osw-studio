@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { requireAuth, verifyInstanceApiKey } from '@/lib/auth/session';
@@ -28,6 +29,42 @@ function getWorkspaceDeploymentCount(workspaceId: string): number {
     const row = sysDb.prepare('SELECT COUNT(*) as count FROM deployment_routing WHERE workspace_id = ?').get(workspaceId) as { count: number };
     return row.count;
   } catch { return 0; }
+}
+
+interface DeploymentInfo {
+  id: string;
+  slug: string | null;
+  customDomain: string | null;
+}
+
+function getWorkspaceDeployments(workspaceId: string): DeploymentInfo[] {
+  try {
+    const sysDb = getSystemDatabase();
+    return (sysDb.prepare(
+      'SELECT deployment_id, slug, custom_domain FROM deployment_routing WHERE workspace_id = ? ORDER BY slug'
+    ).all(workspaceId) as { deployment_id: string; slug: string | null; custom_domain: string | null }[])
+      .map(r => ({ id: r.deployment_id, slug: r.slug, customDomain: r.custom_domain }));
+  } catch { return []; }
+}
+
+interface ProjectInfo {
+  id: string;
+  name: string;
+  updatedAt: string;
+}
+
+function getWorkspaceProjects(workspaceId: string): ProjectInfo[] {
+  try {
+    const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    const dbPath = path.join(dataDir, 'workspaces', workspaceId, 'osws.sqlite');
+    if (!fs.existsSync(dbPath)) return [];
+    const db = new Database(dbPath, { readonly: true });
+    const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
+    if (!tableExists) { db.close(); return []; }
+    const rows = db.prepare('SELECT id, name, updated_at FROM projects ORDER BY updated_at DESC').all() as { id: string; name: string; updated_at: string }[];
+    db.close();
+    return rows.map(r => ({ id: r.id, name: r.name, updatedAt: r.updated_at }));
+  } catch { return []; }
 }
 
 interface WorkspaceMember {
@@ -104,6 +141,8 @@ export async function GET(
       createdAt: ws.created_at,
       updatedAt: ws.updated_at,
       members: getWorkspaceMembers(ws.id),
+      projects: getWorkspaceProjects(ws.id),
+      deployments: getWorkspaceDeployments(ws.id),
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

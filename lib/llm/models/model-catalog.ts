@@ -18,6 +18,7 @@ import {
   registerOpenRouterPricingFromApi,
   registerPricingFromProviderModels,
 } from '@/lib/llm/pricing-cache';
+import { enrichModelsFromModelsDev, loadModelsFromModelsDev } from '@/lib/llm/models-dev';
 import { logger } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,7 @@ export async function loadProviderModels(provider: ProviderId): Promise<Provider
   const cachedEntry = configManager.getCachedModels(provider);
   if (cachedEntry) {
     const cached = cachedEntry.models as ProviderModel[];
+    await enrichModelsFromModelsDev(provider, cached);
     if (provider === 'openrouter') {
       registerPricingFromProviderModels('openrouter', cached);
     }
@@ -168,8 +170,14 @@ export async function loadProviderModels(provider: ProviderId): Promise<Provider
     } else if (providerConfig.supportsModelDiscovery) {
       const modelEntries = await getAvailableModels(apiKey || undefined, provider, providerConfig.baseUrl);
       loadedModels = modelEntries.map((entry) => normalizeModelEntry(entry, 128000));
-    } else if (providerConfig.models) {
-      loadedModels = providerConfig.models;
+    } else {
+      const devModels = await loadModelsFromModelsDev(provider);
+      loadedModels = devModels ?? providerConfig.models ?? [];
+    }
+
+    // Enrich with models.dev pricing for models that don't have it
+    if (loadedModels.length > 0) {
+      await enrichModelsFromModelsDev(provider, loadedModels);
     }
 
     // Cache results

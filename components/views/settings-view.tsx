@@ -2,24 +2,32 @@
 
 import React, { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ProvidersModelsView } from '@/components/providers-models';
-import { SettingsPanel } from '@/components/settings';
+import { UnifiedSettings, type SettingsPane } from '@/components/unified-settings';
+
+const VALID_PANES = new Set<SettingsPane>([
+  'connections', 'models', 'templates', 'appearance', 'costs', 'permissions', 'data',
+]);
+
+// Backward compat: map old param values to new pane IDs
+const LEGACY_MAP: Record<string, SettingsPane> = {
+  application: 'appearance',
+  model: 'models',
+};
 
 interface SettingsViewProps {
-  tab?: 'model' | 'application';
+  tab?: string;
 }
 
 function SettingsViewInner({ tab }: SettingsViewProps) {
   const searchParams = useSearchParams();
-  // URL param takes precedence, then prop, then default to 'model'
-  const settingsTab = searchParams.get('settings') as 'model' | 'application' | null;
-  const activeTab = settingsTab || tab || 'model';
+  const raw = searchParams.get('settings') || tab || 'connections';
+  const pane: SettingsPane =
+    VALID_PANES.has(raw as SettingsPane) ? raw as SettingsPane
+    : LEGACY_MAP[raw] ?? 'connections';
 
   return (
     <div className="h-full flex flex-col">
-      <div className={`flex-1 overflow-auto${activeTab === 'application' ? ' p-6' : ''}`}>
-        {activeTab === 'application' ? <SettingsPanel /> : <ProvidersModelsView />}
-      </div>
+      <UnifiedSettings activePane={pane} />
     </div>
   );
 }

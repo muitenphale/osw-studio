@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { ProvidersModelsView } from '@/components/providers-models';
+import { UnifiedSettingsModal, type SettingsPane } from '@/components/unified-settings';
 import { createPortal } from 'react-dom';
 import { ProjectModelsPanel } from '@/components/providers-models/project-models-panel';
 import { hasAnyConnectedProvider } from '@/lib/llm/providers/connection-status';
@@ -216,11 +216,11 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
-  const [showProvidersManage, setShowProvidersManage] = useState(false);
-  const [providersManageTab, setProvidersManageTab] = useState<'models' | 'connections' | 'templates'>('models');
+  const [showSettingsManage, setShowSettingsManage] = useState(false);
+  const [settingsManagePane, setSettingsManagePane] = useState<SettingsPane>('models');
   const openProvidersManage = useCallback((tab: 'models' | 'connections' | 'templates' = 'models') => {
-    setProvidersManageTab(tab);
-    setShowProvidersManage(true);
+    setSettingsManagePane(tab as SettingsPane);
+    setShowSettingsManage(true);
   }, []);
   // HF Space one-click sign-in: when no provider is connected and we're on an HF
   // Space, offer "Sign in with HuggingFace" OAuth in place of the "Select provider"
@@ -1177,35 +1177,11 @@ export function ChatPanel({
                   modal scroll-lock (react-remove-scroll) only whitelists the dialog content, and
                   cancels wheel events anywhere else — including the drawer. We render our own
                   backdrop since non-modal dialogs don't get Radix's overlay. */}
-              {showProvidersManage && typeof document !== 'undefined' && createPortal(
-                <div
-                  className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
-                  onClick={() => setShowProvidersManage(false)}
-                />,
-                document.body
-              )}
-              <Dialog open={showProvidersManage} onOpenChange={setShowProvidersManage} modal={false}>
-                <DialogContent
-                  className="gap-0 flex flex-col w-[min(1080px,calc(100vw-2rem))] max-w-none h-[min(840px,calc(100vh-3rem))] overflow-hidden"
-                  onOpenAutoFocus={(e) => e.preventDefault()}
-                  onFocusOutside={(e) => {
-                    // Non-modal dialog: the popover this opened from returns focus to its
-                    // trigger (outside the dialog) as it closes, which would otherwise
-                    // dismiss us instantly. Closing is handled by the backdrop and Escape.
-                    e.preventDefault();
-                  }}
-                  onInteractOutside={(e) => {
-                    // The model picker / save-as drawer is a separate fixed layer
-                    // portaled to <body>; interacting with it isn't an outside click.
-                    const original = (e as unknown as { detail?: { originalEvent?: Event } }).detail?.originalEvent;
-                    const target = (original?.target ?? e.target) as Element | null;
-                    if (target?.closest?.('[data-models-drawer]')) e.preventDefault();
-                  }}
-                >
-                  <DialogTitle className="sr-only">Providers &amp; models</DialogTitle>
-                  <ProvidersModelsView initialTab={providersManageTab} />
-                </DialogContent>
-              </Dialog>
+              <UnifiedSettingsModal
+                open={showSettingsManage}
+                onOpenChange={setShowSettingsManage}
+                initialPane={settingsManagePane}
+              />
 
               <InterviewTemplatesManager
                 open={interviewManagerOpen}

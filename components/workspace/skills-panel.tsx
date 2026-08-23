@@ -219,7 +219,7 @@ export function SkillsPanel({ onClose }: SkillsPanelProps) {
       </div>
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <SkillEditor
             skill={null}
             mode="create"

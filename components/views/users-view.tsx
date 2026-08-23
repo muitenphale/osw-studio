@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { getLoginUrl } from '@/lib/config/storage';
-import { Users, Plus, Search, MoreHorizontal, UserCheck, UserX, Trash2, Pencil, ChevronRight, ChevronDown, HardDrive, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { Users, Plus, Search, MoreHorizontal, UserCheck, UserX, Trash2, Pencil, ChevronRight, ChevronDown, HardDrive, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
@@ -71,8 +71,11 @@ export function UsersView() {
   // Edit form state
   const [editForm, setEditForm] = useState({
     displayName: '',
+    isAdmin: false,
     active: true,
+    password: '',
   });
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   // Create form state
   const [createForm, setCreateForm] = useState({
@@ -84,13 +87,12 @@ export function UsersView() {
   });
   const [showPassword, setShowPassword] = useState(false);
 
-  // Reset password state
-  const [resetUser, setResetUser] = useState<UserInfo | null>(null);
-  const [showResetDialog, setShowResetDialog] = useState(false);
-  const [resetPassword, setResetPassword] = useState('');
-  const [showResetPassword, setShowResetPassword] = useState(false);
-
   const [availableWorkspaces, setAvailableWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
+
+  // Workspace grant state (in edit dialog)
+  const [grantWorkspaceId, setGrantWorkspaceId] = useState('');
+  const [grantRole, setGrantRole] = useState<'owner' | 'editor' | 'viewer'>('editor');
+  const [grantingAccess, setGrantingAccess] = useState(false);
 
   // Expandable workspace detail state
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export function UsersView() {
   }, []);
 
   useEffect(() => {
-    if (showCreateDialog) {
+    if (showCreateDialog || showEditDialog) {
       fetch('/api/admin/workspaces')
         .then(res => res.ok ? res.json() : null)
         .then(data => {
@@ -113,7 +115,7 @@ export function UsersView() {
         })
         .catch(() => {});
     }
-  }, [showCreateDialog]);
+  }, [showCreateDialog, showEditDialog]);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -138,58 +140,38 @@ export function UsersView() {
     setEditUser(user);
     setEditForm({
       displayName: user.displayName || '',
+      isAdmin: user.isAdmin,
       active: user.active,
+      password: '',
     });
+    setShowEditPassword(false);
+    setGrantWorkspaceId('');
+    setGrantRole('editor');
     setShowEditDialog(true);
   };
 
-  const handleOpenReset = (user: UserInfo) => {
-    setResetUser(user);
-    setResetPassword('');
-    setShowResetPassword(false);
-    setShowResetDialog(true);
-  };
-
-  const handleResetPassword = async () => {
-    if (!resetUser) return;
-    if (resetPassword.length < 8) {
+  const handleSaveEdit = async () => {
+    if (!editUser) return;
+    if (editForm.password && editForm.password.length < 8) {
       toast.error('Password must be at least 8 characters');
       return;
     }
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/users/${resetUser.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: resetPassword }),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Failed to reset password');
+      const body: Record<string, unknown> = {
+        displayName: editForm.displayName || undefined,
+        active: editForm.active,
+      };
+      if (editForm.isAdmin !== editUser.isAdmin) {
+        body.isAdmin = editForm.isAdmin;
       }
-      toast.success(`Password reset for ${resetUser.email}`);
-      setShowResetDialog(false);
-      setResetUser(null);
-      setResetPassword('');
-    } catch (err) {
-      logger.error('[UsersView] Failed to reset password:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to reset password');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editUser) return;
-    setSaving(true);
-    try {
+      if (editForm.password) {
+        body.password = editForm.password;
+      }
       const res = await fetch(`/api/admin/users/${editUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          displayName: editForm.displayName || undefined,
-          active: editForm.active,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const error = await res.json();
@@ -204,6 +186,80 @@ export function UsersView() {
       toast.error(err instanceof Error ? err.message : 'Failed to update user');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangeRole = async (workspaceId: string, newRole: string) => {
+    if (!editUser) return;
+    try {
+      const res = await fetch(`/api/admin/workspaces/${workspaceId}/access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: editUser.id, role: newRole }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to change role');
+      }
+      toast.success('Role updated');
+      await loadUsers();
+      const updated = (await (await fetch('/api/admin/users')).json()).users as UserInfo[];
+      const refreshed = updated.find(u => u.id === editUser.id);
+      if (refreshed) setEditUser(refreshed);
+    } catch (err) {
+      logger.error('[UsersView] Failed to change role:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to change role');
+    }
+  };
+
+  const handleRevokeAccess = async (workspaceId: string) => {
+    if (!editUser) return;
+    try {
+      const res = await fetch(`/api/admin/workspaces/${workspaceId}/access`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: editUser.id }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to revoke access');
+      }
+      toast.success('Access revoked');
+      await loadUsers();
+      const updated = (await (await fetch('/api/admin/users')).json()).users as UserInfo[];
+      const refreshed = updated.find(u => u.id === editUser.id);
+      if (refreshed) setEditUser(refreshed);
+    } catch (err) {
+      logger.error('[UsersView] Failed to revoke access:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke access');
+    }
+  };
+
+  const handleGrantAccess = async () => {
+    if (!editUser || !grantWorkspaceId) return;
+    setGrantingAccess(true);
+    try {
+      const res = await fetch(`/api/admin/workspaces/${grantWorkspaceId}/access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: editUser.id, role: grantRole }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to grant access');
+      }
+      toast.success('Access granted');
+      setGrantWorkspaceId('');
+      setGrantRole('editor');
+      await loadUsers();
+      const updated = (await (await fetch('/api/admin/users')).json()).users as UserInfo[];
+      const refreshed = updated.find(u => u.id === editUser.id);
+      if (refreshed) setEditUser(refreshed);
+    } catch (err) {
+      logger.error('[UsersView] Failed to grant access:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to grant access');
+    } finally {
+      setGrantingAccess(false);
     }
   };
 
@@ -314,6 +370,13 @@ export function UsersView() {
       default: return 'outline';
     }
   };
+
+  // Workspaces the edit user does NOT already have access to
+  const grantableWorkspaces = useMemo(() => {
+    if (!editUser) return [];
+    const existingIds = new Set(editUser.workspaces.map(ws => ws.id));
+    return availableWorkspaces.filter(ws => !existingIds.has(ws.id));
+  }, [editUser, availableWorkspaces]);
 
   if (!isServerMode) {
     return (
@@ -459,12 +522,6 @@ export function UsersView() {
                               <Pencil className="h-4 w-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
-                            {!externalIdentity && (
-                              <DropdownMenuItem onClick={() => handleOpenReset(user)}>
-                                <KeyRound className="h-4 w-4 mr-2" />
-                                Reset Password
-                              </DropdownMenuItem>
-                            )}
                             <DropdownMenuItem onClick={() => handleToggleActive(user)}>
                               {user.active ? (
                                 <>
@@ -534,11 +591,18 @@ export function UsersView() {
 
       {/* Edit User Dialog */}
       <Dialog open={showEditDialog} onOpenChange={(open) => { setShowEditDialog(open); if (!open) setEditUser(null); }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit User</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 py-4">
+            {/* Email (read-only) */}
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Email</Label>
+              <div className="text-sm font-medium">{editUser?.email}</div>
+            </div>
+
+            {/* Display Name */}
             <div className="space-y-2">
               <Label htmlFor="edit-displayName">Display Name</Label>
               <Input
@@ -548,75 +612,152 @@ export function UsersView() {
                 placeholder="Display name"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="edit-active"
-                checked={editForm.active}
-                onCheckedChange={(checked) => setEditForm(f => ({ ...f, active: checked }))}
-              />
-              <Label htmlFor="edit-active">Active</Label>
+
+            {/* Admin + Active toggles */}
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="edit-admin"
+                  checked={editForm.isAdmin}
+                  onCheckedChange={(checked) => setEditForm(f => ({ ...f, isAdmin: checked }))}
+                />
+                <Label htmlFor="edit-admin">Admin</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="edit-active"
+                  checked={editForm.active}
+                  onCheckedChange={(checked) => setEditForm(f => ({ ...f, active: checked }))}
+                />
+                <Label htmlFor="edit-active">Active</Label>
+              </div>
+            </div>
+
+            {/* Password Reset */}
+            {!externalIdentity && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="edit-password">Reset Password</Label>
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:text-primary/80 transition-colors"
+                    onClick={() => {
+                      const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*';
+                      let pw = '';
+                      const rng = new Uint32Array(16); crypto.getRandomValues(rng);
+                      for (let i = 0; i < 16; i++) pw += chars[rng[i] % chars.length];
+                      setEditForm(f => ({ ...f, password: pw }));
+                      setShowEditPassword(true);
+                    }}
+                  >
+                    Generate
+                  </button>
+                </div>
+                <div className="relative">
+                  <Input
+                    id="edit-password"
+                    type={showEditPassword ? 'text' : 'password'}
+                    value={editForm.password}
+                    onChange={(e) => setEditForm(f => ({ ...f, password: e.target.value }))}
+                    placeholder="Leave blank to keep current"
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {editForm.password && editForm.password.length > 0 && editForm.password.length < 8 && (
+                  <p className="text-xs text-destructive">Minimum 8 characters</p>
+                )}
+              </div>
+            )}
+
+            {/* Workspace Memberships */}
+            <div className="space-y-3">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Workspaces ({editUser?.workspaces.length ?? 0})
+              </div>
+              {editUser && editUser.workspaces.length > 0 ? (
+                <div className="space-y-1.5">
+                  {editUser.workspaces.map((ws) => (
+                    <div
+                      key={ws.id}
+                      className="flex items-center gap-2 text-sm p-2 rounded bg-muted/50"
+                    >
+                      <span className="flex-1 min-w-0 truncate font-medium">{ws.name}</span>
+                      <Select
+                        value={ws.role}
+                        onValueChange={(value) => handleChangeRole(ws.id, value)}
+                      >
+                        <SelectTrigger className="w-24 h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="viewer">viewer</SelectItem>
+                          <SelectItem value="editor">editor</SelectItem>
+                          <SelectItem value="owner">owner</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRevokeAccess(ws.id)}
+                        title="Revoke access"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No workspaces assigned</div>
+              )}
+
+              {/* Grant access to another workspace */}
+              {grantableWorkspaces.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Select value={grantWorkspaceId} onValueChange={setGrantWorkspaceId}>
+                    <SelectTrigger className="flex-1 h-8 text-xs">
+                      <SelectValue placeholder="Add to workspace..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {grantableWorkspaces.map(ws => (
+                        <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={grantRole} onValueChange={(v) => setGrantRole(v as 'owner' | 'editor' | 'viewer')}>
+                    <SelectTrigger className="w-24 h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="viewer">viewer</SelectItem>
+                      <SelectItem value="editor">editor</SelectItem>
+                      <SelectItem value="owner">owner</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs shrink-0"
+                    disabled={!grantWorkspaceId || grantingAccess}
+                    onClick={handleGrantAccess}
+                  >
+                    {grantingAccess ? '...' : 'Grant'}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowEditDialog(false); setEditUser(null); }}>Cancel</Button>
             <Button onClick={handleSaveEdit} disabled={saving}>
               {saving ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reset Password Dialog */}
-      <Dialog open={showResetDialog} onOpenChange={(open) => { setShowResetDialog(open); if (!open) setResetUser(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Reset Password</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <p className="text-sm text-muted-foreground">
-              Set a new password for <span className="font-medium text-foreground">{resetUser?.email}</span>
-            </p>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="reset-password">New Password</Label>
-                <button
-                  type="button"
-                  className="text-xs text-primary hover:text-primary/80 transition-colors"
-                  onClick={() => {
-                    const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*';
-                    let pw = '';
-                    const rng = new Uint32Array(16); crypto.getRandomValues(rng);
-                    for (let i = 0; i < 16; i++) pw += chars[rng[i] % chars.length];
-                    setResetPassword(pw);
-                    setShowResetPassword(true);
-                  }}
-                >
-                  Generate
-                </button>
-              </div>
-              <div className="relative">
-                <Input
-                  id="reset-password"
-                  type={showResetPassword ? 'text' : 'password'}
-                  value={resetPassword}
-                  onChange={(e) => setResetPassword(e.target.value)}
-                  placeholder="Minimum 8 characters"
-                  className="pr-9"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowResetPassword(!showResetPassword)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowResetDialog(false); setResetUser(null); }}>Cancel</Button>
-            <Button onClick={handleResetPassword} disabled={saving || resetPassword.length < 8}>
-              {saving ? 'Resetting...' : 'Reset Password'}
             </Button>
           </DialogFooter>
         </DialogContent>

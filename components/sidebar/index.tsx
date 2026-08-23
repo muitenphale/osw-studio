@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { Project } from '@/lib/vfs/types';
 import { vfs } from '@/lib/vfs';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,13 @@ import {
   LogOut,
   LayoutDashboard,
   UserCircle,
+  FileText,
+  LayoutGrid,
+  Layers,
+  Palette,
+  DollarSign,
+  Shield,
+  Database,
 } from 'lucide-react';
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
@@ -81,8 +89,13 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
     icon: Settings,
     path: 'settings',
     subItems: [
-      { id: 'application', label: 'Application', icon: Settings },
-      { id: 'model', label: 'Provider & Model', icon: Sparkles },
+      { id: 'connections', label: 'Connections', icon: FileText },
+      { id: 'models', label: 'Models', icon: LayoutGrid },
+      { id: 'templates', label: 'Templates', icon: Layers },
+      { id: 'appearance', label: 'Appearance', icon: Palette },
+      { id: 'costs', label: 'Cost Tracking', icon: DollarSign },
+      { id: 'permissions', label: 'Permissions', icon: Shield },
+      { id: 'data', label: 'Data', icon: Database },
     ]
   },
   { id: 'tour', label: 'Guided Tour', icon: Info, action: 'start-tour' },
@@ -99,6 +112,96 @@ const SYSTEM_ACTIONS: SidebarItem[] = [
   ...(ACCOUNT_URL ? [{ id: 'account', label: 'Account', icon: UserCircle, href: ACCOUNT_URL }] : []),
   { id: 'logout', label: 'Logout', icon: LogOut, action: 'logout' },
 ];
+
+// ---------------------------------------------------------------------------
+// Flyout sub-menu (WP-style hover reveal for collapsed sections)
+// ---------------------------------------------------------------------------
+
+function SidebarFlyout({
+  item,
+  triggerRect,
+  sidebarRight,
+  recentProjects,
+  loadingRecentProjects,
+  onSubItemClick,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  item: SidebarItem;
+  triggerRect: DOMRect;
+  sidebarRight: number;
+  recentProjects: Project[];
+  loadingRecentProjects: boolean;
+  onSubItemClick: (parentItem: SidebarItem, subItem: { id: string; label: string; icon: React.ElementType; file?: string }) => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(triggerRect.top);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const labelH = labelRef.current?.offsetHeight ?? 0;
+    const containerPadTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const offset = labelH + containerPadTop;
+    const idealTop = triggerRect.top - offset;
+    const h = el.getBoundingClientRect().height;
+    const maxTop = window.innerHeight - h - 8;
+    setTop(Math.max(8, Math.min(idealTop, maxTop)));
+  }, [triggerRect.top]);
+
+  return createPortal(
+    <div
+      ref={ref}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className="fixed z-[60] bg-popover border rounded-lg shadow-lg py-1 min-w-[180px] max-w-[240px] max-h-[calc(100vh-1rem)] overflow-y-auto"
+      style={{ left: sidebarRight + 4, top }}
+    >
+      <div ref={labelRef} className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+        {item.label}
+      </div>
+
+      {item.hasRecentProjects ? (
+        loadingRecentProjects ? (
+          <div className="px-3 py-1.5 text-xs text-muted-foreground">Loading...</div>
+        ) : recentProjects.length > 0 ? (
+          recentProjects.map(project => (
+            <button
+              key={project.id}
+              type="button"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent rounded-sm transition-colors text-left"
+              onClick={() => onSubItemClick(item, { id: project.id, label: project.name, icon: FolderOpen })}
+            >
+              <FolderOpen className="h-3 w-3 shrink-0" />
+              <span className="truncate">{project.name}</span>
+            </button>
+          ))
+        ) : (
+          <div className="px-3 py-1.5 text-xs text-muted-foreground">No recent projects</div>
+        )
+      ) : item.subItems ? (
+        item.subItems.map(subItem => {
+          const SubIcon = subItem.icon;
+          return (
+            <button
+              key={subItem.id}
+              type="button"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent rounded-sm transition-colors text-left"
+              onClick={() => onSubItemClick(item, subItem)}
+            >
+              <SubIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{subItem.label}</span>
+            </button>
+          );
+        })
+      ) : null}
+    </div>,
+    document.body
+  );
+}
 
 interface SidebarProps {
   currentView: string;
@@ -137,6 +240,8 @@ function SidebarContent({
   const currentSettingsTab = searchParams.get('settings');
   const [pinned, setPinned] = useState(true); // Pinned = sidebar stays expanded
   const [hovering, setHovering] = useState(false);
+  const sidebarExpandingRef = useRef(false);
+  const pendingFlyoutRef = useRef<{ itemId: string; el: HTMLElement } | null>(null);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [loadingRecentProjects, setLoadingRecentProjects] = useState(true);
 
@@ -154,13 +259,13 @@ function SidebarContent({
   // Read-only: the gallery owns refreshing this, so the sidebar adds no extra request.
   const { pendingCount } = useProjectSyncState();
   const isDesktop = process.env.NEXT_PUBLIC_DESKTOP === 'true';
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(isServerMode ? null : false);
 
   useEffect(() => {
     if (!isServerMode) return;
     fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(data => {
-      if (data?.user?.isAdmin) setIsAdmin(true);
-    }).catch(() => {});
+      setIsAdmin(data?.user?.isAdmin ?? false);
+    }).catch(() => setIsAdmin(false));
   }, [isServerMode]);
 
   // Track if we're on mobile (client-side only)
@@ -229,6 +334,7 @@ function SidebarContent({
   // Mouse enter/leave handlers (desktop only)
   const handleMouseEnter = () => {
     if (!isMobile && !pinned) {
+      sidebarExpandingRef.current = true;
       setHovering(true);
       onHoverChange?.(true);
     }
@@ -236,6 +342,7 @@ function SidebarContent({
 
   const handleMouseLeave = () => {
     if (!isMobile && !pinned) {
+      pendingFlyoutRef.current = null;
       setHovering(false);
       onHoverChange?.(false);
     }
@@ -253,7 +360,7 @@ function SidebarContent({
 
   // Filter sidebar items based on Server Mode
   const visibleSidebarItems = SIDEBAR_ITEMS.filter(
-    item => (!item.serverModeOnly || isServerMode) && (!item.adminOnly || isAdmin)
+    item => (!item.serverModeOnly || isServerMode) && (!item.adminOnly || isAdmin !== false)
   );
 
   const toggleExpanded = (itemId: string) => {
@@ -267,6 +374,87 @@ function SidebarContent({
       return newSet;
     });
   };
+
+  // --- Flyout sub-menu state ---
+  const [flyoutItemId, setFlyoutItemId] = useState<string | null>(null);
+  const [flyoutTriggerRect, setFlyoutTriggerRect] = useState<DOMRect | null>(null);
+  const flyoutTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  const showFlyout = useCallback((itemId: string, el: HTMLElement) => {
+    clearTimeout(flyoutTimerRef.current);
+    setFlyoutItemId(itemId);
+    setFlyoutTriggerRect(el.getBoundingClientRect());
+  }, []);
+
+  const hideFlyout = useCallback(() => {
+    flyoutTimerRef.current = setTimeout(() => {
+      setFlyoutItemId(null);
+      setFlyoutTriggerRect(null);
+    }, 150);
+  }, []);
+
+  const cancelFlyoutHide = useCallback(() => {
+    clearTimeout(flyoutTimerRef.current);
+  }, []);
+
+  useEffect(() => () => clearTimeout(flyoutTimerRef.current), []);
+
+  useEffect(() => {
+    if (flyoutItemId && expandedItems.has(flyoutItemId)) {
+      setFlyoutItemId(null);
+      setFlyoutTriggerRect(null);
+    }
+  }, [expandedItems, flyoutItemId]);
+
+  useEffect(() => {
+    const el = sidebarRef.current;
+    if (!el) return;
+    const onTransitionEnd = (e: TransitionEvent) => {
+      if (e.propertyName === 'width' && e.target === el) {
+        sidebarExpandingRef.current = false;
+        const pending = pendingFlyoutRef.current;
+        if (pending) {
+          pendingFlyoutRef.current = null;
+          showFlyout(pending.itemId, pending.el);
+        }
+      }
+    };
+    el.addEventListener('transitionend', onTransitionEnd);
+    return () => el.removeEventListener('transitionend', onTransitionEnd);
+  }, [showFlyout]);
+
+  const handleSubItemClick = useCallback((parentItem: SidebarItem, subItem: { id: string; label: string; icon: React.ElementType; file?: string }) => {
+    setFlyoutItemId(null);
+    setFlyoutTriggerRect(null);
+    onMobileOpenChange?.(false);
+    if (parentItem.hasRecentProjects) {
+      const project = recentProjects.find(p => p.id === subItem.id);
+      if (project) onProjectSelect(project);
+      return;
+    }
+    if (isServerMode) {
+      const subBase = workspaceId ? `/w/${workspaceId}` : '/admin';
+      if (subItem.file) {
+        router.push(`${subBase}/docs?doc=${subItem.id}`);
+      } else {
+        router.push(`${subBase}/${parentItem.id}?settings=${subItem.id}`);
+      }
+    } else {
+      if (subItem.file) {
+        router.push(`/?doc=${subItem.id}`);
+        onNavigate(parentItem.id);
+      } else if (parentItem.id === 'settings') {
+        router.push(`/?settings=${subItem.id}`);
+        onNavigate(parentItem.id);
+      } else {
+        router.push('/');
+        onNavigate(parentItem.id);
+      }
+    }
+  }, [isServerMode, workspaceId, router, onNavigate, onMobileOpenChange, onProjectSelect, recentProjects]);
+
+  const flyoutItem = flyoutItemId ? visibleSidebarItems.find(i => i.id === flyoutItemId) ?? null : null;
 
   const handleItemAction = async (item: SidebarItem) => {
     // Close mobile menu when action is triggered
@@ -324,6 +512,7 @@ function SidebarContent({
       )}
 
       <div
+        ref={sidebarRef}
         className={cn(
           'flex flex-col h-screen bg-card transition-all duration-300',
           // Border: left on mobile (slides from right), right on desktop (stays on left)
@@ -432,20 +621,32 @@ function SidebarContent({
                 'p-1',
                 isExpanded && hasSubItems && 'bg-muted rounded-2xl'
               )}>
-                <div className="relative">
+                <div
+                  className="relative"
+                  onMouseEnter={(e) => {
+                    if (!isMobile && hasSubItems && !isExpanded) {
+                      if (sidebarExpandingRef.current) {
+                        pendingFlyoutRef.current = { itemId: item.id, el: e.currentTarget };
+                      } else {
+                        showFlyout(item.id, e.currentTarget);
+                      }
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (pendingFlyoutRef.current?.itemId === item.id) pendingFlyoutRef.current = null;
+                    if (flyoutItemId === item.id) hideFlyout();
+                  }}
+                >
                   <Button
                     variant="ghost"
-                    // Active item: neutral selected-surface + heavier weight instead of the orange primary fill.
-                    // Applied inline (not an arbitrary bg-[] class) so the CSS var always resolves.
                     style={isActive && !hasSubItems ? { backgroundColor: 'var(--sidebar-active-surface)' } : undefined}
                     className={cn(
                       'w-full',
                       collapsed ? 'justify-center px-2' : 'justify-start',
-                      !collapsed && hasSubItems && 'pr-8', // Make room for chevron
+                      !collapsed && hasSubItems && 'pr-8',
                       isActive && !hasSubItems && 'font-semibold'
                     )}
                     onClick={() => {
-                      // Navigate if item has path (or other action)
                       if (!hasSubItems || currentView !== item.id) {
                         handleItemAction(item);
                       }
@@ -689,6 +890,20 @@ function SidebarContent({
         </Button>
       </div>
     </div>
+
+      {/* Flyout sub-menu portal */}
+      {flyoutItem && flyoutTriggerRect && !isMobile && (
+        <SidebarFlyout
+          item={flyoutItem}
+          triggerRect={flyoutTriggerRect}
+          sidebarRight={sidebarRef.current?.getBoundingClientRect().right ?? 0}
+          recentProjects={recentProjects}
+          loadingRecentProjects={loadingRecentProjects}
+          onSubItemClick={handleSubItemClick}
+          onMouseEnter={cancelFlyoutHide}
+          onMouseLeave={hideFlyout}
+        />
+      )}
     </>
   );
 }

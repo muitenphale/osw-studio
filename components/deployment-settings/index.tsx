@@ -154,7 +154,7 @@ export function DeploymentSettingsModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl h-[80vh] flex flex-col">
+      <DialogContent className="sm:max-w-2xl h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Deployment Settings - {deployment.name}</DialogTitle>
           <DialogDescription>

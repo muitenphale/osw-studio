@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import { vfs } from '@/lib/vfs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { SettingsPanel } from '@/components/settings';
+import { UnifiedSettingsModal } from '@/components/unified-settings';
 import { FunctionsManager } from '@/components/database-manager/functions-manager';
 import { ServerFunctionsManager } from '@/components/database-manager/server-functions-manager';
 import { SecretsManager } from '@/components/database-manager/secrets-manager';
@@ -599,7 +599,7 @@ function ResponsiveTabBar({
 }
 
 export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, workspaceId }: ProjectSettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState('settings');
+  const [activeTab, setActiveTab] = useState('general');
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 
   const functionsProvider = useMemo(() => createFunctionsProvider(project.id), [project.id]);
@@ -607,10 +607,6 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, worksp
   const secretsProvider = useMemo(() => createSecretsProvider(project.id), [project.id]);
   const scheduledFunctionsProvider = useMemo(() => createScheduledFunctionsProvider(project.id), [project.id]);
 
-  // Tracks whether the project already had a database schema, so we only
-  // fire backend_feature_enabled on the empty -> has-schema transition. Seeded from the record and
-  // then confirmed asynchronously, which is what picks up a project still holding one in
-  // localStorage — reading that costs an await, and the ref has to exist before first render.
   const hadDbSchemaRef = useRef(!!project.settings?.databaseSchema);
   useEffect(() => {
     let cancelled = false;
@@ -621,7 +617,6 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, worksp
   }, [project.id]);
 
   const tabs: TabDef[] = [
-    { value: 'settings', icon: <Settings className="h-3 w-3" />, label: 'General' },
     { value: 'general', icon: <Settings2 className="h-3 w-3" />, label: 'Project' },
     { value: 'functions', icon: <Code2 className="h-3 w-3" />, label: 'Functions' },
     { value: 'helpers', icon: <Wrench className="h-3 w-3" />, label: 'Helpers' },
@@ -636,13 +631,7 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, worksp
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
           <ResponsiveTabBar tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 
-          {/* Framed content area — every tab renders its content inside this one wrapper. */}
           <div className="flex-1 overflow-hidden mt-3 rounded-lg border border-border bg-muted/20">
-            <TabsContent value="settings" className="h-full m-0 overflow-hidden">
-              <div className="h-full flex flex-col overflow-hidden p-3">
-                <SettingsPanel hideHeader hideFooter />
-              </div>
-            </TabsContent>
             <TabsContent value="general" className="h-full m-0 overflow-auto">
               <GeneralTab project={project} onProjectUpdate={onProjectUpdate} />
             </TabsContent>
@@ -726,6 +715,7 @@ export function ProjectSettingsPanel({ project, onProjectUpdate, enabled, worksp
           </div>
         </Tabs>
       </div>
+
     </div>
   );
 }
@@ -742,33 +732,51 @@ interface ProjectSettingsModalProps {
 
 export function ProjectSettingsModal({ project, isOpen, onClose, onProjectUpdate, enabled, onToggleEnabled, workspaceId }: ProjectSettingsModalProps) {
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-3xl h-[70vh] flex flex-col">
-        <DialogHeader>
-          <div className="flex items-center justify-between pr-6">
-            <div>
-              <DialogTitle className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Settings
-              </DialogTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                {project.name}
-              </p>
-            </div>
-            {isServerMode && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Backend {enabled ? 'Enabled' : 'Disabled'}</span>
-                <Switch checked={enabled} onCheckedChange={onToggleEnabled} />
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="sm:max-w-3xl h-[90vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-center justify-between pr-6">
+              <div>
+                <DialogTitle className="flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </DialogTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {project.name}
+                </p>
               </div>
-            )}
+              <div className="flex items-center gap-3">
+                {isServerMode && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Backend {enabled ? 'Enabled' : 'Disabled'}</span>
+                    <Switch checked={enabled} onCheckedChange={onToggleEnabled} />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                  onClick={() => setShowSettingsModal(true)}
+                >
+                  Manage settings
+                  <span>&rsaquo;</span>
+                </button>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden">
+            <ProjectSettingsPanel project={project} onProjectUpdate={onProjectUpdate} enabled={enabled} workspaceId={workspaceId} />
           </div>
-        </DialogHeader>
-        <div className="flex-1 overflow-hidden">
-          <ProjectSettingsPanel project={project} onProjectUpdate={onProjectUpdate} enabled={enabled} workspaceId={workspaceId} />
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <UnifiedSettingsModal
+        open={showSettingsModal}
+        onOpenChange={setShowSettingsModal}
+      />
+    </>
   );
 }

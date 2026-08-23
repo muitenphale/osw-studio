@@ -16,7 +16,7 @@ export function PermissionMatrixModal({
 }: PermissionMatrixModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="lg:max-w-3xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="lg:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Customize permissions (Custom mode)</DialogTitle>
         </DialogHeader>

@@ -6,6 +6,24 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.97.0 - Unified Settings and Provider Pricing (2026-08-23)
+
+All settings are in one place now: connections, models, templates, appearance, cost tracking, permissions and data, reachable from the sidebar or a deep link. Cost tracking also works for every cloud provider, not only OpenRouter and HuggingFace; the model selector shows capabilities (vision, function calling, reasoning) for providers that previously returned bare model IDs.
+
+### Settings
+- **One pane, seven sections**: Connections, Models, Templates, Appearance, Cost Tracking, Permissions, Data
+- **Reachable from the sidebar**: sub-items listed under the Settings menu item, or from a flyout when the sidebar is collapsed
+- **Old deep links still work**: `?settings=application` maps to Appearance, `?settings=model` maps to Models
+
+### Cost tracking
+- **Pricing data for all cloud providers**: Anthropic, OpenAI, Gemini, Groq, DeepSeek, HuggingFace, MiniMax, ZhiPu, SambaNova. Fetched from models.dev on first use and cached for the session
+- **Model capabilities filled in from models.dev**: vision support, function calling, reasoning, context length. Providers that only return a list of model IDs (DeepSeek, MiniMax, ZhiPu) now show these details in the model selector
+
+### Sidebar
+- **Flyout sub-menu on collapsed sidebar**: hovering a menu item that has sub-items shows them in a floating panel, without expanding the sidebar
+
+---
+
 ## v1.96.0 - Direct Editing for Static and Handlebars runtimes (2026-08-19)
 
 Selecting an element in the preview now puts a small toolbar on it: retype its text, swap its image, or open the Inspector for its spacing, type, colour and borders. Each of those used to mean writing a prompt and waiting for the agent. Style changes are written to a new `/overrides.css` in the project, so they export and publish with everything else.

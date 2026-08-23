@@ -8,6 +8,7 @@ import { parseStreamingResponse, type StreamResponse } from './streaming-parser'
 import { CostCalculator } from './cost-calculator';
 import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from './pricing-cache';
 import { fetchAvailableModels } from './models-api';
+import { ensureModelsDevPricing } from './models-dev';
 import { apiFetch } from '@/lib/api/backend-status';
 import { requestSnapshotStore } from './request-snapshot';
 import { logger } from '@/lib/utils';
@@ -227,7 +228,9 @@ export class OswsProviderAdapter implements ProviderAdapter {
 
   // ---------------------------------------------------------------------------
   // Private: ensurePricing
-  // Ensures dynamic pricing data is loaded for OpenRouter models.
+  // Ensures dynamic pricing data is loaded for the active provider/model.
+  // OpenRouter uses its own API; all other cloud providers fall back to
+  // models.dev for pricing data.
   // ---------------------------------------------------------------------------
 
   private async ensurePricing(provider: string, model: string): Promise<void> {
@@ -236,34 +239,38 @@ export class OswsProviderAdapter implements ProviderAdapter {
       return;
     }
 
-    if (provider !== 'openrouter') {
+    if (this.config.getModelPricing(provider, model)) {
       this.pricingEnsured.add(key);
       return;
     }
 
-    if (this.config.getModelPricing('openrouter', model)) {
-      this.pricingEnsured.add(key);
-      return;
-    }
+    if (provider === 'openrouter') {
+      const cachedModels = this.config.getCachedModels('openrouter');
+      if (cachedModels?.models?.length) {
+        registerPricingFromProviderModels('openrouter', cachedModels.models as ProviderModel[]);
+        if (this.config.getModelPricing('openrouter', model)) {
+          this.pricingEnsured.add(key);
+          return;
+        }
+      }
 
-    const cachedModels = this.config.getCachedModels('openrouter');
-    if (cachedModels?.models?.length) {
-      registerPricingFromProviderModels('openrouter', cachedModels.models as ProviderModel[]);
-      if (this.config.getModelPricing('openrouter', model)) {
-        this.pricingEnsured.add(key);
-        return;
+      try {
+        const models = await fetchAvailableModels();
+        registerOpenRouterPricingFromApi(models);
+      } catch (error) {
+        logger.warn('[ProviderAdapter] Failed to fetch OpenRouter pricing', error);
       }
     }
 
-    try {
-      const models = await fetchAvailableModels();
-      registerOpenRouterPricingFromApi(models);
-      if (this.config.getModelPricing('openrouter', model)) {
-        this.pricingEnsured.add(key);
+    if (!this.config.getModelPricing(provider, model)) {
+      try {
+        await ensureModelsDevPricing();
+      } catch (error) {
+        logger.warn('[ProviderAdapter] Failed to fetch models.dev pricing', error);
       }
-    } catch (error) {
-      logger.warn('[ProviderAdapter] Failed to fetch pricing metadata', error);
     }
+
+    this.pricingEnsured.add(key);
   }
 
   // ---------------------------------------------------------------------------

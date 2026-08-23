@@ -18,7 +18,7 @@ interface ContentAreaProps {
   view: string;
   workspaceId?: string;
   onProjectSelect: (project: Project) => void;
-  settingsTab?: 'model' | 'application';
+  settingsTab?: string;
   onNavigate?: (view: string) => void;
   onStartTour?: () => void;
   autoCreateProject?: boolean;

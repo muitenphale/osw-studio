@@ -21,7 +21,7 @@ interface ServerSettingsModalProps {
 export function ServerSettingsModal({ deployment, isOpen, onClose, workspaceId }: ServerSettingsModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-4xl h-[80vh] flex flex-col">
+      <DialogContent className="sm:max-w-4xl h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Server Settings</DialogTitle>
           <DialogDescription>

@@ -318,7 +318,7 @@ export function ImportDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
       <DialogContent
-        className="sm:max-w-2xl max-h-[85vh] flex flex-col gap-4"
+        className="sm:max-w-2xl max-h-[90vh] flex flex-col gap-4"
         showCloseButton={phase !== 'applying'}
         onEscapeKeyDown={(event) => {
           if (phase === 'applying') event.preventDefault();

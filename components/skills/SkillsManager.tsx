@@ -984,7 +984,7 @@ function GroupEditorDialog({ open, mode, group, allSkills, onSave, onCancel }: G
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{mode === 'create' ? 'New Skill Group' : 'Edit Skill Group'}</DialogTitle>
           <DialogDescription>

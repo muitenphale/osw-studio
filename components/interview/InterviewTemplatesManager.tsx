@@ -24,7 +24,7 @@ export function InterviewTemplatesManager({
 }: InterviewTemplatesManagerProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90vw] sm:max-w-[85vw] lg:max-w-[70vw] xl:max-w-[900px] h-[85vh] p-0 overflow-hidden">
+      <DialogContent className="max-w-[90vw] sm:max-w-[85vw] lg:max-w-[70vw] xl:max-w-[900px] h-[90vh] p-0 overflow-hidden">
         {/* sr-only title so Radix has an accessible name in every mode */}
         <DialogHeader className="sr-only">
           <DialogTitle>Interview templates</DialogTitle>

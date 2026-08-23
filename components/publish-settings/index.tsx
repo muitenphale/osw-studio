@@ -142,7 +142,7 @@ export function PublishSettingsModal({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={handleClose}>
-        <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Publish Settings - {project.name}</DialogTitle>
             <DialogDescription>

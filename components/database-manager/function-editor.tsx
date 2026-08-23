@@ -122,7 +122,7 @@ export function FunctionEditor({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-3xl h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-3xl h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>
             {fn ? 'Edit Function' : 'Create Function'}

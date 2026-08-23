@@ -28,12 +28,8 @@ import {
 import { configManager } from '@/lib/config/storage';
 import { ProviderId, ProviderModel } from '@/lib/llm/providers/types';
 import { getProvider } from '@/lib/llm/providers/registry';
-import { getAvailableModels, normalizeModelEntry } from '@/lib/llm/llm-client';
-import {
-  fetchAvailableModels,
-  formatModelPrice
-} from '@/lib/llm/models-api';
-import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from '@/lib/llm/pricing-cache';
+import { formatModelPrice } from '@/lib/llm/models-api';
+import { loadProviderModels } from '@/lib/llm/models/model-catalog';
 import { toast } from 'sonner';
 import { track } from '@/lib/telemetry';
 
@@ -69,185 +65,34 @@ export function ModelSelector({ provider, value: _value, onChange, className, hi
   const loadModels = useCallback(async () => {
     try {
       setLoading(true);
-      
-      const apiKey = configManager.getProviderApiKey(currentProvider);
-      
-      if (providerConfig.apiKeyRequired && !apiKey) {
+
+      if (providerConfig.apiKeyRequired && !configManager.getProviderApiKey(currentProvider)) {
         setNeedsApiKey(true);
-        if (providerConfig.models) {
-          setModels(providerConfig.models);
-        } else {
-          setModels([]);
-        }
+        setModels(providerConfig.models ?? []);
         return;
       }
-      
+
       setNeedsApiKey(false);
-      
-      // Check cache first
-      const cachedModels = configManager.getCachedModels(currentProvider);
-      if (cachedModels) {
-        const modelsFromCache = cachedModels.models as ProviderModel[];
-        setModels(modelsFromCache);
-        if (currentProvider === 'openrouter') {
-          registerPricingFromProviderModels('openrouter', modelsFromCache);
-        }
-        return;
-      }
-      
-      let loadedModels: ProviderModel[] = [];
-      
-      if (currentProvider === 'openrouter') {
-        // Use the existing OpenRouter models API
-        const availableModels = await fetchAvailableModels();
-        registerOpenRouterPricingFromApi(availableModels);
-        const norm = (desc: unknown): string => {
-          if (typeof desc === 'string') {
-            return desc;
-          }
 
-          if (desc && typeof desc === 'object') {
-            const record = desc as Record<string, unknown>;
-            const candidate = ['description', 'name', 'summary']
-              .map((key) => record[key])
-              .find((value): value is string => typeof value === 'string');
-
-            if (candidate) {
-              return candidate;
-            }
-
-            try {
-              return JSON.stringify(record);
-            } catch {
-              /* ignore */
-            }
-          }
-
-          if (desc == null) {
-            return '';
-          }
-
-          return String(desc);
-        };
-        loadedModels = availableModels.map((model) => {
-          const promptRate = model.pricing?.prompt ? Number(model.pricing.prompt) : undefined;
-          const completionRate = model.pricing?.completion ? Number(model.pricing.completion) : undefined;
-          const reasoningRate = model.pricing?.internal_reasoning ? Number(model.pricing.internal_reasoning) : undefined;
-
-          const normalizeRate = (value?: number) => {
-            if (value === undefined || !Number.isFinite(value)) return undefined;
-            return value * 1_000_000;
-          };
-
-          const normalizedInput = normalizeRate(promptRate);
-          const normalizedOutput = normalizeRate(completionRate);
-          const normalizedReasoning = normalizeRate(reasoningRate);
-
-          const pricing = (normalizedInput !== undefined && normalizedOutput !== undefined)
-            ? {
-                input: normalizedInput,
-                output: normalizedOutput,
-                reasoning: normalizedReasoning
-              }
-            : undefined;
-
-          const orModalities = model.architecture?.input_modalities as import('@/lib/llm/providers/types').InputModality[] | undefined;
-          const providerModel: ProviderModel = {
-            id: model.id,
-            name: model.name,
-            description: norm(model.description),
-            contextLength: model.context_length,
-            maxTokens: model.top_provider?.max_completion_tokens,
-            supportsFunctions: model.supported_parameters?.includes('tools'),
-            supportsVision: orModalities?.includes('image'),
-            supportsReasoning: model.supported_parameters?.includes('reasoning'),
-            ...(orModalities ? { inputModalities: orModalities } : {}),
-            pricing
-          };
-
-          return providerModel;
-        });
-      } else if (currentProvider === 'huggingface') {
-        try {
-          const hfResponse = await fetch('https://router.huggingface.co/v1/models');
-          if (hfResponse.ok) {
-            const hfData = await hfResponse.json();
-            loadedModels = (hfData.data || []).map((model: any) => {
-              const hfProviders = model.providers || [];
-              const bestProvider = hfProviders.find((p: any) => p.supports_tools && p.status === 'live')
-                || hfProviders.find((p: any) => p.status === 'live')
-                || hfProviders[0];
-
-              const contextLength = bestProvider?.context_length || 32768;
-              const supportsFunctions = hfProviders.some((p: any) => p.supports_tools);
-              const hfModalities = model.architecture?.input_modalities as import('@/lib/llm/providers/types').InputModality[] | undefined;
-              const supportsVision = hfModalities?.includes('image');
-
-              let pricing: { input: number; output: number } | undefined;
-              if (bestProvider?.pricing?.input != null && bestProvider?.pricing?.output != null) {
-                pricing = {
-                  input: bestProvider.pricing.input,
-                  output: bestProvider.pricing.output,
-                };
-              }
-
-              return {
-                id: model.id,
-                name: model.id.split('/').pop() || model.id,
-                contextLength,
-                supportsFunctions,
-                supportsVision,
-                ...(hfModalities ? { inputModalities: hfModalities } : {}),
-                pricing,
-              } as ProviderModel;
-            });
-          }
-        } catch (error) {
-          logger.error('HuggingFace models fetch error:', error);
-        }
-        if (loadedModels.length > 0) {
-          registerPricingFromProviderModels('huggingface', loadedModels);
-        }
-      } else if (providerConfig.supportsModelDiscovery) {
-        // Try to discover models (we know API key exists at this point)
-        const modelEntries = await getAvailableModels(apiKey || undefined, currentProvider);
-        loadedModels = modelEntries.map(entry => normalizeModelEntry(entry, 32000));
-      } else if (providerConfig.models) {
-        // Use hardcoded models
-        loadedModels = providerConfig.models;
-      } else {
-        loadedModels = [];
-      }
-      
+      const loadedModels = await loadProviderModels(currentProvider);
       setModels(loadedModels);
-      
-      // Show warning for local providers with no models
+
       if (providerConfig.isLocal && loadedModels.length === 0) {
         toast.warning(
           `No models found in ${providerConfig.name}. Please load some models in the application.`,
           { duration: 5000 }
         );
       }
-      
-      // Cache the loaded models
-      if (loadedModels.length > 0) {
-        configManager.setCachedModels(currentProvider, loadedModels);
-        if (currentProvider === 'openrouter') {
-          registerPricingFromProviderModels('openrouter', loadedModels);
-        }
-      }
     } catch (error) {
       logger.error('Failed to load models:', error);
-      
-      // Show helpful message for local providers
+
       if (providerConfig.isLocal) {
         toast.error(
           `${providerConfig.name} server not running. Please start the server and load some models.`,
           { duration: 5000 }
         );
       }
-      
-      // Fall back to hardcoded models if available
+
       if (providerConfig.models) {
         setModels(providerConfig.models);
       }

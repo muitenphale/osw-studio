@@ -13,6 +13,8 @@ import {
   ChevronDown,
   UserPlus,
   UserMinus,
+  FolderOpen,
+  Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -43,6 +45,18 @@ interface WorkspaceMember {
   joinedAt: string;
 }
 
+interface WorkspaceProject {
+  id: string;
+  name: string;
+  updatedAt: string;
+}
+
+interface WorkspaceDeployment {
+  id: string;
+  slug: string | null;
+  customDomain: string | null;
+}
+
 interface WorkspaceInfo {
   id: string;
   name: string;
@@ -60,6 +74,8 @@ interface WorkspaceInfo {
 
 interface WorkspaceDetail extends WorkspaceInfo {
   members: WorkspaceMember[];
+  projects: WorkspaceProject[];
+  deployments: WorkspaceDeployment[];
 }
 
 export function WorkspacesView() {
@@ -153,7 +169,6 @@ export function WorkspacesView() {
       setShowEditDialog(false);
       setEditWorkspace(null);
       await loadWorkspaces();
-      // Refresh detail if expanded
       if (expandedId === editWorkspace.id) {
         await loadDetail(editWorkspace.id);
       }
@@ -415,6 +430,7 @@ export function WorkspacesView() {
                             )}
                             <span>{ws.memberCount} {ws.memberCount === 1 ? 'member' : 'members'}</span>
                             <span>{ws.projectCount} {ws.projectCount === 1 ? 'project' : 'projects'}</span>
+                            <span>{ws.deploymentCount} {ws.deploymentCount === 1 ? 'deployment' : 'deployments'}</span>
                             <span>Created {formatDate(ws.createdAt)}</span>
                           </div>
                         </div>
@@ -447,22 +463,21 @@ export function WorkspacesView() {
                         </DropdownMenu>
                       </div>
 
-                      {/* Expanded members section */}
+                      {/* Expanded detail section */}
                       {isExpanded && (
                         <div className="border-t bg-muted/30 px-4 py-3 pl-12">
                           {loadingDetail ? (
                             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
                               <Spinner size={16} color="#f97316" />
-                              <span>Loading members...</span>
+                              <span>Loading details...</span>
                             </div>
                           ) : workspaceDetail ? (
-                            <div className="space-y-3">
-                              {/* Stats row */}
+                            <div className="space-y-4">
+                              {/* Quotas row */}
                               <div className="flex items-center gap-4 text-xs text-muted-foreground">
                                 <span>Max projects: {workspaceDetail.maxProjects}</span>
                                 <span>Max deployments: {workspaceDetail.maxDeployments}</span>
                                 <span>Max storage: {workspaceDetail.maxStorageMb} MB</span>
-                                <span>Deployments: {workspaceDetail.deploymentCount}</span>
                               </div>
 
                               {/* Members */}
@@ -525,6 +540,60 @@ export function WorkspacesView() {
                                   </div>
                                 ) : (
                                   <div className="text-sm text-muted-foreground py-1">No members</div>
+                                )}
+                              </div>
+
+                              {/* Projects */}
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                  Projects ({workspaceDetail.projects?.length ?? workspaceDetail.projectCount})
+                                </div>
+                                {workspaceDetail.projects && workspaceDetail.projects.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {workspaceDetail.projects.map((project) => (
+                                      <div
+                                        key={project.id}
+                                        className="flex items-center gap-3 text-sm p-2 rounded bg-background/60"
+                                      >
+                                        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                        <span className="flex-1 min-w-0 truncate font-medium">{project.name}</span>
+                                        <span className="text-xs text-muted-foreground shrink-0">
+                                          Updated {formatDate(project.updatedAt)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-muted-foreground py-1">No projects</div>
+                                )}
+                              </div>
+
+                              {/* Deployments */}
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                  Deployments ({workspaceDetail.deployments?.length ?? workspaceDetail.deploymentCount})
+                                </div>
+                                {workspaceDetail.deployments && workspaceDetail.deployments.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {workspaceDetail.deployments.map((deployment) => (
+                                      <div
+                                        key={deployment.id}
+                                        className="flex items-center gap-3 text-sm p-2 rounded bg-background/60"
+                                      >
+                                        <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                        <span className="flex-1 min-w-0 truncate font-medium">
+                                          {deployment.slug || deployment.id.slice(0, 8)}
+                                        </span>
+                                        {deployment.customDomain && (
+                                          <Badge variant="outline" className="text-xs shrink-0">
+                                            {deployment.customDomain}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-muted-foreground py-1">No deployments</div>
                                 )}
                               </div>
                             </div>

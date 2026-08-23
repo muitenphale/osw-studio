@@ -113,7 +113,7 @@ export function ScheduledFunctionEditor({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>
             {fn ? 'Edit Schedule' : 'Create Schedule'}

@@ -73,10 +73,15 @@ export async function PUT(
       passwordHash = await hashPassword(body.password);
     }
 
+    if (body.isAdmin !== undefined && id === session.userId) {
+      return NextResponse.json({ error: 'Cannot change your own admin status' }, { status: 400 });
+    }
+
     updateUser(id, {
       active: body.active !== undefined ? (body.active ? 1 : 0) : undefined,
       display_name: body.displayName,
       password_hash: passwordHash,
+      is_admin: body.isAdmin !== undefined ? (body.isAdmin ? 1 : 0) : undefined,
     });
 
     return NextResponse.json({ success: true });

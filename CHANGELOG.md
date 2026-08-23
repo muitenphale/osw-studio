@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.97.0 - 2026-08-23
+
+### UI
+- **Settings and Provider/Model merged into one pane**: `unified-settings/index.tsx` replaces both `settings/index.tsx` and `providers-models/index.tsx` with a single 7-pane layout: Connections, Models, Templates, Appearance, Cost Tracking, Permissions, Data. The old `SettingsPanel` is split into `appearance-pane.tsx`, `cost-tracking-pane.tsx`, `permissions-pane.tsx`, `data-pane.tsx`. Old `?settings=application` and `?settings=model` params map to the new pane ids.
+- **Collapsed sidebar shows a flyout sub-menu on hover**: `SidebarFlyout` component, portal-rendered at `document.body`, viewport-clamped, 150ms hide debounce. First selectable item aligns vertically with the trigger. If the sidebar is mid-expand, the flyout waits for the CSS transition to finish before appearing.
+- **Dialog heights standardized to 90vh**: function editor, scheduled function editor, server function editor, deployment settings, import, interview templates, permission matrix, publish settings, server settings, skills manager and skills panel dialogs.
+
+### AI Orchestration
+- **Cost tracking covers all cloud providers via models.dev**: `ensurePricing` in `provider-adapter.ts` fetches `models.dev/api.json` on first use and registers pricing for Anthropic, OpenAI, Gemini, Groq, DeepSeek, HuggingFace, MiniMax, ZhiPu and SambaNova. Previously only OpenRouter and HuggingFace had dynamic pricing. New module: `lib/llm/models-dev.ts`. The static `PROVIDER_PRICING` table in `cost-calculator.ts` remains as fallback.
+- **Model metadata filled from models.dev**: `enrichModelsFromModelsDev` stamps `inputModalities`, `outputModalities`, `supportsVision`, `supportsFunctions`, `supportsReasoning`, `contextLength` and `maxTokens` onto models that lack them. Existing values are not overwritten; `contextLength` is only updated when the current value is 128000 or below.
+- **Providers without model discovery get their list from models.dev**: MiniMax and ZhiPu load models via `loadModelsFromModelsDev()`. The hardcoded array is the fallback.
+- **Model selector delegates to `loadProviderModels`**: `model-selector.tsx` calls `loadProviderModels()` in `model-catalog.ts` instead of duplicating the OpenRouter/HuggingFace/discovery/static model-loading branches.
+
+### Server Mode
+- **Admin Edit User dialog replaces the separate Reset Password dialog**: the dialog now holds display name, admin toggle, inline password reset with generate/show, active toggle, and a workspace memberships section with per-membership role selector and revoke. `updateUser` in `system-database.ts` accepts `is_admin`; the PUT route guards against self-demotion.
+- **Admin Workspaces expanded row lists projects and deployments**: project names with last-updated dates and deployment slugs with custom domains. The workspace detail API returns `projects` and `deployments` arrays.
+- **Admin sidebar items render on first paint in server mode**: `isAdmin` initializes as `null` (unknown) instead of `false`, so admin-only items appear before the `/api/auth/me` fetch resolves.
+
 ## v1.96.2 - 2026-08-22
 
 ### Server Mode

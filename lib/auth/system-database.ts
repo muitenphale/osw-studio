@@ -250,7 +250,7 @@ export function listUsers(): Omit<SystemUser, 'password_hash'>[] {
 /**
  * Update user properties
  */
-export function updateUser(id: string, updates: { display_name?: string; active?: number; password_hash?: string }): void {
+export function updateUser(id: string, updates: { display_name?: string; active?: number; password_hash?: string; is_admin?: number }): void {
   const db = getSystemDatabase();
   const setClauses: string[] = ["updated_at = datetime('now')"];
   const values: (string | number)[] = [];
@@ -258,6 +258,7 @@ export function updateUser(id: string, updates: { display_name?: string; active?
   if (updates.display_name !== undefined) { setClauses.push('display_name = ?'); values.push(updates.display_name); }
   if (updates.active !== undefined) { setClauses.push('active = ?'); values.push(updates.active); }
   if (updates.password_hash !== undefined) { setClauses.push('password_hash = ?'); values.push(updates.password_hash); }
+  if (updates.is_admin !== undefined) { setClauses.push('is_admin = ?'); values.push(updates.is_admin); }
 
   values.push(id);
   db.prepare(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
