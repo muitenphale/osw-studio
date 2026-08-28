@@ -15,13 +15,12 @@ const buttonVariants = cva(
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
         destructive:
           "bg-red-500 text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20 [&_svg]:!text-white",
-        // The accent fill, for a primary action that commits to something. Deliberately rare:
-        // the neutral pass took orange off buttons, so this is emphasis worth spending, not the
-        // default. Preferred over `destructive` where an action is consequential but not a delete
-        // — red sits at hue ~25 and the accent at ~40, close enough that red beside brand orange
-        // reads as a wrong shade rather than as danger.
+        // The emphasis treatment for a primary action that commits to something. Muted orange,
+        // matching a selected segment in the Inspector's Styles panel (bg-primary/15 + text-primary):
+        // a tinted fill, not a solid one, so orange stays a signal rather than the default. Full
+        // solid orange is spent only on small accents (active tab underline, status dots).
         accent:
-          "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 focus-visible:ring-primary/20",
+          "bg-primary/15 text-primary border border-primary/40 shadow-xs hover:bg-primary/25 focus-visible:ring-primary/20",
         outline:
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
         secondary:

@@ -15,6 +15,7 @@ import { logger } from '@/lib/utils';
 import { SSEClient } from '@/lib/server-generate/sse-client';
 import { handleFilesChanged, cancelPendingFileSync } from '@/lib/server-generate/file-sync-handler';
 import { handleBuildRequested } from '@/lib/server-generate/build-delegation-handler';
+import { handleSearchRequested } from '@/lib/server-generate/search-delegation-handler';
 import { playTaskCompleteSound, playTaskCompleteSoundSubtle } from '@/lib/utils/task-complete-sound';
 import { checkpointManager } from '@/lib/vfs/checkpoint';
 import { saveManager } from '@/lib/vfs/save-manager';
@@ -924,8 +925,16 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
           handleBuildRequested(data as any);
           return;
         }
+        if (event === 'search_requested') {
+          handleSearchRequested(data as any);
+          return;
+        }
         if (event === 'task_complete') {
           cancelPendingFileSync();
+
+          // awaiting_user is a pause (e.g. a gated command awaiting the user's Allow/Deny), not a
+          // finish — the approval prompt is already in the chat. Don't celebrate or pull files.
+          const awaitingUser = data.exitReason === 'awaiting_user';
 
           const tasks = new Map(get().generationTasks);
           const task = [...tasks.values()].find((t) => t.serverTaskId && t.projectId === projectId && t.result === null);
@@ -942,13 +951,15 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
             }
             set({ generationTasks: tasks, ...deriveScalarFields(tasks, get().projectId) });
             if (result === 'completed') {
-              if (data.result !== 'stopped') {
+              if (data.result !== 'stopped' && !awaitingUser) {
                 playTaskCompleteSound();
               }
-              toast.success(data.result === 'stopped' ? 'Task stopped' : 'Task completed');
-              pullAndCheckpointServerFiles(projectId, get).catch(err => {
-                logger.warn('[ServerGen] Post-completion pull failed:', err);
-              });
+              if (!awaitingUser) {
+                toast.success(data.result === 'stopped' ? 'Task stopped' : 'Task completed');
+                pullAndCheckpointServerFiles(projectId, get).catch(err => {
+                  logger.warn('[ServerGen] Post-completion pull failed:', err);
+                });
+              }
             } else if (data.error) {
               toast.error(String(data.error), { duration: 5000 });
             }
@@ -1132,6 +1143,19 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
     const wsMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/w\/([^/]+)/) : null;
     const workspaceId = wsMatch?.[1];
 
+    // Web-search config for the server-side fallback (used only if no browser answers a delegated
+    // search). The default path delegates back to this browser; this carries the key for headless.
+    const wsProvider = configManager.getWebSearchProvider();
+    const webSearch = wsProvider
+      ? {
+          provider: wsProvider,
+          key: (wsProvider === 'tavily' || wsProvider === 'firecrawl' || wsProvider === 'brave')
+            ? (configManager.getWebSearchKey(wsProvider) || undefined)
+            : undefined,
+          searxngUrl: wsProvider === 'searxng' ? (configManager.getSearxngUrl() || undefined) : undefined,
+        }
+      : undefined;
+
     // Build execute options for the server orchestrator
     const imageData = images?.map(img => ({ data: img.data, mediaType: img.mediaType }));
     const executeOptions: Record<string, any> = {};
@@ -1157,6 +1181,8 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
           providerConfig: { provider },
           permissionMode: configManager.getPermissionMode(),
           permissionOverrides: configManager.getPermissionOverrides(),
+          webSearchAvailable: configManager.isWebSearchConfigured(),
+          ...(webSearch ? { webSearch } : {}),
           conversationHistory,
           ...(Object.keys(executeOptions).length > 0 ? { executeOptions } : {}),
           generationParams: {

@@ -6,6 +6,11 @@ export async function searchCommand(env: ShellEnv): Promise<ShellResult> {
   const { args } = env;
 
   if (typeof window === 'undefined') {
+    // Server-side generation: delegate to the connected browser, which runs this same command
+    // with the user's configured provider/key. Falls through to the browser path there.
+    if (env.ctx?.onSearchRequested) {
+      return env.ctx.onSearchRequested(args);
+    }
     return { stdout: '', stderr: 'search: requires the browser runtime.', exitCode: 1 };
   }
   const { configManager } = await import('@/lib/config/storage');

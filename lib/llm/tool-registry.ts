@@ -84,6 +84,13 @@ export interface ToolExecutionContext {
   readVersions?: Map<string, number>;
   /** Delegate a build to the browser (server-side generation only). */
   onBuildRequested?: () => Promise<{ success: boolean; errors?: string[] }>;
+  /** Delegate a web search to the browser (server-side generation only). */
+  onSearchRequested?: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  /** Server-side generation: instead of prompting (no UI), a gated command emits
+   *  `approval_required` and pauses the run (awaiting_user). The user approves/denies
+   *  when they return, which restarts the task. Browser runs leave this unset and use
+   *  the held-promise `onApprovalNeeded` prompt instead. */
+  pauseForApproval?: boolean;
 }
 
 interface RegisteredTool {
@@ -455,6 +462,18 @@ export async function checkCommandPermission(
   const overrides = context.permissionOverrides ?? configManager.getPermissionOverrides();
   if (!needsApproval(gateKey, mode, overrides)) return { allowed: true };
 
+  // Server-side generation: no live UI. Emit `approval_required` (which the tool executor
+  // turns into an awaiting_user pause) and decline this attempt. The client shows a persisted
+  // Allow/Deny prompt; the user's choice restarts the task with the decision applied.
+  if (context.pauseForApproval) {
+    const command = cmdArray.join(' ');
+    context.onProgress?.('approval_required', { gateKey, command, capabilityLabel: capabilityLabel(gateKey) });
+    return {
+      allowed: false,
+      reason: `Paused: awaiting your approval for ${capabilityLabel(gateKey)} ("${cmdArray[0]}"). The task will continue once you allow or deny it — do not retry.`,
+    };
+  }
+
   // Gated but no interactive UI -> allow (cannot prompt, must not hang).
   if (!context.onApprovalNeeded) return { allowed: true };
 
@@ -466,7 +485,9 @@ export async function checkCommandPermission(
 
   if (outcome === 'always') configManager.setPermissionOverride(gateKey, 'allow');
   if (outcome === 'deny') {
-    return { allowed: false, reason: `permission denied by user: ${cmdArray[0]}. Do not retry; continue without it.` };
+    // In server-side generation there is no UI to prompt, so the runner's callback declines
+    // automatically — do not blame the user, and name the capability so the reason is actionable.
+    return { allowed: false, reason: `${capabilityLabel(gateKey)} is not available for "${cmdArray[0]}" here (declined). Do not retry; continue without it.` };
   }
   return { allowed: true };
 }
@@ -648,6 +669,7 @@ async function executeShellSegment(
     generateImage: context.generateImage,
     readVersions: context.readVersions,
     onBuildRequested: context.onBuildRequested,
+    onSearchRequested: context.onSearchRequested,
   });
 
   // Refresh server context if shell command modified .server/ files

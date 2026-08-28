@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { TemplateCard } from './template-card';
 import { TemplatePreviewDialog } from '@/components/template-browser/template-preview-dialog';
 import { templatePreviewUnavailableReason } from '@/lib/vfs/templates/preview-project';
-import { logger } from '@/lib/utils';
+import { logger, formatCompactAge } from '@/lib/utils';
 import { toast } from 'sonner';
 import { provisionBackendFeatures } from '@/lib/vfs/provision-backend-features';
 import { usePagination } from '@/lib/hooks/use-pagination';
@@ -24,12 +24,22 @@ import { Pagination, PaginationRange } from '@/components/ui/pagination';
 import {
   Upload,
   Search,
-  LayoutGrid,
-  List,
   ArrowUpDown,
   Package,
-  Filter
+  Filter,
+  MoreVertical,
+  Trash2,
+  Download,
 } from 'lucide-react';
+import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
+import { Badge } from '@/components/ui/badge';
+import { getRuntimeBadge } from '@/lib/runtimes/registry';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -48,7 +58,6 @@ interface TemplateManagerProps {
 }
 
 type SortOption = 'updated' | 'name' | 'author' | 'files';
-type ViewMode = 'grid' | 'list';
 type TypeFilter = 'all' | 'standard' | 'server';
 
 export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
@@ -57,7 +66,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
   const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
-  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [viewMode, setViewMode] = useViewMode('templates');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   // The template being previewed, carried as the browser's selection value so one dialog serves
   // both surfaces.
@@ -348,6 +357,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     resetOn: [searchQuery, sortBy, typeFilter],
   });
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   if (loading || creating) {
     return (
@@ -364,7 +374,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
     <div className="h-full flex flex-col">
       {/* Toolbar */}
       <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
-        <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
+        <div className="mx-auto max-w-7xl flex flex-col sm:flex-row sm:items-center gap-3">
+        <h1 className="text-lg font-semibold shrink-0">Templates</h1>
         {/* Search */}
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -418,24 +429,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
           </Popover>
 
           {/* View Mode */}
-          <div className="flex border rounded-full">
-            <Button
-              variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('grid')}
-              className="rounded-r-none rounded-l-full"
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('list')}
-              className="rounded-l-none rounded-r-full"
-            >
-              <List className="h-4 w-4" />
-            </Button>
-          </div>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
 
           {/* Import */}
           <Button onClick={handleImportTemplate} size="sm" className="gap-2">
@@ -447,8 +441,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
       </div>
 
       {/* Templates Grid/List */}
-      <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6">
-        <div className="mx-auto max-w-7xl">
+      <div ref={listScrollRef} className="flex-1 min-h-0 flex flex-col px-4 pb-4 sm:px-6 sm:pb-6">
+        <div className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col">
         {sortedTemplates.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
@@ -479,37 +473,131 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
             </div>
           </div>
         ) : (
-          <>
-            <PaginationRange
-              total={templatesPagination.total}
-              rangeStart={templatesPagination.rangeStart}
-              rangeEnd={templatesPagination.rangeEnd}
-              totalPages={templatesPagination.totalPages}
-              className="mb-2"
-            />
-            <div className={viewMode === 'grid'
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-              : 'space-y-3'
-            }>
-              {templatesPagination.pageItems.map((template) => (
-                <TemplateCard
-                  key={template.id}
-                  template={template}
-                  onSelect={handleCreateProject}
-                  onPreview={templatePreviewTarget(template) ? handlePreviewTemplate : undefined}
-                  onDelete={handleDeleteTemplate}
-                  onExport={handleExportTemplate}
-                  viewMode={viewMode}
+          <div className="flex-1 min-h-0 flex flex-col">
+            {templatesPagination.totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
+                <PaginationRange
+                  total={templatesPagination.total}
+                  rangeStart={templatesPagination.rangeStart}
+                  rangeEnd={templatesPagination.rangeEnd}
+                  totalPages={templatesPagination.totalPages}
                 />
-              ))}
-            </div>
-            <Pagination
-              page={templatesPagination.page}
-              totalPages={templatesPagination.totalPages}
-              onPageChange={templatesPagination.setPage}
-              scrollTarget={listScrollRef}
-            />
-          </>
+                <Pagination
+                  page={templatesPagination.page}
+                  totalPages={templatesPagination.totalPages}
+                  onPageChange={templatesPagination.setPage}
+                  scrollTarget={contentScrollRef}
+                  className="pt-0 pb-0"
+                />
+              </div>
+            )}
+            {viewMode === 'table' ? (
+              <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto border rounded-lg">
+                <table className="w-full table-auto border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Type</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Runtime</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Author</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">License</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Updated</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {templatesPagination.pageItems.map((template) => {
+                      const isBuiltIn = 'isBuiltIn' in template && template.isBuiltIn;
+                      const custom = !isBuiltIn ? (template as CustomTemplate) : null;
+                      const runtime = isBuiltIn && 'runtime' in template
+                        ? getRuntimeBadge((template as BuiltInTemplateMetadata).runtime)
+                        : custom?.runtime ? getRuntimeBadge(custom.runtime) : null;
+                      const author = custom?.metadata?.author || template.metadata?.author || '';
+                      const license = custom?.metadata?.license || '';
+                      const updatedAt = custom?.updatedAt || custom?.importedAt;
+                      const thumbnail = custom?.metadata?.thumbnail;
+                      return (
+                        <tr key={template.id} className="border-b border-border/50 hover:bg-muted/50 cursor-pointer h-[44px]" onClick={() => handleCreateProject(template)}>
+                          <td className="p-[4px_10px] align-middle">
+                            <div className="w-[48px] h-[32px] rounded bg-muted border border-border flex items-center justify-center overflow-hidden shrink-0">
+                              {thumbnail ? (
+                                <img src={thumbnail} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <Package className="w-3 h-3 text-muted-foreground opacity-30" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
+                            <div className="min-w-0">
+                              <span className="block font-medium text-foreground text-[13px] truncate">{template.name}</span>
+                              <span className="block text-[11px] text-muted-foreground truncate">{template.description}</span>
+                            </div>
+                          </td>
+                          <td className="p-[4px_10px] align-middle whitespace-nowrap">
+                            <Badge variant={isBuiltIn ? 'secondary' : 'outline'} className="text-[11px] px-[7px] py-[1px] h-auto rounded-full">
+                              {isBuiltIn ? 'Built-in' : 'Custom'}
+                            </Badge>
+                          </td>
+                          <td className="p-[4px_10px] align-middle whitespace-nowrap">
+                            {runtime && <Badge className={`text-[11px] px-[7px] py-[1px] h-auto rounded-full ${runtime.className}`}>{runtime.label}</Badge>}
+                          </td>
+                          <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
+                            {author || '—'}
+                          </td>
+                          <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
+                            {license || '—'}
+                          </td>
+                          <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap overflow-hidden text-ellipsis">
+                            {updatedAt ? formatCompactAge(updatedAt) : '—'}
+                          </td>
+                          <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="outline" size="xs" onClick={() => handleCreateProject(template)}>Use</Button>
+                              {templatePreviewTarget(template) && (
+                                <Button variant="outline" size="xs" onClick={() => handlePreviewTemplate(template)}>Preview</Button>
+                              )}
+                              {!isBuiltIn && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleExportTemplate(template as CustomTemplate)}>
+                                      <Download className="w-4 h-4 mr-2" />Export
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDeleteTemplate((template as CustomTemplate).id)} className="text-destructive focus:text-destructive">
+                                      <Trash2 className="w-4 h-4 mr-2" />Delete
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {templatesPagination.pageItems.map((template) => (
+                  <TemplateCard
+                    key={template.id}
+                    template={template}
+                    onSelect={handleCreateProject}
+                    onPreview={templatePreviewTarget(template) ? handlePreviewTemplate : undefined}
+                    onDelete={handleDeleteTemplate}
+                    onExport={handleExportTemplate}
+                    viewMode="grid"
+                  />
+                ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
         </div>
       </div>

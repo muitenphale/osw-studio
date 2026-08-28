@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
 import { Plus, Edit, Trash2, Code } from 'lucide-react';
 
 interface ScriptsTabProps {
@@ -128,20 +129,15 @@ export function ScriptsTab({ settings, onChange }: ScriptsTabProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">Script Management</h3>
-          <p className="text-sm text-muted-foreground">
-            Add custom scripts to your published deployment
-          </p>
-        </div>
-        <Button onClick={handleAddScript} size="sm">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Script
-        </Button>
-      </div>
-
+    <div className="flex flex-col gap-4">
+      <Section>
+        <SectionHeader icon={Code} title="Scripts">
+          <Button onClick={handleAddScript} size="sm" variant="outline">
+            <Plus className="h-4 w-4" />
+            Add script
+          </Button>
+        </SectionHeader>
+        <SectionBody className="space-y-3">
       {allScripts.length === 0 ? (
         <div className="text-center p-8 border-2 border-dashed rounded-lg">
           <Code className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
@@ -203,6 +199,8 @@ export function ScriptsTab({ settings, onChange }: ScriptsTabProps) {
           ))}
         </div>
       )}
+        </SectionBody>
+      </Section>
 
       {/* Script Editor Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

@@ -68,6 +68,8 @@ export interface AppSettings {
   hasSeenGuidedTour?: boolean;
   /** When true, the large-file-write pacing notice is permanently dismissed. */
   pacingNoticeDismissed?: boolean;
+  /** Per-listing table/grid choice, keyed by page id (projects, templates, skills…). */
+  listViewModes?: Record<string, 'table' | 'grid'>;
   modelCache?: Partial<Record<ProviderId, ModelCacheEntry>>;
   modelPricing?: Partial<Record<ProviderId, Record<string, ProviderPricingEntry>>>;
   reasoningEnabled?: Record<string, boolean>;  // Per-model reasoning toggle (model ID -> enabled)
@@ -149,6 +151,15 @@ class ConfigManager {
     const settings = this.getSettings();
     settings[key] = value;
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
+  }
+
+  /** The saved table/grid choice for a listing page, or null when the user has not picked one. */
+  getListViewMode(page: string): 'table' | 'grid' | null {
+    return this.getSettings().listViewModes?.[page] ?? null;
+  }
+
+  setListViewMode(page: string, mode: 'table' | 'grid'): void {
+    this.setSetting('listViewModes', { ...this.getSettings().listViewModes, [page]: mode });
   }
 
   hasSeenTour(): boolean {

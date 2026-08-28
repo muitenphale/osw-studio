@@ -155,7 +155,7 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   return (
     <div
       className={cn(
-        'bg-card border border-border rounded-xl px-[18px] py-4',
+        'bg-card border border-border rounded-lg px-[18px] py-4',
         className,
       )}
     >
@@ -823,7 +823,7 @@ export function ModelsPane() {
   return (
     <div className="pb-8">
       {/* ---- Active-template bar ---- */}
-      <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl px-[18px] py-[13px] mb-6">
+      <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-lg px-[18px] py-[13px] mb-6">
         <span className="text-xs font-semibold tracking-[0.08em] uppercase text-muted-foreground flex-shrink-0">
           Active template
         </span>

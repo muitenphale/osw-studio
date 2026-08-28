@@ -13,6 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
+import { SettingRow } from '@/components/ui/setting-row';
 import { BarChart3, Shield, Info } from 'lucide-react';
 
 interface AnalyticsTabProps {
@@ -35,42 +37,31 @@ export function AnalyticsTab({ settings, onChange }: AnalyticsTabProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">Analytics Configuration</h3>
-          <p className="text-sm text-muted-foreground">
-            Track visitors and site usage
-          </p>
-        </div>
-      </div>
-
-      {/* Enable Analytics */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
-        <div className="space-y-1">
-          <Label htmlFor="analytics-enabled" className="text-base">
-            Enable Analytics
-          </Label>
-          <p className="text-sm text-muted-foreground">
-            Track page views and visitor statistics
-          </p>
-        </div>
-        <Switch
-          id="analytics-enabled"
-          checked={settings.analytics.enabled}
-          onCheckedChange={(checked) =>
-            handleAnalyticsChange('enabled', checked)
-          }
-        />
-      </div>
+    <div className="flex flex-col gap-4">
+      <Section>
+        <SectionHeader icon={BarChart3} title="Analytics" />
+        <SectionBody className="px-4 py-1">
+          <SettingRow
+            title="Enable analytics"
+            description="Track page views and visitor statistics"
+          >
+            <Switch
+              id="analytics-enabled"
+              checked={settings.analytics.enabled}
+              onCheckedChange={(checked) =>
+                handleAnalyticsChange('enabled', checked)
+              }
+            />
+          </SettingRow>
+        </SectionBody>
+      </Section>
 
       {settings.analytics.enabled && (
         <>
           {/* Provider Selection */}
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold mb-4">Analytics Provider</h4>
-            </div>
+          <Section>
+            <SectionHeader title="Analytics provider" />
+            <SectionBody className="space-y-4">
 
             <div className="space-y-2">
               <Label htmlFor="analytics-provider">Provider</Label>
@@ -354,13 +345,13 @@ export function AnalyticsTab({ settings, onChange }: AnalyticsTabProps) {
                 </p>
               </div>
             )}
-          </div>
+            </SectionBody>
+          </Section>
 
           {/* Privacy Mode */}
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold mb-4">Privacy Settings</h4>
-            </div>
+          <Section>
+            <SectionHeader title="Privacy settings" />
+            <SectionBody className="space-y-4">
 
             <div className="flex items-center justify-between p-4 border rounded-lg">
               <div className="space-y-1 flex-1">
@@ -399,14 +390,14 @@ export function AnalyticsTab({ settings, onChange }: AnalyticsTabProps) {
                 </div>
               </div>
             )}
-          </div>
+            </SectionBody>
+          </Section>
 
           {/* Preview */}
           {settings.analytics.provider !== 'builtin' && (
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-semibold mb-4">Script Preview</h4>
-              </div>
+            <Section>
+              <SectionHeader title="Script preview" />
+              <SectionBody className="space-y-4">
 
               <div className="p-4 bg-muted rounded-lg">
                 <code className="text-xs">
@@ -452,7 +443,8 @@ export function AnalyticsTab({ settings, onChange }: AnalyticsTabProps) {
               <p className="text-xs text-muted-foreground">
                 This script will be injected into the &lt;head&gt; section of your deployment
               </p>
-            </div>
+              </SectionBody>
+            </Section>
           )}
         </>
       )}

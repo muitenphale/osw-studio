@@ -6,6 +6,27 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.98.0 - Table Views and Layout Consistency (2026-08-29)
+
+Lists open as tables now: projects, templates, skills, interviews, deployments, users and workspaces, with the details the cards showed lined up in columns. The pages around them were rebuilt on one layout, so each starts with its name and groups its content into labelled cards. Deployment settings moved out of a modal into a full page.
+
+### Lists
+- **Table or cards, remembered per list**: Projects, Templates, Skills, Interviews and Deployments keep whichever you last used; Users and Workspaces are table only
+
+### Around the app
+- **Settings in labelled cards**: Appearance, Data and all six deployment settings tabs, instead of one long column of fields
+- **One highlight for anything selected**: switches, tabs, the table/card toggle and the deployment side nav share the same muted orange
+
+### Deployments
+- **Settings are a full page**: general, scripts, CDN, SEO, analytics, compliance and the backend tools behind one side nav
+- **Clicking a the deployment item opens it**: the whole card, replacing the Settings item in its menu
+
+### Server mode
+- **The assistant can search the web while it builds**: searches run through your browser, and the server finishes them if you close the tab
+- **A command that needs approval pauses the run**: it offers Allow or Deny when you come back, instead of being refused outright
+
+---
+
 ## v1.97.0 - Unified Settings and Provider Pricing (2026-08-23)
 
 All settings are in one place now: connections, models, templates, appearance, cost tracking, permissions and data, reachable from the sidebar or a deep link. Cost tracking also works for every cloud provider, not only OpenRouter and HuggingFace; the model selector shows capabilities (vision, function calling, reasoning) for providers that previously returned bare model IDs.

@@ -38,6 +38,10 @@ export interface OswsToolExecutorConfig {
   readVersions?: Map<string, number>;
   /** Delegate a build to the browser (server-side generation only). */
   onBuildRequested?: () => Promise<{ success: boolean; errors?: string[] }>;
+  /** Delegate a web search to the browser (server-side generation only). */
+  onSearchRequested?: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  /** Server-side generation: pause (awaiting_user) on gated commands instead of prompting. */
+  pauseForApproval?: boolean;
 }
 
 export class OswsToolExecutor implements ToolExecutor {
@@ -109,7 +113,9 @@ export class OswsToolExecutor implements ToolExecutor {
       isReadOnly: context.isReadOnly || this.config.chatMode,
       writeScope: agent.writeScope,
       onProgress: (event, data) => {
-        if (event === 'ask') awaitingUser = true;
+        // `approval_required` (server-side gated command) pauses the run the same way `ask`
+        // does — the client then shows a persisted Allow/Deny prompt and restarts the task.
+        if (event === 'ask' || event === 'approval_required') awaitingUser = true;
         if (event === 'project_ready') setupComplete = true;
         this.config.progress.onEvent(event, data);
       },
@@ -119,6 +125,8 @@ export class OswsToolExecutor implements ToolExecutor {
       permissionOverrides: this.config.permissionOverrides,
       readVersions: this.config.readVersions,
       onBuildRequested: this.config.onBuildRequested,
+      onSearchRequested: this.config.onSearchRequested,
+      pauseForApproval: this.config.pauseForApproval,
     };
 
     try {

@@ -7,11 +7,21 @@ const RESTART_FAILURE = 'Server restarted before generation could finish';
 const TASK_TTL_MS = 30 * 60 * 1000;
 
 function toPersistedTask(task: ServerTask): PersistedServerTask {
-  const { orchestrator: _orchestrator, pendingBuildResolve: _pendingBuildResolve, ...persisted } = task;
+  const {
+    orchestrator: _orchestrator,
+    pendingBuildResolve: _pendingBuildResolve,
+    pendingSearchResolve: _pendingSearchResolve,
+    ...persisted
+  } = task;
   return persisted;
 }
 
 function rowToTask(row: Record<string, unknown>): PersistedServerTask {
+  let pendingApproval: PersistedServerTask['pendingApproval'] = null;
+  const rawApproval = row.pending_approval as string | null | undefined;
+  if (rawApproval) {
+    try { pendingApproval = JSON.parse(rawApproval); } catch { pendingApproval = null; }
+  }
   return {
     taskId: row.task_id as string,
     projectId: row.project_id as string,
@@ -25,6 +35,7 @@ function rowToTask(row: Record<string, unknown>): PersistedServerTask {
     model: (row.model as string | null) ?? undefined,
     projectName: (row.project_name as string | null) ?? undefined,
     failureReason: (row.failure_reason as string | null) ?? undefined,
+    pendingApproval,
   };
 }
 
@@ -55,11 +66,18 @@ export class ServerTaskStore {
           prompt TEXT,
           model TEXT,
           project_name TEXT,
-          failure_reason TEXT
+          failure_reason TEXT,
+          pending_approval TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_server_generation_tasks_session
           ON server_generation_tasks(session_id, updated_at);
       `);
+
+      // Additive migration for databases created before pending_approval existed. ALTER errors
+      // with "duplicate column" when it already exists (fresh DBs from the CREATE above) — ignore.
+      try {
+        db.exec('ALTER TABLE server_generation_tasks ADD COLUMN pending_approval TEXT');
+      } catch { /* column already present */ }
 
       const now = Date.now();
       db.prepare(`
@@ -83,8 +101,8 @@ export class ServerTaskStore {
     db.prepare(`
       INSERT INTO server_generation_tasks (
         task_id, project_id, session_id, workspace_id, status, started_at, updated_at,
-        build_deferred, prompt, model, project_name, failure_reason
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        build_deferred, prompt, model, project_name, failure_reason, pending_approval
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(task_id) DO UPDATE SET
         status = excluded.status,
         updated_at = excluded.updated_at,
@@ -92,7 +110,8 @@ export class ServerTaskStore {
         prompt = excluded.prompt,
         model = excluded.model,
         project_name = excluded.project_name,
-        failure_reason = excluded.failure_reason
+        failure_reason = excluded.failure_reason,
+        pending_approval = excluded.pending_approval
     `).run(
       persisted.taskId,
       persisted.projectId,
@@ -108,6 +127,7 @@ export class ServerTaskStore {
       persisted.model ?? null,
       persisted.projectName ?? null,
       persisted.failureReason ?? null,
+      persisted.pendingApproval ? JSON.stringify(persisted.pendingApproval) : null,
     );
   }
 

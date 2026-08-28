@@ -18,7 +18,7 @@ export interface ToolCall {
 
 export interface TurnItem {
   id: string;
-  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'error_paused' | 'user' | 'synthetic_error' | 'project_context' | 'compaction' | 'ask' | 'interview_gate';
+  type: 'waiting' | 'reasoning' | 'plan' | 'agent' | 'progress' | 'tool' | 'text' | 'error' | 'error_paused' | 'user' | 'synthetic_error' | 'project_context' | 'compaction' | 'ask' | 'approval' | 'interview_gate';
   timestamp: number;
   data: any;
   eventId?: string;
@@ -388,6 +388,19 @@ export class EventProcessor {
             data: {
               prompt: event.data?.prompt,
               options: Array.isArray(event.data?.options) ? event.data.options : [],
+            },
+          });
+          break;
+
+        case 'approval_required':
+          state.currentTurn.items.push({
+            id: `item-${state.itemIdCounter++}`,
+            type: 'approval',
+            timestamp: event.timestamp,
+            data: {
+              gateKey: event.data?.gateKey,
+              command: event.data?.command,
+              capabilityLabel: event.data?.capabilityLabel,
             },
           });
           break;

@@ -15,6 +15,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ProjectCard } from './project-card';
+import { ProjectTableRow } from './project-table-row';
 import { MultipagePreview } from '@/components/preview/multipage-preview';
 import { AboutModal } from '@/components/about-modal';
 import {
@@ -23,8 +24,6 @@ import {
   FolderOpen,
   Upload,
   Search,
-  LayoutGrid,
-  List,
   ArrowUpDown,
   Info,
   TestTube,
@@ -33,6 +32,7 @@ import {
   ArrowRight,
   ArrowLeft,
 } from 'lucide-react';
+import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
 import {
   Dialog,
   DialogContent,
@@ -98,7 +98,6 @@ interface ProjectManagerProps {
 }
 
 type SortOption = 'updated' | 'created' | 'name';
-type ViewMode = 'grid' | 'list';
 
 export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter = false, autoCreate = false, workspaceId }: ProjectManagerProps) {
   const router = useRouter();
@@ -160,7 +159,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
     return BUILT_IN_TEMPLATES.find(t => t.id === templateId)?.description || '';
   };
   const [sortBy, setSortBy] = useState<SortOption>('updated');
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [viewMode, setViewMode] = useViewMode('projects');
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
@@ -178,6 +177,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const loadingRef = useRef(false);
   const demoCreationRef = useRef(false);
   const listScrollRef = useRef<HTMLElement | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Derive backend enabled state from localStorage
   const backendProjectEnabled = backendProject ? migrateBackendKey(backendProject.id) : true;
@@ -704,7 +704,8 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
         <div className="h-full flex flex-col">
             {/* Toolbar */}
             <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
-              <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3" data-tour-id="projects-actions">
+              <div className="mx-auto max-w-7xl flex flex-col sm:flex-row sm:items-center gap-3" data-tour-id="projects-actions">
+                <h1 className="text-lg font-semibold shrink-0">Projects</h1>
                 {/* New Project */}
                 <div className="flex items-center shrink-0">
                   <Button onClick={() => setCreateDialogOpen(true)} size="sm" className="gap-2" data-tour-id="new-project-button">
@@ -752,24 +753,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                   </Popover>
 
                   {/* View Mode */}
-                  <div className="flex border rounded-full">
-                    <Button
-                      variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setViewMode('grid')}
-                      className="rounded-r-none rounded-l-full"
-                    >
-                      <LayoutGrid className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setViewMode('list')}
-                      className="rounded-l-none rounded-r-full"
-                    >
-                      <List className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  <ViewModeToggle value={viewMode} onChange={setViewMode} />
 
                   {/* Import — a file or a folder, since one input cannot offer both */}
                   <DropdownMenu>
@@ -795,8 +779,8 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
             </div>
 
             {/* Projects Grid/List */}
-            <div className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6">
-              <div className="mx-auto max-w-7xl">
+            <div className="flex-1 min-h-0 flex flex-col px-4 pb-4 sm:px-6 sm:pb-6">
+              <div className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col">
                 {filteredProjects.length === 0 && !backgroundPullDone ? (
                   <div className="flex items-center justify-center py-12">
                     <Spinner size={24} className="text-muted-foreground" />
@@ -827,53 +811,92 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                     )}
                   </div>
                 ) : (
-                  <>
-                    <PaginationRange
-                      total={projectsPagination.total}
-                      rangeStart={projectsPagination.rangeStart}
-                      rangeEnd={projectsPagination.rangeEnd}
-                      totalPages={projectsPagination.totalPages}
-                      className="mb-2"
-                    />
-                    <div
-                      className={viewMode === 'grid'
-                        ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                        : 'space-y-3'}
-                      data-tour-id="projects-list"
-                    >
-                      {projectsPagination.pageItems.map(project => {
-                        if (typeof project !== 'object' || !project.id || !project.name) {
-                          logger.error('Invalid project object:', project);
-                          return null;
-                        }
-
-                        return (
-                          <ProjectCard
-                            key={project.id}
-                            project={project}
-                            onSelect={onProjectSelect}
-                            onDelete={deleteProject}
-                            onExport={exportProject}
-                            onExportZip={exportProjectAsZip}
-                            onDuplicate={duplicateProject}
-                            onPreview={setPreviewProject}
-                            onExportAsTemplate={setTemplateExportProject}
-                            onBackend={setBackendProject}
-                            onUpdate={handleProjectUpdate}
-                            viewMode={viewMode}
-                            forceMenuOpen={tourActionProjectId === project.id}
-                            highlightExport={tourRunning && tourStep === 'project-controls' && tourActionProjectId === project.id}
-                          />
-                        );
-                      })}
-                    </div>
-                    <Pagination
-                      page={projectsPagination.page}
-                      totalPages={projectsPagination.totalPages}
-                      onPageChange={projectsPagination.setPage}
-                      scrollTarget={listScrollRef}
-                    />
-                  </>
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    {projectsPagination.totalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
+                        <PaginationRange
+                          total={projectsPagination.total}
+                          rangeStart={projectsPagination.rangeStart}
+                          rangeEnd={projectsPagination.rangeEnd}
+                          totalPages={projectsPagination.totalPages}
+                        />
+                        <Pagination
+                          page={projectsPagination.page}
+                          totalPages={projectsPagination.totalPages}
+                          onPageChange={projectsPagination.setPage}
+                          scrollTarget={contentScrollRef}
+                          className="pt-0 pb-0"
+                        />
+                      </div>
+                    )}
+                    {viewMode === 'table' ? (
+                      <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto border rounded-lg" data-tour-id="projects-list">
+                        <table className="w-full table-auto border-collapse">
+                          <thead className="sticky top-0 z-10">
+                            <tr>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Runtime</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Files</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Size</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Cost</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Updated</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {projectsPagination.pageItems.map(project => {
+                              if (typeof project !== 'object' || !project.id || !project.name) return null;
+                              return (
+                                <ProjectTableRow
+                                  key={project.id}
+                                  project={project}
+                                  onSelect={onProjectSelect}
+                                  onDelete={deleteProject}
+                                  onExport={exportProject}
+                                  onExportZip={exportProjectAsZip}
+                                  onDuplicate={duplicateProject}
+                                  onPreview={setPreviewProject}
+                                  onExportAsTemplate={setTemplateExportProject}
+                                  onBackend={setBackendProject}
+                                  onUpdate={handleProjectUpdate}
+                                />
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto" data-tour-id="projects-list">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                          {projectsPagination.pageItems.map(project => {
+                            if (typeof project !== 'object' || !project.id || !project.name) {
+                              logger.error('Invalid project object:', project);
+                              return null;
+                            }
+                            return (
+                              <ProjectCard
+                                key={project.id}
+                                project={project}
+                                onSelect={onProjectSelect}
+                                onDelete={deleteProject}
+                                onExport={exportProject}
+                                onExportZip={exportProjectAsZip}
+                                onDuplicate={duplicateProject}
+                                onPreview={setPreviewProject}
+                                onExportAsTemplate={setTemplateExportProject}
+                                onBackend={setBackendProject}
+                                onUpdate={handleProjectUpdate}
+                                viewMode="grid"
+                                forceMenuOpen={tourActionProjectId === project.id}
+                                highlightExport={tourRunning && tourStep === 'project-controls' && tourActionProjectId === project.id}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

@@ -83,6 +83,37 @@ describe('ServerTaskStore', () => {
     expect(task).not.toHaveProperty('pendingBuildResolve');
   });
 
+  it('round-trips pendingApproval through JSON', async () => {
+    const store = new ServerTaskStore();
+    await store.initialize();
+    const pendingApproval = { gateKey: 'search', command: 'search "weather"' };
+    await store.save(makeTask({ pendingApproval }));
+
+    const task = await store.getById('t1');
+    expect(task?.pendingApproval).toEqual(pendingApproval);
+  });
+
+  it('stores a null pending_approval when the task has none', async () => {
+    const store = new ServerTaskStore();
+    await store.initialize();
+    await store.save(makeTask()); // no pendingApproval
+
+    const task = await store.getById('t1');
+    expect(task?.pendingApproval).toBeNull();
+  });
+
+  it('maps a malformed pending_approval column back to null instead of throwing', async () => {
+    const store = new ServerTaskStore();
+    await store.initialize();
+    await store.save(makeTask());
+    // Corrupt the persisted JSON directly; a bad column must not crash the read.
+    mocks.db.prepare('UPDATE server_generation_tasks SET pending_approval = ? WHERE task_id = ?')
+      .run('{not valid json', 't1');
+
+    const task = await store.getById('t1');
+    expect(task?.pendingApproval).toBeNull();
+  });
+
   it('save upserts on taskId, updating status but preserving startedAt', async () => {
     const store = new ServerTaskStore();
     await store.initialize();

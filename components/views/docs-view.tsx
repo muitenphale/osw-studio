@@ -8,6 +8,7 @@ import { useTableOfContents } from '@/lib/hooks/use-table-of-contents';
 import { AlertCircle } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
+import { PageShell, PageHeader } from '@/components/ui/page-shell';
 
 function DocsViewContent() {
   const searchParams = useSearchParams();
@@ -211,9 +212,10 @@ function DocsViewContent() {
   const showToc = tocItems.length >= 3;
 
   return (
-    <div className="h-full flex flex-col">
+    <PageShell>
+      <PageHeader title="Docs" maxWidth="max-w-none" className="pb-2" />
       {/* Two-column layout: Content + TOC */}
-      <div className={`flex-1 overflow-hidden ${showToc ? 'lg:grid lg:grid-cols-[1fr_280px]' : ''}`}>
+      <div className={`flex-1 min-h-0 overflow-hidden ${showToc ? 'lg:grid lg:grid-cols-[1fr_280px]' : ''}`}>
         {/* Main Content Area - scrollable */}
         <div className="h-full overflow-y-auto docs-content-area bg-background">
           <div
@@ -279,7 +281,7 @@ function DocsViewContent() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 

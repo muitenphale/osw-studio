@@ -14,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Search, Image as ImageIcon, X } from 'lucide-react';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
+import { Search, X } from 'lucide-react';
 
 interface SeoTabProps {
   settings: PublishSettings;
@@ -58,19 +59,11 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold">SEO Configuration</h3>
-        <p className="text-sm text-muted-foreground">
-          Optimize your deployment for search engines and social sharing
-        </p>
-      </div>
-
+    <div className="flex flex-col gap-4">
       {/* Basic Meta Tags */}
-      <div className="space-y-4">
-        <div>
-          <h4 className="font-semibold mb-4">Basic Meta Tags</h4>
-        </div>
+      <Section>
+        <SectionHeader title="Basic meta tags" />
+        <SectionBody className="space-y-4">
 
         <div className="space-y-2">
           <Label htmlFor="seo-title">Meta Title</Label>
@@ -162,13 +155,13 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
             Prevent duplicate content issues by specifying the primary URL
           </p>
         </div>
-      </div>
+        </SectionBody>
+      </Section>
 
       {/* Open Graph */}
-      <div className="space-y-4">
-        <div>
-          <h4 className="font-semibold mb-4">Open Graph (Facebook, LinkedIn)</h4>
-        </div>
+      <Section>
+        <SectionHeader title="Open Graph (Facebook, LinkedIn)" />
+        <SectionBody className="space-y-4">
 
         <div className="space-y-2">
           <Label htmlFor="og-title">OG Title</Label>
@@ -224,13 +217,13 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
             </div>
           </div>
         )}
-      </div>
+        </SectionBody>
+      </Section>
 
       {/* Twitter Card */}
-      <div className="space-y-4">
-        <div>
-          <h4 className="font-semibold mb-4">Twitter Card</h4>
-        </div>
+      <Section>
+        <SectionHeader title="Twitter card" />
+        <SectionBody className="space-y-4">
 
         <div className="space-y-2">
           <Label htmlFor="twitter-card">Card Type</Label>
@@ -254,13 +247,13 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
             How your deployment appears when shared on Twitter/X
           </p>
         </div>
-      </div>
+        </SectionBody>
+      </Section>
 
       {/* Preview */}
-      <div className="space-y-4">
-        <div>
-          <h4 className="font-semibold mb-4">Search Result Preview</h4>
-        </div>
+      <Section>
+        <SectionHeader title="Search result preview" />
+        <SectionBody className="space-y-4">
 
         <div className="p-4 border rounded-lg bg-muted/50">
           <div className="flex gap-2 mb-2">
@@ -280,14 +273,14 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
             </div>
           </div>
         </div>
-      </div>
+        </SectionBody>
+      </Section>
 
       {/* Social Share Preview */}
       {(settings.seo.ogTitle || settings.seo.ogImage) && (
-        <div className="space-y-4">
-          <div>
-            <h4 className="font-semibold mb-4">Social Share Preview</h4>
-          </div>
+        <Section>
+          <SectionHeader title="Social share preview" />
+          <SectionBody className="space-y-4">
 
           <div className="p-4 border rounded-lg bg-muted/50">
             <div className="space-y-2">
@@ -318,7 +311,8 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
               </div>
             </div>
           </div>
-        </div>
+          </SectionBody>
+        </Section>
       )}
     </div>
   );

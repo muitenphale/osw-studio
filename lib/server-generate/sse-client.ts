@@ -47,7 +47,7 @@ export class SSEClient {
       'error', 'error_paused', 'stopped', 'compaction', 'agent_progress',
       'usage', 'skill_evaluation', 'checkpoint_created', 'exit_reason',
       // Server generation lifecycle
-      'files_changed', 'build_requested', 'usage_update',
+      'files_changed', 'build_requested', 'search_requested', 'usage_update', 'approval_required',
       'task_complete', 'sync_gap', 'notification', 'runtimeChanged',
     ];
 

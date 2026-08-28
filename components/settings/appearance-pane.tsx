@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { configManager } from '@/lib/config/storage';
-import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { setTelemetryOptIn } from '@/lib/telemetry';
+import { Palette } from 'lucide-react';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
+import { SettingRow } from '@/components/ui/setting-row';
 
 export function AppearancePane() {
   const { theme, setTheme } = useTheme();
@@ -20,42 +22,40 @@ export function AppearancePane() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <Label htmlFor="theme">Theme</Label>
-        <ToggleGroup
-          type="single"
-          value={mounted ? (theme || 'dark') : 'dark'}
-          onValueChange={(value: string) => {
-            if (value) {
-              setTheme(value);
-              configManager.setSetting('theme', value as 'light' | 'dark' | 'system');
-            }
-          }}
-          className="w-full mt-2"
-        >
-          <ToggleGroupItem value="dark" className="flex-1">Dark</ToggleGroupItem>
-          <ToggleGroupItem value="light" className="flex-1">Light</ToggleGroupItem>
-          <ToggleGroupItem value="system" className="flex-1">System</ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+    <Section>
+      <SectionHeader icon={Palette} title="Appearance" />
+      <SectionBody className="px-4 py-1">
+        <SettingRow title="Theme" description="Interface color scheme">
+          <ToggleGroup
+            type="single"
+            value={mounted ? (theme || 'dark') : 'dark'}
+            onValueChange={(value: string) => {
+              if (value) {
+                setTheme(value);
+                configManager.setSetting('theme', value as 'light' | 'dark' | 'system');
+              }
+            }}
+          >
+            <ToggleGroupItem value="dark">Dark</ToggleGroupItem>
+            <ToggleGroupItem value="light">Light</ToggleGroupItem>
+            <ToggleGroupItem value="system">System</ToggleGroupItem>
+          </ToggleGroup>
+        </SettingRow>
 
-      <div className="flex items-center justify-between">
-        <div>
-          <Label htmlFor="telemetry">Anonymous Usage Analytics</Label>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Help improve OSW Studio by sharing anonymous usage data
-          </p>
-        </div>
-        <Switch
-          id="telemetry"
-          checked={telemetryOptIn}
-          onCheckedChange={(checked) => {
-            setTelemetryOptInState(checked);
-            setTelemetryOptIn(checked);
-          }}
-        />
-      </div>
-    </div>
+        <SettingRow
+          title="Anonymous usage analytics"
+          description="Share anonymous usage data to help improve OSW Studio"
+        >
+          <Switch
+            id="telemetry"
+            checked={telemetryOptIn}
+            onCheckedChange={(checked) => {
+              setTelemetryOptInState(checked);
+              setTelemetryOptIn(checked);
+            }}
+          />
+        </SettingRow>
+      </SectionBody>
+    </Section>
   );
 }

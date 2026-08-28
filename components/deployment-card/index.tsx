@@ -14,7 +14,6 @@ import {
 import {
   Globe,
   Settings,
-  Server,
   ExternalLink,
   Copy,
   RefreshCw,
@@ -38,8 +37,7 @@ interface DeploymentCardProps {
   deployment: Deployment;
   project?: Project;
   isPublishing?: boolean;
-  onOpenSettings: (deployment: Deployment) => void;
-  onOpenServerSettings?: (deployment: Deployment) => void;
+  onClick?: (deployment: Deployment) => void;
   onViewAnalytics: (deployment: Deployment) => void;
   onEditProject: (deployment: Deployment) => void;
   onPublish: (deploymentId: string) => void;
@@ -54,8 +52,7 @@ export function DeploymentCard({
   deployment,
   project,
   isPublishing = false,
-  onOpenSettings,
-  onOpenServerSettings,
+  onClick,
   onViewAnalytics,
   onEditProject,
   onPublish,
@@ -139,7 +136,7 @@ export function DeploymentCard({
 
         {/* URL */}
         {deployment.enabled && (
-          <div className="flex items-center gap-2 mb-3 p-2 bg-muted rounded text-xs">
+          <div className="flex items-center gap-2 mb-3 p-2 bg-muted rounded-md text-xs">
             <Globe className="h-3 w-3 text-muted-foreground flex-shrink-0" />
             <span className="flex-1 truncate">{publicUrl}</span>
             <Button
@@ -150,6 +147,15 @@ export function DeploymentCard({
               title="Copy URL"
             >
               <Copy className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={handleViewLive}
+              title="View Live"
+            >
+              <ExternalLink className="h-3 w-3" />
             </Button>
           </div>
         )}
@@ -207,34 +213,36 @@ export function DeploymentCard({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={() => onClick?.(deployment)}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Edit Deployment
+          </Button>
+
           {deployment.enabled ? (
-            <>
-              <Button
-                variant={hasPendingChanges ? undefined : 'outline'}
-                size="sm"
-                className="flex-1"
-                onClick={() => onPublish(deployment.id)}
-                disabled={isPublishing}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${isPublishing ? 'animate-spin' : ''}`} />
+            <Button
+              variant={hasPendingChanges ? undefined : 'outline'}
+              size="sm"
+              className="min-w-0 flex-1"
+              onClick={() => onPublish(deployment.id)}
+              disabled={isPublishing}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 shrink-0 ${isPublishing ? 'animate-spin' : ''}`} />
+              <span className="truncate">
                 {isPublishing
                   ? 'Publishing...'
                   : hasPendingChanges
                     ? 'Publish Changes'
                     : isPublished
                       ? 'Republish'
-                      : 'Publish Deployment'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleViewLive}
-                title="View Live"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-            </>
+                      : 'Publish'}
+              </span>
+            </Button>
           ) : (
             <Button
               variant="outline"
@@ -259,16 +267,6 @@ export function DeploymentCard({
                 Edit Project
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => onOpenSettings(deployment)}>
-                <Settings className="h-4 w-4 mr-2" />
-                Deployment Settings
-              </DropdownMenuItem>
-              {deployment.databaseEnabled && (
-                <DropdownMenuItem onClick={() => onOpenServerSettings?.(deployment)}>
-                  <Server className="h-4 w-4 mr-2" />
-                  Server Settings
-                </DropdownMenuItem>
-              )}
               {deployment.analytics.enabled && deployment.analytics.provider === 'builtin' && (
                 <DropdownMenuItem onClick={() => onViewAnalytics(deployment)}>
                   <BarChart3 className="h-4 w-4 mr-2" />

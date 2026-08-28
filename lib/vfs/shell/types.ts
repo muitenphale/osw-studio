@@ -25,6 +25,9 @@ export interface ShellContext {
   readVersions?: Map<string, number>;
   /** Delegate a build to the browser (server-side generation only). */
   onBuildRequested?: () => Promise<{ success: boolean; errors?: string[] }>;
+  /** Delegate a web search to the browser (server-side generation only), so the client's
+   *  configured provider/key runs it. Returns the command's stdout/stderr/exit. */
+  onSearchRequested?: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 }
 
 export type ShellResult = {

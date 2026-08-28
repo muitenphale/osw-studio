@@ -15,6 +15,7 @@ import { AppearancePane } from '@/components/settings/appearance-pane';
 import { CostTrackingPane } from '@/components/settings/cost-tracking-pane';
 import { PermissionsPane } from '@/components/settings/permissions-pane';
 import { DataPane } from '@/components/settings/data-pane';
+import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
   Select,
@@ -225,10 +226,17 @@ export function UnifiedSettings({
     );
   }
 
+  const activeLabel = PANES.find((p) => p.id === currentPane)?.label ?? '';
+
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
-      <PaneContent pane={currentPane} />
-    </div>
+    <PageShell>
+      <PageHeader title="Settings" maxWidth="max-w-4xl">
+        <span className="text-lg font-normal text-muted-foreground">· {activeLabel}</span>
+      </PageHeader>
+      <PageBody maxWidth="max-w-4xl">
+        <PaneContent pane={currentPane} />
+      </PageBody>
+    </PageShell>
   );
 }
 

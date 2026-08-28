@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.98.0 - 2026-08-29
+
+### UI
+- **Listing pages render as a table by default**: new `ViewModeToggle` (`components/ui/view-mode-toggle.tsx`) switches Projects, Templates, Skills, Interviews and Deployments between `table` (the new default) and the existing card `grid`; Users and Workspaces gain a table with no grid mode. The `useViewMode(page)` hook in the same file persists each page's choice to the new `AppSettings.listViewModes` record via `configManager.getListViewMode`/`setListViewMode`, read in an effect so the value cannot desync server and client markup. Tables are `table-auto` with a sticky `bg-muted` header inside a scrolling bordered box. New `project-table-row.tsx`; `ThumbnailArea` gains an `xs` size for table cells; `formatCompactAge` (`lib/utils.ts`) drops the "about/over/almost/less than" prefix from date columns.
+- **Main-menu pages share a page shell**: new `components/ui/page-shell.tsx` exports `PageShell`, `PageHeader` and `PageBody`, which put the page title first in a fixed header above a scrolling, centered body. `PageBody` takes `fill` for pages whose inner table scrolls and `bodyRef` for a pagination scroll target. Adopted by Settings, Dashboard, Docs, Users, Workspaces and Deployments.
+- **Settings panes are built from sections of rows**: new `components/ui/section.tsx` (`Section`, `SectionHeader`, `SectionBody`) and `setting-row.tsx` (`SettingRow`) replace the hand-rolled bordered boxes in `appearance-pane.tsx` and `data-pane.tsx`. `UnifiedSettings` renders a `Settings · <pane>` header.
+- **Active and emphasis controls use a muted orange**: `bg-primary/15` with `text-primary` and `border-primary/40` replaces the solid `bg-primary` fill on the `accent` Button variant and the checked `Switch` track (which keeps a full-orange thumb), and the `bg-accent` fill on `ToggleGroup`; the new `ViewModeToggle` and the deployment-detail side nav use the same treatment. Dashboard and `models-pane` cards move from `rounded-xl` to `rounded-lg`.
+- **Deployment settings open as a full-page detail view**: `components/deployment-detail/index.tsx` replaces `DeploymentSettingsModal` with a side nav over the existing publish-settings tabs (General, Scripts, CDN, SEO, Analytics, Compliance) and the backend managers (Functions, Helpers, Secrets, Schedules, Schema, SQL, Logs). `DeploymentCard` takes an `onClick` so the whole card opens the detail view, replacing the Settings and Server Settings items in its dropdown. `components/deployment-settings/` and `components/publish-settings/index.tsx` are removed; `DeploymentCard` drops `onOpenSettings` and `onOpenServerSettings`.
+- **Deployment settings tabs use the shared section layout**: all six `publish-settings/*-tab.tsx` files drop their `text-lg` headings and hand-rolled `p-4 border rounded-lg` boxes for `Section`/`SectionHeader`/`SectionBody` and `SettingRow`. The detail view's side nav marks the active item with the same muted orange as the rest of the app.
+- **Skills page toggles and filters move into a strip and a section header**: the master "Skills system" and "Skill evaluation" switches share one strip with `InfoTip` explainers (new `components/ui/info-tip.tsx`). The Skills/Groups tabs, Built-in/Custom filter and Enable all/Disable all fold into a single `SectionHeader`; Import and Export move to a toolbar overflow menu.
+
+### Server Mode
+- **Gated commands pause for approval instead of being denied**: server-side generation answered every permission gate with `deny`. `checkCommandPermission` (`lib/llm/tool-registry.ts`) now takes `pauseForApproval`, emits an `approval_required` progress event and ends the run with `exitReason: 'awaiting_user'`. The pending `{gateKey, command}` is stored in the new `pending_approval` column (`task-store.ts`, additive migration) so the Allow/Deny prompt survives a reload; Allow writes a permission override and restarts the run.
+- **`search` works during server-side generation**: the command delegates to the connected browser through a `search_requested` SSE event, which posts back to `/api/server-generate/search-result` (`search-delegation-handler.ts`). With no browser connected, a 30s timeout falls back to `runServerSideSearch` (`server-side-search.ts`), which calls the provider on the server and passes a user-supplied SearXNG URL through `assertPublicUrl`. To make that fallback possible the provider key travels in the `webSearch` field of the start request; it stays in memory for the run and is excluded from `PersistedServerTask`.
+
+### Fixes
+- **The pagination row only renders when there is more than one page**: `PaginationRange` and `Pagination` both return nothing when `totalPages` is 1, which left an empty padded row above the table in Projects, Deployments, Templates and Skills. Each call site now guards on `totalPages > 1`.
+
+### Tests
+- **Coverage for the new search, approval and formatting paths**: `runServerSideSearch` including the SearXNG SSRF guard (`lib/server-generate/__tests__/server-side-search.test.ts`), `pending_approval` round-trip and malformed-column handling (`task-store.test.ts`), the approval-pause branch (`permission-gate.test.ts`), and `formatCompactAge` (`lib/__tests__/utils.test.ts`).
+
 ## v1.97.0 - 2026-08-23
 
 ### UI

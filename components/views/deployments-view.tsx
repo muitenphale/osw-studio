@@ -8,24 +8,35 @@ import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { createSyncProgressToast } from '@/lib/vfs/sync-progress-toast';
 import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
 import { DeploymentCard } from '../deployment-card';
-import { DeploymentSettingsModal } from '../deployment-settings';
-import { ServerSettingsModal } from '../server-settings';
+import { DeploymentDetail } from '../deployment-detail';
 import { CreateDeploymentModal } from '../create-deployment-modal';
 import { takePendingDeploymentRequest } from '@/lib/deployments/pending-create';
 import { AnalyticsDashboard } from '../analytics-dashboard';
 import { TemplateExportDialog } from '../templates/template-export-dialog';
 import { ProjectSwapDialog } from '../project-swap-dialog';
-import { Globe, Plus, Search, ArrowUpDown } from 'lucide-react';
+import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
+import { Globe, Plus, Search, ArrowUpDown, MoreVertical, Settings, RefreshCw, Eye, EyeOff, Trash2, Copy, Pencil, ExternalLink } from 'lucide-react';
+import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { logger } from '@/lib/utils';
+import { logger, formatCompactAge } from '@/lib/utils';
 import { track } from '@/lib/telemetry';
 import { usePagination } from '@/lib/hooks/use-pagination';
 import { Pagination, PaginationRange } from '@/components/ui/pagination';
+import { ThumbnailArea } from '@/components/ui/thumbnail-area';
+import { captureDeploymentScreenshot } from '@/lib/utils/deployment-thumbnail';
 
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
@@ -41,14 +52,13 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
   const [loading, setLoading] = useState(true);
   const [publishingStates, setPublishingStates] = useState<Record<string, boolean>>({});
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showServerSettingsModal, setShowServerSettingsModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForProjectId, setCreateForProjectId] = useState<string | undefined>(undefined);
   const [showTemplateExportModal, setShowTemplateExportModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
+  const [viewMode, setViewMode] = useViewMode('deployments');
   const [swapDialogState, setSwapDialogState] = useState<{
     deploymentId: string;
     deploymentName: string;
@@ -171,17 +181,9 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     );
   };
 
-  const handleOpenSettings = (deployment: Deployment) => {
+  const handleOpenDetail = (deployment: Deployment) => {
     setSelectedDeployment(deployment);
-    setShowSettingsModal(true);
-    // The General tab lets you point the deployment at a different project, so its picker needs the
-    // current list — not the snapshot taken when the page mounted.
     void fetchProjects();
-  };
-
-  const handleOpenServerSettings = (deployment: Deployment) => {
-    setSelectedDeployment(deployment);
-    setShowServerSettingsModal(true);
   };
 
   const handleViewAnalytics = (deployment: Deployment) => {
@@ -328,8 +330,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     }
 
     setSwapDialogState(null);
-    setShowSettingsModal(false);
-    setSelectedDeployment(null);
     toast.success('Project swapped and deployment republished');
     await loadData();
   };
@@ -646,6 +646,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     resetOn: [searchQuery, sortBy],
   });
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   if (!isServerMode) {
     return (
@@ -668,65 +669,102 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     );
   }
 
+  // ── Detail view ──
+  if (selectedDeployment && !showAnalyticsModal) {
+    return (
+      <>
+        <DeploymentDetail
+          deployment={selectedDeployment}
+          projects={projects}
+          isPublishing={publishingStates[selectedDeployment.id] || false}
+          onBack={() => setSelectedDeployment(null)}
+          onSave={handleSaveSettings}
+          onPublish={handlePublish}
+          workspaceId={workspaceId}
+        />
+
+        <TemplateExportDialog
+          project={templateExportProject}
+          open={showTemplateExportModal}
+          onOpenChange={(open) => {
+            setShowTemplateExportModal(open);
+            if (!open) setTemplateExportProject(null);
+          }}
+        />
+
+        {swapDialogState && (
+          <ProjectSwapDialog
+            isOpen={true}
+            onClose={() => setSwapDialogState(null)}
+            deploymentId={swapDialogState.deploymentId}
+            deploymentName={swapDialogState.deploymentName}
+            currentProjectId={swapDialogState.currentProjectId}
+            newProjectId={swapDialogState.newProjectId}
+            newProjectName={swapDialogState.newProjectName}
+            onSwapComplete={handleSwapComplete}
+            workspaceId={workspaceId}
+          />
+        )}
+      </>
+    );
+  }
+
   return (
     <>
-      <div className="h-full flex flex-col">
-        {/* Toolbar */}
-        <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
-          <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
-            {/* New Deployment */}
-            <div className="flex items-center shrink-0">
-              <Button onClick={handleOpenCreate} size="sm" className="gap-2">
-                <Plus className="h-4 w-4" />
-                <span>New</span>
-              </Button>
-            </div>
-
-            {/* Search */}
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search deployments..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-
-            {/* Controls */}
-            <div className="flex items-center gap-2">
-              {/* Sort */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <ArrowUpDown className="h-4 w-4" />
-                    <span className="hidden sm:inline">Sort</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-48" align="end">
-                  <div className="space-y-2">
-                    <h4 className="font-semibold text-sm">Sort by</h4>
-                    <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="updated">Last Updated</SelectItem>
-                        <SelectItem value="published">Last Published</SelectItem>
-                        <SelectItem value="created">Date Created</SelectItem>
-                        <SelectItem value="name">Name</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
+      <PageShell>
+        <PageHeader title="Deployments">
+          {/* New Deployment */}
+          <div className="flex items-center shrink-0">
+            <Button onClick={handleOpenCreate} size="sm" className="gap-2">
+              <Plus className="h-4 w-4" />
+              <span>New</span>
+            </Button>
           </div>
-        </div>
+
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search deployments..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-2">
+            <ViewModeToggle value={viewMode} onChange={setViewMode} />
+            {/* Sort */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <span className="hidden sm:inline">Sort</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48" align="end">
+                <div className="space-y-2">
+                  <h4 className="font-semibold text-sm">Sort by</h4>
+                  <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="updated">Last Updated</SelectItem>
+                      <SelectItem value="published">Last Published</SelectItem>
+                      <SelectItem value="created">Date Created</SelectItem>
+                      <SelectItem value="name">Name</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </PageHeader>
 
         {/* Deployments Grid/List */}
-        <div ref={listScrollRef} className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
-          <div className="mx-auto max-w-7xl">
+        <PageBody fill bodyRef={listScrollRef}>
             {filteredAndSortedDeployments.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Globe className="h-16 w-16 text-muted-foreground mb-4" />
@@ -748,81 +786,187 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                 )}
               </div>
             ) : (
-              <>
-                <PaginationRange
-                  total={deploymentsPagination.total}
-                  rangeStart={deploymentsPagination.rangeStart}
-                  rangeEnd={deploymentsPagination.rangeEnd}
-                  totalPages={deploymentsPagination.totalPages}
-                  className="mb-2"
-                />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {deploymentsPagination.pageItems.map((deployment) => {
-                    const project = projects.find(p => p.id === deployment.projectId);
-                    return (
-                      <DeploymentCard
-                        key={deployment.id}
-                        deployment={deployment}
-                        project={project}
-                        isPublishing={publishingStates[deployment.id] || false}
-                        onOpenSettings={handleOpenSettings}
-                        onOpenServerSettings={handleOpenServerSettings}
-                        onViewAnalytics={handleViewAnalytics}
-                        onEditProject={handleEditProject}
-                        onPublish={handlePublish}
-                        onDisable={handleDisable}
-                        onEnable={handleEnable}
-                        onDelete={handleDelete}
-                        onExportAsTemplate={handleExportAsTemplate}
-                        onThumbnailChange={handleDeploymentThumbnailChange}
-                      />
-                    );
-                  })}
-                </div>
-                <Pagination
-                  page={deploymentsPagination.page}
-                  totalPages={deploymentsPagination.totalPages}
-                  onPageChange={deploymentsPagination.setPage}
-                  scrollTarget={listScrollRef}
-                />
-              </>
+              <div className="flex-1 min-h-0 flex flex-col">
+                {deploymentsPagination.totalPages > 1 && (
+                  <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
+                    <PaginationRange
+                      total={deploymentsPagination.total}
+                      rangeStart={deploymentsPagination.rangeStart}
+                      rangeEnd={deploymentsPagination.rangeEnd}
+                      totalPages={deploymentsPagination.totalPages}
+                    />
+                    <Pagination
+                      page={deploymentsPagination.page}
+                      totalPages={deploymentsPagination.totalPages}
+                      onPageChange={deploymentsPagination.setPage}
+                      scrollTarget={contentScrollRef}
+                      className="pt-0 pb-0"
+                    />
+                  </div>
+                )}
+                {viewMode === 'table' ? (
+                  <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto border rounded-lg">
+                    <table className="w-full table-auto border-collapse">
+                      <thead className="sticky top-0 z-10">
+                        <tr>
+                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
+                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">URL</th>
+                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Ver.</th>
+                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Published</th>
+                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deploymentsPagination.pageItems.map((deployment) => {
+                          const project = projects.find(p => p.id === deployment.projectId);
+                          const isPublished = deployment.lastPublishedVersion !== null && deployment.lastPublishedVersion !== undefined;
+                          const hasPendingChanges = isPublished && Number(deployment.settingsVersion) > Number(deployment.lastPublishedVersion);
+                          const publicUrl = deployment.publicUrl || `${typeof window !== 'undefined' ? window.location.origin : ''}/deployments/${deployment.id}`;
+                          return (
+                            <tr key={deployment.id} className="border-b border-border/50 hover:bg-muted/50 cursor-pointer h-[44px]" onClick={() => handleOpenDetail(deployment)}>
+                              <td className="p-[4px_10px] align-middle">
+                                <ThumbnailArea
+                                  size="xs"
+                                  image={deployment.previewImage || project?.previewImage}
+                                  onCapture={isPublished ? async () => captureDeploymentScreenshot(publicUrl) : undefined}
+                                  onImageChange={(img) => handleDeploymentThumbnailChange(deployment.id, img)}
+                                />
+                              </td>
+                              <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-medium text-foreground text-[13px] truncate">{deployment.name}</span>
+                                    {!deployment.enabled && <Badge variant="outline" className="text-[10px] shrink-0">Disabled</Badge>}
+                                  </div>
+                                  <span className="block text-[11px] text-muted-foreground truncate">{deployment.slug || project?.name || ''}</span>
+                                </div>
+                              </td>
+                              <td className="p-[4px_10px] text-[11px] text-muted-foreground align-middle" style={{ maxWidth: 320 }}>
+                                {deployment.enabled ? (
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    <span className="font-mono truncate">{publicUrl.replace(/^https?:\/\//, '')}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(publicUrl); toast.success('URL copied'); }}
+                                      className="shrink-0 h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted-foreground/15 transition-colors"
+                                      title="Copy URL"
+                                    >
+                                      <Copy className="w-3 h-3" />
+                                    </button>
+                                    <a
+                                      href={publicUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="shrink-0 h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted-foreground/15 transition-colors"
+                                      title="Open link"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  </div>
+                                ) : '—'}
+                              </td>
+                              <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap font-mono tabular-nums">
+                                {deployment.settingsVersion}{' / '}{deployment.lastPublishedVersion ?? '—'}
+                              </td>
+                              <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap overflow-hidden text-ellipsis">
+                                {deployment.publishedAt ? formatCompactAge(new Date(deployment.publishedAt)) : '—'}
+                              </td>
+                              <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button variant="outline" size="xs" onClick={() => handleOpenDetail(deployment)}>
+                                    <Settings className="w-3 h-3" />Edit
+                                  </Button>
+                                  {deployment.enabled ? (
+                                    <Button
+                                      variant={hasPendingChanges ? 'outline' : 'ghost'}
+                                      size="xs"
+                                      onClick={() => handlePublish(deployment.id)}
+                                      disabled={publishingStates[deployment.id]}
+                                    >
+                                      <RefreshCw className={`w-3 h-3 ${publishingStates[deployment.id] ? 'animate-spin' : ''}`} />
+                                      {isPublished ? 'Republish' : 'Publish'}
+                                    </Button>
+                                  ) : (
+                                    <Button variant="outline" size="xs" onClick={() => handleEnable(deployment.id)}>Enable</Button>
+                                  )}
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => handleEditProject(deployment)}>
+                                        <Pencil className="w-4 h-4 mr-2" />Edit Project
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      {deployment.enabled && (
+                                        <DropdownMenuItem onClick={() => navigator.clipboard.writeText(publicUrl)}>
+                                          <Copy className="w-4 h-4 mr-2" />Copy URL
+                                        </DropdownMenuItem>
+                                      )}
+                                      {deployment.enabled ? (
+                                        <DropdownMenuItem onClick={() => handleDisable(deployment.id)}>
+                                          <EyeOff className="w-4 h-4 mr-2" />Disable
+                                        </DropdownMenuItem>
+                                      ) : (
+                                        <DropdownMenuItem onClick={() => handleEnable(deployment.id)}>
+                                          <Eye className="w-4 h-4 mr-2" />Enable
+                                        </DropdownMenuItem>
+                                      )}
+                                      <DropdownMenuItem onClick={() => handleDelete(deployment.id)} className="text-destructive focus:text-destructive">
+                                        <Trash2 className="w-4 h-4 mr-2" />Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {deploymentsPagination.pageItems.map((deployment) => {
+                      const project = projects.find(p => p.id === deployment.projectId);
+                      return (
+                        <DeploymentCard
+                          key={deployment.id}
+                          deployment={deployment}
+                          project={project}
+                          isPublishing={publishingStates[deployment.id] || false}
+                          onClick={handleOpenDetail}
+                          onViewAnalytics={handleViewAnalytics}
+                          onEditProject={handleEditProject}
+                          onPublish={handlePublish}
+                          onDisable={handleDisable}
+                          onEnable={handleEnable}
+                          onDelete={handleDelete}
+                          onExportAsTemplate={handleExportAsTemplate}
+                          onThumbnailChange={handleDeploymentThumbnailChange}
+                        />
+                      );
+                    })}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
-          </div>
-        </div>
-      </div>
+        </PageBody>
+      </PageShell>
 
-      {selectedDeployment && (
-        <>
-          <DeploymentSettingsModal
-            deployment={selectedDeployment}
-            projects={projects}
-            isOpen={showSettingsModal}
-            onClose={() => {
-              setShowSettingsModal(false);
-              setSelectedDeployment(null);
-            }}
-            onSave={handleSaveSettings}
-          />
-
-          <ServerSettingsModal
-            deployment={selectedDeployment}
-            isOpen={showServerSettingsModal}
-            onClose={() => {
-              setShowServerSettingsModal(false);
-              setSelectedDeployment(null);
-            }}
-            workspaceId={workspaceId}
-          />
-
-          <AnalyticsDashboard
-            deployment={selectedDeployment}
-            isOpen={showAnalyticsModal}
-            onClose={() => {
-              setShowAnalyticsModal(false);
-              setSelectedDeployment(null);
-            }}
-          />
-        </>
+      {selectedDeployment && showAnalyticsModal && (
+        <AnalyticsDashboard
+          deployment={selectedDeployment}
+          isOpen={showAnalyticsModal}
+          onClose={() => {
+            setShowAnalyticsModal(false);
+            setSelectedDeployment(null);
+          }}
+        />
       )}
 
       <CreateDeploymentModal

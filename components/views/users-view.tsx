@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
+import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
 
 interface WorkspaceInfo {
   id: string;
@@ -401,43 +402,39 @@ export function UsersView() {
 
   return (
     <>
-      <div className="h-full flex flex-col">
-        {/* Toolbar */}
-        <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
-          <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
-            {!externalIdentity && (
-              <div className="flex items-center shrink-0">
-                <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  <span>New User</span>
-                </Button>
-              </div>
-            )}
-
-            {/* Search */}
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search users..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
+      <PageShell>
+        <PageHeader title="Users">
+          {!externalIdentity && (
+            <div className="flex items-center shrink-0">
+              <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
+                <Plus className="h-4 w-4" />
+                <span>New User</span>
+              </Button>
             </div>
+          )}
 
-            {externalIdentity && (
-              <div className="flex items-center gap-2">
-                <p className="text-sm text-muted-foreground">
-                  Users are managed externally
-                </p>
-              </div>
-            )}
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search users..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
           </div>
-        </div>
+
+          {externalIdentity && (
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-muted-foreground">
+                Users are managed externally
+              </p>
+            </div>
+          )}
+        </PageHeader>
 
         {/* User List */}
-        <div className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
-          <div className="mx-auto max-w-7xl">
+        <PageBody fill>
             {filteredUsers.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Users className="h-16 w-16 text-muted-foreground mb-4" />
@@ -458,136 +455,125 @@ export function UsersView() {
                 )}
               </div>
             ) : (
-              <div className="space-y-2">
-                {filteredUsers.map((user) => {
-                  const isExpanded = expandedUserId === user.id;
-                  return (
-                    <div key={user.id} className="rounded-lg border bg-card overflow-hidden">
-                      <div
-                        className="flex items-center gap-4 p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                        onClick={() => handleToggleExpand(user.id)}
-                      >
-                        {/* Expand chevron */}
-                        <div className="shrink-0 text-muted-foreground">
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </div>
-
-                        {/* User Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium truncate">{user.email}</span>
-                            {user.isAdmin && (
-                              <Badge variant="destructive" className="text-xs">admin</Badge>
-                            )}
-                            {!user.active && (
-                              <Badge variant="outline" className="text-xs text-muted-foreground">inactive</Badge>
-                            )}
-                            {user.workspaces.map(ws => (
-                              <Badge key={ws.id} variant={roleBadgeVariant(ws.role)} className="text-xs">
-                                {ws.name} ({ws.role})
-                              </Badge>
-                            ))}
-                          </div>
-                          <div className="text-sm text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                            {user.displayName && (
-                              <span>{user.displayName}</span>
-                            )}
-                            <span>{user.projectCount} projects</span>
-                            <span>
-                              <HardDrive className="inline h-3 w-3 mr-0.5 relative -top-px" />
-                              {user.storageMb} MB
-                            </span>
-                            {user.lastActive ? (
-                              <span>Active {formatDate(user.lastActive)}</span>
-                            ) : (
-                              <span>Created {formatDate(user.createdAt)}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenEdit(user)}>
-                              <Pencil className="h-4 w-4 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleToggleActive(user)}>
-                              {user.active ? (
-                                <>
-                                  <UserX className="h-4 w-4 mr-2" />
-                                  Deactivate
-                                </>
-                              ) : (
-                                <>
-                                  <UserCheck className="h-4 w-4 mr-2" />
-                                  Reactivate
-                                </>
-                              )}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleDelete(user)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-
-                      {/* Expanded workspace details */}
-                      {isExpanded && (
-                        <div className="border-t bg-muted/30 px-4 py-3 pl-12">
-                          {user.workspaces.length > 0 ? (
-                            <div className="space-y-2">
-                              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                                Workspaces ({user.workspaces.length})
-                              </div>
-                              {user.workspaces.map((ws) => (
-                                <div
-                                  key={ws.id}
-                                  className="flex items-center gap-3 text-sm p-2 rounded bg-background/60"
-                                >
-                                  <HardDrive className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="font-medium truncate">{ws.name}</span>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                                    <span>{ws.max_projects} projects</span>
-                                    <span>{ws.max_deployments} deployments</span>
-                                    <span>Created {formatDate(ws.created_at)}</span>
-                                  </div>
+              <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
+                <table className="w-full table-auto border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      <th className="bg-muted p-[6px_10px] border-b select-none"></th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">User</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Projects</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Storage</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Workspaces</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Active</th>
+                      <th className="bg-muted p-[6px_10px] border-b select-none"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUsers.map((user) => {
+                      const isExpanded = expandedUserId === user.id;
+                      return (
+                        <React.Fragment key={user.id}>
+                          <tr
+                            className="border-b border-border/50 hover:bg-muted/50 cursor-pointer h-[44px]"
+                            onClick={() => handleToggleExpand(user.id)}
+                          >
+                            <td className="p-[4px_10px] align-middle text-muted-foreground">
+                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </td>
+                            <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-medium text-foreground text-[13px] truncate">{user.email}</span>
+                                  {user.isAdmin && <Badge variant="destructive" className="text-[10px] shrink-0">admin</Badge>}
+                                  {!user.active && <Badge variant="outline" className="text-[10px] shrink-0 text-muted-foreground">inactive</Badge>}
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-muted-foreground py-2">
-                              No workspaces assigned
-                            </div>
+                                {user.displayName && <span className="block text-[11px] text-muted-foreground truncate">{user.displayName}</span>}
+                              </div>
+                            </td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.projectCount}</td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.storageMb} MB</td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.workspaces.length}</td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">{user.lastActive ? formatDate(user.lastActive) : formatDate(user.createdAt)}</td>
+                            <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="xs" className="px-1">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleOpenEdit(user)}>
+                                    <Pencil className="h-4 w-4 mr-2" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleToggleActive(user)}>
+                                    {user.active ? (
+                                      <>
+                                        <UserX className="h-4 w-4 mr-2" />
+                                        Deactivate
+                                      </>
+                                    ) : (
+                                      <>
+                                        <UserCheck className="h-4 w-4 mr-2" />
+                                        Reactivate
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDelete(user)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="bg-muted/30 border-b border-border/50">
+                              <td></td>
+                              <td colSpan={6} className="p-[4px_10px] pb-4 align-top">
+                                {user.workspaces.length > 0 ? (
+                                  <div className="space-y-2">
+                                    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                      Workspaces ({user.workspaces.length})
+                                    </div>
+                                    {user.workspaces.map((ws) => (
+                                      <div
+                                        key={ws.id}
+                                        className="flex items-center gap-3 text-sm p-2 rounded bg-background/60"
+                                      >
+                                        <HardDrive className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                          <span className="font-medium truncate">{ws.name}</span>
+                                          <Badge variant={roleBadgeVariant(ws.role)} className="text-[10px] shrink-0">{ws.role}</Badge>
+                                        </div>
+                                        <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                                          <span>{ws.max_projects} projects</span>
+                                          <span>{ws.max_deployments} deployments</span>
+                                          <span>Created {formatDate(ws.created_at)}</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-muted-foreground py-2">
+                                    No workspaces assigned
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
                           )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
-          </div>
-        </div>
-      </div>
+        </PageBody>
+      </PageShell>
 
       {/* Edit User Dialog */}
       <Dialog open={showEditDialog} onOpenChange={(open) => { setShowEditDialog(open); if (!open) setEditUser(null); }}>

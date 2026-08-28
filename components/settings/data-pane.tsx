@@ -3,11 +3,13 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Download, Upload, Info } from 'lucide-react';
+import { Download, Upload, Info, Database } from 'lucide-react';
 import { BackupService } from '@/lib/vfs/backup-service';
 import { track } from '@/lib/telemetry';
 import { configManager } from '@/lib/config/storage';
 import { AboutModal } from '@/components/about-modal';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
+import { SettingRow } from '@/components/ui/setting-row';
 
 export function DataPane() {
   const [isExporting, setIsExporting] = useState(false);
@@ -83,68 +85,44 @@ export function DataPane() {
   };
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        Backup and restore your projects, conversations, and settings.
-      </p>
+    <>
+      <Section>
+        <SectionHeader icon={Database} title="Data" />
+        <SectionBody className="px-4 py-1">
+          <SettingRow
+            title="Export all data"
+            description="Download a backup of all projects, conversations, and settings"
+          >
+            <Button variant="outline" size="sm" onClick={handleExportData} disabled={isExporting}>
+              <Download className="h-4 w-4" />
+              {isExporting ? 'Exporting...' : 'Export'}
+            </Button>
+          </SettingRow>
 
-      {/* Export Data */}
-      <div className="flex items-center gap-3 p-3 rounded-lg border">
-        <Download className="h-4 w-4 text-muted-foreground shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium">Export All Data</div>
-          <div className="text-xs text-muted-foreground">
-            Download a backup of all projects and data
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleExportData}
-          disabled={isExporting}
-        >
-          {isExporting ? 'Exporting...' : 'Export'}
-        </Button>
-      </div>
+          <SettingRow title="Import data" description="Restore from a .osws backup file">
+            <Button variant="outline" size="sm" onClick={handleImportData} disabled={isImporting}>
+              <Upload className="h-4 w-4" />
+              {isImporting ? 'Importing...' : 'Import'}
+            </Button>
+          </SettingRow>
 
-      {/* Import Data */}
-      <div className="flex items-center gap-3 p-3 rounded-lg border">
-        <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium">Import Data</div>
-          <div className="text-xs text-muted-foreground">
-            Restore from a .osws backup file
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleImportData}
-          disabled={isImporting}
-        >
-          {isImporting ? 'Importing...' : 'Import'}
-        </Button>
-      </div>
+          {isImporting && (
+            <div className="space-y-2 py-3 border-t border-border">
+              <div className="flex justify-between text-xs">
+                <span>{importMessage}</span>
+                <span>{importProgress}%</span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${importProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </SectionBody>
+      </Section>
 
-      {/* Import Progress */}
-      {isImporting && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs">
-            <span>{importMessage}</span>
-            <span>{importProgress}%</span>
-          </div>
-          <div className="w-full bg-muted rounded-full h-2">
-            <div
-              className="bg-primary h-2 rounded-full transition-all duration-300"
-              style={{ width: `${importProgress}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      <hr className="border-border" />
-
-      {/* Clear Settings + About */}
       <div className="flex items-center justify-between">
         <Button
           variant="ghost"
@@ -152,22 +130,15 @@ export function DataPane() {
           className="text-destructive hover:text-destructive"
           onClick={clearSettings}
         >
-          Clear All Settings
+          Clear all settings
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setAboutModalOpen(true)}
-        >
+        <Button variant="ghost" size="sm" onClick={() => setAboutModalOpen(true)}>
           <Info className="mr-1.5 h-3.5 w-3.5" />
           About OSW Studio
         </Button>
       </div>
 
-      <AboutModal
-        open={aboutModalOpen}
-        onOpenChange={setAboutModalOpen}
-      />
-    </div>
+      <AboutModal open={aboutModalOpen} onOpenChange={setAboutModalOpen} />
+    </>
   );
 }

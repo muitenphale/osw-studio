@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { logger } from '@/lib/utils';
+import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
 
 interface WorkspaceMember {
   userId: string;
@@ -360,31 +361,27 @@ export function WorkspacesView() {
 
   return (
     <>
-      <div className="h-full flex flex-col">
-        {/* Toolbar */}
-        <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
-          <div className="mx-auto max-w-7xl flex flex-col sm:flex-row gap-3">
-            <div className="flex items-center shrink-0">
-              <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
-                <Plus className="h-4 w-4" />
-                <span>New Workspace</span>
-              </Button>
-            </div>
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search workspaces..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
+      <PageShell>
+        <PageHeader title="Workspaces">
+          <div className="flex items-center shrink-0">
+            <Button onClick={() => setShowCreateDialog(true)} size="sm" className="gap-2">
+              <Plus className="h-4 w-4" />
+              <span>New Workspace</span>
+            </Button>
           </div>
-        </div>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search workspaces..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </PageHeader>
 
         {/* Workspace List */}
-        <div className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
-          <div className="mx-auto max-w-7xl">
+        <PageBody fill>
             {filteredWorkspaces.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Building2 className="h-16 w-16 text-muted-foreground mb-4" />
@@ -405,67 +402,68 @@ export function WorkspacesView() {
                 )}
               </div>
             ) : (
-              <div className="space-y-2">
-                {filteredWorkspaces.map((ws) => {
-                  const isExpanded = expandedId === ws.id;
-                  return (
-                    <div key={ws.id} className="rounded-lg border bg-card overflow-hidden">
-                      <div
-                        className="flex items-center gap-4 p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                        onClick={() => handleToggleExpand(ws.id)}
-                      >
-                        {/* Expand chevron */}
-                        <div className="shrink-0 text-muted-foreground">
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </div>
-
-                        {/* Workspace Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium truncate">{ws.name}</span>
-                          </div>
-                          <div className="text-sm text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                            {ws.ownerEmail && (
-                              <span>Owner: {ws.ownerEmail}</span>
-                            )}
-                            <span>{ws.memberCount} {ws.memberCount === 1 ? 'member' : 'members'}</span>
-                            <span>{ws.projectCount} {ws.projectCount === 1 ? 'project' : 'projects'}</span>
-                            <span>{ws.deploymentCount} {ws.deploymentCount === 1 ? 'deployment' : 'deployments'}</span>
-                            <span>Created {formatDate(ws.createdAt)}</span>
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenEdit(ws)}>
-                              <Pencil className="h-4 w-4 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleDelete(ws)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-
-                      {/* Expanded detail section */}
-                      {isExpanded && (
-                        <div className="border-t bg-muted/30 px-4 py-3 pl-12">
+              <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
+                <table className="w-full table-auto border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      <th className="bg-muted p-[6px_10px] border-b select-none"></th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Workspace</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Members</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Projects</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Deployments</th>
+                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Created</th>
+                      <th className="bg-muted p-[6px_10px] border-b select-none"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredWorkspaces.map((ws) => {
+                      const isExpanded = expandedId === ws.id;
+                      return (
+                        <React.Fragment key={ws.id}>
+                          <tr
+                            className="border-b border-border/50 hover:bg-muted/50 cursor-pointer h-[44px]"
+                            onClick={() => handleToggleExpand(ws.id)}
+                          >
+                            <td className="p-[4px_10px] align-middle text-muted-foreground">
+                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </td>
+                            <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
+                              <div className="min-w-0">
+                                <span className="block font-medium text-foreground text-[13px] truncate">{ws.name}</span>
+                                {ws.ownerEmail && <span className="block text-[11px] text-muted-foreground truncate">Owner: {ws.ownerEmail}</span>}
+                              </div>
+                            </td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.memberCount}</td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.projectCount}</td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.deploymentCount}</td>
+                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">{formatDate(ws.createdAt)}</td>
+                            <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="xs" className="px-1">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleOpenEdit(ws)}>
+                                    <Pencil className="h-4 w-4 mr-2" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDelete(ws)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="bg-muted/30 border-b border-border/50">
+                              <td></td>
+                              <td colSpan={6} className="p-[4px_10px] pb-4 align-top">
                           {loadingDetail ? (
                             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
                               <Spinner size={16} color="#f97316" />
@@ -598,16 +596,18 @@ export function WorkspacesView() {
                               </div>
                             </div>
                           ) : null}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
-          </div>
-        </div>
-      </div>
+        </PageBody>
+      </PageShell>
 
       {/* Edit Workspace Dialog */}
       <Dialog open={showEditDialog} onOpenChange={(open) => { setShowEditDialog(open); if (!open) setEditWorkspace(null); }}>

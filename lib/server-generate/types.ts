@@ -2,6 +2,15 @@
 import type { MultiAgentOrchestrator } from '@/lib/llm/multi-agent-orchestrator';
 import type { VirtualFileSystem } from '@/lib/vfs';
 import type { ProviderId } from '@/lib/llm/providers/types';
+import type { WebSearchProviderId } from '@/lib/web-search/types';
+
+/** Web-search config the client sends so the server can run a search when no browser is
+ *  connected (the headless fallback). Carries the provider key, same boundary as the LLM key. */
+export interface ServerWebSearchConfig {
+  provider: WebSearchProviderId;
+  key?: string;
+  searxngUrl?: string;
+}
 
 /** Passed to MultiAgentOrchestrator when running server-side */
 export interface ServerOrchestratorContext {
@@ -13,6 +22,17 @@ export interface ServerOrchestratorContext {
   dirtyPaths: Set<string>;
   /** Delegate a build to the connected browser session. */
   onBuildRequested?: () => Promise<BuildResult>;
+  /** Delegate a web search to the connected browser session (its provider/key run it). */
+  onSearchRequested?: (args: string[]) => Promise<SearchDelegationResult>;
+  /** Client has a web-search provider configured — drives whether `search` is advertised. */
+  webSearchAvailable?: boolean;
+}
+
+/** Result of a browser-delegated search: the `search` command's own stdout/stderr/exit. */
+export interface SearchDelegationResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
 }
 
 /** All config the server needs from the client to run generation */
@@ -45,6 +65,11 @@ export interface ServerTask {
   buildDeferred: boolean;
   /** Resolve function for pending build delegation */
   pendingBuildResolve: ((result: BuildResult) => void) | null;
+  /** Resolve function for a pending browser-delegated search */
+  pendingSearchResolve?: ((result: SearchDelegationResult) => void) | null;
+  /** Set when the run paused on a gated command awaiting the user's Allow/Deny. Persisted so it
+   *  survives the user leaving/returning and a process restart. Cleared on task restart. */
+  pendingApproval?: { gateKey: string; command: string } | null;
   /** Metadata for client display (shelf) */
   prompt?: string;
   model?: string;
@@ -57,7 +82,7 @@ export interface ServerTask {
 export type PersistedServerTask = Pick<
   ServerTask,
   'taskId' | 'projectId' | 'sessionId' | 'workspaceId' | 'status' | 'startedAt' | 'updatedAt' | 'buildDeferred'
-  | 'prompt' | 'model' | 'projectName' | 'failureReason'
+  | 'prompt' | 'model' | 'projectName' | 'failureReason' | 'pendingApproval'
 >;
 
 export interface BuildResult {
@@ -84,6 +109,11 @@ export interface StartGenerationRequest {
   providerConfig?: { baseUrl?: string; provider?: ProviderId };
   permissionMode?: 'auto' | 'ask' | 'custom';
   permissionOverrides?: Record<string, 'ask' | 'allow'>;
+  /** Whether the client has a web-search provider configured. The server advertises the `search`
+   *  command based on this (the search itself is delegated back to the browser to run). */
+  webSearchAvailable?: boolean;
+  /** Provider + key for the server-side search fallback (used only when no browser is connected). */
+  webSearch?: ServerWebSearchConfig;
   conversationHistory: unknown[];
   executeOptions?: {
     images?: Array<{ data: string; mediaType: string }>;

@@ -606,6 +606,9 @@ export class MultiAgentOrchestrator {
         permissionOverrides: this.permissionOverrides,
         readVersions: this.readVersions,
         onBuildRequested: this.serverContext?.onBuildRequested,
+        onSearchRequested: this.serverContext?.onSearchRequested,
+        // Server-side runs pause on gated commands (no UI to prompt); browser runs prompt live.
+        pauseForApproval: !!this.serverContext,
       });
       executor.onAfterExecute = async (toolCall, result, durationMs) => {
         track('tool_call', {
@@ -784,6 +787,9 @@ export class MultiAgentOrchestrator {
   }
 
   private isWebSearchAvailable(): boolean {
+    // Server-side the provider config lives on the client, so trust the flag the client sent
+    // (the search itself is delegated back to the browser). Browser runs read local config.
+    if (this.serverContext) return !!this.serverContext.webSearchAvailable;
     return configManager.isWebSearchConfigured();
   }
 

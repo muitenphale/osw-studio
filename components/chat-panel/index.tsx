@@ -1350,6 +1350,50 @@ function TurnDisplay({ turn, collatedUsage, collatedTaskStartTime, onRestore, on
             );
           }
 
+          case 'approval': {
+            // Server-side generation paused on a gated command. Allow persists the capability so
+            // the run (and future ones) proceed without re-prompting; Deny continues without it.
+            // Either choice restarts the task from history via onGenerate.
+            const appr = item.data as { gateKey?: string; command?: string; capabilityLabel?: string };
+            if (!appr.gateKey) return null;
+            const label = appr.capabilityLabel || appr.gateKey;
+            return (
+              <div key={item.id} className="text-sm bg-amber-500/10 border border-amber-500/30 px-3 py-2 rounded">
+                <p className="text-sm text-foreground mb-0.5">
+                  Approval needed: <span className="font-medium">{label}</span>
+                </p>
+                {appr.command && (
+                  <p className="text-xs text-muted-foreground font-mono truncate mb-2">{appr.command}</p>
+                )}
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => {
+                      if (generating) return;
+                      track('approval_response', { via: 'chip', decision: 'allow', gate: appr.gateKey });
+                      configManager.setPermissionOverride(appr.gateKey!, 'allow');
+                      onGenerate?.(`Approved ${label}. Continue the task.`);
+                    }}
+                    disabled={!!generating}
+                    className="text-xs px-3 py-1.5 rounded border border-primary/30 bg-primary/10 text-primary font-medium hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:cursor-default"
+                  >
+                    Allow
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (generating) return;
+                      track('approval_response', { via: 'chip', decision: 'deny', gate: appr.gateKey });
+                      onGenerate?.(`I declined ${label}. Continue without it.`);
+                    }}
+                    disabled={!!generating}
+                    className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-40 disabled:cursor-default"
+                  >
+                    Deny
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
           case 'project_context':
             return (
               <div key={item.id} className={`rounded-md transition-all ${expandedItems.has(item.id) ? 'bg-muted/30 p-2' : 'p-1.5'}`}>

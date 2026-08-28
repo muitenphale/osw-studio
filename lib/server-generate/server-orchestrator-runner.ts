@@ -4,7 +4,7 @@ import { ServerConfigManager } from './server-config-manager';
 import { runWithVFS } from './vfs-context';
 import type { SSEEventBus } from './sse-event-bus';
 import type { TaskManager } from './task-manager';
-import type { ServerGenerationParams, ServerOrchestratorContext, StartGenerationRequest, BuildResult } from './types';
+import type { ServerGenerationParams, ServerOrchestratorContext, StartGenerationRequest, BuildResult, SearchDelegationResult, ServerWebSearchConfig } from './types';
 import { VirtualFileSystem } from '@/lib/vfs';
 import type { VirtualFile } from '@/lib/vfs/types';
 
@@ -92,6 +92,8 @@ export async function runServerGeneration(
     },
     dirtyPaths,
     onBuildRequested: () => awaitBuildResult(taskId, deps),
+    onSearchRequested: (args) => awaitSearchResult(taskId, deps, args, request.webSearch),
+    webSearchAvailable: request.webSearchAvailable,
   };
 
   const flushDirtyPaths = () => {
@@ -115,6 +117,17 @@ export async function runServerGeneration(
         eventData.cost as number,
       );
     }
+
+    // A gated command with no standing allow pauses the run (awaiting_user). Record what needs
+    // approval so the client can show a persisted Allow/Deny prompt after the user returns; the
+    // event above already reached the client live for the in-session case.
+    if (event === 'approval_required') {
+      task.pendingApproval = {
+        gateKey: String(eventData.gateKey ?? ''),
+        command: String(eventData.command ?? ''),
+      };
+      void taskManager.updateTask(task).catch(() => { /* best-effort persist */ });
+    }
   };
 
   await runWithVFS(serverVFS, async () => {
@@ -127,9 +140,8 @@ export async function runServerGeneration(
         serverContext,
         permissionMode: request.permissionMode,
         permissionOverrides: request.permissionOverrides,
-        // Server-side has no UI to prompt, so gated commands are declined.
-        // Auto mode never gates, so this only affects Ask/Custom users.
-        onApprovalNeeded: async () => 'deny' as const,
+        // No auto-deny: the presence of serverContext makes the orchestrator pause gated
+        // commands (awaiting_user) instead, surfacing an Allow/Deny prompt to the client.
       },
     );
 
@@ -151,6 +163,9 @@ export async function runServerGeneration(
 
       eventBus.emit(taskId, request.projectId, 'task_complete', {
         result: finalResult,
+        // exitReason lets the client tell a genuine finish from a pause (awaiting_user, e.g. a
+        // gated command awaiting approval) so it doesn't celebrate a run that is actually waiting.
+        exitReason: result.exitReason,
         ...(finalResult === 'failed' ? { error: result.summary } : {}),
         tokens: session.totalPromptTokens + session.totalCompletionTokens,
         cost: session.totalCost,
@@ -216,6 +231,55 @@ export async function awaitBuildResult(taskId: string, deps: RunnerDeps): Promis
         task.pendingBuildResolve = null;
         task.buildDeferred = true;
         resolve({ success: true, errors: ['Build deferred — client disconnected'] });
+      }, 30_000);
+    }),
+  ]);
+
+  return result;
+}
+
+/**
+ * Delegate a web search to the connected browser (its configured provider/key run it). Emits
+ * `search_requested`; the client runs the `search` command and POSTs the result back. On a
+ * disconnect timeout, returns a graceful error so the agent continues without it. (Piece B2 will
+ * replace this fallback with a native server-side search when no browser is connected.)
+ */
+export async function awaitSearchResult(
+  taskId: string,
+  deps: RunnerDeps,
+  args: string[],
+  webSearch?: ServerWebSearchConfig,
+): Promise<SearchDelegationResult> {
+  const { taskManager, eventBus } = deps;
+  const task = taskManager.getTask(taskId);
+  if (!task) return { stdout: '', stderr: 'search: task not found', exitCode: 1 };
+
+  eventBus.emit(taskId, task.projectId, 'search_requested', { taskId, args }, task.sessionId);
+
+  let timeoutId: ReturnType<typeof setTimeout>;
+
+  const result = await Promise.race<SearchDelegationResult>([
+    new Promise<SearchDelegationResult>((resolve) => {
+      task.pendingSearchResolve = (r: SearchDelegationResult) => {
+        clearTimeout(timeoutId);
+        resolve(r);
+      };
+    }),
+    new Promise<SearchDelegationResult>((resolve) => {
+      timeoutId = setTimeout(async () => {
+        task.pendingSearchResolve = null;
+        // No browser answered (headless/disconnected). Fall back to a server-side search when the
+        // client supplied provider config; otherwise tell the agent to continue without it.
+        if (webSearch) {
+          const { runServerSideSearch } = await import('./server-side-search');
+          resolve(await runServerSideSearch(args, webSearch));
+        } else {
+          resolve({
+            stdout: '',
+            stderr: 'search: no connected browser to run the search and no server-side provider configured. Continue without it.',
+            exitCode: 1,
+          });
+        }
       }, 30_000);
     }),
   ]);

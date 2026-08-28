@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Globe, AlertTriangle } from 'lucide-react';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
+import { SettingRow } from '@/components/ui/setting-row';
+import { Globe, AlertTriangle, FolderOpen, Link2, History } from 'lucide-react';
 
 interface GeneralTabProps {
   settings: PublishSettings;
@@ -22,7 +24,7 @@ interface GeneralTabProps {
 
 export function GeneralTab({ settings, onChange, projectId, deploymentId, publicUrl: resolvedUrl, projects, onProjectChange }: GeneralTabProps) {
   const [originalProjectId] = useState(projectId);
-  const handleChange = (field: keyof PublishSettings, value: any) => {
+  const handleChange = (field: keyof PublishSettings, value: PublishSettings[keyof PublishSettings]) => {
     onChange({
       ...settings,
       [field]: value,
@@ -39,108 +41,75 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, public
   const servedElsewhere = publicUrl !== directUrl;
 
   return (
-    <div className="space-y-6">
-      {/* Publishing Status */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-4">Publishing Status</h3>
-        </div>
+    <div className="flex flex-col gap-4">
+      <Section>
+        <SectionHeader icon={Globe} title="Publishing status" />
+        <SectionBody className="px-4 py-1">
+          <SettingRow title="Published" description="Make this deployment publicly accessible">
+            <Switch
+              id="enabled"
+              checked={settings.enabled}
+              onCheckedChange={(checked) => handleChange('enabled', checked)}
+            />
+          </SettingRow>
+          <SettingRow title="Under construction" description="Show maintenance overlay on live deployment">
+            <Switch
+              id="under-construction"
+              checked={settings.underConstruction}
+              onCheckedChange={(checked) => handleChange('underConstruction', checked)}
+            />
+          </SettingRow>
+        </SectionBody>
+      </Section>
 
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <div className="space-y-1">
-            <Label htmlFor="enabled" className="text-base">
-              Published
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              Make this deployment publicly accessible
-            </p>
-          </div>
-          <Switch
-            id="enabled"
-            checked={settings.enabled}
-            onCheckedChange={(checked) => handleChange('enabled', checked)}
-          />
-        </div>
-
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <div className="space-y-1">
-            <Label htmlFor="under-construction" className="text-base">
-              Under Construction
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              Show maintenance overlay on live deployment
-            </p>
-          </div>
-          <Switch
-            id="under-construction"
-            checked={settings.underConstruction}
-            onCheckedChange={(checked) => handleChange('underConstruction', checked)}
-          />
-        </div>
-      </div>
-
-      {/* Source Project */}
       {projects && projects.length > 0 && onProjectChange && (
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Source Project</h3>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="project-select">Project</Label>
-            <Select value={projectId} onValueChange={onProjectChange}>
-              <SelectTrigger id="project-select">
-                <SelectValue placeholder="Select a project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
-                    {project.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              The project whose files are published to this deployment.
-            </p>
-          </div>
-
-          {projectId !== originalProjectId && (
-            <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
-              <div className="text-sm text-yellow-800 dark:text-yellow-200">
-                <p className="font-medium">Changing the source project may break the published deployment.</p>
-                <p className="mt-1 text-yellow-700 dark:text-yellow-300">
-                  The new project may have different files and structure. You will need to republish after saving.
-                </p>
-              </div>
+        <Section>
+          <SectionHeader icon={FolderOpen} title="Source project" />
+          <SectionBody className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="project-select">Project</Label>
+              <Select value={projectId} onValueChange={onProjectChange}>
+                <SelectTrigger id="project-select">
+                  <SelectValue placeholder="Select a project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The project whose files are published to this deployment.
+              </p>
             </div>
-          )}
-        </div>
+
+            {projectId !== originalProjectId && (
+              <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+                <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                  <p className="font-medium">Changing the source project may break the published deployment.</p>
+                  <p className="mt-1 text-yellow-700 dark:text-yellow-300">
+                    The new project may have different files and structure. You will need to republish after saving.
+                  </p>
+                </div>
+              </div>
+            )}
+          </SectionBody>
+        </Section>
       )}
 
-      {/* Public URL */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-4">Public URL</h3>
-        </div>
-
-        <div className="space-y-3">
+      <Section>
+        <SectionHeader icon={Link2} title="Public URL" />
+        <SectionBody className="space-y-3">
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Public URL</Label>
             <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
-              <Globe className="h-4 w-4 text-muted-foreground" />
-              <code className="text-sm flex-1">{publicUrl}</code>
-              {settings.enabled && (
-                <Badge variant="default" className="ml-2">
-                  Live
-                </Badge>
-              )}
-              {!settings.enabled && (
-                <Badge variant="secondary" className="ml-2">
-                  Not Published
-                </Badge>
-              )}
+              <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+              <code className="text-sm flex-1 break-all">{publicUrl}</code>
+              <Badge variant={settings.enabled ? 'default' : 'secondary'} className="ml-2 shrink-0">
+                {settings.enabled ? 'Live' : 'Not Published'}
+              </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
               This is the public URL where your deployment will be accessible
@@ -150,24 +119,20 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, public
           {/* Show direct path when subdomain or custom domain is set */}
           {servedElsewhere && (
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Direct Path</Label>
+              <Label className="text-xs text-muted-foreground">Direct path</Label>
               <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border border-dashed">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <code className="text-xs flex-1 text-muted-foreground">{directUrl}</code>
+                <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                <code className="text-xs flex-1 text-muted-foreground break-all">{directUrl}</code>
               </div>
             </div>
           )}
-        </div>
-      </div>
+        </SectionBody>
+      </Section>
 
-      {/* Custom Domain */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-4">Custom Domain (Advanced)</h3>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="custom-domain">Domain Name (Optional)</Label>
+      <Section>
+        <SectionHeader icon={Globe} title="Custom domain" />
+        <SectionBody className="space-y-2">
+          <Label htmlFor="custom-domain">Domain name (optional)</Label>
           <Input
             id="custom-domain"
             type="text"
@@ -178,44 +143,42 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, public
           <p className="text-xs text-muted-foreground">
             Enter your custom domain and add a DNS A record pointing to this server. Used for SEO meta tags, sitemaps, and asset paths. Republish after setting.
           </p>
-        </div>
-      </div>
+        </SectionBody>
+      </Section>
 
-      {/* Version Info */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-4">Version Information</h3>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="p-3 border rounded-lg">
-            <div className="text-sm text-muted-foreground mb-1">Current Version</div>
-            <div className="text-2xl font-semibold">{settings.settingsVersion}</div>
-          </div>
-          <div className="p-3 border rounded-lg">
-            <div className="text-sm text-muted-foreground mb-1">Published Version</div>
-            <div className="text-2xl font-semibold">
-              {settings.lastPublishedVersion !== null && settings.lastPublishedVersion !== undefined
-                ? settings.lastPublishedVersion
-                : '-'}
+      <Section>
+        <SectionHeader icon={History} title="Version" />
+        <SectionBody className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 border rounded-lg">
+              <div className="text-xs text-muted-foreground mb-1">Current version</div>
+              <div className="text-2xl font-semibold tabular-nums">{settings.settingsVersion}</div>
             </div>
-          </div>
-        </div>
-
-        {settings.lastPublishedVersion !== undefined &&
-          settings.settingsVersion > settings.lastPublishedVersion && (
-            <div className="p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-yellow-100 dark:bg-yellow-900">
-                  Pending Changes
-                </Badge>
-                <span className="text-sm">
-                  You have unpublished changes. Republish to apply them.
-                </span>
+            <div className="p-3 border rounded-lg">
+              <div className="text-xs text-muted-foreground mb-1">Published version</div>
+              <div className="text-2xl font-semibold tabular-nums">
+                {settings.lastPublishedVersion !== null && settings.lastPublishedVersion !== undefined
+                  ? settings.lastPublishedVersion
+                  : '-'}
               </div>
             </div>
-          )}
-      </div>
+          </div>
+
+          {settings.lastPublishedVersion !== undefined &&
+            settings.settingsVersion > settings.lastPublishedVersion && (
+              <div className="p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="bg-yellow-100 dark:bg-yellow-900">
+                    Pending Changes
+                  </Badge>
+                  <span className="text-sm">
+                    You have unpublished changes. Republish to apply them.
+                  </span>
+                </div>
+              </div>
+            )}
+        </SectionBody>
+      </Section>
     </div>
   );
 }

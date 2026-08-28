@@ -5,7 +5,7 @@ import { Skill, SkillGroup } from '@/lib/vfs/skills/types';
 import { skillsService } from '@/lib/vfs/skills';
 import { vfs } from '@/lib/vfs';
 import { track } from '@/lib/telemetry';
-import { logger } from '@/lib/utils';
+import { logger, formatCompactAge } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,14 @@ import {
   TabsContent,
 } from '@/components/ui/tabs';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Section } from '@/components/ui/section';
+import { InfoTip } from '@/components/ui/info-tip';
+import {
   Plus,
   Search,
   Download,
@@ -38,6 +46,7 @@ import {
   ChevronRight,
   Power,
   FolderTree,
+  MoreVertical,
 } from 'lucide-react';
 import {
   Dialog,
@@ -51,6 +60,7 @@ import { toast } from 'sonner';
 import { SkillEditor } from './SkillEditor';
 import { usePagination } from '@/lib/hooks/use-pagination';
 import { Pagination, PaginationRange } from '@/components/ui/pagination';
+import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
 
 export function SkillsManager() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -68,6 +78,8 @@ export function SkillsManager() {
   const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [showBuiltIn, setShowBuiltIn] = useState(true);
   const [showCustom, setShowCustom] = useState(true);
+  const [viewMode, setViewMode] = useViewMode('skills');
+  const [activeTab, setActiveTab] = useState<'skills' | 'groups'>('skills');
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupDialogMode, setGroupDialogMode] = useState<'create' | 'edit'>('create');
   const [groupBeingEdited, setGroupBeingEdited] = useState<SkillGroup | null>(null);
@@ -367,6 +379,7 @@ export function SkillsManager() {
     resetOn: [searchQuery, showBuiltIn, showCustom],
   });
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   if (loading) {
     return (
@@ -385,7 +398,8 @@ export function SkillsManager() {
         {/* Toolbar */}
         <div className="pt-4 px-4 pb-3 sm:pt-6 sm:px-6 sm:pb-3 shrink-0">
           <div className="mx-auto max-w-7xl flex flex-col gap-3">
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <h1 className="text-lg font-semibold shrink-0">Skills</h1>
               <div className="flex items-center shrink-0">
                 <Button onClick={handleCreateNew} size="sm">
                   <Plus className="w-4 h-4 mr-2" />
@@ -406,49 +420,59 @@ export function SkillsManager() {
 
               {/* Actions */}
               <div className="flex items-center gap-2">
+                <ViewModeToggle value={viewMode} onChange={setViewMode} />
                 <Button variant="outline" size="sm" onClick={handleOpenCreateGroup}>
                   <FolderTree className="w-4 h-4 mr-2" />
                   New Group
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleImport}>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Import
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleExportAll}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Export
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="px-2" title="More">
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleImport}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportAll}>
+                      <Download className="w-4 h-4 mr-2" />
+                      Export
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
-            {/* Global Enable/Disable Toggle */}
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Power className="w-4 h-4" />
-                <Label htmlFor="global-toggle" className="text-sm font-medium cursor-pointer">
-                  Enable Skills System
-                </Label>
-              </div>
+            {/* Skills system master toggle + skill evaluation (slim strip) */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <Power className="w-4 h-4 text-muted-foreground shrink-0" />
+              <Label htmlFor="global-toggle" className="text-[13px] font-medium cursor-pointer">
+                Skills system
+              </Label>
+              <InfoTip>
+                Skills are reusable instructions that steer how the AI builds. When on, the ones you
+                enable below are added to the AI&apos;s guidance for every build. Turn off to run with
+                no skills at all.
+              </InfoTip>
               <Switch
                 id="global-toggle"
                 checked={globalEnabled}
                 onCheckedChange={handleGlobalToggle}
               />
-            </div>
 
-            {/* Skill Evaluation Toggle */}
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4" />
-                <div>
-                  <Label htmlFor="eval-toggle" className="text-sm font-medium cursor-pointer">
-                    Skill Evaluation
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Pre-check which skills are relevant before each message. Increases initial token usage per message.
-                  </p>
-                </div>
-              </div>
+              <span className="mx-1 h-5 w-px bg-border hidden sm:block" />
+
+              <Sparkles className="w-4 h-4 text-muted-foreground shrink-0" />
+              <Label htmlFor="eval-toggle" className="text-[13px] font-medium cursor-pointer">
+                Skill evaluation
+              </Label>
+              <InfoTip>
+                Before each message a quick check picks which of your enabled skills are relevant, so
+                only those get added instead of all of them. Sharpens relevance but spends some extra
+                tokens up front. Leave off to always include every enabled skill.
+              </InfoTip>
               <Switch
                 id="eval-toggle"
                 checked={evaluationEnabled}
@@ -456,81 +480,84 @@ export function SkillsManager() {
                 onCheckedChange={handleEvaluationToggle}
               />
             </div>
+
           </div>
         </div>
 
         {/* Tabs */}
-        <div ref={listScrollRef} className="flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-3 sm:pb-6 overflow-auto">
-          <div className="mx-auto max-w-7xl">
-            <Tabs defaultValue="skills" className="w-full">
-              <TabsList className="mb-4">
-                <TabsTrigger value="skills" className="gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Skills
-                  <Badge variant="outline" className="text-xs ml-1">{filteredSkills.length}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="groups" className="gap-1.5">
-                  <FolderTree className="w-3.5 h-3.5" />
-                  Groups
-                  <Badge variant="outline" className="text-xs ml-1">{filteredGroups.length}</Badge>
-                </TabsTrigger>
-              </TabsList>
+        <div ref={listScrollRef} className="flex-1 min-h-0 flex flex-col px-4 pb-4 sm:px-6 sm:pb-6">
+          <div className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'skills' | 'groups')} className="w-full flex-1 min-h-0 flex flex-col">
+              <Section className="flex-1 min-h-0 flex flex-col">
+                {/* Header: Skills/Groups switch + (skills-only) source filter & bulk actions */}
+                <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border shrink-0">
+                  <TabsList className="h-8 bg-muted/60">
+                    <TabsTrigger value="skills" className="gap-1.5 h-6 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-none">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Skills
+                      <Badge variant="outline" className="text-xs ml-1">{filteredSkills.length}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="groups" className="gap-1.5 h-6 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-none">
+                      <FolderTree className="w-3.5 h-3.5" />
+                      Groups
+                      <Badge variant="outline" className="text-xs ml-1">{filteredGroups.length}</Badge>
+                    </TabsTrigger>
+                  </TabsList>
 
-              <TabsContent value="skills" className="mt-0 space-y-3">
-                {/* Source filter + bulk actions */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-muted-foreground">Show:</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 gap-1.5"
-                      // Active: mild orange fill + border (matches the enabled-skill card). Inline so it wins
-                      // over the outline variant's dark bg/border in both themes.
-                      style={showBuiltIn ? { backgroundColor: 'color-mix(in oklab, var(--primary) 5%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)' } : undefined}
-                      onClick={() => setShowBuiltIn(v => !v)}
-                      aria-pressed={showBuiltIn}
-                    >
-                      <FileText className="w-3 h-3" />
-                      Built-in
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 gap-1.5"
-                      style={showCustom ? { backgroundColor: 'color-mix(in oklab, var(--primary) 5%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)' } : undefined}
-                      onClick={() => setShowCustom(v => !v)}
-                      aria-pressed={showCustom}
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      Custom
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2"
-                      onClick={() => handleBulkSkillToggle(filteredSkills.map(s => s.id), true)}
-                      disabled={!globalEnabled || filteredSkills.length === 0}
-                      title="Enable all skills currently shown"
-                    >
-                      Enable all
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2"
-                      onClick={() => handleBulkSkillToggle(filteredSkills.map(s => s.id), false)}
-                      disabled={!globalEnabled || filteredSkills.length === 0}
-                      title="Disable all skills currently shown"
-                    >
-                      Disable all
-                    </Button>
-                  </div>
+                  {activeTab === 'skills' && (
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Show:</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 gap-1.5"
+                        style={showBuiltIn ? { backgroundColor: 'color-mix(in oklab, var(--primary) 5%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)' } : undefined}
+                        onClick={() => setShowBuiltIn(v => !v)}
+                        aria-pressed={showBuiltIn}
+                        title="Show or hide the skills that ship with OSW Studio"
+                      >
+                        <FileText className="w-3 h-3" />
+                        Built-in
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 gap-1.5"
+                        style={showCustom ? { backgroundColor: 'color-mix(in oklab, var(--primary) 5%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)' } : undefined}
+                        onClick={() => setShowCustom(v => !v)}
+                        aria-pressed={showCustom}
+                        title="Show or hide the skills you created"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        Custom
+                      </Button>
+                      <span className="w-px h-5 bg-border mx-0.5" />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => handleBulkSkillToggle(filteredSkills.map(s => s.id), true)}
+                        disabled={!globalEnabled || filteredSkills.length === 0}
+                        title="Enable all skills currently shown"
+                      >
+                        Enable all
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => handleBulkSkillToggle(filteredSkills.map(s => s.id), false)}
+                        disabled={!globalEnabled || filteredSkills.length === 0}
+                        title="Disable all skills currently shown"
+                      >
+                        Disable all
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
-                {filteredSkills.length === 0 ? (
+                <TabsContent value="skills" className="mt-0 flex-1 min-h-0 flex flex-col">
+                  {filteredSkills.length === 0 ? (
                   <div className="text-center py-12">
                     <Sparkles className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                     <h3 className="text-lg font-semibold mb-2">No skills found</h3>
@@ -549,40 +576,108 @@ export function SkillsManager() {
                     )}
                   </div>
                 ) : (
-                  <>
-                    <PaginationRange
-                      total={skillsPagination.total}
-                      rangeStart={skillsPagination.rangeStart}
-                      rangeEnd={skillsPagination.rangeEnd}
-                      totalPages={skillsPagination.totalPages}
-                      className="mb-2"
-                    />
-                    <div className="grid gap-3">
-                      {skillsPagination.pageItems.map(skill => (
-                        <SkillCard
-                          key={skill.id}
-                          skill={skill}
-                          isEnabled={enabledSkills.has(skill.id)}
-                          globalEnabled={globalEnabled}
-                          groups={skillToGroups.get(skill.id) ?? []}
-                          enabledGroups={enabledGroups}
-                          onToggle={handleSkillToggle}
-                          onEdit={handleEdit}
-                          onDelete={handleDelete}
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    {skillsPagination.totalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 px-3 pt-3 pb-2 shrink-0 border-b border-border">
+                        <PaginationRange
+                          total={skillsPagination.total}
+                          rangeStart={skillsPagination.rangeStart}
+                          rangeEnd={skillsPagination.rangeEnd}
+                          totalPages={skillsPagination.totalPages}
                         />
-                      ))}
-                    </div>
-                    <Pagination
-                      page={skillsPagination.page}
-                      totalPages={skillsPagination.totalPages}
-                      onPageChange={skillsPagination.setPage}
-                      scrollTarget={listScrollRef}
-                    />
-                  </>
+                        <Pagination
+                          page={skillsPagination.page}
+                          totalPages={skillsPagination.totalPages}
+                          onPageChange={skillsPagination.setPage}
+                          scrollTarget={contentScrollRef}
+                          className="pt-0 pb-0"
+                        />
+                      </div>
+                    )}
+                    {viewMode === 'table' ? (
+                      <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto">
+                        <table className="w-full table-auto border-collapse">
+                          <thead className="sticky top-0 z-10">
+                            <tr>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Type</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Group</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Updated</th>
+                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {skillsPagination.pageItems.map(skill => {
+                              const memberOf = skillToGroups.get(skill.id) ?? [];
+                              return (
+                                <tr key={skill.id} className="border-b border-border/50 hover:bg-muted/50 cursor-pointer h-[44px]" onClick={() => handleEdit(skill)}>
+                                  <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
+                                    <div className="min-w-0">
+                                      <span className="block font-medium text-foreground text-[13px] truncate">{skill.name}</span>
+                                      <span className="block text-[11px] text-muted-foreground truncate">{skill.description}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-[4px_10px] align-middle whitespace-nowrap">
+                                    <Badge variant={skill.isBuiltIn ? 'secondary' : 'outline'} className="text-[11px] px-[7px] py-[1px] h-auto rounded-full">
+                                      {skill.isBuiltIn ? 'Built-in' : 'Custom'}
+                                    </Badge>
+                                  </td>
+                                  <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
+                                    {memberOf.length > 0 ? memberOf[0].name : '—'}
+                                  </td>
+                                  <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap overflow-hidden text-ellipsis">
+                                    {formatCompactAge(skill.updatedAt)}
+                                  </td>
+                                  <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-end gap-1">
+                                      <Button variant="outline" size="xs" onClick={() => handleEdit(skill)}>
+                                        <Edit className="w-3 h-3" />Edit
+                                      </Button>
+                                      <Button
+                                        variant={enabledSkills.has(skill.id) ? 'outline' : 'ghost'}
+                                        size="xs"
+                                        onClick={() => handleSkillToggle(skill.id, !enabledSkills.has(skill.id))}
+                                        disabled={!globalEnabled}
+                                      >
+                                        {enabledSkills.has(skill.id) ? 'On' : 'Off'}
+                                      </Button>
+                                      {!skill.isBuiltIn && (
+                                        <Button variant="ghost" size="xs" onClick={() => handleDelete(skill)}>
+                                          <Trash2 className="w-3 h-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto p-3">
+                        <div className="grid gap-3">
+                        {skillsPagination.pageItems.map(skill => (
+                          <SkillCard
+                            key={skill.id}
+                            skill={skill}
+                            isEnabled={enabledSkills.has(skill.id)}
+                            globalEnabled={globalEnabled}
+                            groups={skillToGroups.get(skill.id) ?? []}
+                            enabledGroups={enabledGroups}
+                            onToggle={handleSkillToggle}
+                            onEdit={handleEdit}
+                            onDelete={handleDelete}
+                          />
+                        ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </TabsContent>
 
-              <TabsContent value="groups" className="mt-0">
+              <TabsContent value="groups" className="mt-0 flex-1 min-h-0 overflow-auto p-3">
                 {filteredGroups.length === 0 ? (
                   <div className="text-center py-12">
                     <FolderTree className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
@@ -616,6 +711,7 @@ export function SkillsManager() {
                   </div>
                 )}
               </TabsContent>
+              </Section>
             </Tabs>
           </div>
         </div>

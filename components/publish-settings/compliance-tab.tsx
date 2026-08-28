@@ -13,6 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
+import { SettingRow } from '@/components/ui/setting-row';
 import { Shield, Info, Cookie } from 'lucide-react';
 
 interface ComplianceTabProps {
@@ -35,42 +37,31 @@ export function ComplianceTab({ settings, onChange }: ComplianceTabProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">Compliance & Consent</h3>
-          <p className="text-sm text-muted-foreground">
-            Cookie consent banner and privacy compliance
-          </p>
-        </div>
-      </div>
-
-      {/* Enable Compliance Banner */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
-        <div className="space-y-1">
-          <Label htmlFor="compliance-enabled" className="text-base">
-            Enable Consent Banner
-          </Label>
-          <p className="text-sm text-muted-foreground">
-            Show a cookie consent banner to visitors
-          </p>
-        </div>
-        <Switch
-          id="compliance-enabled"
-          checked={settings.compliance.enabled}
-          onCheckedChange={(checked) =>
-            handleComplianceChange('enabled', checked)
-          }
-        />
-      </div>
+    <div className="flex flex-col gap-4">
+      <Section>
+        <SectionHeader icon={Cookie} title="Consent banner" />
+        <SectionBody className="px-4 py-1">
+          <SettingRow
+            title="Enable consent banner"
+            description="Show a cookie consent banner to visitors"
+          >
+            <Switch
+              id="compliance-enabled"
+              checked={settings.compliance.enabled}
+              onCheckedChange={(checked) =>
+                handleComplianceChange('enabled', checked)
+              }
+            />
+          </SettingRow>
+        </SectionBody>
+      </Section>
 
       {settings.compliance.enabled && (
         <>
           {/* Banner Configuration */}
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold mb-4">Banner Configuration</h4>
-            </div>
+          <Section>
+            <SectionHeader title="Banner configuration" />
+            <SectionBody className="space-y-4">
 
             {/* Banner Position */}
             <div className="space-y-2">
@@ -193,13 +184,13 @@ export function ComplianceTab({ settings, onChange }: ComplianceTabProps) {
                 />
               </div>
             </div>
-          </div>
+            </SectionBody>
+          </Section>
 
           {/* Compliance Mode */}
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold mb-4">Compliance Mode</h4>
-            </div>
+          <Section>
+            <SectionHeader title="Compliance mode" />
+            <SectionBody className="space-y-4">
 
             <div className="space-y-2">
               <Label htmlFor="compliance-mode">Mode</Label>
@@ -262,13 +253,13 @@ export function ComplianceTab({ settings, onChange }: ComplianceTabProps) {
                 </div>
               </div>
             )}
-          </div>
+            </SectionBody>
+          </Section>
 
           {/* Preview Info */}
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold mb-4">Preview</h4>
-            </div>
+          <Section>
+            <SectionHeader title="Preview" />
+            <SectionBody className="space-y-4">
 
             <div className="p-4 bg-muted rounded-lg border">
               <div className="flex gap-3">
@@ -283,7 +274,8 @@ export function ComplianceTab({ settings, onChange }: ComplianceTabProps) {
                 </div>
               </div>
             </div>
-          </div>
+            </SectionBody>
+          </Section>
         </>
       )}
     </div>

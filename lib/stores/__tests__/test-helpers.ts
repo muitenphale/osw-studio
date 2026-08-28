@@ -36,6 +36,10 @@ export function setupOrchestratorMocks() {
       getDebugStreamEnabled: () => false,
       getPermissionMode: () => 'auto',
       getPermissionOverrides: () => ({}),
+      isWebSearchConfigured: () => false,
+      getWebSearchProvider: () => null,
+      getWebSearchKey: () => null,
+      getSearxngUrl: () => null,
     },
     migrateBackendKey: () => false,
   }));

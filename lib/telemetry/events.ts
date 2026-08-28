@@ -45,6 +45,7 @@ export const EVENT_CATALOG = {
   agent_spawned:      { category: 'generation', disclosure: 'When the AI delegates to a sub-agent (explore, plan, task)' },
   skill_read:         { category: 'generation', disclosure: 'Whether the AI consulted a skill file (built-in skill names only; custom skills are counted anonymously)' },
   ask_response:       { category: 'generation', disclosure: 'Whether AI questions are answered by tapping an option or typing' },
+  approval_response:  { category: 'generation', disclosure: 'Whether a paused server-side permission request was allowed or denied' },
 
   // projects
   project_create:     { category: 'projects', disclosure: 'Which creation flow and runtime are used when a project is created (e.g. quick vs. describe, static vs. react)' },

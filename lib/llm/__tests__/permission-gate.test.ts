@@ -73,4 +73,28 @@ describe('checkCommandPermission', () => {
     );
     expect(r.allowed).toBe(true);
   });
+
+  it('pauseForApproval: gated command emits approval_required and declines (server pause path)', async () => {
+    const onProgress = vi.fn();
+    const cb = vi.fn();
+    const r = await checkCommandPermission(
+      ['search', 'muse glimmer 30b'],
+      { permissionMode: 'ask', permissionOverrides: {}, pauseForApproval: true, onProgress, onApprovalNeeded: cb },
+    );
+    expect(r.allowed).toBe(false);
+    expect((r as { reason: string }).reason).toMatch(/awaiting your approval/i);
+    // Emits the pause signal and never reaches the (would-deny) live callback.
+    expect(onProgress).toHaveBeenCalledWith('approval_required', expect.objectContaining({ gateKey: 'search' }));
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('pauseForApproval: a standing allow skips the pause entirely', async () => {
+    const onProgress = vi.fn();
+    const r = await checkCommandPermission(
+      ['search', 'x'],
+      { permissionMode: 'ask', permissionOverrides: { search: 'allow' }, pauseForApproval: true, onProgress },
+    );
+    expect(r.allowed).toBe(true);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
 });

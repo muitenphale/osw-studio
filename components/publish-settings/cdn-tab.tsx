@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Section, SectionHeader, SectionBody } from '@/components/ui/section';
 import { Plus, Edit, Trash2, Link2 } from 'lucide-react';
 
 interface CdnTabProps {
@@ -112,20 +113,15 @@ export function CdnTab({ settings, onChange }: CdnTabProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">CDN Resources</h3>
-          <p className="text-sm text-muted-foreground">
-            Add external CSS and JavaScript libraries
-          </p>
-        </div>
-        <Button onClick={handleAddCdn} size="sm">
-          <Plus className="h-4 w-4 mr-2" />
-          Add CDN Resource
-        </Button>
-      </div>
-
+    <div className="flex flex-col gap-4">
+      <Section>
+        <SectionHeader icon={Link2} title="CDN resources">
+          <Button onClick={handleAddCdn} size="sm" variant="outline">
+            <Plus className="h-4 w-4" />
+            Add resource
+          </Button>
+        </SectionHeader>
+        <SectionBody className="space-y-3">
       {settings.cdnLinks.length === 0 ? (
         <div className="text-center p-8 border-2 border-dashed rounded-lg">
           <Link2 className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
@@ -182,6 +178,8 @@ export function CdnTab({ settings, onChange }: CdnTabProps) {
           ))}
         </div>
       )}
+        </SectionBody>
+      </Section>
 
       {/* CDN Editor Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

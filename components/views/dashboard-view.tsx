@@ -23,6 +23,7 @@ import { vfs } from '@/lib/vfs';
 import { templateService } from '@/lib/vfs/template-service';
 import { skillsService } from '@/lib/vfs/skills';
 import pkg from '@/package.json';
+import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
 
 const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 
@@ -248,7 +249,7 @@ function QuickActionsBar({
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-4 mb-6">
+    <div className="bg-card rounded-lg border border-border p-4 mb-6">
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" asChild className="gap-1.5">
           <Link href={projectsHref} onClick={handleNewProjectClick}>
@@ -318,7 +319,7 @@ function WhatsNewCard({
   const docsHref = isServerMode ? '/admin/docs?doc=whats-new' : '#';
 
   return (
-    <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+    <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex items-center gap-2">
           <Newspaper className="w-4 h-4 text-orange-500" />
@@ -376,7 +377,7 @@ function CompactOverview({
   const rightColumn = stats.slice(half);
 
   return (
-    <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+    <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium text-foreground">System Overview</h3>
         <Button
@@ -437,7 +438,7 @@ function BrowserOverview({
   const rightColumn = stats.slice(half);
 
   return (
-    <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+    <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium text-foreground">Content Overview</h3>
         <Button
@@ -499,7 +500,7 @@ function RecentProjectsCard({
   const viewAllHref = isServerMode ? '/admin/projects' : '#';
 
   return (
-    <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+    <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <FolderOpen className="w-4 h-4 text-orange-500" />
@@ -543,7 +544,7 @@ function RecentProjectsCard({
 // Recent Deployments Card
 function RecentDeploymentsCard({ deployments }: { deployments: DashboardData['recentDeployments'] }) {
   return (
-    <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+    <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Globe className="w-4 h-4 text-orange-500" />
@@ -594,7 +595,7 @@ function TrafficLists({ data }: { data: DashboardData }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* Top Deployments */}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+      <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
         <div className="flex items-center gap-2 mb-3">
           <Globe className="w-4 h-4 text-orange-500" />
           <h3 className="text-sm font-medium text-foreground">Top Deployments (24h)</h3>
@@ -622,7 +623,7 @@ function TrafficLists({ data }: { data: DashboardData }) {
       </div>
 
       {/* Recent Errors */}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-col">
+      <div className="bg-card rounded-lg border border-border p-4 flex flex-col">
         <div className="flex items-center gap-2 mb-3">
           <AlertTriangle className="w-4 h-4 text-orange-500" />
           <h3 className="text-sm font-medium text-foreground">Recent Errors</h3>
@@ -789,27 +790,30 @@ export function DashboardView({ workspaceId, onNavigate, onProjectSelect, onStar
     const hasWhatsNew = serverData.whatsNew?.highlights?.length > 0;
 
     return (
-      <div className="h-full overflow-y-auto p-6">
-        {/* Quick Actions */}
-        <QuickActionsBar onStartTour={handleStartTour} />
+      <PageShell>
+        <PageHeader title="Dashboard" />
+        <PageBody innerClassName="">
+          {/* Quick Actions */}
+          <QuickActionsBar onStartTour={handleStartTour} />
 
-        {/* Row 1: System Overview + What's New */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
-          <CompactOverview data={serverData} loading={loading} onRefresh={fetchData} />
-          {hasWhatsNew && <WhatsNewCard whatsNew={serverData.whatsNew} />}
-        </div>
+          {/* Row 1: System Overview + What's New */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
+            <CompactOverview data={serverData} loading={loading} onRefresh={fetchData} />
+            {hasWhatsNew && <WhatsNewCard whatsNew={serverData.whatsNew} />}
+          </div>
 
-        {/* Row 2: Recent Projects + Recent Deployments */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
-          <RecentProjectsCard projects={serverData.recentProjects} />
-          <RecentDeploymentsCard deployments={serverData.recentDeployments} />
-        </div>
+          {/* Row 2: Recent Projects + Recent Deployments */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
+            <RecentProjectsCard projects={serverData.recentProjects} />
+            <RecentDeploymentsCard deployments={serverData.recentDeployments} />
+          </div>
 
-        {/* Row 3: Top Deployments + Recent Errors */}
-        <div className="[&>*>*]:min-h-[140px]">
-          <TrafficLists data={serverData} />
-        </div>
-      </div>
+          {/* Row 3: Top Deployments + Recent Errors */}
+          <div className="[&>*>*]:min-h-[140px]">
+            <TrafficLists data={serverData} />
+          </div>
+        </PageBody>
+      </PageShell>
     );
   }
 
@@ -818,30 +822,33 @@ export function DashboardView({ workspaceId, onNavigate, onProjectSelect, onStar
     const hasWhatsNew = browserData.whatsNew !== null;
 
     return (
-      <div className="h-full overflow-y-auto p-6">
-        {/* Quick Actions */}
-        <QuickActionsBar onStartTour={handleStartTour} onNavigate={onNavigate} />
+      <PageShell>
+        <PageHeader title="Dashboard" />
+        <PageBody innerClassName="">
+          {/* Quick Actions */}
+          <QuickActionsBar onStartTour={handleStartTour} onNavigate={onNavigate} />
 
-        {/* Row 1: Content Overview + What's New */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
-          <BrowserOverview data={browserData} loading={loading} onRefresh={fetchData} />
-          {hasWhatsNew && (
-            <WhatsNewCard
-              whatsNew={browserData.whatsNew!}
+          {/* Row 1: Content Overview + What's New */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 [&>*]:min-h-[160px]">
+            <BrowserOverview data={browserData} loading={loading} onRefresh={fetchData} />
+            {hasWhatsNew && (
+              <WhatsNewCard
+                whatsNew={browserData.whatsNew!}
+                onNavigate={onNavigate}
+              />
+            )}
+          </div>
+
+          {/* Row 2: Recent Projects (no Deployments in browser mode) */}
+          <div className="mb-4 lg:w-1/2">
+            <RecentProjectsCard
+              projects={browserData.recentProjects}
               onNavigate={onNavigate}
+              onProjectSelect={handleProjectSelect}
             />
-          )}
-        </div>
-
-        {/* Row 2: Recent Projects (no Deployments in browser mode) */}
-        <div className="mb-4 lg:w-1/2">
-          <RecentProjectsCard
-            projects={browserData.recentProjects}
-            onNavigate={onNavigate}
-            onProjectSelect={handleProjectSelect}
-          />
-        </div>
-      </div>
+          </div>
+        </PageBody>
+      </PageShell>
     );
   }
 

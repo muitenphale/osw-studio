@@ -16,7 +16,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Search, Plus, Edit, Copy, Trash2, Eye, ClipboardList, FileText } from 'lucide-react';
+import { Search, Plus, Edit, Copy, Trash2, Eye, ClipboardList, FileText, MoreVertical } from 'lucide-react';
+import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { InterviewTemplateEditor } from './InterviewTemplateEditor';
 
 interface InterviewTemplatesPanelProps {
@@ -40,6 +47,7 @@ export function InterviewTemplatesPanel({
   const [showBuiltIn, setShowBuiltIn] = useState(true);
   const [showCustom, setShowCustom] = useState(true);
   const [templateToDelete, setTemplateToDelete] = useState<InterviewTemplate | null>(null);
+  const [viewMode, setViewMode] = useViewMode('interviews');
 
   const reloadList = useCallback(async () => {
     try {
@@ -116,18 +124,9 @@ export function InterviewTemplatesPanel({
   return (
     <>
       <div className="flex flex-col h-full">
-        <div className="px-6 pt-6 pb-3 shrink-0">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="w-5 h-5" />
-            <h2 className="text-lg font-semibold leading-none tracking-tight">Interview Templates</h2>
-          </div>
-          <p className="text-sm text-muted-foreground mt-1.5">
-            Manage the guided interviews available in interview mode.
-          </p>
-        </div>
-
-        <div className="px-6 pb-3 shrink-0 flex flex-col gap-3">
-          <div className="flex flex-col sm:flex-row gap-3">
+        <div className="px-6 pt-6 pb-3 shrink-0 flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <h1 className="text-lg font-semibold shrink-0">Interviews</h1>
             <div className="flex items-center shrink-0">
               <Button size="sm" onClick={() => setView({ mode: 'create' })}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -143,6 +142,7 @@ export function InterviewTemplatesPanel({
                 className="pl-9"
               />
             </div>
+            <ViewModeToggle value={viewMode} onChange={setViewMode} />
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Show:</span>
@@ -173,7 +173,7 @@ export function InterviewTemplatesPanel({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
+        <div className="flex-1 min-h-0 flex flex-col px-6 pb-6">
           {filtered.length === 0 ? (
             <div className="text-center py-12">
               <ClipboardList className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
@@ -192,8 +192,73 @@ export function InterviewTemplatesPanel({
                 </Button>
               )}
             </div>
+          ) : viewMode === 'table' ? (
+            <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
+              <table className="w-full table-auto border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Title</th>
+                    <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Type</th>
+                    <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Items</th>
+                    <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Artifact</th>
+                    <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(t => (
+                    <tr key={t.id} className="border-b border-border/50 hover:bg-muted/50 cursor-pointer h-[44px]" onClick={() => setView(t.isBuiltIn ? { mode: 'view', template: t } : { mode: 'edit', template: t })}>
+                      <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
+                        <div className="min-w-0">
+                          <span className="block font-medium text-foreground text-[13px] truncate">{t.title}</span>
+                          <span className="block text-[11px] text-muted-foreground truncate">{t.description}</span>
+                        </div>
+                      </td>
+                      <td className="p-[4px_10px] align-middle whitespace-nowrap">
+                        <Badge variant={t.isBuiltIn ? 'secondary' : 'outline'} className="text-[11px] px-[7px] py-[1px] h-auto rounded-full">
+                          {t.isBuiltIn ? 'Built-in' : 'Custom'}
+                        </Badge>
+                      </td>
+                      <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{t.items.length}</td>
+                      <td className="p-[4px_10px] text-[11px] text-muted-foreground align-middle whitespace-nowrap font-mono overflow-hidden text-ellipsis" style={{ maxWidth: 260 }}>
+                        {t.artifacts[0]?.path ?? '—'}
+                      </td>
+                      <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          {t.isBuiltIn ? (
+                            <>
+                              <Button variant="outline" size="xs" onClick={() => setView({ mode: 'view', template: t })}>View</Button>
+                              <Button variant="outline" size="xs" onClick={() => handleDuplicate(t)}>Duplicate</Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button variant="outline" size="xs" onClick={() => setView({ mode: 'edit', template: t })}>
+                                <Edit className="w-3 h-3" />Edit
+                              </Button>
+                              <Button variant="outline" size="xs" onClick={() => handleDuplicate(t)}>Duplicate</Button>
+                            </>
+                          )}
+                          {!t.isBuiltIn && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setTemplateToDelete(t)} className="text-destructive focus:text-destructive">
+                                  <Trash2 className="w-4 h-4 mr-2" />Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <div className="grid gap-3">
+            <div className="flex-1 min-h-0 overflow-auto">
+              <div className="grid gap-3">
               {filtered.map(t => (
                 <div key={t.id} className="border rounded-lg p-4">
                   <div className="flex items-start justify-between gap-4">
@@ -263,6 +328,7 @@ export function InterviewTemplatesPanel({
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           )}
         </div>
