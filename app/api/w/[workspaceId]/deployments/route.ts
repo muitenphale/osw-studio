@@ -11,6 +11,7 @@ import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { ensureDeploymentRoute } from '@/lib/auth/system-database';
 import { Deployment } from '@/lib/vfs/types';
 import { withPublicUrl } from '@/lib/api/deployment-url';
+import { toPublicDeployment } from '@/lib/api/deployment-public';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function GET(
@@ -22,7 +23,7 @@ export async function GET(
 
     const deployments = await adapter.listDeployments?.() || [];
 
-    return NextResponse.json(deployments.map(withPublicUrl));
+    return NextResponse.json(deployments.map(d => toPublicDeployment(withPublicUrl(d))));
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -109,7 +110,7 @@ export async function POST(
       logger.warn('[Deployments API] Failed to register deployment route:', routeError);
     }
 
-    return NextResponse.json(deployment, { status: 201 });
+    return NextResponse.json(toPublicDeployment(deployment), { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

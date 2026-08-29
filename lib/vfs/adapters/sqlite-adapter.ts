@@ -30,14 +30,13 @@ import {
   deleteDeploymentDatabase,
   deleteProjectDatabase,
   listDeploymentIds,
-  deploymentExists,
   closeAllConnections,
   closeCoreDatabaseByPath,
 } from './sqlite-connection';
 import { DeploymentDatabase } from './deployment-database';
 import { AnalyticsDatabase } from './analytics-database';
 import { ProjectDatabase } from './project-database';
-import type { AnalyticsConfig, ComplianceConfig, SeoConfig } from '../types';
+import type { AnalyticsConfig, ComplianceConfig, ReviewConfig, SeoConfig } from '../types';
 
 // Default configs for Deployment
 const DEFAULT_ANALYTICS: AnalyticsConfig = {
@@ -58,6 +57,8 @@ const DEFAULT_COMPLIANCE: ComplianceConfig = {
 };
 
 const DEFAULT_SEO: SeoConfig = {};
+
+const DEFAULT_REVIEW: ReviewConfig = { enabled: false };
 
 // Migration definitions
 interface Migration {
@@ -448,6 +449,23 @@ const MIGRATIONS: Migration[] = [
       db.exec(`DROP TABLE files`);
       db.exec(`ALTER TABLE files_v10 RENAME TO files`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id)`);
+    }
+  },
+  {
+    id: 'add_deployment_review_v11',
+    up: (db) => {
+      // Review mode is a settings group like analytics/seo/compliance and is stored the same way:
+      // one column holding its JSON. It cannot be folded into the initial schema — installs that
+      // already ran that migration never re-run it, so the column would exist only on new
+      // databases.
+      //
+      // The PRAGMA check makes the ALTER safe to reach twice, and safe on a database with no
+      // deployments table at all: either way the statement would throw inside the migration
+      // transaction, which fails init and takes the whole adapter down with it.
+      const cols = db.prepare(`PRAGMA table_info(deployments)`).all() as Array<{ name: string }>;
+      if (cols.length > 0 && !cols.some((c) => c.name === 'review')) {
+        db.exec(`ALTER TABLE deployments ADD COLUMN review TEXT DEFAULT '{}'`);
+      }
     }
   },
 ];
@@ -886,9 +904,7 @@ export class SQLiteAdapter implements StorageAdapter {
       this.deploymentDatabases.delete(deploymentId);
     }
 
-    if (deploymentExists(deploymentId)) {
-      deleteDeploymentDatabase(deploymentId);
-    }
+    deleteDeploymentDatabase(deploymentId);
   }
 
   /**
@@ -1000,10 +1016,8 @@ export class SQLiteAdapter implements StorageAdapter {
     db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 
     // Delete deployment database if it exists
-    if (deploymentExists(id)) {
-      this.deploymentDatabases.delete(id);
-      deleteDeploymentDatabase(id);
-    }
+    this.deploymentDatabases.delete(id);
+    deleteDeploymentDatabase(id);
 
     // Delete project database if it exists
     this.projectDatabases.delete(id);
@@ -1674,10 +1688,10 @@ export class SQLiteAdapter implements StorageAdapter {
       INSERT INTO deployments (
         id, project_id, name, slug, enabled, under_construction,
         custom_domain, head_scripts, body_scripts, cdn_links,
-        analytics, seo, compliance, settings_version,
+        analytics, seo, compliance, review, settings_version,
         last_published_version, preview_image, preview_updated_at,
         database_enabled, created_at, updated_at, published_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -1694,6 +1708,7 @@ export class SQLiteAdapter implements StorageAdapter {
       JSON.stringify(deployment.analytics ?? DEFAULT_ANALYTICS),
       JSON.stringify(deployment.seo ?? DEFAULT_SEO),
       JSON.stringify(deployment.compliance ?? DEFAULT_COMPLIANCE),
+      JSON.stringify(deployment.review ?? DEFAULT_REVIEW),
       deployment.settingsVersion ?? 1,
       deployment.lastPublishedVersion ?? null,
       deployment.previewImage ?? null,
@@ -1741,7 +1756,7 @@ export class SQLiteAdapter implements StorageAdapter {
       UPDATE deployments SET
         project_id = ?, name = ?, slug = ?, enabled = ?, under_construction = ?,
         custom_domain = ?, head_scripts = ?, body_scripts = ?, cdn_links = ?,
-        analytics = ?, seo = ?, compliance = ?, settings_version = ?,
+        analytics = ?, seo = ?, compliance = ?, review = ?, settings_version = ?,
         last_published_version = ?, preview_image = ?, preview_updated_at = ?,
         database_enabled = ?, updated_at = ?, published_at = ?
       WHERE id = ?
@@ -1760,6 +1775,7 @@ export class SQLiteAdapter implements StorageAdapter {
       JSON.stringify(deployment.analytics ?? DEFAULT_ANALYTICS),
       JSON.stringify(deployment.seo ?? DEFAULT_SEO),
       JSON.stringify(deployment.compliance ?? DEFAULT_COMPLIANCE),
+      JSON.stringify(deployment.review ?? DEFAULT_REVIEW),
       deployment.settingsVersion ?? 1,
       deployment.lastPublishedVersion ?? null,
       deployment.previewImage ?? null,
@@ -1784,9 +1800,7 @@ export class SQLiteAdapter implements StorageAdapter {
       this.deploymentDatabases.delete(deploymentId);
     }
 
-    if (deploymentExists(deploymentId)) {
-      deleteDeploymentDatabase(deploymentId);
-    }
+    deleteDeploymentDatabase(deploymentId);
   }
 
   private rowToDeployment(row: Record<string, unknown>): Deployment {
@@ -1804,6 +1818,10 @@ export class SQLiteAdapter implements StorageAdapter {
       analytics: parseJSON(row.analytics as string, DEFAULT_ANALYTICS),
       seo: parseJSON(row.seo as string, DEFAULT_SEO),
       compliance: parseJSON(row.compliance as string, DEFAULT_COMPLIANCE),
+      // Spread over the default rather than relying on parseJSON's fallback alone: rows written
+      // before the review column existed carry its `'{}'` default, which would otherwise read back
+      // as a ReviewConfig with no `enabled`.
+      review: { ...DEFAULT_REVIEW, ...parseJSON(row.review as string, DEFAULT_REVIEW) },
       settingsVersion: row.settings_version as number ?? 1,
       lastPublishedVersion: row.last_published_version as number | undefined,
       previewImage: row.preview_image as string | undefined,

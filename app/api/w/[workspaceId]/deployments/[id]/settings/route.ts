@@ -73,6 +73,13 @@ export async function PUT(
       );
     }
 
+    // `review` is deliberately absent from this allowlist, and adding it as a bare
+    // `body.review ?? existing` clause would be a bug: this route has no `mergeReviewConfig`, so a
+    // body carrying a review block that has been through `toPublicDeployment` — which strips
+    // `passwordHash` — would write it back without one and silently unlock the review site. Review
+    // mode is edited through the deployment route, which merges the block and strips the hash on
+    // the way out. Omitting it here is what keeps this handler non-destructive: the spread below
+    // carries the stored block through untouched.
     const updatedDeployment = {
       ...existingDeployment,
       enabled: body.enabled ?? existingDeployment.enabled,

@@ -11,6 +11,8 @@ import { CdnTab } from '../publish-settings/cdn-tab';
 import { AnalyticsTab } from '../publish-settings/analytics-tab';
 import { SeoTab } from '../publish-settings/seo-tab';
 import { ComplianceTab } from '../publish-settings/compliance-tab';
+import { ReviewTab, type ReviewDraft } from '../publish-settings/review-tab';
+import type { PublicReviewConfig } from '@/lib/api/deployment-public';
 import {
   SchemaViewer,
   SqlEditor,
@@ -36,6 +38,7 @@ import {
   Terminal,
   ScrollText,
   ExternalLink,
+  MessagesSquare,
 } from 'lucide-react';
 
 type NavSection = 'deployment' | 'backend';
@@ -54,6 +57,7 @@ const DEPLOYMENT_NAV: NavItem[] = [
   { id: 'seo', label: 'SEO', icon: SearchIcon, section: 'deployment' },
   { id: 'analytics', label: 'Analytics', icon: BarChart3, section: 'deployment' },
   { id: 'compliance', label: 'Compliance', icon: Shield, section: 'deployment' },
+  { id: 'review', label: 'Review', icon: MessagesSquare, section: 'deployment' },
 ];
 
 const BACKEND_NAV: NavItem[] = [
@@ -66,13 +70,33 @@ const BACKEND_NAV: NavItem[] = [
   { id: 'logs', label: 'Logs', icon: ScrollText, section: 'backend' },
 ];
 
+/**
+ * The record this component receives has been through `toPublicDeployment`, which drops
+ * `review.passwordHash` and puts `reviewPasswordSet` in its place. `Deployment` names neither, so
+ * the review block is read through the public projection's type rather than the stored one's.
+ */
+function toReviewDraft(review: Deployment['review']): ReviewDraft {
+  const published = review as PublicReviewConfig | undefined;
+  return {
+    enabled: published?.enabled ?? false,
+    expiresAt: published?.expiresAt,
+    notifyByEmail: published?.notifyByEmail,
+    reviewPasswordSet: published?.reviewPasswordSet ?? false,
+    // No `password`: an absent field is the wire's way of saying "leave the stored hash alone".
+  };
+}
+
+/** The settings payload, plus the review block, whose password field the `Deployment` type omits. */
+export type DeploymentSettingsUpdate = Partial<Deployment> & { review?: ReviewDraft };
+
 interface DeploymentDetailProps {
   deployment: Deployment;
   projects: Project[];
   isPublishing: boolean;
   onBack: () => void;
-  onSave: (settings: Partial<Deployment>) => Promise<void>;
+  onSave: (settings: DeploymentSettingsUpdate) => Promise<void>;
   onPublish: (deploymentId: string) => void;
+  onOpenInEditor?: (pagePath: string) => void;
   workspaceId?: string;
 }
 
@@ -83,6 +107,7 @@ export function DeploymentDetail({
   onBack,
   onSave,
   onPublish,
+  onOpenInEditor,
   workspaceId,
 }: DeploymentDetailProps) {
   const [activeNav, setActiveNav] = useState('general');
@@ -98,6 +123,7 @@ export function DeploymentDetail({
   const [analytics, setAnalytics] = useState(deployment.analytics);
   const [seo, setSeo] = useState(deployment.seo);
   const [compliance, setCompliance] = useState(deployment.compliance);
+  const [review, setReview] = useState<ReviewDraft>(() => toReviewDraft(deployment.review));
 
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -114,6 +140,7 @@ export function DeploymentDetail({
     setAnalytics(deployment.analytics);
     setSeo(deployment.seo);
     setCompliance(deployment.compliance);
+    setReview(toReviewDraft(deployment.review));
     setIsDirty(false);
   }, [deployment]);
 
@@ -129,9 +156,10 @@ export function DeploymentDetail({
       JSON.stringify(cdnLinks) !== JSON.stringify(deployment.cdnLinks) ||
       JSON.stringify(analytics) !== JSON.stringify(deployment.analytics) ||
       JSON.stringify(seo) !== JSON.stringify(deployment.seo) ||
-      JSON.stringify(compliance) !== JSON.stringify(deployment.compliance);
+      JSON.stringify(compliance) !== JSON.stringify(deployment.compliance) ||
+      JSON.stringify(review) !== JSON.stringify(toReviewDraft(deployment.review));
     setIsDirty(hasChanges);
-  }, [projectId, enabled, underConstruction, customDomain, headScripts, bodyScripts, cdnLinks, analytics, seo, compliance, deployment]);
+  }, [projectId, enabled, underConstruction, customDomain, headScripts, bodyScripts, cdnLinks, analytics, seo, compliance, review, deployment]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -147,6 +175,7 @@ export function DeploymentDetail({
         analytics,
         seo,
         compliance,
+        review,
       });
       setIsDirty(false);
     } catch (error) {
@@ -347,6 +376,20 @@ export function DeploymentDetail({
             )}
             {activeNav === 'compliance' && (
               <ComplianceTab settings={settings} onChange={updateSettings} />
+            )}
+            {activeNav === 'review' && (
+              <ReviewTab
+                deploymentId={deployment.id}
+                review={review}
+                onChange={setReview}
+                storedEnabled={toReviewDraft(deployment.review).enabled}
+                isDirty={isDirty}
+                hasBeenPublished={hasBeenPublished}
+                hasPendingChanges={hasPendingChanges}
+                isPublishing={isPublishing}
+                onPublish={() => onPublish(deployment.id)}
+                onOpenInEditor={(pagePath) => onOpenInEditor?.(pagePath)}
+              />
             )}
 
             {/* Backend sections */}

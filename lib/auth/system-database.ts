@@ -71,6 +71,17 @@ const ROLE_LEVELS: Record<string, number> = { viewer: 1, editor: 2, owner: 3 };
 // ---------------------------------------------------------------------------
 
 /**
+ * Whether the system database file is already there.
+ *
+ * getSystemDatabase() creates it on first call, so boot-time maintenance that only wants to read
+ * existing workspaces asks this first — a browser-mode install has no system database and must not
+ * acquire one merely by starting.
+ */
+export function systemDatabaseExists(): boolean {
+  return fs.existsSync(path.join(getDataDir(), 'system.sqlite'));
+}
+
+/**
  * Get the system database connection (singleton)
  */
 export function getSystemDatabase(): Database.Database {

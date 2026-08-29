@@ -19,6 +19,41 @@ export async function register() {
       }
     }
 
+    // Register any deployment that predates routing rows being written at creation time. Without
+    // a row, resolveDeployment finds the deployment in neither of the two databases it tries, so
+    // analytics, edge functions, the scheduler and the owner's own review copy all act as though
+    // it were deleted. Healing on boot means an admin no longer has to know about the per-workspace
+    // repair endpoint. Runs before the Caddy regeneration below, which reads the same routing
+    // table — a row created here gets its subdomain block on this boot rather than the next one.
+    try {
+      const { listWorkspaces, systemDatabaseExists } = await import('@/lib/auth/system-database');
+      if (systemDatabaseExists()) {
+        const { backfillDeploymentRoutes } = await import('@/lib/auth/default-workspace');
+        let created = 0;
+        for (const workspace of listWorkspaces()) {
+          try {
+            created += backfillDeploymentRoutes(workspace.id);
+          } catch (err) {
+            // One unreadable workspace must not stop the others from being healed.
+            if (process.env.ADMIN_PASSWORD) {
+              console.warn(
+                `[DeploymentRoutes] Backfill failed for workspace ${workspace.id}:`,
+                err instanceof Error ? err.message : err
+              );
+            }
+          }
+        }
+        // Silent when there was nothing to do, which is every boot after the first.
+        if (created > 0) {
+          console.log(`[DeploymentRoutes] Registered ${created} previously unrouted deployment(s)`);
+        }
+      }
+    } catch (err) {
+      if (process.env.ADMIN_PASSWORD) {
+        console.warn('[DeploymentRoutes] Backfill skipped:', err instanceof Error ? err.message : err);
+      }
+    }
+
     // Rebuild the Caddy config from the deployment routing table on boot, so a
     // freshly (re)deployed instance serves every existing deployment subdomain
     // without waiting for the next publish to regenerate it. No-op unless

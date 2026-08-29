@@ -8,6 +8,14 @@
 
 import { logger } from '@/lib/utils';
 import { withPublicUrl } from '@/lib/api/deployment-url';
+import { toPublicDeployment } from '@/lib/api/deployment-public';
+import {
+  InvalidReviewConfigError,
+  mergeReviewConfig,
+  readReviewPasswordUpdate,
+  reviewChangeNeedsRepublish,
+} from '@/lib/api/deployment-review-merge';
+import { hashPassword } from '@/lib/auth/passwords';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { cleanStaticDeployment } from '@/lib/compiler/static-builder';
@@ -31,7 +39,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(withPublicUrl(deployment));
+    return NextResponse.json(toPublicDeployment(withPublicUrl(deployment)));
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -71,12 +79,41 @@ export async function PUT(
       updatedAt: new Date(),
     };
 
+    // The body's review block has been through `toPublicDeployment` and carries no password hash,
+    // so the blanket spread above would clear it on any GET-then-PUT round trip. Merge instead:
+    // the hash survives unless the body clears it explicitly with `password: null`.
+    //
+    // The password arrives as plaintext and is hashed here, so the server owns the cost factor and
+    // the length rule; `mergeReviewConfig` stays synchronous and never reads a hash from a body.
+    if (body && typeof body === 'object' && 'review' in body) {
+      const update = readReviewPasswordUpdate(body.review);
+      const resolvedHash =
+        update.kind === 'set'
+          ? await hashPassword(update.password)
+          : update.kind === 'clear'
+            ? null
+            : undefined;
+
+      updatedDeployment.review = mergeReviewConfig(existingDeployment.review, body.review, resolvedHash);
+
+      // Enabling or disabling review mode changes what the next build writes, and nothing else in
+      // the block does. Counted from the stored record so a stale or forged counter in the body
+      // cannot desync the unpublished-changes comparison.
+      if (reviewChangeNeedsRepublish(existingDeployment.review, updatedDeployment.review)) {
+        updatedDeployment.settingsVersion = existingDeployment.settingsVersion + 1;
+      }
+    }
+
     if (adapter.updateDeployment) {
       await adapter.updateDeployment(updatedDeployment);
     }
 
-    return NextResponse.json(updatedDeployment);
+    return NextResponse.json(toPublicDeployment(updatedDeployment));
   } catch (error) {
+    // A malformed review block is the caller's mistake, not a server fault.
+    if (error instanceof InvalidReviewConfigError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

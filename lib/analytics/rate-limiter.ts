@@ -130,6 +130,8 @@ class RateLimiter {
 // Singleton instances for different endpoints
 export const pageviewRateLimiter = new RateLimiter();
 export const interactionRateLimiter = new RateLimiter();
+export const reviewPasswordRateLimiter = new RateLimiter();
+export const reviewCommentRateLimiter = new RateLimiter();
 
 // Predefined configurations
 export const RATE_LIMIT_CONFIG = {
@@ -144,6 +146,35 @@ export const RATE_LIMIT_CONFIG = {
   strict: {
     limit: 10,            // Very strict for suspicious activity
     windowMs: 60 * 1000   // per 1 minute
+  },
+  /**
+   * Review-copy password submissions. Far tighter than `strict`, because this is a credential
+   * check rather than a traffic valve: `strict` still permits 14,400 guesses a day, and the
+   * password is the only thing between a URL-holder and a client's unpublished site. Five attempts
+   * per five minutes leaves room for a mistyped password while making online guessing pointless,
+   * and caps the bcrypt work an unauthenticated caller can force — a cost-12 verify is a quarter
+   * second of server CPU, so the limit is a denial-of-service bound as much as a guessing one.
+   */
+  reviewPassword: {
+    limit: 5,
+    windowMs: 5 * 60 * 1000
+  },
+  /**
+   * Review comment and profile writes. Unlike the analytics limits above, what is being paced here
+   * is a person typing, not a browser emitting telemetry, so the ceiling can be far lower: 60 in
+   * ten minutes is one every ten seconds sustained, well past what anyone reviewing a page does,
+   * while still leaving headroom for a whole client team sharing one office IP — the identifier is
+   * an address, not a participant.
+   *
+   * It is a flood bound rather than a CPU one. Each accepted write is a durable row in the
+   * deployment's review database and a line in the digest that goes out to the other participants,
+   * so an unbounded rate is unbounded storage on the host and unbounded mail sent in the agency's
+   * name. Looser than reviewPassword because a wrong guess and a real comment are not comparable:
+   * these callers have already passed the gate.
+   */
+  reviewComment: {
+    limit: 60,
+    windowMs: 10 * 60 * 1000
   }
 } as const;
 

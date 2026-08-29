@@ -1,0 +1,181 @@
+/**
+ * What a review comment is allowed to contain, and who it is allowed to be from.
+ *
+ * A review copy is reachable by anyone holding its URL, so a POST body is the least trusted input
+ * in the feature. Two separable decisions live here and are kept apart deliberately:
+ *
+ * The body decides *content* — text, which page, which element — and nothing else. Identity is not
+ * in its vocabulary, so a caller cannot name itself or claim the team badge by sending a field.
+ *
+ * Identity comes from `resolveCommentAuthorship`, which takes the access result and the stored
+ * participant row and has no body parameter at all. The impersonation guard is therefore in the
+ * signature rather than in a filter someone has to remember to apply.
+ */
+
+import type { ReviewAccess } from './access';
+import type { ReviewParticipant } from '@/lib/vfs/adapters/review-database';
+
+/**
+ * Room for a paragraph of feedback with a quoted snippet, not for using another tenant's review
+ * database as file storage. Every accepted comment is durable rows plus a line in an email digest.
+ */
+export const MAX_COMMENT_BODY = 4000;
+
+/** A path on the reviewed site; longer than this is not one. */
+export const MAX_PAGE_PATH = 512;
+
+/** A CSS path deep enough to address any element the overlay can pick. */
+export const MAX_SELECTOR = 512;
+
+/** The snippet the comment was anchored to, kept for when the element later moves or is edited. */
+export const MAX_ANCHOR_TEXT = 512;
+
+/** Shown when someone comments before naming themselves; replaced as soon as they do. */
+const FALLBACK_AUTHOR_NAME = { participant: 'Guest', team: 'Team' } as const;
+
+/**
+ * The content half of a comment. There is no author, participant or team field on this type, and
+ * that absence is the point — see the module comment.
+ */
+export interface ReviewCommentInput {
+  body: string;
+  pagePath: string;
+  selector: string | undefined;
+  anchorText: string | undefined;
+  parentId: string | undefined;
+}
+
+export type CommentInputResult =
+  | { ok: true; value: ReviewCommentInput }
+  | { ok: false; error: string };
+
+function asRecord(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+}
+
+/**
+ * Read one optional string field, capped.
+ *
+ * A non-string is refused rather than coerced: `String({})` would store "[object Object]" and
+ * `String(12)` would quietly accept a number as a selector, both of which hide a client bug in the
+ * database instead of reporting it.
+ */
+function optionalString(
+  value: unknown,
+  max: number,
+  field: string
+): { ok: true; value: string | undefined } | { ok: false; error: string } {
+  if (value === undefined || value === null || value === '') return { ok: true, value: undefined };
+  if (typeof value !== 'string') return { ok: false, error: `${field} must be a string` };
+  if (value.length > max) return { ok: false, error: `${field} exceeds ${max} characters` };
+  return { ok: true, value };
+}
+
+/**
+ * Validate a comment POST body into the fields that may be written.
+ *
+ * The result is built field by field rather than by spreading and deleting, so a field nobody
+ * thought about cannot arrive at `createComment` by default.
+ */
+export function validateCommentInput(raw: unknown): CommentInputResult {
+  const input = asRecord(raw);
+
+  const body = input.body;
+  if (typeof body !== 'string' || body.trim().length === 0) {
+    return { ok: false, error: 'body is required' };
+  }
+  if (body.length > MAX_COMMENT_BODY) {
+    return { ok: false, error: `body exceeds ${MAX_COMMENT_BODY} characters` };
+  }
+
+  const pagePath = input.page_path;
+  if (typeof pagePath !== 'string' || pagePath.trim().length === 0) {
+    return { ok: false, error: 'page_path is required' };
+  }
+  if (pagePath.length > MAX_PAGE_PATH) {
+    return { ok: false, error: `page_path exceeds ${MAX_PAGE_PATH} characters` };
+  }
+
+  const selector = optionalString(input.selector, MAX_SELECTOR, 'selector');
+  if (!selector.ok) return selector;
+
+  const anchorText = optionalString(input.anchor_text, MAX_ANCHOR_TEXT, 'anchor_text');
+  if (!anchorText.ok) return anchorText;
+
+  // Capped at the selector length for want of a better bound; a parent id is a UUID, and anything
+  // longer is not one. Existence is checked separately, against this deployment's database.
+  const parentId = optionalString(input.parent_id, MAX_SELECTOR, 'parent_id');
+  if (!parentId.ok) return parentId;
+
+  return {
+    ok: true,
+    value: {
+      body: body.trim(),
+      pagePath: pagePath.trim(),
+      selector: selector.value,
+      anchorText: anchorText.value,
+      parentId: parentId.value,
+    },
+  };
+}
+
+export interface CommentAuthorship {
+  participantId: string;
+  authorName: string;
+  isTeam: boolean;
+}
+
+/**
+ * Decide who a comment is from.
+ *
+ * The participant id is the one the access layer verified out of a signed cookie or an account
+ * session — never the id on the row that came back, so a lookup returning the wrong row cannot
+ * redirect attribution.
+ *
+ * `isTeam` is read off the access result and not off the stored row. The row's flag is a cached
+ * copy of a fact the session re-establishes on every request; if the two ever disagree, the
+ * session is the one that was just checked.
+ */
+export function resolveCommentAuthorship(
+  access: ReviewAccess,
+  participant: ReviewParticipant | null
+): CommentAuthorship {
+  const isTeam = access.kind === 'team';
+  const participantId = access.kind === 'denied' ? '' : access.participantId;
+
+  return {
+    participantId,
+    authorName:
+      participant?.displayName?.trim() ||
+      (isTeam ? FALLBACK_AUTHOR_NAME.team : FALLBACK_AUTHOR_NAME.participant),
+    isTeam,
+  };
+}
+
+/** Just enough of ReviewDatabase to look a parent up; keeps this testable against a temp database. */
+export interface ParentCommentLookup {
+  getComment(id: string): { id: string } | null;
+}
+
+export type ParentCommentResult =
+  | { ok: true; parentId: string | undefined }
+  | { ok: false; error: string };
+
+/**
+ * Confirm a reply's parent exists in *this* deployment's review database.
+ *
+ * Review data is per-deployment, so an id from another deployment is simply absent here. Writing it
+ * through unchecked would leave a dangling reference that renders as an orphan thread — and, since
+ * ids are guessable in bulk, would let one review copy be used to probe which ids exist elsewhere.
+ */
+export function resolveParentComment(
+  parentId: string | undefined,
+  lookup: ParentCommentLookup
+): ParentCommentResult {
+  if (!parentId) return { ok: true, parentId: undefined };
+
+  const parent = lookup.getComment(parentId);
+  if (!parent) return { ok: false, error: 'parent_id does not exist in this deployment' };
+
+  return { ok: true, parentId: parent.id };
+}

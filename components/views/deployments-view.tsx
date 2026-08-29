@@ -8,7 +8,8 @@ import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { createSyncProgressToast } from '@/lib/vfs/sync-progress-toast';
 import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
 import { DeploymentCard } from '../deployment-card';
-import { DeploymentDetail } from '../deployment-detail';
+import { DeploymentDetail, type DeploymentSettingsUpdate } from '../deployment-detail';
+import type { ReviewDraft } from '../publish-settings/review-tab';
 import { CreateDeploymentModal } from '../create-deployment-modal';
 import { takePendingDeploymentRequest } from '@/lib/deployments/pending-create';
 import { AnalyticsDashboard } from '../analytics-dashboard';
@@ -41,7 +42,8 @@ import { captureDeploymentScreenshot } from '@/lib/utils/deployment-thumbnail';
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
 interface DeploymentsViewProps {
-  onProjectSelect: (project: Project) => void;
+  /** `previewPath` opens the workspace preview on that page — used by the review comment inbox. */
+  onProjectSelect: (project: Project, previewPath?: string) => void;
   workspaceId?: string;
 }
 
@@ -65,7 +67,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     currentProjectId: string;
     newProjectId: string;
     newProjectName: string;
-    pendingSettings: Partial<Deployment>;
+    pendingSettings: DeploymentSettingsUpdate;
   } | null>(null);
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 
@@ -206,6 +208,22 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     }
   };
 
+  /** Open the deployment's project in the editor with the preview already on the commented page. */
+  const handleOpenPageInEditor = async (deployment: Deployment, pagePath: string) => {
+    try {
+      await vfs.init();
+      const project = await vfs.getProject(deployment.projectId);
+      if (!project) {
+        toast.error('Project not found in local storage');
+        return;
+      }
+      onProjectSelect(project, pagePath);
+    } catch (error) {
+      logger.error('[DeploymentsView] Failed to open project page:', error);
+      toast.error('Failed to load project');
+    }
+  };
+
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
 
   const handleExportAsTemplate = async (deployment: Deployment) => {
@@ -224,7 +242,34 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     }
   };
 
-  const handleSaveSettings = async (settings: Partial<Deployment>) => {
+  /**
+   * Persist the review block, and answer with what the server actually stored.
+   *
+   * It goes to the deployment route rather than the settings one: only that handler runs
+   * `mergeReviewConfig`, and the settings route deliberately drops `review` because writing a block
+   * that has been through `toPublicDeployment` — no password hash on it — would unlock the review
+   * copy. The response is what gets kept, so the plaintext password never lands in component state.
+   */
+  const saveReviewBlock = async (
+    deploymentId: string,
+    review: ReviewDraft
+  ): Promise<Deployment['review']> => {
+    const response = await fetch(`${apiBase}/deployments/${deploymentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to save review settings');
+    }
+
+    const updated = await response.json();
+    return updated.review;
+  };
+
+  const handleSaveSettings = async (settings: DeploymentSettingsUpdate) => {
     if (!selectedDeployment) return;
 
     try {
@@ -257,8 +302,14 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         }
       }
 
-      // Save publishing settings (exclude projectId — handled above)
-      const { projectId: _projectId, ...publishSettings } = settings;
+      // Save publishing settings (exclude projectId and review — both handled separately)
+      const { projectId: _projectId, review, ...publishSettings } = settings;
+
+      // Ahead of the settings PUT: enabling review mode bumps settingsVersion server-side, and the
+      // settings response is what this component then trusts for that counter.
+      const savedReview = review
+        ? await saveReviewBlock(selectedDeployment.id, review)
+        : selectedDeployment.review;
 
       const response = await fetch(`${apiBase}/deployments/${selectedDeployment.id}/settings`, {
         method: 'PUT',
@@ -285,6 +336,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
       setSelectedDeployment({
         ...selectedDeployment,
         ...settings,
+        review: savedReview,
         settingsVersion: result.settingsVersion,
         lastPublishedVersion: result.lastPublishedVersion,
       });
@@ -292,6 +344,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
       // Update the deployment in the main list (optimistic update - no full reload)
       updateDeploymentInState(selectedDeployment.id, {
         ...settings,
+        review: savedReview,
         settingsVersion: result.settingsVersion,
         updatedAt: new Date(),
       });
@@ -307,9 +360,11 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     // Swap + republish completed via the swap API.
     // Now save any remaining publishing settings.
     const { deploymentId, pendingSettings } = swapDialogState;
-    const { projectId: _projectId, ...publishSettings } = pendingSettings;
+    const { projectId: _projectId, review, ...publishSettings } = pendingSettings;
 
     try {
+      const savedReview = review ? await saveReviewBlock(deploymentId, review) : undefined;
+
       const response = await fetch(`${apiBase}/deployments/${deploymentId}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -320,6 +375,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         const result = await response.json();
         updateDeploymentInState(deploymentId, {
           ...pendingSettings,
+          ...(review ? { review: savedReview } : {}),
           settingsVersion: result.settingsVersion,
           updatedAt: new Date(),
           publishedAt: new Date(),
@@ -680,6 +736,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
           onBack={() => setSelectedDeployment(null)}
           onSave={handleSaveSettings}
           onPublish={handlePublish}
+          onOpenInEditor={(pagePath) => handleOpenPageInEditor(selectedDeployment, pagePath)}
           workspaceId={workspaceId}
         />
 

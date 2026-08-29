@@ -55,6 +55,13 @@ export async function verifySession(token: string): Promise<SessionData | null> 
     const secret = getSecretKey();
     const { payload } = await jwtVerify(token, secret);
 
+    // SESSION_SECRET also signs handoff tokens and review-session cookies, and a review cookie is
+    // handed to any anonymous visitor of a review copy — so a valid signature on its own no longer
+    // means "account session". Every other family stamps a `purpose`; account sessions never do, so
+    // refusing any stamped token tells them apart here rather than leaving it to a downstream user
+    // lookup that happens to find nothing.
+    if (payload.purpose !== undefined) return null;
+
     return {
       userId: payload.userId as string,
       email: payload.email as string,

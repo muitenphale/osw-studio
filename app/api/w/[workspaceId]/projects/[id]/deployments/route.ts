@@ -7,6 +7,7 @@
 import { logger } from '@/lib/utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
+import { toPublicDeployment } from '@/lib/api/deployment-public';
 
 export async function GET(
   _request: NextRequest,
@@ -34,7 +35,7 @@ export async function GET(
 
     const deployments = await adapter.listDeploymentsByProject?.(projectId) || [];
 
-    return NextResponse.json({ deployments });
+    return NextResponse.json({ deployments: deployments.map(toPublicDeployment) });
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

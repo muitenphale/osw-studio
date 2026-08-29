@@ -88,6 +88,9 @@ export interface Deployment {
    */
   publicUrl?: string;
 
+  // Review mode (private commentable copy)
+  review?: ReviewConfig;
+
   // Preview
   previewImage?: string; // base64 data URL of deployment screenshot
   previewUpdatedAt?: Date;
@@ -122,9 +125,23 @@ export interface PublishSettings {
   // Compliance
   compliance: ComplianceConfig;
 
+  // No `review` here on purpose: PublishSettings is the input to published public output — injected
+  // HTML, sitemap, robots — and a review block carries a bcrypt hash. `Deployment.review` is the
+  // one field review mode is read from and written to.
+
   // State tracking
   settingsVersion: number;
   lastPublishedVersion?: number;
+}
+
+export interface ReviewConfig {
+  enabled: boolean;
+  /** bcrypt. Never sent to a client — the API reports `reviewPasswordSet` instead. */
+  passwordHash?: string;
+  /** ISO timestamp. Absent means no expiry. */
+  expiresAt?: string;
+  /** Instance or workspace mail must also be configured for anything to send. */
+  notifyByEmail?: boolean;
 }
 
 export interface ScriptConfig {

@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## v1.98.0 - 2026-08-29
 
 ### UI

@@ -6,6 +6,7 @@
  * - Core database (data/osws.sqlite) - projects, templates, skills
  * - Runtime databases (deployments/{deploymentId}/runtime.sqlite) - per-deployment runtime data
  * - Analytics databases (deployments/{deploymentId}/analytics.sqlite) - per-deployment analytics
+ * - Review databases (deployments/{deploymentId}/review.sqlite) - per-deployment review comments
  *
  * Migration: On first access, splits old unified deployment.sqlite into
  * runtime.sqlite + analytics.sqlite if needed.
@@ -14,11 +15,13 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { deploymentsRoot } from '@/lib/deployments-root';
 
 // Connection caches
 const coreDatabases = new Map<string, Database.Database>();
 const runtimeDatabases = new Map<string, Database.Database>();
 const analyticsDatabases = new Map<string, Database.Database>();
+const reviewDatabases = new Map<string, Database.Database>();
 const projectDatabases = new Map<string, Database.Database>();
 
 /**
@@ -34,7 +37,7 @@ function getDataDir(): string {
  * Includes backward compatibility: renames old sites/ dir to deployments/ if needed
  */
 function getDeploymentsDir(): string {
-  const deploymentsDir = process.env.DEPLOYMENTS_DIR || path.join(process.cwd(), 'deployments');
+  const deploymentsDir = deploymentsRoot();
   const oldSitesDir = path.join(process.cwd(), 'sites');
 
   // Backward compatibility: rename sites/ to deployments/ if old dir exists and new one doesn't
@@ -293,6 +296,31 @@ export function getAnalyticsDatabaseConnection(deploymentId: string): Database.D
 }
 
 /**
+ * Get a deployment's review database connection (cached)
+ * Creates deployments/{deploymentId}/review.sqlite if it doesn't exist
+ */
+export function getReviewDatabaseConnection(deploymentId: string): Database.Database {
+  validateIdFormat(deploymentId, 'deployment ID');
+  const cached = reviewDatabases.get(deploymentId);
+  if (cached) {
+    return cached;
+  }
+
+  const deploymentsDir = getDeploymentsDir();
+  const deploymentDir = path.join(deploymentsDir, deploymentId);
+  ensureDir(deploymentDir);
+
+  // No migrateDeploymentDatabase call here, unlike the runtime and analytics connections: review
+  // data postdates the unified deployment.sqlite, so there is nothing in it to split out.
+  const dbPath = path.join(deploymentDir, 'review.sqlite');
+  const db = new Database(dbPath);
+  configureDatabase(db);
+
+  reviewDatabases.set(deploymentId, db);
+  return db;
+}
+
+/**
  * @deprecated Use getRuntimeDatabaseConnection instead
  * Backward compatibility: returns runtime database connection
  */
@@ -301,37 +329,22 @@ export function getDeploymentDatabase(deploymentId: string): Database.Database {
 }
 
 /**
- * Check if a deployment database exists (either format)
- */
-export function deploymentExists(deploymentId: string): boolean {
-  validateIdFormat(deploymentId, 'deployment ID');
-  const deploymentsDir = getDeploymentsDir();
-  const dir = path.join(deploymentsDir, deploymentId);
-  const runtimePath = path.join(dir, 'runtime.sqlite');
-  const oldDeploymentPath = path.join(dir, 'deployment.sqlite');
-  const oldSitePath = path.join(dir, 'site.sqlite');
-  return fs.existsSync(runtimePath) || fs.existsSync(oldDeploymentPath) || fs.existsSync(oldSitePath);
-}
-
-/**
  * Delete a deployment's databases and directory
  */
 export function deleteDeploymentDatabase(deploymentId: string): void {
   validateIdFormat(deploymentId, 'deployment ID');
-  // Close all connections
+  // Close all connections. An open handle keeps the file locked on Windows, which would fail the
+  // recursive removal below.
   closeRuntimeDatabase(deploymentId);
   closeAnalyticsDatabase(deploymentId);
+  closeReviewDatabase(deploymentId);
 
   const deploymentsDir = getDeploymentsDir();
   const deploymentDir = path.join(deploymentsDir, deploymentId);
 
-  if (fs.existsSync(deploymentDir)) {
-    const files = fs.readdirSync(deploymentDir);
-    for (const file of files) {
-      fs.unlinkSync(path.join(deploymentDir, file));
-    }
-    fs.rmdirSync(deploymentDir);
-  }
+  // A deployment directory may contain subdirectories, not only files, so a flat unlink pass is
+  // not enough. force: true also makes this a no-op when the directory is already gone.
+  fs.rmSync(deploymentDir, { recursive: true, force: true });
 }
 
 /**
@@ -365,11 +378,27 @@ export function closeAnalyticsDatabase(deploymentId: string): void {
 }
 
 /**
+ * Close a specific deployment's review database connection
+ */
+export function closeReviewDatabase(deploymentId: string): void {
+  const db = reviewDatabases.get(deploymentId);
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // Ignore errors on close
+    }
+    reviewDatabases.delete(deploymentId);
+  }
+}
+
+/**
  * @deprecated Use closeRuntimeDatabase instead
  */
 export function closeDeploymentDatabase(deploymentId: string): void {
   closeRuntimeDatabase(deploymentId);
   closeAnalyticsDatabase(deploymentId);
+  closeReviewDatabase(deploymentId);
 }
 
 /**
@@ -480,6 +509,11 @@ export function closeAllConnections(): void {
   // Close all analytics databases
   for (const [deploymentId] of analyticsDatabases) {
     closeAnalyticsDatabase(deploymentId);
+  }
+
+  // Close all review databases
+  for (const [deploymentId] of reviewDatabases) {
+    closeReviewDatabase(deploymentId);
   }
 
   // Close all project databases (keys may be composite "baseDir:projectId")

@@ -68,6 +68,15 @@ export interface MultipagePreviewHandle {
 
 interface MultipagePreviewProps {
   projectId: string;
+  /**
+   * The page to show on the first compile, instead of the entry point.
+   *
+   * One-shot: consumed by the first compile that has nothing to preserve, so a later navigation
+   * inside the preview is not undone the next time the project recompiles. Ignored when the page is
+   * not in the build — a comment can outlive the page it was written on, and an error banner would
+   * be a worse answer than the entry point.
+   */
+  initialPath?: string;
   refreshTrigger?: number;
   onFocusSelection?: (selection: FocusContextPayload | null) => void;
   hasFocusTarget?: boolean;
@@ -1196,6 +1205,7 @@ export function crosshairHintClass(input: {
 
 const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePreviewProps>(({
   projectId,
+  initialPath,
   refreshTrigger,
   onFocusSelection,
   hasFocusTarget = false,
@@ -1324,6 +1334,10 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
   const scrollMemoryRef = useRef(new FrameScrollMemory());
   const loadIdCounterRef = useRef(0);
   const loadPageRef = useRef<((path: string, compiled?: CompiledProject, isRecovery?: boolean) => void) | null>(null);
+  // Held in a ref rather than read from the prop: it is consumed by the first compile, and a prop
+  // read would re-apply it on every recompile and yank the preview back off the page the user
+  // navigated to.
+  const pendingInitialPathRef = useRef<string | null>(initialPath ?? null);
   // Set true once we've successfully read our own marker from the frame. Guards escape detection:
   // we only trust a "contentWindow read threw" as a real cross-origin escape once we know reads
   // normally work — so if they never do (unexpected sandbox behaviour), escape detection is inert
@@ -1607,6 +1621,18 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
       compiledProjectRef.current = compiled;
 
       let pathToLoad = currentPath;
+
+      // The caller's requested page, spent once. Only honoured when the build actually contains it,
+      // so a stale request falls through to the entry point rather than raising "Page not found".
+      if (!pathToLoad && pendingInitialPathRef.current) {
+        const requested = pendingInitialPathRef.current;
+        pendingInitialPathRef.current = null;
+        const known =
+          compiled.routes.some(route => route.path === requested) ||
+          compiled.files.some(file => file.path === requested);
+        if (known) pathToLoad = requested;
+      }
+
       if (!pathToLoad) {
         const ep = compiled.entryPoint || '/index.html';
         if (ep !== '/index.html' && compiled.blobUrls.has(ep)) {

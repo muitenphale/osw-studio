@@ -17,7 +17,8 @@ import { DashboardView } from './dashboard-view';
 interface ContentAreaProps {
   view: string;
   workspaceId?: string;
-  onProjectSelect: (project: Project) => void;
+  /** `previewPath` opens the workspace preview on that page rather than the entry point. */
+  onProjectSelect: (project: Project, previewPath?: string) => void;
   settingsTab?: string;
   onNavigate?: (view: string) => void;
   onStartTour?: () => void;

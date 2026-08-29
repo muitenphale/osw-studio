@@ -50,11 +50,28 @@ export function replaceAssetPathsWithDeploymentPrefix(
   deploymentId: string,
   servedAtRoot?: boolean
 ): string {
-  let result = content;
-
   // If served at domain root (custom domain or subdomain slug), use root-relative paths.
   // Otherwise use deployment-prefixed paths for direct /deployments/{id}/ access.
-  const pathPrefix = servedAtRoot ? '' : `/deployments/${deploymentId}`;
+  return replaceAssetPathsWithPrefix(
+    content,
+    blobUrlToPath,
+    servedAtRoot ? '' : `/deployments/${deploymentId}`
+  );
+}
+
+/**
+ * Replace both blob URLs and file path references with absolute paths under `pathPrefix`.
+ *
+ * The prefix is a parameter rather than derived from the deployment because one compiled site is
+ * published to more than one place: the public copy under `/deployments/{id}` (or a domain root,
+ * where the prefix is empty) and the review copy under `/review/{id}`.
+ */
+export function replaceAssetPathsWithPrefix(
+  content: string,
+  blobUrlToPath: Map<string, string>,
+  pathPrefix: string
+): string {
+  let result = content;
 
   // First, replace all blob URLs with appropriate paths
   for (const [blobUrl, filePath] of blobUrlToPath) {

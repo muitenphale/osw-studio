@@ -1,6 +1,8 @@
 import { PublishSettings } from '../vfs/types';
 import { generateTrackingScript } from '../analytics/tracking-script';
 import { generateConsentBanner } from './consent-banner';
+import { generateReviewWidget, REVIEW_WIDGET_MARKER } from './review-widget';
+import { escapeHtml } from './escape-html';
 
 export interface HtmlProcessingOptions {
   publishSettings: PublishSettings;
@@ -8,10 +10,13 @@ export interface HtmlProcessingOptions {
   baseUrl: string;
   deploymentId: string;
   hasEdgeFunctions?: boolean;
+  /** Set only by the review build pass. See step 8 in processHtml. */
+  reviewWidget?: boolean;
 }
 
 /**
- * Injects scripts, CDN links, SEO meta tags, analytics, and compliance banner into HTML
+ * Injects scripts, CDN links, SEO meta tags, analytics, compliance banner, and — on the review
+ * build pass only — the review comment widget into HTML
  *
  * Note: Under construction mode is handled separately by serving a dedicated page,
  * not by overlaying content
@@ -43,6 +48,12 @@ export function processHtml(html: string, options: HtmlProcessingOptions): strin
 
   // 7. Inject compliance banner (if enabled)
   processed = injectComplianceBanner(processed, deploymentId, publishSettings);
+
+  // 8. Review comment widget. Opt-in per build pass, never conditional on runtime state, so the
+  //    public build cannot emit it by misconfiguration.
+  if (options.reviewWidget) {
+    processed = injectReviewWidget(processed, deploymentId);
+  }
 
   return processed;
 }
@@ -269,6 +280,16 @@ function injectComplianceBanner(html: string, deploymentId: string, settings: Pu
 }
 
 /**
+ * Inject the review comment widget (review build pass only). Idempotent: a second host would be
+ * found first by the script instance the second copy carries, and attachShadow on an element that
+ * already has a shadow root throws, taking the whole widget down.
+ */
+function injectReviewWidget(html: string, deploymentId: string): string {
+  if (html.includes(REVIEW_WIDGET_MARKER)) return html;
+  return injectBeforeBodyClose(html, generateReviewWidget(deploymentId));
+}
+
+/**
  * Helper to inject content before </body>
  */
 function injectBeforeBodyClose(html: string, content: string): string {
@@ -302,18 +323,4 @@ function injectEdgeFunctionInterceptor(html: string, deploymentId: string): stri
 </script>`;
 
   return injectIntoHead(html, interceptorScript);
-}
-
-/**
- * Escape HTML special characters
- */
-function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;',
-  };
-  return text.replace(/[&<>"']/g, (char) => map[char]);
 }

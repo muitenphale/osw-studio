@@ -70,6 +70,12 @@ interface WorkspaceProps {
   project: Project;
   onBack: () => void;
   workspaceId?: string;
+  /**
+   * The page the preview should open on, when the caller opened this project to look at something
+   * specific — the review comment inbox is the first. One-shot: the preview uses it for the first
+   * compile only, so navigating away from it sticks.
+   */
+  initialPreviewPath?: string;
 }
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
@@ -199,7 +205,7 @@ export function focusMessageContext<T extends { domPath: string }>(
   return { promptBlock: formatBlock(focus), generationFocus: focus };
 }
 
-export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
+export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: WorkspaceProps) {
   const refreshTrigger = useWorkspaceStore(s => s.refreshTrigger);
   const generating = useWorkspaceStore(s => s.generating);
   const debugEvents = useWorkspaceStore(s => s.debugEvents);
@@ -2484,6 +2490,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                   <MultipagePreview
                     ref={attachDesktopPreview}
                     projectId={project.id}
+                    initialPath={initialPreviewPath}
                     refreshTrigger={refreshTrigger}
                     onFocusSelection={handleDesktopFocusSelection}
                     hasFocusTarget={Boolean(focusContext)}
@@ -2742,6 +2749,7 @@ export function Workspace({ project, onBack, workspaceId }: WorkspaceProps) {
                 <MultipagePreview
                   ref={previewRef}
                   projectId={project.id}
+                  initialPath={initialPreviewPath}
                   refreshTrigger={refreshTrigger}
                   onFocusSelection={handleMobileFocusSelection}
                   hasFocusTarget={Boolean(focusContext)}

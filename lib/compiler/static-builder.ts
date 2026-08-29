@@ -9,7 +9,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createServerAdapter, getWorkspaceAdapter } from '@/lib/vfs/adapters/server';
 import { VirtualServer } from '@/lib/preview/virtual-server';
-import { VirtualFile, FileTreeNode, Deployment } from '@/lib/vfs/types';
+import { VirtualFile, FileTreeNode, Deployment, ProjectRuntime, PublishSettings } from '@/lib/vfs/types';
 import { logger } from '@/lib/utils';
 import { processHtml } from '@/lib/publishing/html-processor';
 import { stripPreviewScripts } from '@/lib/preview/strip-preview-scripts';
@@ -18,7 +18,8 @@ import { resolveWithin } from '@/lib/vfs/path-safety';
 import { generateSitemap, generateRobotsTxt } from '@/lib/publishing/seo-generator';
 import { extractBackendFeatures } from './backend-feature-extractor';
 import { deploymentStaticDir } from './deployment-static-dir';
-import { resolveDeploymentServing, replaceAssetPathsWithDeploymentPrefix } from './deployment-paths';
+import { deploymentReviewDir } from './deployment-review-dir';
+import { resolveDeploymentServing, replaceAssetPathsWithPrefix } from './deployment-paths';
 
 export interface BuildResult {
   success: boolean;
@@ -27,6 +28,41 @@ export interface BuildResult {
   filesWritten: number;
   outputPath: string;
   error?: string;
+}
+
+type BuildAdapter =
+  | Awaited<ReturnType<typeof createServerAdapter>>
+  | ReturnType<typeof getWorkspaceAdapter>;
+
+/** One output copy of the site. */
+interface BuildTarget {
+  /** What in-page absolute asset paths are rewritten to. Empty when served at a domain root. */
+  pathPrefix: string;
+  reviewWidget: boolean;
+}
+
+/** A file as it is written, after the target's transform. */
+interface OutputFile {
+  path: string;
+  content: string | ArrayBuffer;
+}
+
+interface PreparedBuild {
+  /**
+   * Produce one target's files.
+   *
+   * Returns a new array of new objects on every call and never writes back to the compiled files,
+   * because both targets transform the same compiled site: rewriting in place would leave the
+   * second call prefixing asset paths that the first already prefixed and injecting the SEO and
+   * script blocks a second time.
+   */
+  transform(target: BuildTarget): OutputFile[];
+  /** Paths of the compiled HTML pages, for the sitemap. */
+  htmlFiles: string[];
+  publicTarget: BuildTarget;
+  baseUrl: string;
+  publishSettings: PublishSettings;
+  cleanup(): void;
 }
 
 /**
@@ -96,6 +132,109 @@ function createServerVfs(
 }
 
 /**
+ * The publish-time view of a deployment's settings, shared by the HTML processor, the sitemap and
+ * robots.txt so the three cannot describe the same deployment differently.
+ */
+function toPublishSettings(deployment: Deployment): PublishSettings {
+  return {
+    enabled: deployment.enabled,
+    underConstruction: deployment.underConstruction,
+    customDomain: deployment.customDomain,
+    headScripts: deployment.headScripts,
+    bodyScripts: deployment.bodyScripts,
+    cdnLinks: deployment.cdnLinks,
+    analytics: deployment.analytics,
+    seo: deployment.seo,
+    compliance: deployment.compliance,
+    settingsVersion: deployment.settingsVersion,
+    lastPublishedVersion: deployment.lastPublishedVersion,
+  };
+}
+
+/**
+ * Compile the project once and hand back a transform that can render it for any number of targets.
+ */
+async function prepareBuild(
+  adapter: BuildAdapter,
+  deployment: Deployment,
+  deploymentId: string,
+  runtime: ProjectRuntime | undefined
+): Promise<PreparedBuild> {
+  const allFiles = await adapter.listFiles(deployment.projectId);
+
+  // Create a minimal VFS-like wrapper for server-side compilation
+  const serverVfs = createServerVfs(deployment.projectId, allFiles);
+
+  // Check if project has edge functions (for conditional interceptor injection)
+  const edgeFunctions = adapter.listEdgeFunctions
+    ? await adapter.listEdgeFunctions(deployment.projectId)
+    : [];
+  const hasEdgeFunctions = edgeFunctions.some(f => f.enabled);
+
+  // Compile project using VirtualServer (renders Handlebars templates)
+  const server = new VirtualServer(serverVfs as any, deployment.projectId, { runtime, minify: true });
+  const compiledProject = await server.compileProject();
+
+  // Create reverse map: blobUrl -> filePath for replacements
+  const blobUrlToPath = new Map<string, string>();
+  for (const [filePath, blobUrl] of compiledProject.blobUrls) {
+    blobUrlToPath.set(blobUrl, filePath);
+  }
+
+  // Decide how the deployment is served — controls asset path style and SEO URLs.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const { servedAtRoot, baseUrl } = resolveDeploymentServing(deployment, deploymentId, {
+    staticProxyEnabled: process.env.STATIC_PROXY === 'true',
+    appUrl,
+  });
+
+  const publishSettings = toPublishSettings(deployment);
+
+  return {
+    publicTarget: {
+      pathPrefix: servedAtRoot ? '' : `/deployments/${deploymentId}`,
+      reviewWidget: false,
+    },
+    baseUrl,
+    publishSettings,
+    htmlFiles: compiledProject.files
+      .filter(file => typeof file.content === 'string' && file.path.endsWith('.html'))
+      .map(file => file.path),
+
+    transform(target: BuildTarget): OutputFile[] {
+      return compiledProject.files.map((file) => {
+        // Binary content passes through untouched, so the target only borrows the reference.
+        if (typeof file.content !== 'string') {
+          return { path: file.path, content: file.content };
+        }
+
+        // Replace both blob URLs and file path references with absolute paths
+        let content = replaceAssetPathsWithPrefix(file.content, blobUrlToPath, target.pathPrefix);
+
+        if (file.path.endsWith('.html')) {
+          // Remove preview instrumentation scripts from HTML files
+          content = stripPreviewScripts(content);
+
+          // Apply deployment settings to HTML files
+          content = processHtml(content, {
+            publishSettings,
+            projectId: deployment.projectId,
+            baseUrl,
+            deploymentId,
+            hasEdgeFunctions,
+            reviewWidget: target.reviewWidget,
+          });
+        }
+
+        return { path: file.path, content };
+      });
+    },
+
+    cleanup: () => server.cleanupBlobUrls(),
+  };
+}
+
+/**
  * Build a static deployment from a deployment entity
  * Uses VirtualServer to compile Handlebars templates (same as export)
  */
@@ -132,16 +271,83 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
       };
     }
 
+    const outputDir = deploymentStaticDir(deploymentId);
+    const reviewDir = deploymentReviewDir(deploymentId);
+    const reviewEnabled = deployment.review?.enabled === true;
+    const reviewTarget: BuildTarget = {
+      pathPrefix: `/review/${deploymentId}`,
+      reviewWidget: true,
+    };
+
+    // Undefined for an adapter with nothing on disk, which falls back to writing the bytes.
+    const blobBaseDir = adapter.getBaseDir?.();
+    let copiedInsteadOfLinked = 0;
+
+    /** Write one target's files into a freshly cleared directory. */
+    const writeTarget = async (targetDir: string, files: OutputFile[]): Promise<number> => {
+      // `force` covers the first build, where there is nothing to remove.
+      await fs.rm(targetDir, { recursive: true, force: true });
+      await fs.mkdir(targetDir, { recursive: true });
+
+      let written = 0;
+      for (const file of files) {
+        // Skip template files and development files (same as export)
+        if (shouldExcludeFromExport(file.path)) {
+          continue;
+        }
+
+        // A file path comes from whoever pushed the project, so joining it onto the output
+        // directory is not enough on its own: `/assets/../../../x` resolves outside it and writes
+        // wherever the server process can reach. Anything that would land outside is dropped
+        // rather than written.
+        const filePath = resolveWithin(targetDir, file.path);
+        if (!filePath) {
+          logger.warn(`[Static Builder] Skipped file with unsafe path: ${file.path.slice(0, 120)}`);
+          continue;
+        }
+
+        // Create directory if needed
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+        // Text is transformed on the way out (asset paths rewritten, preview scripts stripped, SEO
+        // injected), so it is written. Binary content passes through untouched, so it is linked to
+        // the blob the project already holds: the deployment gets a directory entry rather than a
+        // second copy of every image. Copying is the fallback when there is no store to link from.
+        if (typeof file.content === 'string') {
+          await fs.writeFile(filePath, file.content, 'utf-8');
+        } else if (blobBaseDir) {
+          const hash = putBlob(blobBaseDir, Buffer.from(file.content));
+          if (!linkBlob(blobBaseDir, hash, filePath)) copiedInsteadOfLinked += 1;
+        } else {
+          await fs.writeFile(filePath, Buffer.from(file.content));
+        }
+
+        written++;
+      }
+      return written;
+    };
+
+    // The project is compiled once and rendered per target. Under construction needs nothing
+    // compiled for its own output, so it only pays for a compile when a review build is wanted —
+    // which also keeps a project that fails to compile publishable as "under construction".
+    const build = deployment.underConstruction && !reviewEnabled
+      ? null
+      : await prepareBuild(adapter, deployment, deploymentId, project.settings?.runtime);
+
+    // A review build is gated on a password and an expiry, so it lives outside the web root. When
+    // review mode is off the directory goes, rather than being left serving a stale copy.
+    const writeReviewBuild = async () => {
+      if (build && reviewEnabled) {
+        await writeTarget(reviewDir, build.transform(reviewTarget));
+      } else {
+        await fs.rm(reviewDir, { recursive: true, force: true });
+      }
+    };
+
     // Check if under construction - if so, replace entire deployment with construction page
     if (deployment.underConstruction) {
-      const outputDir = deploymentStaticDir(deploymentId);
-
       // Clean existing output directory
-      try {
-        await fs.rm(outputDir, { recursive: true, force: true });
-      } catch (error) {
-        // Directory doesn't exist, that's fine
-      }
+      await fs.rm(outputDir, { recursive: true, force: true });
 
       // Create output directory
       await fs.mkdir(outputDir, { recursive: true });
@@ -149,6 +355,11 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
       // Generate and write under construction page as index.html
       const constructionHtml = generateUnderConstructionHtml(deployment.name);
       await fs.writeFile(path.join(outputDir, 'index.html'), constructionHtml, 'utf-8');
+
+      // The construction page replaces what the public sees, not what a reviewer does: a
+      // pre-launch site is the case review mode exists for, so the review build is still the site.
+      await writeReviewBuild();
+      build?.cleanup();
 
       logger.info(`[Static Builder] Built under construction page for deployment ${deploymentId}`);
 
@@ -161,171 +372,20 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
       };
     }
 
-    // Get all files from SQLite
-    const allFiles = await adapter.listFiles(deployment.projectId);
+    const { htmlFiles, baseUrl, publishSettings } = build!;
 
-    // Create a minimal VFS-like wrapper for server-side compilation
-    const serverVfs = createServerVfs(deployment.projectId, allFiles);
-
-    // Check if project has edge functions (for conditional interceptor injection)
-    const edgeFunctions = adapter.listEdgeFunctions
-      ? await adapter.listEdgeFunctions(deployment.projectId)
-      : [];
-    const hasEdgeFunctions = edgeFunctions.some(f => f.enabled);
-
-    // Compile project using VirtualServer (renders Handlebars templates)
-    const server = new VirtualServer(serverVfs as any, deployment.projectId, { runtime: project.settings?.runtime, minify: true });
-    const compiledProject = await server.compileProject();
-
-    // Create reverse map: blobUrl -> filePath for replacements
-    const blobUrlToPath = new Map<string, string>();
-    for (const [filePath, blobUrl] of compiledProject.blobUrls) {
-      blobUrlToPath.set(blobUrl, filePath);
-    }
-
-    // Decide how the deployment is served — controls asset path style and SEO URLs.
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const { servedAtRoot, baseUrl } = resolveDeploymentServing(deployment, deploymentId, {
-      staticProxyEnabled: process.env.STATIC_PROXY === 'true',
-      appUrl,
-    });
-
-    // Post-process files to replace asset references with absolute paths
-    // and apply deployment settings (scripts, CDN, SEO, etc.)
-    const htmlFiles: string[] = [];
-    for (const file of compiledProject.files) {
-      if (typeof file.content === 'string') {
-        // Replace both blob URLs and file path references with absolute paths
-        file.content = replaceAssetPathsWithDeploymentPrefix(
-          file.content,
-          blobUrlToPath,
-          allFiles,
-          deploymentId,
-          servedAtRoot
-        );
-
-        // Remove preview instrumentation scripts from HTML files
-        if (file.path.endsWith('.html')) {
-          file.content = stripPreviewScripts(file.content);
-          htmlFiles.push(file.path);
-
-          // Apply deployment settings to HTML files
-          file.content = processHtml(file.content, {
-            publishSettings: {
-              enabled: deployment.enabled,
-              underConstruction: deployment.underConstruction,
-              customDomain: deployment.customDomain,
-              headScripts: deployment.headScripts,
-              bodyScripts: deployment.bodyScripts,
-              cdnLinks: deployment.cdnLinks,
-              analytics: deployment.analytics,
-              seo: deployment.seo,
-              compliance: deployment.compliance,
-              settingsVersion: deployment.settingsVersion,
-              lastPublishedVersion: deployment.lastPublishedVersion,
-            },
-            projectId: deployment.projectId,
-            baseUrl,
-            deploymentId,
-            hasEdgeFunctions,
-          });
-        }
-      }
-    }
-
-    const outputDir = deploymentStaticDir(deploymentId);
-
-    // Clean existing output directory
-    try {
-      await fs.rm(outputDir, { recursive: true, force: true });
-    } catch (error) {
-      // Directory doesn't exist (first build), that's fine
-    }
-
-    // Create output directory
-    await fs.mkdir(outputDir, { recursive: true });
-
-    let filesWritten = 0;
-    // Undefined for an adapter with nothing on disk, which falls back to writing the bytes.
-    const blobBaseDir = adapter.getBaseDir?.();
-    let copiedInsteadOfLinked = 0;
-
-    // Write compiled files
-    for (const file of compiledProject.files) {
-      // Skip template files and development files (same as export)
-      if (shouldExcludeFromExport(file.path)) {
-        continue;
-      }
-
-      // A file path comes from whoever pushed the project, so joining it onto the output directory
-      // is not enough on its own: `/assets/../../../x` resolves outside it and writes wherever the
-      // server process can reach. Anything that would land outside is dropped rather than written.
-      const filePath = resolveWithin(outputDir, file.path);
-      if (!filePath) {
-        logger.warn(`[Static Builder] Skipped file with unsafe path: ${file.path.slice(0, 120)}`);
-        continue;
-      }
-
-      // Create directory if needed
-      const fileDir = path.dirname(filePath);
-      await fs.mkdir(fileDir, { recursive: true });
-
-      // Text is transformed on the way out (asset paths rewritten, preview scripts stripped, SEO
-      // injected), so it is written. Binary content passes through untouched, so it is linked to
-      // the blob the project already holds: the deployment gets a directory entry rather than a
-      // second copy of every image. Copying is the fallback when there is no store to link from.
-      if (typeof file.content === 'string') {
-        await fs.writeFile(filePath, file.content, 'utf-8');
-      } else if (blobBaseDir) {
-        const hash = putBlob(blobBaseDir, Buffer.from(file.content));
-        if (!linkBlob(blobBaseDir, hash, filePath)) copiedInsteadOfLinked += 1;
-      } else {
-        await fs.writeFile(filePath, Buffer.from(file.content));
-      }
-
-      filesWritten++;
-    }
+    let filesWritten = await writeTarget(outputDir, build!.transform(build!.publicTarget));
+    await writeReviewBuild();
 
     // Generate and write sitemap.xml if htmlFiles exist
     if (htmlFiles.length > 0) {
-      const sitemapContent = generateSitemap({
-        baseUrl,
-        htmlFiles,
-        publishSettings: {
-          enabled: deployment.enabled,
-          underConstruction: deployment.underConstruction,
-          customDomain: deployment.customDomain,
-          headScripts: deployment.headScripts,
-          bodyScripts: deployment.bodyScripts,
-          cdnLinks: deployment.cdnLinks,
-          analytics: deployment.analytics,
-          seo: deployment.seo,
-          compliance: deployment.compliance,
-          settingsVersion: deployment.settingsVersion,
-          lastPublishedVersion: deployment.lastPublishedVersion,
-        },
-      });
+      const sitemapContent = generateSitemap({ baseUrl, htmlFiles, publishSettings });
       await fs.writeFile(path.join(outputDir, 'sitemap.xml'), sitemapContent, 'utf-8');
       filesWritten++;
     }
 
     // Generate and write robots.txt
-    const robotsContent = generateRobotsTxt({
-      baseUrl,
-      publishSettings: {
-        enabled: deployment.enabled,
-        underConstruction: deployment.underConstruction,
-        customDomain: deployment.customDomain,
-        headScripts: deployment.headScripts,
-        bodyScripts: deployment.bodyScripts,
-        cdnLinks: deployment.cdnLinks,
-        analytics: deployment.analytics,
-        seo: deployment.seo,
-        compliance: deployment.compliance,
-        settingsVersion: deployment.settingsVersion,
-        lastPublishedVersion: deployment.lastPublishedVersion,
-      },
-    });
+    const robotsContent = generateRobotsTxt({ baseUrl, publishSettings });
     await fs.writeFile(path.join(outputDir, 'robots.txt'), robotsContent, 'utf-8');
     filesWritten++;
 
@@ -349,7 +409,7 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
     }
 
     // Clean up VirtualServer resources
-    server.cleanupBlobUrls();
+    build!.cleanup();
 
     // The previous build's directory was cleared before this one was written, so blobs it alone
     // was keeping alive are now unreferenced. Sweeping here rather than on a timer keeps the
@@ -397,8 +457,10 @@ export async function buildStaticDeployment(deploymentId: string, workspaceId?: 
  */
 export async function cleanStaticDeployment(deploymentId: string): Promise<boolean> {
   try {
-    const outputDir = deploymentStaticDir(deploymentId);
-    await fs.rm(outputDir, { recursive: true, force: true });
+    // Both copies of the site go: the review build is a full second copy of the same pages, and
+    // leaving it behind would keep a commentable version of an unpublished site fetchable.
+    await fs.rm(deploymentStaticDir(deploymentId), { recursive: true, force: true });
+    await fs.rm(deploymentReviewDir(deploymentId), { recursive: true, force: true });
     return true;
   } catch (error) {
     logger.error('[Static Builder] Error cleaning deployment:', error);

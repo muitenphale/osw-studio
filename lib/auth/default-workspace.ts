@@ -277,37 +277,60 @@ export function repairWorkspace(workspaceId: string): RepairResult {
   }
 
   // 3. Ensure all deployments in workspace DB are registered in deployment_routing
-  if (fs.existsSync(workspaceDbPath)) {
-    try {
-      const db = openReadonlyDb(workspaceDbPath);
-      const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deployments'").get();
-      if (tableExists) {
-        const deployments = db.prepare('SELECT id, slug FROM deployments').all() as { id: string; slug: string | null }[];
-        db.close();
-
-        const sysDb = getSystemDatabase();
-        for (const deployment of deployments) {
-          const existing = sysDb.prepare('SELECT deployment_id FROM deployment_routing WHERE deployment_id = ?')
-            .get(deployment.id);
-          if (!existing) {
-            // Assign a slug so the deployment gets a subdomain route — Caddy
-            // generation skips routing rows without one. Prefer the deployment's
-            // own slug; generate a unique one only if it lacks it.
-            const slug = deployment.slug || generateUniqueSlug(s => !!getDeploymentBySlug(s));
-            sysDb.prepare(`
-              INSERT OR IGNORE INTO deployment_routing (deployment_id, workspace_id, slug)
-              VALUES (?, ?, ?)
-            `).run(deployment.id, workspaceId, slug);
-            result.deploymentRoutesCreated++;
-          }
-        }
-      } else {
-        db.close();
-      }
-    } catch (err) {
-      result.errors.push(`Failed to repair deployment routes: ${err}`);
-    }
+  try {
+    result.deploymentRoutesCreated = backfillDeploymentRoutes(workspaceId);
+  } catch (err) {
+    result.errors.push(`Failed to repair deployment routes: ${err}`);
   }
 
   return result;
+}
+
+/**
+ * Register every deployment in a workspace's database that has no deployment_routing row yet,
+ * returning how many rows were created.
+ *
+ * Deployments created before routing rows were written at creation time have none. They live in
+ * the workspace database, but resolveDeployment only tries the workspace the routing table names
+ * and then the default data/osws.sqlite — so an unrouted workspace deployment is in neither, and
+ * every route that carries only a deployment id (analytics tracking, edge-function invocation,
+ * the scheduler, the owner's own review copy) behaves as if it does not exist.
+ *
+ * Never rewrites an existing row: a later publish may have set a slug or custom domain on it.
+ * Cheap enough to run on every boot — one read-only query per workspace, then nothing.
+ */
+export function backfillDeploymentRoutes(workspaceId: string): number {
+  const workspaceDbPath = path.join(getDataDir(), 'workspaces', workspaceId, 'osws.sqlite');
+  if (!fs.existsSync(workspaceDbPath)) return 0;
+
+  const db = openReadonlyDb(workspaceDbPath);
+  let deployments: { id: string; slug: string | null }[];
+  try {
+    const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deployments'").get();
+    deployments = tableExists
+      ? db.prepare('SELECT id, slug FROM deployments').all() as { id: string; slug: string | null }[]
+      : [];
+  } finally {
+    db.close();
+  }
+
+  const sysDb = getSystemDatabase();
+  let created = 0;
+  for (const deployment of deployments) {
+    const existing = sysDb.prepare('SELECT deployment_id FROM deployment_routing WHERE deployment_id = ?')
+      .get(deployment.id);
+    if (existing) continue;
+
+    // Assign a slug so the deployment gets a subdomain route — Caddy
+    // generation skips routing rows without one. Prefer the deployment's
+    // own slug; generate a unique one only if it lacks it.
+    const slug = deployment.slug || generateUniqueSlug(s => !!getDeploymentBySlug(s));
+    sysDb.prepare(`
+      INSERT OR IGNORE INTO deployment_routing (deployment_id, workspace_id, slug)
+      VALUES (?, ?, ?)
+    `).run(deployment.id, workspaceId, slug);
+    created++;
+  }
+
+  return created;
 }

@@ -48,6 +48,9 @@ function getViewRoute(view: string, workspaceId?: string): string {
 function PageWrapperInner({ view, workspaceId, settingsTab, autoCreateProject }: PageWrapperProps) {
   const router = useRouter();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  // Which page the preview should open on, when whoever opened the project cared. Cleared on every
+  // open so a page carried in from one comment does not stick to the next project opened.
+  const [initialPreviewPath, setInitialPreviewPath] = useState<string | undefined>(undefined);
   const [showAboutModal, setShowAboutModal] = useState(false);
 
   // Global model auto-assign on provider connect. Mounted here (always-present root) so the
@@ -73,8 +76,9 @@ function PageWrapperInner({ view, workspaceId, settingsTab, autoCreateProject }:
     router.push(route);
   }, [router, workspaceId]);
 
-  const handleProjectOpen = useCallback((project: Project) => {
+  const handleProjectOpen = useCallback((project: Project, previewPath?: string) => {
     setSelectedProject(project);
+    setInitialPreviewPath(previewPath);
     track('project_open');
   }, []);
 
@@ -92,6 +96,7 @@ function PageWrapperInner({ view, workspaceId, settingsTab, autoCreateProject }:
       project={selectedProject}
       onBack={() => setSelectedProject(null)}
       workspaceId={workspaceId}
+      initialPreviewPath={initialPreviewPath}
     />
   ) : (
     <ContentArea
