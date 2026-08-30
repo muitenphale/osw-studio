@@ -82,7 +82,61 @@ export function isBlockedHostname(host: string): boolean {
   return false;
 }
 
-type Resolver = (hostname: string) => Promise<string[]>;
+export type Resolver = (hostname: string) => Promise<string[]>;
+
+/**
+ * Thrown when a host is refused by this guard, as opposed to being unreachable or unresolvable.
+ *
+ * A caller needs to tell those apart. A refusal is a decision this process made and can be reported
+ * as one; anything else is the network answering, and reporting it as a refusal would hide a typo in
+ * a hostname behind a security message. The type is the distinction — callers must not have to match
+ * on the wording.
+ */
+export class BlockedHostError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BlockedHostError';
+  }
+}
+
+/**
+ * Refuse a host that is, or resolves to, an address on the machine's own networks.
+ *
+ * Split out from `assertPublicUrl` because not every destination is a URL — an SMTP server is a bare
+ * host and a port, and it needs the same check for the same reason. A name is not evidence on its
+ * own: `smtp.example.com` with an A record of 169.254.169.254 is the case worth catching, so every
+ * answer the resolver returns is checked and one private answer is enough to refuse.
+ *
+ * Returns the addresses that passed, so a caller can connect to one of those rather than resolving
+ * the name a second time. Between the two lookups the owner of the name is free to change what it
+ * answers, and a record with a short TTL can answer publicly for this check and privately for the
+ * connection — the check is only worth what the caller connects to.
+ */
+export async function assertPublicHost(
+  host: string,
+  opts: { resolve?: Resolver } = {},
+): Promise<string[]> {
+  if (isBlockedHostname(host)) throw new BlockedHostError('blocked: private hostname');
+
+  // If the host is an IP literal, check directly; otherwise resolve and check every A/AAAA.
+  if (net.isIP(host)) {
+    if (isPrivateIp(host)) throw new BlockedHostError('blocked: private address');
+    return [host];
+  }
+  const resolve = opts.resolve ?? (async (h: string) => {
+    const dns = await import('node:dns');
+    const records = await dns.promises.lookup(h, { all: true });
+    return records.map(r => r.address);
+  });
+  const ips = await resolve(host);
+  if (ips.length === 0) throw new BlockedHostError('blocked: no address');
+  for (const ip of ips) {
+    // Never include the address in the message: it would report the shape of the internal network
+    // back to whoever supplied the hostname.
+    if (isPrivateIp(ip)) throw new BlockedHostError('blocked: private address');
+  }
+  return ips;
+}
 
 export async function assertPublicUrl(
   raw: string,
@@ -91,27 +145,11 @@ export async function assertPublicUrl(
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error('invalid URL'); }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`blocked: unsupported scheme ${url.protocol}`);
+    throw new BlockedHostError(`blocked: unsupported scheme ${url.protocol}`);
   }
   // url.hostname wraps IPv6 literals in brackets (e.g. "[::1]"); strip them so
   // net.isIP and isPrivateIp receive a bare literal.
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (isBlockedHostname(host)) throw new Error('blocked: private hostname');
-
-  // If the host is an IP literal, check directly; otherwise resolve and check every A/AAAA.
-  if (net.isIP(host)) {
-    if (isPrivateIp(host)) throw new Error('blocked: private address');
-    return url;
-  }
-  const resolve = opts.resolve ?? (async (h: string) => {
-    const dns = await import('node:dns');
-    const records = await dns.promises.lookup(h, { all: true });
-    return records.map(r => r.address);
-  });
-  const ips = await resolve(host);
-  if (ips.length === 0) throw new Error('blocked: no address');
-  for (const ip of ips) {
-    if (isPrivateIp(ip)) throw new Error('blocked: private address');
-  }
+  await assertPublicHost(host, opts);
   return url;
 }

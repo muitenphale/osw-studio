@@ -18,6 +18,11 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "public/**",
+      // Published deployment output, and the review copy beside it. Review mode writes its build to
+      // deployments/{id}/review-build, deliberately outside public/ so nothing serves it statically
+      // — which also puts generated customer code somewhere eslint looks. One bundled site added
+      // 714 warnings here.
+      "deployments/**",
       // The whole desktop tree: `next lint` only ever covered the Next app, and the Electron main
       // process is CommonJS by design (it dynamic-requires the standalone server at a runtime path).
       // Widening lint to it is a deliberate change, not a side effect of dropping `next lint`.

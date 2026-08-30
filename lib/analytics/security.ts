@@ -109,28 +109,102 @@ function getAnalyticsSecret(): string {
 }
 
 /**
- * Validate request origin against allowed domains
+ * Parse a header value into a URL, or null when it is not an http(s) one.
+ *
+ * Everything below works on the parsed pieces rather than on the string, because textual matching
+ * is what let `https://oswstudio.com.evil.net` satisfy a rule written for `https://oswstudio.com`:
+ * a host boundary is a structural property of a URL, not a prefix of its text.
+ */
+function parseHttpUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The `.host` suffix of a `https://*.host` allowlist entry. */
+function wildcardSuffix(allowed: string): string {
+  return allowed.replace(/^https?:\/\/\*/, '');
+}
+
+/**
+ * Whether a host is a strict subdomain of a wildcard entry's suffix.
+ *
+ * The length test is what keeps `evil-oswstudio.com` out of `*.oswstudio.com`: it ends in the same
+ * characters, but not at a label boundary.
+ */
+function matchesWildcardHost(host: string, allowed: string): boolean {
+  const suffix = wildcardSuffix(allowed);
+  return host.length > suffix.length && host.endsWith(suffix);
+}
+
+/**
+ * Match the `Origin` header, which a browser sets itself and which is only ever scheme + host +
+ * port. Exact origin equality, so nothing that merely begins with an allowed origin passes, and an
+ * allowlist entry carrying a path — `${appUrl}/deployments/${id}` — never matches here at all,
+ * because no browser puts a path in this header.
+ */
+function originIsAllowed(origin: string, allowedOrigins: string[]): boolean {
+  const url = parseHttpUrl(origin);
+  if (!url) return false;
+
+  return allowedOrigins.some((allowed) => {
+    if (allowed.includes('*')) return matchesWildcardHost(url.host, allowed);
+
+    const allowedUrl = parseHttpUrl(allowed);
+    if (!allowedUrl) return false;
+    // A path entry describes where a page lives, not who is calling; only the origin-shaped
+    // entries can answer for this header.
+    if (allowedUrl.pathname !== '/' || allowedUrl.search || allowedUrl.hash) return false;
+    return url.origin === allowedUrl.origin;
+  });
+}
+
+/**
+ * Match the `Referer` header, which carries a full URL, and is therefore the only header a path
+ * entry can ever be checked against.
+ *
+ * The origin has to match exactly, as above; the path is a prefix match, but only at a segment
+ * boundary — `/deployments/abc` does not cover `/deployments/abcdef`.
+ */
+function refererIsAllowed(referer: string, allowedOrigins: string[]): boolean {
+  const url = parseHttpUrl(referer);
+  if (!url) return false;
+
+  return allowedOrigins.some((allowed) => {
+    if (allowed.includes('*')) return matchesWildcardHost(url.host, allowed);
+
+    const allowedUrl = parseHttpUrl(allowed);
+    if (!allowedUrl || url.origin !== allowedUrl.origin) return false;
+
+    const prefix = allowedUrl.pathname.replace(/\/+$/, '');
+    if (prefix === '') return true;
+    return url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
+  });
+}
+
+/**
+ * Validate request origin against allowed domains.
+ *
+ * `Origin` decides whenever it is present: the browser sets it, a page cannot forge it, and letting
+ * a friendly `Referer` overturn a refused `Origin` would put the weaker of the two headers in
+ * charge. `Referer` is the fallback for the requests that carry no `Origin` at all.
  *
  * @param request - Incoming request
- * @param allowedOrigins - Array of allowed origin URLs
+ * @param allowedOrigins - Array of allowed origin URLs, and paths beneath them
  * @returns true if origin is allowed, false otherwise
  */
 export function validateOrigin(
   request: Request,
   allowedOrigins: string[]
 ): boolean {
-  const origin = request.headers.get('origin') || '';
-  const referer = request.headers.get('referer') || '';
+  const origin = request.headers.get('origin');
+  if (origin) return originIsAllowed(origin, allowedOrigins);
 
-  return allowedOrigins.some((allowed) => {
-    if (allowed.includes('*')) {
-      const suffix = allowed.replace(/^https?:\/\/\*/, '');
-      const matchesOrigin = origin.endsWith(suffix) && /^https?:\/\//.test(origin);
-      const matchesReferer = referer.endsWith(suffix) || referer.includes(suffix + '/');
-      return matchesOrigin || matchesReferer;
-    }
-    return origin.startsWith(allowed) || referer.startsWith(allowed);
-  });
+  const referer = request.headers.get('referer');
+  return referer ? refererIsAllowed(referer, allowedOrigins) : false;
 }
 
 /**

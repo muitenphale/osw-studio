@@ -59,13 +59,13 @@ describe('servedAtRoot flips asset path style (issue #14)', () => {
   const html = '<link href="/styles/style.css"><script src="/scripts/main.js"></script>';
 
   it('prefixes asset paths with /deployments/{id} when NOT served at root', () => {
-    const out = replaceAssetPathsWithDeploymentPrefix(html, new Map(), [], ID, false);
+    const out = replaceAssetPathsWithDeploymentPrefix(html, new Map(), ID, false);
     expect(out).toContain(`href="/deployments/${ID}/styles/style.css"`);
     expect(out).toContain(`src="/deployments/${ID}/scripts/main.js"`);
   });
 
   it('keeps asset paths root-relative when served at root', () => {
-    const out = replaceAssetPathsWithDeploymentPrefix(html, new Map(), [], ID, true);
+    const out = replaceAssetPathsWithDeploymentPrefix(html, new Map(), ID, true);
     expect(out).toContain('href="/styles/style.css"');
     expect(out).toContain('src="/scripts/main.js"');
     expect(out).not.toContain('/deployments/');

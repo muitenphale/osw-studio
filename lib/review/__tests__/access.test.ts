@@ -61,6 +61,14 @@ function signedInAsTeam() {
   mocks.requireDeploymentAccess.mockResolvedValue(TEAM_ACCESS);
 }
 
+/** Signed in with workspace access that clears `granted` but nothing above it. */
+function signedInWithRole(granted: 'viewer' | 'editor') {
+  mocks.getSession.mockResolvedValue(TEAM_SESSION);
+  mocks.requireDeploymentAccess.mockImplementation(async (_id: string, role: string) =>
+    role === 'viewer' || role === granted ? TEAM_ACCESS : NO_TEAM_ACCESS
+  );
+}
+
 describe('resolveReviewAccess', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -150,7 +158,9 @@ describe('resolveReviewAccess', () => {
 
     const result = await resolveReviewAccess(DEPLOYMENT_A, requestWithCookies({}));
 
-    expect(result).toEqual({ kind: 'team', participantId: 'user:user-7', userId: 'user-7' });
+    expect(result).toEqual({
+      kind: 'team', participantId: 'user:user-7', userId: 'user-7', canModerate: true,
+    });
     expect(mocks.requireDeploymentAccess).toHaveBeenCalledWith(DEPLOYMENT_A, 'viewer');
   });
 
@@ -167,7 +177,9 @@ describe('resolveReviewAccess', () => {
       requestWithCookies({ [cookie.name]: cookie.value })
     );
 
-    expect(result).toEqual({ kind: 'team', participantId: 'user:user-7', userId: 'user-7' });
+    expect(result).toEqual({
+      kind: 'team', participantId: 'user:user-7', userId: 'user-7', canModerate: true,
+    });
   });
 
   it('falls back to the cookie when the account has no claim on the deployment', async () => {
@@ -198,6 +210,34 @@ describe('resolveReviewAccess', () => {
       kind: 'team',
       participantId: 'user:user-7',
       userId: 'user-7',
+      canModerate: true,
+    });
+  });
+
+  it('admits a read-only workspace member but does not let them act as the team', async () => {
+    const { resolveReviewAccess } = await load();
+    mocks.resolveDeployment.mockResolvedValue(deploymentWithReview(OPEN));
+    signedInWithRole('viewer');
+
+    const result = await resolveReviewAccess(DEPLOYMENT_A, requestWithCookies({}));
+
+    // Viewer is the right bar for reading a review copy and the wrong one for resolving comments
+    // or replying in the agency's name, so the two questions are asked separately.
+    expect(result).toEqual({
+      kind: 'team', participantId: 'user:user-7', userId: 'user-7', canModerate: false,
+    });
+    expect(mocks.requireDeploymentAccess).toHaveBeenCalledWith(DEPLOYMENT_A, 'viewer');
+    // Probed, so a read-only member browsing a review copy does not file a denial warning per asset.
+    expect(mocks.requireDeploymentAccess).toHaveBeenCalledWith(DEPLOYMENT_A, 'editor', { probe: true });
+  });
+
+  it('reports moderation for a member who clears editor', async () => {
+    const { resolveReviewAccess } = await load();
+    mocks.resolveDeployment.mockResolvedValue(deploymentWithReview(OPEN));
+    signedInWithRole('editor');
+
+    expect(await resolveReviewAccess(DEPLOYMENT_A, requestWithCookies({}))).toEqual({
+      kind: 'team', participantId: 'user:user-7', userId: 'user-7', canModerate: true,
     });
   });
 
@@ -314,5 +354,49 @@ describe('isReviewExpired', () => {
     expect(isReviewExpired({ enabled: true, expiresAt: new Date(NOW + 1000).toISOString() })).toBe(false);
     expect(isReviewExpired({ enabled: true, expiresAt: new Date(NOW - 1000).toISOString() })).toBe(true);
     expect(isReviewExpired({ enabled: true, expiresAt: 'nonsense' })).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A cookie value is attacker-controlled text, not necessarily valid encoding
+// ---------------------------------------------------------------------------
+
+describe('a malformed review cookie', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('SESSION_SECRET', 'test-review-secret-value');
+    mocks.getSession.mockResolvedValue(null);
+    mocks.requireDeploymentAccess.mockResolvedValue(NO_TEAM_ACCESS);
+  });
+
+  /**
+   * Any page on this origin — including a published deployment, which is attacker-authorable HTML —
+   * can set `osw_review_{id}=%`. That is not valid percent-encoding, so decoding it throws, and an
+   * uncaught throw here reaches the route catch as a 500 on every request for the victim's review
+   * copy: a one-line denial of service against someone else's review round.
+   */
+  it('is ignored rather than throwing', async () => {
+    const { resolveReviewAccess } = await load();
+    mocks.resolveDeployment.mockResolvedValue(deploymentWithReview(OPEN));
+
+    const result = await resolveReviewAccess(
+      DEPLOYMENT_A,
+      requestWithCookieHeader(`osw_review_${DEPLOYMENT_A}=%`)
+    );
+
+    expect(result).toEqual({ kind: 'denied' });
+  });
+
+  it('does not stop a valid cookie presented alongside it', async () => {
+    const { resolveReviewAccess, mintReviewCookie } = await load();
+    mocks.resolveDeployment.mockResolvedValue(deploymentWithReview(OPEN));
+
+    const cookie = await mintReviewCookie(DEPLOYMENT_A, OPEN);
+    const result = await resolveReviewAccess(
+      DEPLOYMENT_A,
+      requestWithCookieHeader(`${cookie.name}=%; ${cookie.name}=${cookie.value}`)
+    );
+
+    expect(result).toEqual({ kind: 'participant', participantId: cookie.participantId });
   });
 });

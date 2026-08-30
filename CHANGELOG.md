@@ -1,6 +1,34 @@
 # Changelog
 
-## Unreleased
+## v1.99.0 - 2026-08-30
+
+### Review Mode
+- **Publishing writes a private review copy of a deployment**: `review.enabled` on the deployment record makes `buildStaticDeployment` emit a second copy into `deployments/{id}/review-build/`, outside `public/` so nothing serves it statically. `app/review/[deploymentId]/route.ts` and its `[...path]` sibling read it. The public copy is built from the same files with `reviewWidget: false` and never carries the widget.
+- **A comment widget is injected into the review copy only**: `generateReviewWidget` (`lib/publishing/review-widget.ts`) emits an inline script into a closed shadow root, gated by the `reviewWidget` flag on `processHtml`. Anchoring, page paths and thread assembly live in `lib/review/widget-runtime.ts` as JavaScript source text, since the widget ships as script and cannot import.
+- **Comments are stored per deployment**: new `ReviewDatabase` (`lib/vfs/adapters/review-database.ts`) at `deployments/{id}/review.sqlite`, with `participants`, `comments` and `notification_state` tables. Comments anchor to a CSS selector plus the text it matched, so a moved element still shows what was said.
+- **The review API is served under the review prefix**: `/review/{id}/osw-api/comments` and `/osw-api/participant`, from `reviewApiBase` (`lib/review/api-base.ts`). Under `/api` a browser would not send the participant cookie, which is scoped to `/review/{id}`.
+- **Anonymous reviewers are identified by a signed cookie**: `mintReviewCookie` (`lib/review/session.ts`) issues `osw_review_{id}` carrying `purpose: 'review'`, the deployment id, and an epoch derived from the review password. `resolveReviewAccess` (`lib/review/access.ts`) admits workspace members as `team` without the gate.
+- **A review copy can take a password and a deadline**: `review.passwordHash` is deployment-scoped and bcrypt-hashed by the route, never supplied by a client; `review.expiresAt` stops serving to reviewers while still admitting workspace members. `mergeReviewConfig` (`lib/api/deployment-review-merge.ts`) treats an absent hash as unchanged and `password: null` as a clear.
+- **The Review tab reads and answers comments**: `components/publish-settings/review-tab.tsx` lists threads with open/resolved filters, replies and resolve. Its Show button opens `/review/{id}{page}?osw-comment={id}`; the widget reads that parameter and opens the thread against the element it was left on.
+- **Review traffic is rate limited per caller and deployment**: `reviewAsset`, `reviewComment`, `reviewCommentList`, `reviewPassword`, `reviewWrite` and `reviewUnsubscribe` in `RATE_LIMIT_CONFIG` (`lib/analytics/rate-limiter.ts`), consumed before the access check.
+
+### Mail
+- **An instance can be given an SMTP server**: stored in `instance_settings` under `mail.smtp.*` keys (`lib/mail/settings.ts`), with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` as fallbacks. A value stored through the UI wins over the environment. Passwords are stored unencrypted; see `docs/VPS_DEPLOYMENT.md`.
+- **A workspace either relays through the instance or brings its own server**: new `workspace_mail` table. In `instance` mode a workspace may set a display name but not the From address, which keeps SPF and DKIM aligned; `resolveMailSource` (`lib/mail/transport.ts`) settles which tier sends.
+- **Mail is queued and drained on a timer**: new `email_outbox` table with `deliverPendingEmails` (`lib/mail/delivery.ts`) and a backoff schedule. Registered as the `email-delivery` scheduler task in `instrumentation.ts`. With no transport resolvable a pass holds every row untouched rather than spending an attempt.
+- **New comments go out as a digest**: the `review-notifications` task composes per recipient from `lib/review/digest.ts`, gated on `review.notifyByEmail` and on `isMailSending` for the workspace. A watermark in `notification_state` marks how far each recipient has been told. Turning a tier off drops what it had queued.
+- **Recipients can stop their own notifications**: `/review/{id}/unsubscribe` with an HMAC token from `lib/review/unsubscribe-token.ts`, setting `muted` on `notification_state`.
+- **Mail settings have their own page**: `/w/{id}/mail` (`components/views/mail-view.tsx`, logic in `mail-logic.ts`), server mode only, with a test send that reports the mail server's own refusal. Admin routes under `app/api/admin/mail/`, workspace routes under `app/api/w/[workspaceId]/mail/`.
+- **A workspace SMTP host is checked before it is dialled**: `assertMailHostAllowed` (`lib/mail/transport.ts`) refuses a workspace host that resolves into private address space, and pins the connection to the address it checked. The instance tier is exempt, so `localhost:1025` and internal relays still work.
+
+### Security
+- **Origin checks compare hosts rather than string prefixes**: `validateOrigin` (`lib/analytics/security.ts`) parsed nothing and used `startsWith`, so `https://example.com.attacker.net` satisfied a rule written for `https://example.com` and could post analytics for any deployment. It now parses both headers, requires exact origin equality, and matches wildcard entries only at a label boundary.
+- **A handoff token can no longer be presented as an account session**: `verifySession` (`lib/auth/session.ts`) accepted any well-signed token, so the short-lived token from `createHandoffToken` worked as a session cookie. It now refuses any token carrying a `purpose` claim.
+
+### Server Mode
+- **Deployments with no routing row are registered on boot**: `backfillDeploymentRoutes` (`lib/auth/default-workspace.ts`) runs per workspace from `instrumentation.ts`. Without a row `resolveDeployment` finds the deployment in neither database it tries, so analytics, edge functions and the scheduler behave as though it were deleted.
+- **A deployment id held by two workspaces is left unrouted**: `migrateLegacyData` copies a legacy `data/osws.sqlite` into every workspace created on the box, so an upgraded instance can hold the same deployment id twice while `deployment_routing` has room for one owner. The backfill skips those rather than assigning by workspace creation order.
+- **Publishing a deployment another workspace owns answers 409 before building**: the ownership check in `registerDeploymentRoute` ran after the build had been written and `publishedAt` recorded, so the caller was told the publish failed while the deployment was marked published. The publish route now checks the routing row first.
 
 ## v1.98.0 - 2026-08-29
 

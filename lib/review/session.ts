@@ -1,19 +1,13 @@
 /**
  * Review sessions for anonymous visitors of a review copy.
  *
- * A review copy is reachable by anyone who has its URL — a deployment id is a UUID, but it is not
- * a secret, so it cannot be the thing that identifies a commenter. Display names are typed by hand
- * and are not unique either. The identity that comments are attributed to is therefore a
- * participant id the *server* generates and hands back in a signed cookie; nothing a client sends
- * is ever trusted as a participant id.
+ * A deployment id is a UUID but not a secret, and display names are typed by hand, so neither can
+ * identify a commenter. Comments are attributed to a participant id the server generates and returns
+ * in a signed cookie; nothing a client sends is trusted as a participant id.
  *
- * This shares SESSION_SECRET with the account session in lib/auth/session.ts, so the two token
- * families have to be told apart deliberately. A `purpose: 'review'` claim, the convention
- * verifyHandoffToken already uses, makes that explicit in this direction: an account or handoff
- * token presented as a review cookie is refused here on the claim, not on luck. The opposite
- * direction is not this module's to enforce — verifySession accepts any well-signed token — and
- * currently survives only because getSession re-derives the user and finds no such account. A
- * `purpose` guard in verifySession would close it properly.
+ * SESSION_SECRET is shared with the account session in lib/auth/session.ts, so the two token families
+ * are told apart in both directions: a `purpose: 'review'` claim is required here, and verifySession
+ * refuses any token carrying a `purpose` at all.
  *
  * A session also carries the deployment it was minted for and an epoch derived from the review
  * password, both checked on verify, so a cookie is worthless against another deployment and stops
@@ -147,7 +141,7 @@ export async function mintReviewCookie(
  *
  * A signature alone is not enough. The token must say it is a review session, it must name the
  * deployment being asked about, and it must have been minted under the password that is in force
- * now — so a cookie that leaked between review copies, an account token replayed here, and a
+ * now, so a cookie that leaked between review copies, an account token replayed here, and a
  * session from before the password changed all come back null.
  */
 export async function verifyReviewSession(

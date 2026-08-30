@@ -1,16 +1,15 @@
 /**
  * What a participant may say about themselves.
  *
- * Two fields, both from an untrusted caller: the name their comments are attributed to, and an
- * optional address the comment digest is sent to.
+ * Two fields from an untrusted caller: the name comments are attributed to, and an optional address
+ * the digest goes to.
  *
- * The address is the reason this module is strict. It is stored now and interpolated into an
- * outgoing message later, and a value that only fails at send time has already been persisted and
- * handed to the mailer — by which point a newline in it is a forged header and a comma in it is a
- * second recipient. Rejecting at the boundary is the only place where refusing is free.
+ * The address is why this is strict. It is stored now and interpolated into a message later, where a
+ * newline is a forged header and a comma is a second recipient. The boundary is the only place
+ * refusing costs nothing.
  *
- * The caller's participant id is deliberately not part of this type. It comes from the verified
- * access result, so a body-supplied id has nowhere to land rather than needing to be stripped.
+ * The participant id is not part of this type: it comes from the verified access result, so a
+ * body-supplied one has nowhere to land rather than needing to be stripped.
  */
 
 /** A display name, not a biography; it renders on every comment in the thread. */
@@ -25,10 +24,9 @@ const MAX_EMAIL_LOCAL = 64;
 /**
  * Dot-separated atoms either side of a single `@`, with at least one dot in the domain.
  *
- * Deliberately narrower than the addresses RFC 5322 permits: quoted local parts, comments and
- * bare-hostname domains are all legal and none of them are what a client types into a review
- * sidebar. The characters this excludes are exactly the ones that change an address's meaning to a
- * mail transfer agent.
+ * Narrower than RFC 5322 permits. Quoted local parts, comments and bare-hostname domains are all
+ * legal, none are what a client types into a review sidebar, and the characters excluded are the
+ * ones that change an address's meaning to a mail transfer agent.
  */
 const EMAIL_PATTERN =
   /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
@@ -36,9 +34,8 @@ const EMAIL_PATTERN =
 /**
  * Anything that would let an address carry a second instruction into an SMTP envelope or a header.
  *
- * Checked separately from the pattern even though the pattern already excludes them, because this
- * is the property that has to survive anyone later relaxing the pattern to accommodate a customer's
- * unusual address.
+ * Checked separately from the pattern, which already excludes them, so the property survives anyone
+ * later relaxing the pattern for an unusual address.
  */
 const HEADER_INJECTION = /[\r\n\t\0,;<>"()[\]\\ ]/;
 
@@ -64,9 +61,8 @@ export type ParticipantProfileResult =
 /**
  * Validate a participant PATCH body into the two fields a participant owns about themselves.
  *
- * Built field by field rather than by spreading, so an id, a team flag, or anything else the body
- * carries has no route through: the returned value has room for a name and an address and nothing
- * else.
+ * Built field by field rather than spread, so the result has room for a name and an address and
+ * nothing else.
  */
 export function validateParticipantProfile(raw: unknown): ParticipantProfileResult {
   const input = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};

@@ -186,3 +186,69 @@ describe('repairWorkspace', () => {
     expect(repairWorkspace(workspaceId).deploymentRoutesCreated).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The same deployment id in two workspaces
+// ---------------------------------------------------------------------------
+
+describe('a deployment id held by more than one workspace', () => {
+  /**
+   * Not hypothetical: migrateLegacyData copies the whole of a legacy data/osws.sqlite into each
+   * workspace created on the box, so an upgraded instance with two workspaces holds the same
+   * deployment ids twice. deployment_routing has room for one owner.
+   *
+   * The backfill visits workspaces in listWorkspaces order — created_at DESC — so claiming one
+   * would hand the deployment to the newest workspace, and the older workspace that had been
+   * publishing it would start getting 'Deployment is owned by another workspace' instead.
+   */
+  it('is left unrouted rather than assigned to whichever workspace is visited first', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const older = await workspaceWithUnroutedDeployment();
+    const newer = await workspaceWithUnroutedDeployment();
+
+    const { backfillDeploymentRoutes } = await import('@/lib/auth/default-workspace');
+    const { getSystemDatabase } = await import('@/lib/auth/system-database');
+
+    expect(backfillDeploymentRoutes(newer)).toBe(0);
+    expect(backfillDeploymentRoutes(older)).toBe(0);
+
+    const row = getSystemDatabase()
+      .prepare('SELECT workspace_id FROM deployment_routing WHERE deployment_id = ?')
+      .get(DEPLOYMENT);
+    expect(row).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+
+    warn.mockRestore();
+  });
+
+  /**
+   * The ambiguity must not cost the unambiguous deployments in the same workspace their rows —
+   * that would trade one broken case for a broader one.
+   */
+  it('still routes the deployments that only one workspace has', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const shared = await workspaceWithUnroutedDeployment();
+    await workspaceWithUnroutedDeployment();
+
+    const onlyHere = 'aaaaaaaa-5555-6666-7777-888888888888';
+    const { getWorkspaceAdapter } = await import('@/lib/vfs/adapters/server');
+    const adapter = getWorkspaceAdapter(shared);
+    await adapter.init();
+    await adapter.createDeployment!({
+      id: onlyHere, projectId: PROJECT, name: 'D2', enabled: true,
+      createdAt: new Date(), updatedAt: new Date(),
+    } as never);
+
+    const { backfillDeploymentRoutes } = await import('@/lib/auth/default-workspace');
+    const { getSystemDatabase } = await import('@/lib/auth/system-database');
+
+    expect(backfillDeploymentRoutes(shared)).toBe(1);
+
+    const row = getSystemDatabase()
+      .prepare('SELECT workspace_id FROM deployment_routing WHERE deployment_id = ?')
+      .get(onlyHere) as { workspace_id: string } | undefined;
+    expect(row?.workspace_id).toBe(shared);
+  });
+});

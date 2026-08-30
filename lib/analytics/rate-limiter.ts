@@ -132,6 +132,9 @@ export const pageviewRateLimiter = new RateLimiter();
 export const interactionRateLimiter = new RateLimiter();
 export const reviewPasswordRateLimiter = new RateLimiter();
 export const reviewCommentRateLimiter = new RateLimiter();
+export const reviewAssetRateLimiter = new RateLimiter();
+export const reviewCommentListRateLimiter = new RateLimiter();
+export const reviewUnsubscribeRateLimiter = new RateLimiter();
 
 // Predefined configurations
 export const RATE_LIMIT_CONFIG = {
@@ -174,6 +177,60 @@ export const RATE_LIMIT_CONFIG = {
    */
   reviewComment: {
     limit: 60,
+    windowMs: 10 * 60 * 1000
+  },
+  /**
+   * Assets inside a review copy. Two orders of magnitude looser than the write limits, because what
+   * it paces is a browser loading a page rather than a person typing, and the review copy is served
+   * `no-store` — so every navigation refetches every stylesheet, script, font and image instead of
+   * reusing them. A heavy page is a burst of a hundred-odd requests, and a limit a single page load
+   * could reach would present as a broken site rather than as a gate.
+   *
+   * 1000 a minute leaves roughly ten such page loads a minute to one caller on one deployment,
+   * which is past what a person clicking through a site generates and still has headroom for a
+   * client team sharing one office address — the identifier is an address, not a participant. What
+   * it bounds is the work: each request resolves a deployment and reads a file off disk on a URL
+   * that is explicitly not a secret, so without a ceiling an anonymous caller sets the instance's
+   * disk read rate.
+   *
+   * The window is a minute rather than the ten the analytics limits use, because a limiter holds
+   * one timestamp per request in the window and a ten-minute budget at this rate would be ten
+   * thousand of them per caller.
+   */
+  reviewAsset: {
+    limit: 1000,
+    windowMs: 60 * 1000
+  },
+  /**
+   * Reading the comment list. Paced like the asset limit rather than the write one, because what
+   * makes this call is a page loading, not a person typing: the widget fetches the list once on
+   * every navigation and again after each write, and the studio inbox refetches on every action.
+   *
+   * 120 a minute is a page load every half second sustained on one deployment from one address,
+   * which is past what a person clicking through a site produces and leaves room for a client team
+   * behind one office gateway — the identifier is an address, not a participant. The window matches
+   * reviewAsset's for the same reason: a limiter holds one timestamp per request in the window.
+   *
+   * What it bounds is work, not secrecy. Every call resolves the deployment, opens its review
+   * database and reads the comment table, on a deployment id that is printed into every published
+   * page, for a caller who has proven nothing at the point the gate runs.
+   */
+  reviewCommentList: {
+    limit: 120,
+    windowMs: 60 * 1000
+  },
+  /**
+   * Unsubscribe links from a digest footer. A recipient clicks one once; a mail scanner may
+   * prefetch it first, and a client team's digests can arrive through one corporate gateway, so the
+   * budget is per deployment and generous enough that a whole team unsubscribing at once is
+   * unremarkable.
+   *
+   * Not a guessing bound — the token is an HMAC, and no rate makes that guessable. It is there
+   * because the route resolves a deployment and opens its review database on an unauthenticated
+   * request, and that work should not be free to repeat.
+   */
+  reviewUnsubscribe: {
+    limit: 30,
     windowMs: 10 * 60 * 1000
   }
 } as const;

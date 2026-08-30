@@ -6,6 +6,26 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.99.0 - Review Mode (2026-08-30)
+
+You can now send someone a private link to a published site and have them comment on it directly, with no account and nothing to install. They walk the site and leave comments on the things they mean, and you read, reply and resolve from the deployment's Review tab. Turning review mode on is what makes publishing write that second, private copy; the live site is untouched and never carries the comment widget.
+
+Review mode needs Server Mode, and the review copy is whatever you last published rather than a live view of your editor.
+
+### Reviewing
+- **A private copy of the published site**: written when you publish, at its own address, with the public site unchanged
+- **Comments stick to the element**: a client clicks the heading or image they mean, and the comment stays pinned to it
+- **No account for the reviewer**: they type a name the first time they comment, and that is all
+- **Optional password and closing date**: set either on the deployment, or leave the address open to anyone holding it
+- **Replies and resolve from the studio**: the Review tab lists every thread, and Show opens the review copy on that comment
+
+### Email
+- **A digest once the comments stop**: one message covering everything new, sent after fifteen quiet minutes, or within two hours if the comments keep coming
+- **The instance's mail server, or the workspace's own**: plain SMTP, so anything that speaks it works. No vendor integration and no OAuth
+- **Anyone can stop their own notifications**: every message carries an unsubscribe link
+
+---
+
 ## v1.98.0 - Table Views and Layout Consistency (2026-08-29)
 
 Lists open as tables now: projects, templates, skills, interviews, deployments, users and workspaces, with the details the cards showed lined up in columns. The pages around them were rebuilt on one layout, so each starts with its name and groups its content into labelled cards. Deployment settings moved out of a modal into a full page.

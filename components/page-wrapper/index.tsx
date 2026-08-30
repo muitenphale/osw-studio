@@ -18,7 +18,7 @@ import { TelemetryBootstrap } from '@/components/telemetry-bootstrap';
 import { useProviderAutoAssign } from '@/lib/hooks/use-provider-auto-assign';
 import { useModelConfigSignal } from '@/lib/hooks/use-model-config-signal';
 
-type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'interviews' | 'deployments' | 'users' | 'workspaces' | 'docs' | 'settings';
+type View = 'dashboard' | 'projects' | 'templates' | 'skills' | 'interviews' | 'deployments' | 'users' | 'workspaces' | 'mail' | 'docs' | 'settings';
 
 interface PageWrapperProps {
   view: View;
@@ -38,6 +38,7 @@ function getViewRoute(view: string, workspaceId?: string): string {
     interviews: `${base}/interviews`,
     templates: `${base}/templates`,
     docs: `${base}/docs`,
+    mail: `${base}/mail`,
     // System-wide routes (always /admin/)
     users: '/admin/users',
     workspaces: '/admin/workspaces',

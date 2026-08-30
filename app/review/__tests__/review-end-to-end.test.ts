@@ -7,9 +7,24 @@ import { NextRequest } from 'next/server';
 
 import { REVIEW_WIDGET_MARKER } from '@/lib/publishing/review-widget';
 import { reviewApiBase } from '@/lib/review/api-base';
+import {
+  reviewAssetRateLimitKey,
+  reviewAssetRateLimiter,
+  reviewCommentListRateLimitKey,
+  reviewCommentListRateLimiter,
+} from '@/lib/review/read-gate';
+import { MAX_LISTED_COMMENTS } from '@/lib/review/comment-view';
+import { RATE_LIMIT_CONFIG, getIdentifier } from '@/lib/analytics/rate-limiter';
 import { reviewCookieName } from '@/lib/review/session';
 import { hashPassword } from '@/lib/auth/passwords';
 import { getWorkspaceAdapter, closeWorkspaceAdapter } from '@/lib/vfs/adapters/server';
+import {
+  closeSystemDatabase,
+  createUser,
+  createWorkspace,
+  grantWorkspaceAccess,
+  updateUser,
+} from '@/lib/auth/system-database';
 import { closeReviewDatabase } from '@/lib/vfs/adapters/sqlite-connection';
 import type { SQLiteAdapter } from '@/lib/vfs/adapters/sqlite-adapter';
 import type { Deployment, ReviewConfig, VirtualFile } from '@/lib/vfs/types';
@@ -72,6 +87,12 @@ let dir: string;
 let workspaceId: string;
 let deploymentId: string;
 let adapter: SQLiteAdapter;
+/**
+ * What the deployment's routing row says, as `requireDeploymentAccess` will read it. Null is the
+ * legacy single-workspace shape, in which any authenticated caller is already the owner; a test
+ * that cares about roles points this at a workspace in the temp system database instead.
+ */
+let routedWorkspaceId: string | null = null;
 
 async function addFile(filePath: string, content: string | ArrayBuffer, type: string) {
   await adapter.createFile({
@@ -206,20 +227,21 @@ beforeEach(async () => {
   await addFile('/styles/main.css', 'body { color: red }', 'css');
   await addFile('/logo.png', PNG.buffer.slice(0) as ArrayBuffer, 'image');
 
+  routedWorkspaceId = null;
   mocks.getSession.mockResolvedValue(null);
   // Re-read on every call so a mid-test change to the review settings is what the routes see,
   // exactly as a fresh database read would be in production.
   mocks.resolveDeployment.mockImplementation(async (id: string) => {
     const deployment = await adapter.getDeployment(id);
-    // workspaceId null is the legacy single-workspace shape requireDeploymentAccess allows for an
-    // authenticated caller, so the team path runs without stubbing the workspace check.
-    return deployment ? { adapter, deployment, workspaceId: null } : null;
+    // See routedWorkspaceId.
+    return deployment ? { adapter, deployment, workspaceId: routedWorkspaceId } : null;
   });
 });
 
 afterEach(async () => {
   closeReviewDatabase(deploymentId);
   closeWorkspaceAdapter(workspaceId);
+  closeSystemDatabase();
   vi.unstubAllEnvs();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -268,6 +290,33 @@ describe('review mode — serve', () => {
     const response = await asset(['styles', 'main.css']);
 
     expect(response.status).toBe(404);
+  });
+
+  it('rate limits asset serving per caller and per deployment', async () => {
+    // Every request here resolves a deployment and reads a file, on a URL that is not a secret and
+    // that is served no-store — so it is refetched on every navigation and cannot be left unbounded.
+    await publish({ enabled: true });
+    const cookie = cookieFrom(await entry());
+
+    // Control: the asset serves before the budget is spent, so the 429 below is the limit.
+    expect((await asset(['styles', 'main.css'], cookie)).status).toBe(200);
+
+    const spend = (id: string) => {
+      const key = reviewAssetRateLimitKey(getIdentifier(request(`${ORIGIN}/review/${id}/x`)), id);
+      for (let n = 0; n < RATE_LIMIT_CONFIG.reviewAsset.limit; n++) {
+        reviewAssetRateLimiter.check(key, RATE_LIMIT_CONFIG.reviewAsset);
+      }
+    };
+
+    // A different deployment first: its budget must not be the one that runs out below.
+    spend(randomUUID());
+    expect((await asset(['styles', 'main.css'], cookie)).status).toBe(200);
+
+    spend(deploymentId);
+
+    const blocked = await asset(['styles', 'main.css'], cookie);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('retry-after')).toBeTruthy();
   });
 });
 
@@ -326,6 +375,80 @@ describe('review mode — comments', () => {
     );
 
     expect(response.status).toBe(403);
+  });
+
+  it('refuses a comment posted from another tenant on this instance', async () => {
+    // The case a shared analytics allowlist misses. `*.{appHost}` is on it, because every published
+    // deployment posts its own pageviews from its slug subdomain — and a slug subdomain is
+    // same-site with the app, so SameSite=Lax still sends the review cookie. A tenant who can
+    // publish could otherwise forge a comment for any visitor holding one, on any deployment id
+    // they can read out of a published page.
+    const cookie = await admitted();
+
+    // The app is on a real host for this test; the wildcard is only added for a non-localhost one.
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://oswstudio.com');
+
+    const forged = await post(
+      { body: 'signed in the visitor name', page_path: '/index.html' },
+      cookie,
+      'https://tenant.oswstudio.com'
+    );
+    expect(forged.status).toBe(403);
+
+    // Control: the same POST on the app's own origin still works, so the refusal above is the host
+    // and not the environment change.
+    const genuine = await post(
+      { body: 'typed by the visitor', page_path: '/index.html' },
+      cookie,
+      'https://oswstudio.com'
+    );
+    expect(genuine.status).toBe(201);
+  });
+
+  it('refuses a participant rename posted from another tenant on this instance', async () => {
+    const cookie = await admitted();
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://oswstudio.com');
+
+    const rename = (origin: string) =>
+      patchParticipant(
+        request(`${ORIGIN}${reviewApiBase(deploymentId)}/participant`, {
+          method: 'PATCH',
+          body: JSON.stringify({ display_name: 'Renamed' }),
+          headers: { 'content-type': 'application/json', origin },
+          cookie,
+        }),
+        { params: Promise.resolve({ deploymentId }) }
+      );
+
+    expect((await rename('https://tenant.oswstudio.com')).status).toBe(403);
+    expect((await rename('https://oswstudio.com')).status).toBe(200);
+  });
+
+  it('refuses a resolve posted from another tenant on this instance', async () => {
+    const cookie = await admitted();
+    const created = await post({ body: 'Typo in the footer', page_path: '/index.html' }, cookie);
+    const { comment } = await created.json();
+
+    mocks.getSession.mockResolvedValue({
+      userId: 'u1', email: 'agency@example.com', isAdmin: false, exp: 253402300799,
+    });
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://oswstudio.com');
+
+    const resolve = (origin: string) =>
+      patchComment(
+        request(`${ORIGIN}${reviewApiBase(deploymentId)}/comments/${comment.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'resolved' }),
+          headers: { 'content-type': 'application/json', origin },
+          cookie,
+        }),
+        { params: Promise.resolve({ deploymentId, id: comment.id }) }
+      );
+
+    // A team member's account session is SameSite=Lax too, and this is the one review write that
+    // can close a client's comment.
+    expect((await resolve('https://tenant.oswstudio.com')).status).toBe(403);
+    expect((await resolve('https://oswstudio.com')).status).toBe(200);
   });
 
   it('reads the comment back without any email on the wire', async () => {
@@ -393,6 +516,213 @@ describe('review mode — comments', () => {
     const allowed = await patch();
     expect(allowed.status).toBe(200);
     expect((await allowed.json()).comment.status).toBe('resolved');
+  });
+});
+
+/**
+ * Roles, against a real system database.
+ *
+ * `requireDeploymentAccess` is the only authorisation function in play here, and it is the real
+ * one: the routing row points at a workspace in the temp system database, so `verifyWorkspaceAccess`
+ * reads real `workspace_access` rows and the instance-admin bypass is the shipping bypass rather
+ * than a mock's idea of one.
+ */
+describe('review mode — team authority', () => {
+  type Role = 'viewer' | 'editor' | 'owner' | 'admin';
+
+  /** Put a real user of the given role behind the session, on a real routed workspace. */
+  function signInWithRole(role: Role): string {
+    const ownerId = createUser(`owner-${randomUUID()}@example.com`, 'not-a-real-hash');
+    routedWorkspaceId = createWorkspace('Agency', ownerId);
+
+    let userId = ownerId;
+    if (role !== 'owner') {
+      userId = createUser(`${role}-${randomUUID()}@example.com`, 'not-a-real-hash');
+      // An instance admin deliberately gets no workspace_access row: the bypass is the thing under
+      // test, and granting one would hide it.
+      if (role !== 'admin') grantWorkspaceAccess(userId, routedWorkspaceId, role);
+      else updateUser(userId, { is_admin: 1 });
+    }
+
+    mocks.getSession.mockResolvedValue({
+      userId, email: `${role}@example.com`, isAdmin: role === 'admin', exp: 253402300799,
+    });
+    return userId;
+  }
+
+  /** A client comment for the team to act on, posted before anyone signs in. */
+  async function clientComment(): Promise<{ id: string; cookie: string }> {
+    // Anonymous again: the entry route mints a participant cookie only for a caller with no
+    // account, and a case that signed in earlier would otherwise get none.
+    mocks.getSession.mockResolvedValue(null);
+    await publish({ enabled: true });
+    const cookie = cookieFrom(await entry());
+    const created = await post({ body: 'The footer is cut off', page_path: '/index.html' }, cookie);
+    expect(created.status).toBe(201);
+    return { id: (await created.json()).comment.id, cookie };
+  }
+
+  const resolve = (id: string) =>
+    patchComment(
+      request(`${ORIGIN}${reviewApiBase(deploymentId)}/comments/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'resolved' }),
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+      }),
+      { params: Promise.resolve({ deploymentId, id }) }
+    );
+
+  const list = (cookie?: string) =>
+    listComments(request(`${ORIGIN}${reviewApiBase(deploymentId)}/comments`, { cookie }), {
+      params: Promise.resolve({ deploymentId }),
+    });
+
+  it('refuses a resolve from a workspace member who may only view', async () => {
+    const { id } = await clientComment();
+    signInWithRole('viewer');
+
+    const response = await resolve(id);
+
+    expect(response.status).toBe(403);
+    expect((await list()).status).toBe(200);
+    const payload = await (await list()).json();
+    expect(payload.comments[0].status).toBe('open');
+  });
+
+  it('lets an editor, an owner and an instance admin resolve', async () => {
+    for (const role of ['editor', 'owner', 'admin'] as Role[]) {
+      const { id } = await clientComment();
+      signInWithRole(role);
+
+      const response = await resolve(id);
+      expect(response.status, `${role} should be able to resolve`).toBe(200);
+      expect((await response.json()).comment.status).toBe('resolved');
+
+      // Each role gets its own deployment and review database, since the ones above are cached by
+      // id for the life of the test file.
+      closeReviewDatabase(deploymentId);
+      deploymentId = randomUUID();
+    }
+  });
+
+  it('does not badge a viewer-level member comment as the team', async () => {
+    await clientComment();
+    signInWithRole('viewer');
+
+    const response = await post({ body: 'Agreed, that needs fixing', page_path: '/index.html' }, '');
+
+    // Commenting is legitimate for a viewer; speaking as the agency is not.
+    expect(response.status).toBe(201);
+    expect((await response.json()).comment.is_team).toBe(false);
+  });
+
+  it('still lets a viewer read the review copy and its comments', async () => {
+    await clientComment();
+    signInWithRole('viewer');
+
+    // The obvious over-correction: locking viewers out of the thing a viewer role exists to allow.
+    expect((await entry()).status).toBe(200);
+    expect((await asset(['styles', 'main.css'])).status).toBe(200);
+
+    const response = await list();
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.comments).toHaveLength(1);
+    // The flag the widget keys the resolve control off, so it must read as authority, not access.
+    expect(payload.viewer.is_team).toBe(false);
+  });
+
+  it('badges an editor comment as the team', async () => {
+    // Control for the two tests above: the badge is withheld by role, not by a broken team path.
+    await clientComment();
+    signInWithRole('editor');
+
+    const response = await post({ body: 'On it', page_path: '/index.html' }, '');
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).comment.is_team).toBe(true);
+  });
+});
+
+describe('review mode — listing comments', () => {
+  it('rate limits the comment list per caller and per deployment', async () => {
+    // The list resolves the deployment, opens its database and reads every comment, for a caller
+    // who has proven nothing yet, on a deployment id that is printed in every published page.
+    await publish({ enabled: true });
+    const cookie = cookieFrom(await entry());
+
+    const list = () =>
+      listComments(request(`${ORIGIN}${reviewApiBase(deploymentId)}/comments`, { cookie }), {
+        params: Promise.resolve({ deploymentId }),
+      });
+
+    // Control: the list answers before the budget is spent, so the 429 below is the limit.
+    expect((await list()).status).toBe(200);
+
+    const spend = (id: string) => {
+      const key = reviewCommentListRateLimitKey(
+        getIdentifier(request(`${ORIGIN}/review/${id}/x`)),
+        id
+      );
+      for (let n = 0; n < RATE_LIMIT_CONFIG.reviewCommentList.limit; n++) {
+        reviewCommentListRateLimiter.check(key, RATE_LIMIT_CONFIG.reviewCommentList);
+      }
+    };
+
+    // A different deployment first: hammering one agency's review copy must not close another's.
+    spend(randomUUID());
+    expect((await list()).status).toBe(200);
+
+    spend(deploymentId);
+
+    const blocked = await list();
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('retry-after')).toBeTruthy();
+  });
+
+  it('caps the list at the most recent comments and says that it did', async () => {
+    await publish({ enabled: true });
+    const cookie = cookieFrom(await entry());
+
+    const { ReviewDatabase } = await import('@/lib/vfs/adapters/review-database');
+    const db = new ReviewDatabase(deploymentId);
+    db.init();
+    const overCap = MAX_LISTED_COMMENTS + 5;
+    for (let n = 0; n < overCap; n++) {
+      db.createComment({
+        participantId: 'p-flood', authorName: 'Flood', pagePath: '/index.html', body: `#${n}`,
+      });
+    }
+
+    const response = await listComments(
+      request(`${ORIGIN}${reviewApiBase(deploymentId)}/comments`, { cookie }),
+      { params: Promise.resolve({ deploymentId }) }
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.comments).toHaveLength(MAX_LISTED_COMMENTS);
+    // A silent cap reads as "these are all the comments" when it is not.
+    expect(payload.truncated).toBe(true);
+    expect(payload.total).toBe(overCap);
+    // The most recent ones, and still oldest-first within the page the caller got.
+    expect(payload.comments[payload.comments.length - 1].body).toBe(`#${overCap - 1}`);
+    expect(payload.comments[0].body).toBe(`#${overCap - MAX_LISTED_COMMENTS}`);
+  });
+
+  it('reports no truncation on a list that fits', async () => {
+    await publish({ enabled: true });
+    const cookie = cookieFrom(await entry());
+    await post({ body: 'One comment', page_path: '/index.html' }, cookie);
+
+    const response = await listComments(
+      request(`${ORIGIN}${reviewApiBase(deploymentId)}/comments`, { cookie }),
+      { params: Promise.resolve({ deploymentId }) }
+    );
+
+    const payload = await response.json();
+    expect(payload.truncated).toBe(false);
+    expect(payload.total).toBe(1);
   });
 });
 

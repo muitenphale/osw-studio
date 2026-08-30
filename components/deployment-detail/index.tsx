@@ -96,7 +96,6 @@ interface DeploymentDetailProps {
   onBack: () => void;
   onSave: (settings: DeploymentSettingsUpdate) => Promise<void>;
   onPublish: (deploymentId: string) => void;
-  onOpenInEditor?: (pagePath: string) => void;
   workspaceId?: string;
 }
 
@@ -107,7 +106,6 @@ export function DeploymentDetail({
   onBack,
   onSave,
   onPublish,
-  onOpenInEditor,
   workspaceId,
 }: DeploymentDetailProps) {
   const [activeNav, setActiveNav] = useState('general');
@@ -380,6 +378,7 @@ export function DeploymentDetail({
             {activeNav === 'review' && (
               <ReviewTab
                 deploymentId={deployment.id}
+                workspaceId={workspaceId}
                 review={review}
                 onChange={setReview}
                 storedEnabled={toReviewDraft(deployment.review).enabled}
@@ -388,7 +387,6 @@ export function DeploymentDetail({
                 hasPendingChanges={hasPendingChanges}
                 isPublishing={isPublishing}
                 onPublish={() => onPublish(deployment.id)}
-                onOpenInEditor={(pagePath) => onOpenInEditor?.(pagePath)}
               />
             )}
 

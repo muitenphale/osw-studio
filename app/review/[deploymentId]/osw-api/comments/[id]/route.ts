@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveReviewAccess } from '@/lib/review/access';
 import { authorizeStatusChange } from '@/lib/review/comment-status';
 import { toWireComment } from '@/lib/review/comment-view';
+import { isReviewOriginAllowed } from '@/lib/review/origin-gate';
 import { ReviewDatabase } from '@/lib/vfs/adapters/review-database';
 import { logger } from '@/lib/utils';
 
@@ -34,6 +35,21 @@ export async function PATCH(
   try {
     const access = await resolveReviewAccess(deploymentId, request);
     if (access.kind === 'denied') return notFound();
+
+    // A write, and therefore the same origin gate the other two review writes carry. A team
+    // member's account session is SameSite=Lax like the participant cookie, so a page on a tenant's
+    // published subdomain — same-site with the app — would otherwise be able to close a client's
+    // comments in their name. See lib/review/origin-gate.ts.
+    if (!isReviewOriginAllowed(request)) {
+      logger.warn('[Review Comments] Invalid origin (rejected):', {
+        origin: request.headers.get('origin'),
+        deploymentId,
+      });
+      return NextResponse.json(
+        { error: 'Origin not allowed' },
+        { status: 403, headers: PRIVATE_HEADERS }
+      );
+    }
 
     const parsed = await request.json().catch(() => null);
 

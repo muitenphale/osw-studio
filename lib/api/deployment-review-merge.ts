@@ -7,7 +7,7 @@
  * review site without anyone asking for it. The hash is server-owned state: an absent field means
  * "leave it as it was", never "remove it".
  *
- * The hash is server-owned in the stronger sense too — a body never supplies one. The password
+ * The hash is server-owned in a stronger sense too: a body never supplies one. The password
  * arrives as plaintext under `review.password`, the route hashes it, and the resolved value reaches
  * this function as the `passwordHash` argument. That keeps the cost factor and the length rule on
  * the server, where a client cannot install a hash of a password the server never saw. A `password`
@@ -15,7 +15,7 @@
  * `reviewPasswordSet` projection gets: a round trip that echoes back a field the server owns is a
  * normal request, not a caller error.
  *
- * Clearing the password is a deliberate act, so it needs its own signal — the body sends
+ * Clearing the password is a deliberate act, so it needs its own signal: the body sends
  * `password: null`, which the route resolves to a `null` hash argument.
  */
 import type { ReviewConfig } from '@/lib/vfs/types';

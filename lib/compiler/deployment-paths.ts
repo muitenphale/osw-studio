@@ -5,7 +5,6 @@
  * dependencies and can be unit-tested directly.
  */
 
-import { VirtualFile } from '@/lib/vfs/types';
 
 export interface DeploymentServing {
   /** True when the deployment is served at a root (needs root-relative asset paths). */
@@ -46,7 +45,6 @@ export function resolveDeploymentServing(
 export function replaceAssetPathsWithDeploymentPrefix(
   content: string,
   blobUrlToPath: Map<string, string>,
-  allFiles: VirtualFile[],
   deploymentId: string,
   servedAtRoot?: boolean
 ): string {

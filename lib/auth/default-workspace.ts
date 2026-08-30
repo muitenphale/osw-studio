@@ -298,7 +298,56 @@ export function repairWorkspace(workspaceId: string): RepairResult {
  *
  * Never rewrites an existing row: a later publish may have set a slug or custom domain on it.
  * Cheap enough to run on every boot — one read-only query per workspace, then nothing.
+ *
+ * A deployment id that appears in more than one workspace database is skipped, and that case is
+ * real rather than theoretical: `migrateLegacyData` copies the whole of a legacy data/osws.sqlite
+ * into each workspace created on the box, so two workspaces on an upgraded instance hold the same
+ * deployment ids. deployment_routing has room for one owner, and choosing between them here means
+ * choosing by whatever order listWorkspaces happens to return — which is created_at DESC, so the
+ * newest workspace silently takes deployments the older one has been publishing for months, and
+ * the older one gets 'Deployment is owned by another workspace' from then on. Leaving an ambiguous
+ * id unrouted restores what happened before this backfill existed: the row is written by whichever
+ * workspace actually publishes.
  */
+/**
+ * Deployment ids held by every workspace database except this one.
+ *
+ * Read directly rather than from deployment_routing: the duplicates this exists to catch are
+ * precisely the ones with no routing row yet.
+ */
+function deploymentIdsInOtherWorkspaces(exceptWorkspaceId: string): Set<string> {
+  const ids = new Set<string>();
+  const root = path.join(getDataDir(), 'workspaces');
+  if (!fs.existsSync(root)) return ids;
+
+  for (const entry of fs.readdirSync(root)) {
+    if (entry === exceptWorkspaceId) continue;
+    const dbPath = path.join(root, entry, 'osws.sqlite');
+    if (!fs.existsSync(dbPath)) continue;
+
+    try {
+      const db = openReadonlyDb(dbPath);
+      try {
+        const hasTable = db
+          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deployments'")
+          .get();
+        if (hasTable) {
+          for (const row of db.prepare('SELECT id FROM deployments').all() as { id: string }[]) {
+            ids.add(row.id);
+          }
+        }
+      } finally {
+        db.close();
+      }
+    } catch {
+      // An unreadable neighbour cannot prove a duplicate either way. Skipping it keeps the backfill
+      // working on the rest rather than failing the whole boot pass.
+    }
+  }
+
+  return ids;
+}
+
 export function backfillDeploymentRoutes(workspaceId: string): number {
   const workspaceDbPath = path.join(getDataDir(), 'workspaces', workspaceId, 'osws.sqlite');
   if (!fs.existsSync(workspaceDbPath)) return 0;
@@ -314,12 +363,21 @@ export function backfillDeploymentRoutes(workspaceId: string): number {
     db.close();
   }
 
+  const claimedElsewhere = deploymentIdsInOtherWorkspaces(workspaceId);
+
   const sysDb = getSystemDatabase();
   let created = 0;
   for (const deployment of deployments) {
     const existing = sysDb.prepare('SELECT deployment_id FROM deployment_routing WHERE deployment_id = ?')
       .get(deployment.id);
     if (existing) continue;
+
+    if (claimedElsewhere.has(deployment.id)) {
+      console.warn(
+        `[DeploymentRoutes] ${deployment.id} exists in more than one workspace database; leaving it unrouted rather than assigning it to ${workspaceId}.`
+      );
+      continue;
+    }
 
     // Assign a slug so the deployment gets a subdomain route — Caddy
     // generation skips routing rows without one. Prefer the deployment's

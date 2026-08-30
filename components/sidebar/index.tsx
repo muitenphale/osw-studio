@@ -32,6 +32,7 @@ import {
   DollarSign,
   Shield,
   Database,
+  Mail,
 } from 'lucide-react';
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
@@ -71,6 +72,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'skills', label: 'Skills', icon: Sparkles, path: 'skills' },
   { id: 'interviews', label: 'Interviews', icon: ClipboardList, path: 'interviews' },
   { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true, adminOnly: true },
+  { id: 'mail', label: 'Mail', icon: Mail, path: 'mail', serverModeOnly: true },
   {
     id: 'docs',
     label: 'Docs',

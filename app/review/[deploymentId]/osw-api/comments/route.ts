@@ -17,17 +17,22 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAllowedOrigins, validateOrigin } from '@/lib/analytics/security';
 import { RATE_LIMIT_CONFIG } from '@/lib/analytics/rate-limiter';
-import { resolveReviewAccess } from '@/lib/review/access';
+import { actsAsTeam, resolveReviewAccess } from '@/lib/review/access';
+import { isReviewOriginAllowed } from '@/lib/review/origin-gate';
 import {
   resolveCommentAuthorship,
   resolveParentComment,
   validateCommentInput,
 } from '@/lib/review/comment-input';
-import { toWireComment, toWireComments, toWireParticipants } from '@/lib/review/comment-view';
+import {
+  MAX_LISTED_COMMENTS,
+  toWireComment,
+  toWireComments,
+  toWireParticipants,
+} from '@/lib/review/comment-view';
+import { consumeReviewCommentListAttempt } from '@/lib/review/read-gate';
 import { consumeReviewWriteAttempt } from '@/lib/review/write-gate';
-import { resolveDeployment } from '@/lib/vfs/adapters/deployment-adapter';
 import { ReviewDatabase, type ReviewParticipant } from '@/lib/vfs/adapters/review-database';
 import { logger } from '@/lib/utils';
 
@@ -64,11 +69,30 @@ export async function GET(
   const { deploymentId } = await params;
 
   try {
+    // Before the access check, as on the writes: a flood should cost a map lookup, not a deployment
+    // resolve and a read of somebody's comment table.
+    const gate = consumeReviewCommentListAttempt(request, deploymentId);
+    if (!gate.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded' },
+        {
+          status: 429,
+          headers: {
+            ...PRIVATE_HEADERS,
+            'Retry-After': gate.retryAfterSeconds.toString(),
+            'X-RateLimit-Limit': RATE_LIMIT_CONFIG.reviewCommentList.limit.toString(),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
+      );
+    }
+
     const access = await resolveReviewAccess(deploymentId, request);
     if (access.kind === 'denied') return notFound();
 
     const db = openReviewDatabase(deploymentId);
-    const comments = db.listComments();
+    const total = db.countComments();
+    const comments = db.listComments({ limit: MAX_LISTED_COMMENTS });
 
     // Only the people actually referenced by a comment, plus the caller so the UI can render its
     // own name before it has posted anything.
@@ -85,8 +109,13 @@ export async function GET(
         // Emails are stripped for every caller, team included — see lib/review/comment-view.ts.
         participants: toWireParticipants(participants),
         // The participant id lives in an HttpOnly cookie, so the page cannot otherwise tell which
-        // comments are its own or whether to offer the resolve control.
-        viewer: { participant_id: access.participantId, is_team: access.kind === 'team' },
+        // comments are its own or whether to offer the resolve control. `is_team` is authority
+        // rather than membership, so a read-only member sees the copy without the resolve control.
+        viewer: { participant_id: access.participantId, is_team: actsAsTeam(access) },
+        // Reported rather than left to be inferred from the length: a capped list looks exactly
+        // like a complete one, and a reader who is not told will act on a partial thread.
+        total,
+        truncated: total > comments.length,
       },
       { headers: PRIVATE_HEADERS }
     );
@@ -126,14 +155,9 @@ export async function POST(
     const access = await resolveReviewAccess(deploymentId, request);
     if (access.kind === 'denied') return notFound();
 
-    const resolved = await resolveDeployment(deploymentId);
-    if (!resolved) return notFound();
-
-    // Same browser-enforced check the analytics collectors rely on: a review page is same-origin
-    // with this endpoint, so a cross-site page scripting a visitor's cookie into a comment fails
-    // here even though the cookie itself would have been sent.
-    const allowedOrigins = getAllowedOrigins(deploymentId, resolved.deployment.customDomain);
-    if (!validateOrigin(request, allowedOrigins)) {
+    // The review copy is reachable only at the app origin, so that is the whole allowlist — not the
+    // analytics one, which names every tenant's published subdomain. See lib/review/origin-gate.ts.
+    if (!isReviewOriginAllowed(request)) {
       logger.warn('[Review Comments] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         deploymentId,

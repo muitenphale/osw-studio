@@ -169,6 +169,54 @@ function initSystemSchema(db: Database.Database): void {
       attempts INTEGER NOT NULL DEFAULT 0,
       last_attempted_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS instance_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS workspace_mail (
+      workspace_id TEXT PRIMARY KEY,
+      -- Whether this workspace sends at all, and the state a workspace starts in. Off composes
+      -- nothing rather than queueing it up for later. Unlike the instance tier's switch, absence is
+      -- not a signal here: nothing provisions a workspace from an environment, so a row is only ever
+      -- written by an owner who was looking at the switch. See lib/mail/settings.ts.
+      enabled INTEGER NOT NULL DEFAULT 0,
+      mode TEXT NOT NULL DEFAULT 'instance',  -- 'instance' | 'own'
+      display_name TEXT,          -- instance mode only; overrides the From display name
+      smtp_host TEXT,
+      smtp_port INTEGER,
+      smtp_secure TEXT,           -- 'starttls' | 'ssl' | 'none'
+      smtp_user TEXT,
+      smtp_password TEXT,         -- own mode only; never returned to a client
+      from_address TEXT,          -- own mode only
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS email_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      -- Which workspace's mail settings send this. NULL = instance mail (e.g. an admin test).
+      -- Deliberately not a foreign key: a queued message names the transport that should carry it,
+      -- and a workspace deleted mid-flight should not silently drop mail already composed for it.
+      workspace_id TEXT,
+      to_email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      body_html TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      -- 'delivered' mirrors webhook_outbox so the two queues read alike, but SMTP can only tell us
+      -- a mail server *accepted* the message; a later bounce arrives out of band and nothing reads
+      -- it. Treat this column as "handed off", never as "it reached a person".
+      delivered INTEGER NOT NULL DEFAULT 0,
+      delivered_at TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_attempted_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_email_outbox_pending ON email_outbox(delivered, attempts);
+    CREATE INDEX IF NOT EXISTS idx_email_outbox_workspace ON email_outbox(workspace_id);
   `);
 
   // Migration: add custom_domain column if missing (existing databases)
@@ -177,6 +225,16 @@ function initSystemSchema(db: Database.Database): void {
   } catch {
     db.prepare('ALTER TABLE deployment_routing ADD COLUMN custom_domain TEXT').run();
     db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_deployment_routing_domain ON deployment_routing(custom_domain)').run();
+  }
+
+  // Migration: add workspace_mail.enabled if missing (existing databases). Existing rows take the
+  // column default of 0: they were written by a page that had no such switch on it, so they carry
+  // no decision to preserve, and off is the same holding state a workspace that has never been
+  // configured is already in.
+  try {
+    db.prepare('SELECT enabled FROM workspace_mail LIMIT 0').get();
+  } catch {
+    db.prepare('ALTER TABLE workspace_mail ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0').run();
   }
 
   // Migration: raise old restrictive workspace defaults (3/1/100) to generous values.
@@ -416,6 +474,31 @@ export function getWorkspaceAccess(userId: string, workspaceId: string): Workspa
   const db = getSystemDatabase();
   return db.prepare('SELECT * FROM workspace_access WHERE user_id = ? AND workspace_id = ?')
     .get(userId, workspaceId) as WorkspaceAccess | undefined;
+}
+
+export interface WorkspaceMember {
+  userId: string;
+  email: string;
+  role: 'owner' | 'editor' | 'viewer';
+}
+
+/**
+ * Everyone with access to a workspace, and the address to reach them at.
+ *
+ * Deactivated accounts are left out: a removed colleague cannot act on a notification, and their
+ * address is usually the first thing an employer turns off.
+ */
+export function listWorkspaceMembers(workspaceId: string): WorkspaceMember[] {
+  const db = getSystemDatabase();
+  const rows = db.prepare(`
+    SELECT wa.user_id, wa.role, u.email
+    FROM workspace_access wa
+    JOIN users u ON u.id = wa.user_id
+    WHERE wa.workspace_id = ? AND u.active = 1
+    ORDER BY wa.created_at ASC
+  `).all(workspaceId) as { user_id: string; role: WorkspaceMember['role']; email: string }[];
+
+  return rows.map(row => ({ userId: row.user_id, email: row.email, role: row.role }));
 }
 
 /**

@@ -9,13 +9,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAllowedOrigins, validateOrigin } from '@/lib/analytics/security';
 import { RATE_LIMIT_CONFIG } from '@/lib/analytics/rate-limiter';
-import { resolveReviewAccess } from '@/lib/review/access';
+import { actsAsTeam, resolveReviewAccess } from '@/lib/review/access';
 import { toWireParticipant } from '@/lib/review/comment-view';
+import { isReviewOriginAllowed } from '@/lib/review/origin-gate';
 import { validateParticipantProfile } from '@/lib/review/participant-input';
 import { consumeReviewWriteAttempt } from '@/lib/review/write-gate';
-import { resolveDeployment } from '@/lib/vfs/adapters/deployment-adapter';
 import { ReviewDatabase } from '@/lib/vfs/adapters/review-database';
 import { logger } from '@/lib/utils';
 
@@ -54,11 +53,9 @@ export async function PATCH(
     const access = await resolveReviewAccess(deploymentId, request);
     if (access.kind === 'denied') return notFound();
 
-    const resolved = await resolveDeployment(deploymentId);
-    if (!resolved) return notFound();
-
-    const allowedOrigins = getAllowedOrigins(deploymentId, resolved.deployment.customDomain);
-    if (!validateOrigin(request, allowedOrigins)) {
+    // The app origin only — see lib/review/origin-gate.ts for why the analytics allowlist is the
+    // wrong one on a write.
+    if (!isReviewOriginAllowed(request)) {
       logger.warn('[Review Participant] Invalid origin (rejected):', {
         origin: request.headers.get('origin'),
         deploymentId,
@@ -90,8 +87,9 @@ export async function PATCH(
       displayName: profile.value.displayName,
       email: profile.value.email,
       // Re-derived from the session on every write, so the flag on the row cannot drift into a
-      // claim the caller does not currently hold.
-      isTeam: access.kind === 'team',
+      // claim the caller does not currently hold — and the claim is authority, not membership, so a
+      // read-only workspace member's row is an ordinary participant's.
+      isTeam: actsAsTeam(access),
     });
 
     return NextResponse.json(

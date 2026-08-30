@@ -209,21 +209,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
   };
 
   /** Open the deployment's project in the editor with the preview already on the commented page. */
-  const handleOpenPageInEditor = async (deployment: Deployment, pagePath: string) => {
-    try {
-      await vfs.init();
-      const project = await vfs.getProject(deployment.projectId);
-      if (!project) {
-        toast.error('Project not found in local storage');
-        return;
-      }
-      onProjectSelect(project, pagePath);
-    } catch (error) {
-      logger.error('[DeploymentsView] Failed to open project page:', error);
-      toast.error('Failed to load project');
-    }
-  };
-
   const [templateExportProject, setTemplateExportProject] = useState<Project | null>(null);
 
   const handleExportAsTemplate = async (deployment: Deployment) => {
@@ -736,7 +721,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
           onBack={() => setSelectedDeployment(null)}
           onSave={handleSaveSettings}
           onPublish={handlePublish}
-          onOpenInEditor={(pagePath) => handleOpenPageInEditor(selectedDeployment, pagePath)}
           workspaceId={workspaceId}
         />
 

@@ -1,9 +1,9 @@
 /**
  * The Review tab's pure logic.
  *
- * Kept out of the component so the parts that actually decide something — turning an expiry choice
+ * Kept out of the component so the parts that actually decide something, turning an expiry choice
  * into a stored deadline, assembling threads out of a flat comment list, deriving the colour a
- * participant is shown in — can be exercised without rendering anything.
+ * participant is shown in, can be exercised without rendering anything.
  */
 
 import type { WireComment } from '@/lib/review/comment-view';
@@ -56,7 +56,7 @@ export function expiryOptionToIso(
 
 /**
  * Mirrors `isReviewExpired` in lib/review/access.ts, including its treatment of an unparseable
- * deadline as closed — a UI that called that one "no expiry" would promise access the server
+ * deadline as closed, a UI that called that one "no expiry" would promise access the server
  * refuses.
  */
 export function isReviewExpired(expiresAt: string | undefined, now: Date = new Date()): boolean {
@@ -75,7 +75,7 @@ const TEAM_COLOR = '#3f7ae0';
  * Derived from the server-minted participant id, not the display name, so two clients who both type
  * "Priya" stay visibly two people. The formula is a transcription of `colorFor` in
  * lib/publishing/review-widget.ts: that copy lives inside a template literal that ships as script
- * text to a customer's page, so it cannot be imported — and the two must agree, or a comment would
+ * text to a customer's page, so it cannot be imported, and the two must agree, or a comment would
  * be one colour in the client's browser and another in the team's inbox.
  */
 export function participantColor(participantId: string, isTeam: boolean): string {
@@ -175,7 +175,7 @@ export function shortSelector(selector: string | null, maxSegments = 2): string 
   return segments.slice(-maxSegments).join(' > ');
 }
 
-/** `/index.html · h2` — where the comment is pinned, in one line. */
+/** `/index.html · h2`, where the comment is pinned, in one line. */
 export function describeAnchor(comment: WireComment): string {
   const element = shortSelector(comment.selector);
   return element ? `${comment.page_path} · ${element}` : comment.page_path;

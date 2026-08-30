@@ -245,6 +245,56 @@ pm2 restart osws
 - ✅ fail2ban protects against brute force attempts
 - ✅ Swap prevents out-of-memory crashes on small instances
 
+### Configuring a mail server
+
+Review-mode digests go out over plain SMTP, so anything that speaks it works: Mailhog while you are
+developing, or a hosted relay in production. There is no vendor SDK and no OAuth flow.
+
+Set it once as an instance admin, or at deploy time with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM`. A value stored through the UI wins over the
+environment, so an operator can override a provisioned config and clear the override to fall back.
+
+A worked example, verified end to end against AgentMail:
+
+| Field | Value |
+|---|---|
+| Host | `smtp.agentmail.to` |
+| Port | `587` |
+| Encryption | STARTTLS (`465` for implicit TLS also works) |
+| Username | your inbox address, e.g. `you@agentmail.to` |
+| Password | your AgentMail API key |
+| From | the **same** inbox address |
+
+The last row is a provider rule worth knowing before you debug it: AgentMail requires the From
+address to match the inbox that authenticated. Some relays are stricter than others about this, and
+the failure is a rejection at send time rather than a configuration error, so use **Send test email**
+after any change — it reports the server's own message rather than a reworded one.
+
+Mail is only written when a live server is available and sending is on. If a tier is off or no
+server sits behind it, nothing is queued. Turning it back on starts from that moment, so a quiet
+stretch does not arrive as one dump. Anything already queued for a tier is dropped when its switch
+goes off.
+
+This also shapes what a workspace can do. A workspace using the instance's mail server may override
+the *display name* but not the address, which keeps SPF and DKIM aligned and is the reason those are
+two separate settings. A workspace that needs its own From address has to bring its own relay, where
+its domain is already authorised.
+
+### SMTP passwords are stored in plaintext
+
+SMTP passwords — both the instance's and any a workspace sets for its own relay — are stored
+unencrypted in `data/system.sqlite`. They have to be usable as passwords when mail is sent, so
+encrypting them would only move the problem to a key held on the same disk.
+
+That makes the database file itself the thing to protect:
+
+- Keep `data/` readable only by the `osws` user (it is by default; a restore from backup can widen it)
+- Treat any backup of `data/system.sqlite` as carrying live mail credentials — encrypt it before it
+  leaves the machine
+- If the mail account allows it, use a relay-specific credential rather than a full mailbox password,
+  so a leak costs you a sending key and not an inbox
+- Consider full-disk encryption on the volume if the instance sends on behalf of other people
+
 ---
 
 ## Next Steps

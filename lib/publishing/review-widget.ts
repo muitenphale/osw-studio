@@ -4,7 +4,7 @@
  * Comment bodies, display names and anything else that came back from the API are rendered with
  * `textContent`, never `innerHTML`. A comment is written by an untrusted reviewer and is rendered
  * back inside the customer's own page. The one `innerHTML` assignment here writes a constant
- * template with nothing interpolated into it — the chrome, before any data exists.
+ * template with nothing interpolated into it, the chrome, before any data exists.
  *
  * Self-contained by construction: all CSS and JS is inline and there are no external references.
  * Published sites run on arbitrary hosts behind arbitrary network policies, so a blocked CDN would
@@ -27,7 +27,7 @@
  * is what keeps them correct for whatever the page appends to <body> after the widget has mounted.
  *
  * The bar sits at the bottom. A top bar would cover the customer's own `position: fixed` nav on the
- * review copy — unreadable and unclickable, and that nav is usually what the reviewer wants to
+ * review copy, unreadable and unclickable, and that nav is usually what the reviewer wants to
  * comment on. Reserving space with `html { padding-top }` is worse still: it changes the layout
  * under review.
  *
@@ -58,8 +58,8 @@ function jsString(value: string): string {
 /**
  * Layout the customer's stylesheet must not be able to reach.
  *
- * `all: initial` comes first so the host starts from a known state — it also stops the customer's
- * font and colour inheriting into the shadow tree — and the declarations after it re-establish the
+ * `all: initial` comes first so the host starts from a known state, it also stops the customer's
+ * font and colour inheriting into the shadow tree, and the declarations after it re-establish the
  * few properties the overlay needs. The layer inside the shadow root is what actually gets
  * positioned; the host is only a full-viewport, click-through anchor for it.
  */
@@ -123,10 +123,7 @@ button, input, textarea { font: inherit; color: inherit; margin: 0; }
   pointer-events: auto;
   box-shadow: 0 -1px 8px rgba(0,0,0,0.28);
 }
-.bar .mark {
-  width: 18px; height: 18px; border-radius: 5px; background: #e07a3f;
-  display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; flex: none;
-}
+.bar .mark { width: 18px; height: 18px; display: block; flex: none; }
 .bar .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
 .bar .sep { opacity: 0.35; }
 .bar .note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -270,7 +267,7 @@ button, input, textarea { font: inherit; color: inherit; margin: 0; }
 `.trim();
 
 /**
- * The static chrome. Nothing is interpolated into this — it is assigned before any comment, name or
+ * The static chrome. Nothing is interpolated into this, it is assigned before any comment, name or
  * API response exists, and every one of those is written with `textContent` afterwards.
  */
 const WIDGET_MARKUP = `
@@ -297,7 +294,7 @@ const WIDGET_MARKUP = `
     </div>
   </aside>
   <div class="bar" role="region" aria-label="Review mode">
-    <span class="mark">O</span>
+    <svg class="mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><rect x="0" y="0" width="256" height="256" rx="20" ry="20" fill="#f7f7f7"></rect><g transform="translate(0,256) scale(0.0476,-0.0476)" fill="#1c1c1c"><path d="M725 4825 c-50 -18 -100 -71 -114 -122 -15 -54 -15 -1573 0 -1628 16 -55 44 -92 89 -115 38 -19 62 -20 855 -20 781 0 817 1 853 19 46 23 67 46 87 94 13 32 15 138 15 830 0 566 -3 804 -11 828 -16 45 -55 87 -104 110 -38 18 -82 19 -835 18 -659 0 -802 -2 -835 -14z m1351 -371 c15 -11 37 -33 48 -48 21 -27 21 -38 21 -520 0 -547 3 -523 -68 -566 -31 -19 -54 -20 -521 -20 -483 0 -489 0 -524 22 -20 12 -42 38 -53 62 -17 38 -19 74 -19 504 0 496 1 503 51 548 46 41 66 43 561 41 464 -2 477 -3 504 -23z"></path><path d="M3058 4830 c-44 -13 -87 -49 -108 -90 -19 -37 -20 -61 -20 -471 0 -428 0 -432 22 -471 13 -22 41 -51 64 -64 41 -24 41 -24 685 -24 645 0 645 0 689 -22 63 -33 80 -71 80 -183 0 -101 -15 -144 -63 -179 -28 -21 -41 -21 -695 -26 -666 -5 -667 -5 -702 -27 -109 -68 -106 -247 5 -310 40 -23 40 -23 858 -23 664 0 824 3 850 14 43 17 95 78 102 118 3 18 5 225 3 459 -3 426 -3 426 -31 462 -58 76 -15 71 -757 77 -620 5 -667 6 -692 23 -44 30 -58 74 -58 179 0 116 16 153 80 186 44 22 44 22 693 22 710 0 678 -3 731 60 80 96 41 240 -79 287 -35 14 -1612 17 -1657 3z"></path><path d="M702 2509 c-48 -24 -75 -57 -91 -114 -9 -29 -11 -253 -9 -840 3 -779 4 -801 23 -834 11 -19 37 -48 58 -65 39 -31 39 -31 380 -31 342 0 342 0 399 28 31 15 63 39 73 53 16 25 16 25 62 -16 77 -67 104 -71 470 -68 320 3 320 3 360 30 24 16 49 44 62 70 21 44 21 49 21 854 0 773 -1 811 -19 851 -35 76 -135 120 -215 93 -41 -13 -90 -51 -109 -84 -9 -16 -13 -187 -17 -688 -5 -654 -5 -667 -26 -694 -43 -58 -68 -69 -169 -72 -82 -3 -99 -1 -133 18 -22 12 -49 39 -61 60 -21 37 -21 45 -21 664 0 439 -3 641 -11 673 -32 123 -190 174 -285 91 -73 -64 -69 -20 -70 -743 0 -721 3 -687 -66 -737 -28 -20 -47 -23 -133 -26 -91 -3 -103 -2 -134 20 -19 13 -44 36 -55 51 -21 28 -21 38 -26 695 -4 481 -8 673 -17 687 -50 87 -152 118 -241 74z"></path><path d="M3047 2515 c-47 -16 -81 -46 -101 -90 -14 -28 -16 -95 -16 -463 0 -281 4 -440 11 -459 15 -40 48 -73 94 -94 38 -17 79 -19 685 -19 626 0 646 -1 678 -20 58 -35 72 -72 72 -185 0 -110 -14 -147 -67 -182 -25 -17 -73 -18 -698 -23 -672 -5 -672 -5 -708 -33 -20 -15 -44 -42 -53 -60 -21 -39 -21 -125 -1 -163 20 -38 65 -80 100 -93 19 -8 289 -11 833 -11 701 0 809 2 841 15 48 20 71 41 94 88 19 35 19 60 17 480 -3 444 -3 444 -30 479 -54 71 -23 68 -740 68 -612 0 -645 1 -685 20 -67 30 -83 66 -83 183 0 116 14 156 68 189 35 21 35 21 691 22 606 1 658 2 688 19 137 74 130 264 -12 328 -38 18 -85 19 -840 18 -652 0 -807 -2 -838 -14z"></path></g></svg>
     <span class="name"></span>
     <span class="sep">&middot;</span>
     <span class="note">Review copy, not live</span>
@@ -358,6 +355,8 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
     drawerOpen: false,
     filter: 'all',
     comments: [],
+    total: 0,
+    truncated: false,
     threads: [],
     participants: {},
     viewer: null,
@@ -388,7 +387,16 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
     var init = options || {};
     init.credentials = 'same-origin';
     if (init.body) init.headers = { 'Content-Type': 'application/json' };
-    return fetch(API + path, init).then(function (response) {
+    /*
+     * Absolute, not the bare path. A page whose deployment has edge functions enabled also carries
+     * the interceptor from lib/publishing/html-processor.ts, which replaces window.fetch and claims
+     * any relative URL it does not exclude: the review API path would be reissued against the
+     * edge-function endpoint and 404, leaving every reviewer told comments are unavailable. The
+     * origin is only knowable here, at runtime, this script is baked into static HTML long before
+     * anyone knows what host serves it. Same origin either way, so credentials 'same-origin' still
+     * carries the participant cookie.
+     */
+    return fetch(window.location.origin + API + path, init).then(function (response) {
       return response
         .json()
         .catch(function () { return {}; })
@@ -405,6 +413,13 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
     state.comments = (data && data.comments) || [];
     state.threads = oswBuildThreads(state.comments);
     state.viewer = (data && data.viewer) || state.viewer;
+    /*
+     * The server caps how many comments one response carries. The count in the bar is the server's
+     * total rather than the array length, so a capped round still says how many there are, and the
+     * drawer says outright that it is showing a slice.
+     */
+    state.total = data && typeof data.total === 'number' ? data.total : state.comments.length;
+    state.truncated = !!(data && data.truncated);
 
     var list = (data && data.participants) || [];
     for (var i = 0; i < list.length; i++) state.participants[list[i].id] = list[i];
@@ -412,6 +427,7 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
 
   function addComment(comment) {
     state.comments.push(comment);
+    state.total = state.total + 1;
     state.threads = oswBuildThreads(state.comments);
   }
 
@@ -445,7 +461,7 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
    * Align the overlay layer with the viewport.
    *
    * A fixed-position host resolves against the body instead of the viewport when the page
-   * puts a transform, filter or containment on <html> or <body> — a real thing to find on a
+   * puts a transform, filter or containment on <html> or <body>, a real thing to find on a
    * customer's site and, untreated, one that leaves the bar scrolling away mid-page. Rather than
    * enumerate the properties that cause it, the layer measures where it actually landed and
    * translates itself back, which handles any cause that only displaces it.
@@ -673,6 +689,17 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
   function renderDrawer() {
     while (clist.firstChild) clist.removeChild(clist.firstChild);
 
+    if (state.truncated) {
+      clist.appendChild(
+        el(
+          'div',
+          'empty',
+          'Showing the ' + state.comments.length + ' most recent of ' + state.total +
+            ' comments on this review copy.'
+        )
+      );
+    }
+
     var visibleThreads = oswFilterThreads(state.threads, state.filter, pagePath());
     if (!visibleThreads.length) {
       clist.appendChild(el('div', 'empty', state.ready ? 'No comments yet.' : 'Loading' + '\\u2026'));
@@ -697,7 +724,7 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
   }
 
   function renderBar() {
-    var total = state.comments.length;
+    var total = state.total;
     countBtn.textContent = total === 1 ? '1 comment' : total + ' comments';
     toggle.setAttribute('aria-pressed', state.commenting ? 'true' : 'false');
     toggle.textContent = state.commenting ? 'Commenting on' : 'Commenting off';
@@ -857,7 +884,7 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
 
   /*
    * A click or hover anywhere in the widget arrives at document level retargeted to the host,
-   * because the shadow root is closed. That is the test for "is this ours" — and it must not be
+   * because the shadow root is closed. That is the test for "is this ours", and it must not be
    * swallowed, or the shadow tree's own handlers would never run.
    */
   function ownEvent(event) {
@@ -1008,15 +1035,45 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
     });
   }
 
-  pins.addEventListener('click', function (event) {
-    var id = event.target && event.target.dataset ? event.target.dataset.thread : null;
-    if (!id) return;
+  /* Opening a thread in the drawer and bringing it into view: shared by a pin click and a link. */
+  function focusThread(id) {
     state.focusThread = id;
     state.drawerOpen = true;
     drawer.hidden = false;
     render();
     var focused = clist.querySelector('.focus');
     if (focused && focused.scrollIntoView) focused.scrollIntoView({ block: 'nearest' });
+  }
+
+  /*
+   * Open the thread a ?osw-comment= link names.
+   *
+   * The studio links straight to a comment, and a page can carry several. Without this the link
+   * lands at the top of the page and leaves the reader to work out which pin was meant.
+   *
+   * The page is scrolled to the anchored element as well as the drawer to the thread, because a
+   * link arrives at the top of the document while the comment may be far down it. An anchor that no
+   * longer resolves is not an error: the thread still opens, carrying the text it was left against.
+   */
+  function focusLinkedThread() {
+    var id = oswDeepLinkedComment(window.location.search);
+    if (!id) return;
+
+    var thread = oswThreadForComment(state.threads, id);
+    if (!thread) return;
+
+    focusThread(thread.id);
+
+    var anchor = oswResolveAnchor(thread.comment.selector, host);
+    if (anchor.anchored && anchor.element.scrollIntoView) {
+      anchor.element.scrollIntoView({ block: 'center' });
+    }
+  }
+
+  pins.addEventListener('click', function (event) {
+    var id = event.target && event.target.dataset ? event.target.dataset.thread : null;
+    if (!id) return;
+    focusThread(id);
   });
 
   document.addEventListener('mousemove', onPointerMove, true);
@@ -1048,6 +1105,7 @@ ${REVIEW_RUNTIME_JS.split('\n').map(line => (line ? '  ' + line : line)).join('\
       ingest(data);
       state.ready = true;
       render();
+      focusLinkedThread();
     })
     .catch(function () {
       root.querySelector('.note').textContent = 'Review copy, not live \\u2014 comments unavailable';

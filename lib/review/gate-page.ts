@@ -2,19 +2,12 @@
  * The password page for a review copy.
  *
  * Deliberately a hand-written string rather than a React page. This is served to a client with no
- * account, on whatever network their office runs, and it is the only door to the review copy — so
+ * account, on whatever network their office runs, and it is the only door to the review copy, so
  * it carries no stylesheet, no font, no script and no image. Anything it referenced off-page would
  * be one more thing that can fail between the client and the site they were asked to look at.
  */
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+import { escapeHtml } from '@/lib/publishing/escape-html';
 
 const STYLE = `
   :root { color-scheme: light dark; }
@@ -55,7 +48,7 @@ const STYLE = `
 
 export interface ReviewPasswordPageOptions {
   deploymentId: string;
-  /** The deployment's name, chosen by a workspace member — escaped, never trusted as markup. */
+  /** The deployment's name, chosen by a workspace member, escaped, never trusted as markup. */
   name?: string;
   error?: string;
 }

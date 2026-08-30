@@ -3,7 +3,7 @@
  *
  * The widget runs inside a published customer page, so it cannot import anything: it is a string of
  * script injected into HTML at build time. That rules out writing this logic as ordinary TypeScript
- * and calling it, and it rules out `Function.prototype.toString` on compiled TypeScript too — the
+ * and calling it, and it rules out `Function.prototype.toString` on compiled TypeScript too, the
  * server bundle is minified, and a function that closes over a module-scope constant would emit a
  * reference to a name that does not exist in the customer's page. The failure would be silent and
  * would only appear in someone's review session.
@@ -28,6 +28,8 @@ export const REVIEW_RUNTIME_EXPORTS = [
   'oswPagePath',
   'oswBuildThreads',
   'oswFilterThreads',
+  'oswDeepLinkedComment',
+  'oswThreadForComment',
 ] as const;
 
 /**
@@ -43,14 +45,14 @@ function oswIsSafeIdent(value) {
 }
 
 /*
- * The element's position among its siblings, counting from 1 — every sibling, host included.
+ * The element's position among its siblings, counting from 1, every sibling, host included.
  *
  * This is the index CSS itself computes, which is the only index a stored selector can be resolved
  * against later. Skipping the host would look harmless because the host is appended last and every
  * element before it counts the same either way, but the host's position is only asserted once, at
  * init: modal portals, toast containers and lazily loaded third-party widgets all land after it and
  * stay there. Skipping it shifts every one of their siblings by one, and a selector short by one
- * silently matches a neighbour — a pin on an element the comment is not about.
+ * silently matches a neighbour, a pin on an element the comment is not about.
  *
  * Counting the host also leaves the selector portable, since it matches what a document without the
  * widget computes: the studio's own comment inbox loads the published page, which carries no widget.
@@ -74,7 +76,7 @@ function oswChildIndex(node) {
  *
  * A unique id terminates the walk: it identifies the element on its own, and a path built above it
  * would only add ways for the selector to break when the page is rebuilt. Everything else is
- * tag plus position, deliberately not classes — utility class names churn on every restyle, which
+ * tag plus position, deliberately not classes, utility class names churn on every restyle, which
  * is precisely the kind of edit a review round asks for.
  *
  * Returns null for the widget's own chrome and for anything not attached to the document, so a
@@ -172,7 +174,7 @@ function oswDescribeElement(el) {
  * The path a comment is filed under.
  *
  * Stripped of the review mount point so that a comment made on the review copy names the same page
- * as the published one — the team reads these next to the live site, not next to the review build.
+ * as the published one: the team reads these next to the live site, not the review build.
  */
 function oswPagePath(pathname, deploymentId) {
   var path = pathname || '/';
@@ -187,7 +189,7 @@ function oswPagePath(pathname, deploymentId) {
  *
  * Replies are flattened onto their root rather than nested arbitrarily deep: a reply to a reply
  * shares the root's anchor and pin, so presenting it as a third level would imply an anchor it does
- * not have. A reply whose parent is missing becomes its own thread instead of disappearing — the
+ * not have. A reply whose parent is missing becomes its own thread instead of disappearing, the
  * server will not create one, but dropping comments on the floor is not the way to find out it did.
  */
 function oswBuildThreads(comments) {
@@ -253,4 +255,42 @@ function oswFilterThreads(threads, filter, pagePath) {
 
   return kept;
 }
+
+/*
+ * The comment a ?osw-comment= link points at, or null.
+ *
+ * Read with a regex rather than URLSearchParams so the whole runtime keeps to the one dialect it is
+ * tested in, and so a malformed query cannot throw on the way into the widget's boot.
+ */
+function oswDeepLinkedComment(search) {
+  if (!search) return null;
+  var match = /[?&]osw-comment=([^&]*)/.exec(search);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]) || null;
+  } catch (err) {
+    /* An id that is not valid percent-encoding is not one this widget minted. */
+    return null;
+  }
+}
+
+/*
+ * The thread holding a comment id, whether that id is the thread's root or one of its replies.
+ *
+ * A link to a reply has to open the thread it belongs to: a reply is not addressable on its own,
+ * and the studio has a reply's id as readily as a root's.
+ */
+function oswThreadForComment(threads, commentId) {
+  if (!commentId) return null;
+  var list = threads || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].id === commentId) return list[i];
+    var replies = list[i].replies || [];
+    for (var j = 0; j < replies.length; j++) {
+      if (replies[j].id === commentId) return list[i];
+    }
+  }
+  return null;
+}
+
 `.trim();

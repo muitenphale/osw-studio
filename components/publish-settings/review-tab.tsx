@@ -66,6 +66,8 @@ export interface ReviewDraft {
 
 interface ReviewTabProps {
   deploymentId: string;
+  /** Absent in browser mode, where there is no server to send mail from. */
+  workspaceId?: string;
   review: ReviewDraft;
   onChange: (review: ReviewDraft) => void;
   /**
@@ -79,17 +81,20 @@ interface ReviewTabProps {
   hasPendingChanges: boolean;
   isPublishing: boolean;
   onPublish: () => void;
-  onOpenInEditor: (pagePath: string) => void;
 }
 
 interface CommentsResponse {
   comments: WireComment[];
   participants: WireParticipant[];
   viewer: { participant_id: string; is_team: boolean };
+  /** How many comments exist, which is more than `comments` holds once the server caps the list. */
+  total: number;
+  truncated: boolean;
 }
 
 export function ReviewTab({
   deploymentId,
+  workspaceId,
   review,
   onChange,
   storedEnabled,
@@ -98,7 +103,6 @@ export function ReviewTab({
   hasPendingChanges,
   isPublishing,
   onPublish,
-  onOpenInEditor,
 }: ReviewTabProps) {
   const update = (patch: Partial<ReviewDraft>) => onChange({ ...review, ...patch });
 
@@ -119,6 +123,40 @@ export function ReviewTab({
       toast.error('Could not copy the address');
     }
   };
+
+  // ── Email notifications ──────────────────────────────────────────────────
+  // The switch is only meaningful when a transport resolves, so the tab asks rather than assumes.
+  // `null` is "not answered yet" and keeps the control disabled, so a slow answer never shows a
+  // switch that appears usable and silently does nothing.
+  const [mailSending, setMailSending] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setMailSending(false);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/w/${workspaceId}/mail/sending`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          setMailSending(false);
+          return;
+        }
+        const body = (await res.json()) as { sending?: boolean };
+        setMailSending(body.sending === true);
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
+        setMailSending(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [workspaceId]);
 
   // ── Password ─────────────────────────────────────────────────────────────
   const [passwordEditing, setPasswordEditing] = useState(false);
@@ -169,15 +207,23 @@ export function ReviewTab({
   // The review copy is written by a publish, so switching the toggle on does not make the address
   // answer. `settingsVersion` bumps on that toggle (reviewChangeNeedsRepublish), which is what puts
   // the deployment into pending-changes here.
-  const notBuilt = review.enabled && (isDirty || !hasBeenPublished || hasPendingChanges);
+  // Two different situations were being reported with one sentence. A deployment that has never
+  // produced a copy is not the same as one whose copy exists but predates the latest changes, and
+  // the second is the ordinary state after any settings edit — settingsVersion bumps for SEO or
+  // scripts just as it does for the review toggle. Calling that "not built yet" claimed the address
+  // returns nothing while it was serving, and disabled Open on a link that works.
+  const nothingToOpen = review.enabled && (isDirty || !hasBeenPublished);
+  const outOfDate = review.enabled && !nothingToOpen && hasPendingChanges;
+  const notBuilt = nothingToOpen;
+
   const buildNotice = !review.enabled
     ? null
     : isDirty
       ? 'Review mode is not saved yet. Save changes, then publish to build the review copy.'
       : !hasBeenPublished
         ? 'This deployment has never been published, so there is no review copy yet. The address returns nothing until you publish.'
-        : hasPendingChanges
-          ? 'The review copy has not been built yet. The address returns nothing until you publish.'
+        : outOfDate
+          ? 'Changes since your last publish are not in the review copy. Publish to update it.'
           : null;
 
   const statusBadge = !review.enabled ? (
@@ -185,6 +231,10 @@ export function ReviewTab({
   ) : notBuilt ? (
     <Badge variant="outline" className="border-amber-500 text-amber-500">
       Publish to apply
+    </Badge>
+  ) : outOfDate ? (
+    <Badge variant="outline" className="border-amber-500 text-amber-500">
+      Publish to update
     </Badge>
   ) : expired ? (
     <Badge variant="secondary">Closed</Badge>
@@ -341,11 +391,20 @@ export function ReviewTab({
               <SettingRow
                 className="flex-wrap"
                 title="Email notifications"
-                description="This instance cannot send email yet, so nothing is delivered and no digest is queued. Comments are kept and read here."
+                description={
+                  mailSending
+                    ? 'Sends a digest of new comments to everyone taking part, at most once an hour. Turning it off drops anything still queued.'
+                    : 'No mail server is set up, so nothing is delivered and no digest is queued. Comments are kept and read here.'
+                }
               >
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary">Not available</Badge>
-                  <Switch id="review-notify" checked={false} disabled />
+                  {!mailSending && <Badge variant="secondary">Not available</Badge>}
+                  <Switch
+                    id="review-notify"
+                    checked={review.notifyByEmail === true && mailSending === true}
+                    disabled={!mailSending}
+                    onCheckedChange={(checked) => update({ notifyByEmail: checked })}
+                  />
                 </div>
               </SettingRow>
 
@@ -397,25 +456,46 @@ export function ReviewTab({
         </div>
       )}
 
-      <ReviewComments
-        deploymentId={deploymentId}
-        storedEnabled={storedEnabled}
-        onOpenInEditor={onOpenInEditor}
-      />
+      <ReviewComments deploymentId={deploymentId} storedEnabled={storedEnabled} />
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Open the review copy at the page a comment was left on.
+ *
+ * The comment's anchor — a CSS selector plus the text it matched — was computed by the widget
+ * against the published DOM, so the review copy is the one place it resolves by construction. The
+ * workspace preview renders current source instead, which is why sending someone there dropped the
+ * anchor and left them on a page with no indication of which element was meant.
+ *
+ * A workspace member is admitted as `team` without the password gate (lib/review/access.ts), so
+ * this lands them on the page with the pins, the replies and the resolve control already there.
+ */
+function openReviewPage(deploymentId: string, pagePath: string, commentId: string): void {
+  // A bare '/' is dropped rather than appended: `/review/{id}/` is answered with a 308 to the
+  // unslashed form, and while that redirect does carry the query through, the link should not
+  // depend on it.
+  // Defensive: validation refuses a stored path carrying a query or fragment, but rows written
+  // before that rule exist, and either would swallow the `osw-comment` parameter appended below.
+  const bare = pagePath.split('?')[0].split('#')[0];
+  const normalized = bare.startsWith('/') ? bare : `/${bare}`;
+  const path = normalized === '/' ? '' : normalized;
+  // `osw-comment` is read by the widget on boot: it opens that thread in the drawer and scrolls the
+  // page to the element it was left against. Without it a page carrying several comments lands the
+  // reader at the top with no indication of which pin was meant.
+  const url = `/review/${encodeURIComponent(deploymentId)}${path}?osw-comment=${encodeURIComponent(commentId)}`;
+  window.open(url, '_blank', 'noopener');
+}
+
 function ReviewComments({
   deploymentId,
   storedEnabled,
-  onOpenInEditor,
 }: {
   deploymentId: string;
   storedEnabled: boolean;
-  onOpenInEditor: (pagePath: string) => void;
 }) {
   const [data, setData] = useState<CommentsResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -432,7 +512,15 @@ function ReviewComments({
       const response = await fetch(`${reviewApiBase(deploymentId)}/comments`, {
         credentials: 'same-origin',
       });
-      if (!response.ok) throw new Error('Could not load comments');
+      // 404 is the review layer's answer for "this deployment has no review copy open right now" —
+      // review switched off in the stored record, or the round expired. It is a state, not a
+      // failure, and reporting it as one sent people looking for a broken server.
+      if (response.status === 404) {
+        setData(null);
+        setError('The review copy is not open yet. Publish with review mode on, then reload.');
+        return;
+      }
+      if (!response.ok) throw new Error(`Could not load comments (${response.status})`);
       setData((await response.json()) as CommentsResponse);
     } catch (err) {
       logger.error('[ReviewTab] Failed to load comments:', err);
@@ -548,112 +636,125 @@ function ReviewComments({
               Try again
             </Button>
           </div>
-        ) : visible.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            {counts.all === 0
-              ? 'No comments yet. Send the address to whoever is reviewing.'
-              : filter === 'open'
-                ? 'Nothing open.'
-                : 'Nothing resolved yet.'}
-          </p>
         ) : (
-          visible.map((thread, index) => (
-            // Wraps rather than squeezing: the actions are a fixed width, so on a narrow column an
-            // unwrapped row would shrink the comment body to one word per line.
-            <div
-              key={thread.root.id}
-              className="flex flex-wrap items-start gap-x-3 gap-y-2 border-t border-border py-3 first:border-t-0"
-            >
-              <span
-                className={cn(
-                  'mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold tabular-nums',
-                  thread.root.status === 'resolved'
-                    ? 'bg-green-500/15 text-green-600 dark:text-green-500'
-                    : 'bg-primary/15 text-primary'
-                )}
-              >
-                {index + 1}
-              </span>
+          <>
+            {data?.truncated && (
+              // Said outright rather than left to the counts: the filter chips above read as the
+              // whole round, and acting on a partial one is the failure a silent cap produces.
+              <p className="border-b border-border py-2 text-xs text-muted-foreground">
+                Showing the {data.comments.length} most recent of {data.total} comments.
+              </p>
+            )}
+            {visible.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                {counts.all === 0
+                  ? 'No comments yet. Send the address to whoever is reviewing.'
+                  : filter === 'open'
+                    ? 'Nothing open.'
+                    : 'Nothing resolved yet.'}
+              </p>
+            ) : (
+              visible.map((thread, index) => (
+                // Wraps rather than squeezing: the actions are a fixed width, so on a narrow column an
+                // unwrapped row would shrink the comment body to one word per line.
+                <div
+                  key={thread.root.id}
+                  className="flex flex-wrap items-start gap-x-3 gap-y-2 border-t border-border py-3 first:border-t-0"
+                >
+                  <span
+                    className={cn(
+                      'mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold tabular-nums',
+                      thread.root.status === 'resolved'
+                        ? 'bg-green-500/15 text-green-600 dark:text-green-500'
+                        : 'bg-primary/15 text-primary'
+                    )}
+                  >
+                    {index + 1}
+                  </span>
 
-              <div className="min-w-[10rem] flex-1">
-                <div className="text-[13px]">{thread.root.body}</div>
-                <CommentMeta comment={thread.root} />
+                  <div className="min-w-[10rem] flex-1">
+                    <div className="text-[13px]">{thread.root.body}</div>
+                    <CommentMeta comment={thread.root} />
 
-                {thread.replies.map((reply) => (
-                  <div key={reply.id} className="mt-2 border-l-2 border-border pl-3">
-                    <div className="flex items-start gap-1.5 text-xs">
-                      <CornerDownRight className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
-                      <span>{reply.body}</span>
-                    </div>
-                    <CommentMeta comment={reply} anchored={false} />
+                    {thread.replies.map((reply) => (
+                      <div key={reply.id} className="mt-2 border-l-2 border-border pl-3">
+                        <div className="flex items-start gap-1.5 text-xs">
+                          <CornerDownRight className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                          <span>{reply.body}</span>
+                        </div>
+                        <CommentMeta comment={reply} anchored={false} />
+                      </div>
+                    ))}
+
+                    {replyingTo === thread.root.id && (
+                      <div className="mt-2 flex flex-col gap-2">
+                        <Textarea
+                          autoFocus
+                          rows={2}
+                          value={replyBody}
+                          onChange={(e) => setReplyBody(e.target.value)}
+                          placeholder="Reply…"
+                          className="text-[13px]"
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="accent"
+                            size="sm"
+                            disabled={!replyBody.trim() || busyId === thread.root.id}
+                            onClick={() => postReply(thread.root)}
+                          >
+                            {busyId === thread.root.id ? 'Posting…' : 'Post reply'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setReplyingTo(null);
+                              setReplyBody('');
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ))}
 
-                {replyingTo === thread.root.id && (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <Textarea
-                      autoFocus
-                      rows={2}
-                      value={replyBody}
-                      onChange={(e) => setReplyBody(e.target.value)}
-                      placeholder="Reply…"
-                      className="text-[13px]"
-                    />
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        variant="accent"
-                        size="sm"
-                        disabled={!replyBody.trim() || busyId === thread.root.id}
-                        onClick={() => postReply(thread.root)}
-                      >
-                        {busyId === thread.root.id ? 'Posting…' : 'Post reply'}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setReplyingTo(null);
-                          setReplyBody('');
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
+                  <div className="ml-auto flex shrink-0 flex-wrap items-start justify-end gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setReplyingTo(thread.root.id);
+                        setReplyBody('');
+                      }}
+                    >
+                      Reply
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        openReviewPage(deploymentId, thread.root.page_path, thread.root.id)
+                      }
+                    >
+                      Show
+                    </Button>
+                    <Button
+                      variant={thread.root.status === 'resolved' ? 'ghost' : 'accent'}
+                      size="sm"
+                      disabled={busyId === thread.root.id}
+                      onClick={() =>
+                        setStatus(thread.root.id, thread.root.status === 'resolved' ? 'open' : 'resolved')
+                      }
+                    >
+                      {thread.root.status === 'resolved' ? 'Reopen' : 'Resolve'}
+                    </Button>
                   </div>
-                )}
-              </div>
-
-              <div className="ml-auto flex shrink-0 flex-wrap items-start justify-end gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setReplyingTo(thread.root.id);
-                    setReplyBody('');
-                  }}
-                >
-                  Reply
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onOpenInEditor(thread.root.page_path)}
-                >
-                  Open in editor
-                </Button>
-                <Button
-                  variant={thread.root.status === 'resolved' ? 'ghost' : 'accent'}
-                  size="sm"
-                  disabled={busyId === thread.root.id}
-                  onClick={() =>
-                    setStatus(thread.root.id, thread.root.status === 'resolved' ? 'open' : 'resolved')
-                  }
-                >
-                  {thread.root.status === 'resolved' ? 'Reopen' : 'Resolve'}
-                </Button>
-              </div>
-            </div>
-          ))
+                </div>
+              ))
+            )}
+          </>
         )}
       </SectionBody>
     </Section>

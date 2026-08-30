@@ -37,6 +37,8 @@ interface Runtime {
   oswPagePath(pathname: string, deploymentId: string): string;
   oswBuildThreads(comments: Wireish[]): Thread[];
   oswFilterThreads(threads: Thread[], filter: string, pagePath?: string): Thread[];
+  oswDeepLinkedComment(search: string | null | undefined): string | null;
+  oswThreadForComment(threads: Thread[] | null, commentId: string | null): Thread | null;
 }
 
 function loadRuntime(): Runtime {
@@ -324,5 +326,64 @@ describe('safe identifiers', () => {
     expect(runtime.oswIsSafeIdent('has space')).toBe(false);
     expect(runtime.oswIsSafeIdent('has.dot')).toBe(false);
     expect(runtime.oswIsSafeIdent('')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deep links from the studio to one comment
+// ---------------------------------------------------------------------------
+
+describe('oswDeepLinkedComment', () => {
+  it('reads the id out of a query string, wherever the parameter sits', () => {
+    expect(runtime.oswDeepLinkedComment('?osw-comment=abc')).toBe('abc');
+    expect(runtime.oswDeepLinkedComment('?page=2&osw-comment=abc')).toBe('abc');
+    expect(runtime.oswDeepLinkedComment('?osw-comment=abc&page=2')).toBe('abc');
+  });
+
+  it('decodes the value, because the studio encodes it', () => {
+    expect(runtime.oswDeepLinkedComment('?osw-comment=a%2Fb')).toBe('a/b');
+  });
+
+  it('is null when there is nothing to focus', () => {
+    expect(runtime.oswDeepLinkedComment('')).toBeNull();
+    expect(runtime.oswDeepLinkedComment(null)).toBeNull();
+    expect(runtime.oswDeepLinkedComment('?other=1')).toBeNull();
+    expect(runtime.oswDeepLinkedComment('?osw-comment=')).toBeNull();
+  });
+
+  it('does not match a parameter that merely ends in the name', () => {
+    // `?not-osw-comment=x` is a different parameter, and treating it as this one would open a
+    // thread nobody linked to.
+    expect(runtime.oswDeepLinkedComment('?not-osw-comment=x')).toBeNull();
+  });
+
+  it('returns null rather than throwing on a malformed escape', () => {
+    // The query string is whatever is in the address bar. A throw here would happen during the
+    // widget's boot, after the comments have loaded, and would leave the page without its pins.
+    expect(runtime.oswDeepLinkedComment('?osw-comment=%')).toBeNull();
+  });
+});
+
+describe('oswThreadForComment', () => {
+  const threads = (): Thread[] =>
+    runtime.oswBuildThreads([
+      { id: 'root-1', parent_id: null, status: 'open', page_path: '/' },
+      { id: 'reply-1', parent_id: 'root-1', status: 'open', page_path: '/' },
+      { id: 'root-2', parent_id: null, status: 'open', page_path: '/' },
+    ]);
+
+  it('finds a thread by its root id', () => {
+    expect(runtime.oswThreadForComment(threads(), 'root-2')?.id).toBe('root-2');
+  });
+
+  it('finds the thread a reply belongs to', () => {
+    // The studio lists a reply's id as readily as a root's, and a reply is not addressable alone.
+    expect(runtime.oswThreadForComment(threads(), 'reply-1')?.id).toBe('root-1');
+  });
+
+  it('is null for an id that is not here, so a stale link opens nothing', () => {
+    expect(runtime.oswThreadForComment(threads(), 'gone')).toBeNull();
+    expect(runtime.oswThreadForComment(threads(), null)).toBeNull();
+    expect(runtime.oswThreadForComment(null, 'root-1')).toBeNull();
   });
 });

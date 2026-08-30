@@ -21,7 +21,7 @@ export type PublicDeployment<T> = Omit<T, 'review'> & {
 };
 
 /**
- * Returns a copy — deployment records come straight from the storage adapter and are read back
+ * Returns a copy, deployment records come straight from the storage adapter and are read back
  * and written by other callers, so mutating one here would strip the hash from the live object.
  */
 export function toPublicDeployment<T extends { review?: ReviewConfig }>(

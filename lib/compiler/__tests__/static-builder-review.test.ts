@@ -5,6 +5,8 @@ import path from 'path';
 import { SQLiteAdapter } from '@/lib/vfs/adapters/sqlite-adapter';
 import { blobDir } from '@/lib/vfs/adapters/blob-store';
 import { REVIEW_WIDGET_MARKER } from '@/lib/publishing/review-widget';
+import { reviewApiBase } from '@/lib/review/api-base';
+import { interceptPage } from '@/lib/publishing/__tests__/interceptor-harness';
 import type { VirtualFile } from '@/lib/vfs/types';
 
 /**
@@ -131,6 +133,39 @@ describe('review build', () => {
 
     expect(read(reviewDir(), 'index.html')).toContain(REVIEW_WIDGET_MARKER);
     expect(read(publicDir(), 'index.html')).not.toContain(REVIEW_WIDGET_MARKER);
+  });
+
+  it('carries a widget whose calls survive the edge-function interceptor', async () => {
+    // Both scripts are injected into the same review page, and the interceptor replaces
+    // window.fetch for everything after it. A widget call it claims never reaches the comment
+    // route, so the reviewer is told comments are unavailable on exactly the deployments that
+    // use edge functions.
+    const { buildStaticDeployment } = await import('../static-builder');
+    await adapter.createEdgeFunction!({
+      id: 'ef-1', projectId: 'p1', name: 'products', code: 'return Response.json({})',
+      method: 'ANY', enabled: true, timeoutMs: 5000,
+      createdAt: new Date(), updatedAt: new Date(),
+    });
+    await createDeployment({ review: { enabled: true } });
+    await buildStaticDeployment('d1', 'w1');
+
+    const review = read(reviewDir(), 'index.html');
+    expect(review).toContain(REVIEW_WIDGET_MARKER);
+
+    const origin = 'https://studio.example.com';
+    const page = interceptPage(review, origin);
+    // Control: the interceptor is present and doing its job, so the assertions below cannot pass
+    // by way of it having been disabled.
+    expect(page.route('/products')).toBe('/api/deployments/d1/functions/products');
+
+    const base = `${origin}${reviewApiBase('d1')}`;
+    expect(page.widgetRequest('/comments', {})).toBe(`${base}/comments`);
+    expect(page.widgetRequest('/comments/c-1', { method: 'PATCH', body: '{}' })).toBe(
+      `${base}/comments/c-1`
+    );
+    expect(page.widgetRequest('/participant', { method: 'PATCH', body: '{}' })).toBe(
+      `${base}/participant`
+    );
   });
 
   it('injects the head content once', async () => {

@@ -143,3 +143,32 @@ describe('readReviewPasswordUpdate', () => {
     expect(() => readReviewPasswordUpdate({ password: 12345678 })).toThrow(InvalidReviewConfigError);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The email notification flag is a client-owned field and has to survive the merge
+// ---------------------------------------------------------------------------
+
+describe('notifyByEmail', () => {
+  /**
+   * The scheduler composes nothing for a deployment whose `notifyByEmail` is not true
+   * (lib/scheduler/review-notifications.ts), so the whole notification path depends on this field
+   * arriving from the Review tab and being kept here. It is not server-owned — unlike the password
+   * hash — so it must not be stripped with the fields that are.
+   */
+  it('follows the client in both directions', () => {
+    expect(
+      mergeReviewConfig({ enabled: true }, { enabled: true, notifyByEmail: true }).notifyByEmail
+    ).toBe(true);
+    expect(
+      mergeReviewConfig(
+        { enabled: true, notifyByEmail: true },
+        { enabled: true, notifyByEmail: false }
+      ).notifyByEmail
+    ).toBe(false);
+  });
+
+  it('is left alone by a body that does not mention it', () => {
+    const merged = mergeReviewConfig({ enabled: true, notifyByEmail: true }, { enabled: true });
+    expect(merged.notifyByEmail).toBe(true);
+  });
+});

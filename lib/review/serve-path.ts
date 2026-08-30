@@ -7,7 +7,7 @@
  * caller who needed no account. So the join has to be contained.
  *
  * Containment cannot be delegated upstream. Next percent-decodes each dynamic segment after it has
- * normalized the request path, so `%2e%2e%2f` arrives as one segment whose text is `../` — the
+ * normalized the request path, so `%2e%2e%2f` arrives as one segment whose text is `../`, the
  * router never saw a `..` segment to strip, and the traversal reaches this code intact.
  */
 

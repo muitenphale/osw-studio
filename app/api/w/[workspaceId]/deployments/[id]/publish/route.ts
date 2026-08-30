@@ -41,6 +41,21 @@ export async function POST(
     // after the build (as it was) meant the first publish always emitted prefixed
     // paths that then 404'd once the subdomain (serving at root) was created.
     const previousRoute = getDeploymentRoute(id);
+
+    // Before the build, not after. registerDeploymentRoute below refuses a deployment another
+    // workspace owns, and by the time it runs the site has been compiled and written and the
+    // deployment record already carries a new publishedAt — so the caller was told the publish
+    // failed while the deployment was left marked as published.
+    if (previousRoute && previousRoute.workspace_id !== workspaceId) {
+      return NextResponse.json(
+        {
+          error:
+            'This deployment is registered to another workspace, so it cannot be published from this one. That usually means the same deployment exists in two workspace databases, which happens when more than one workspace was created on an instance carrying a legacy data/osws.sqlite.',
+        },
+        { status: 409 }
+      );
+    }
+
     const oldSlug = previousRoute?.slug || null;
     const preBuildDeployment = await adapter.getDeployment?.(id);
     const slug = oldSlug || preBuildDeployment?.slug || generateUniqueSlug(s => !!getDeploymentBySlug(s));
@@ -96,6 +111,11 @@ export async function POST(
     }
     if (error instanceof Error && (error.message === 'Workspace access denied' || error.message === 'Insufficient workspace permissions')) {
       return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+    // A refusal, not a fault: the guard above catches this before any work is done, so reaching it
+    // here means the row was written between that check and the registration.
+    if (error instanceof Error && error.message === 'Deployment is owned by another workspace') {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     logger.error('[Deployments API] Error publishing deployment:', error);
     return NextResponse.json(

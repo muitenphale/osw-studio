@@ -3,6 +3,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+// `server-only` is a bundler guard, not behaviour; these modules reach it through access.ts.
+vi.mock('server-only', () => ({}));
+
 import {
   MAX_COMMENT_BODY,
   MAX_PAGE_PATH,
@@ -43,12 +46,55 @@ describe('validateCommentInput', () => {
     expect(validateCommentInput({ ...base, page_path: '/a'.repeat(4) }).ok).toBe(true);
   });
 
+  it('accepts the page paths the widget actually sends', () => {
+    for (const pagePath of ['/', '/index.html', '/articles/a-b_c.html', '/a%20b/page.html']) {
+      expect(validateCommentInput({ ...base, page_path: pagePath }).ok).toBe(true);
+    }
+  });
+
+  it('rejects a page path that is not a path', () => {
+    // Length was the only constraint, so any string reached storage, the digest, the inbox and the
+    // studio's "open in editor" navigation. Refused rather than rewritten: a value that does not
+    // look like a path is a client bug or an attack, and silently repairing it hides both.
+    for (const pagePath of [
+      'https://evil.com',
+      'javascript:alert(1)',
+      '//evil.com/index.html',
+      '../../etc/passwd',
+      '/articles/../../etc/passwd',
+      'no-leading-slash',
+      '/page.html\r\nX-Injected: 1',
+      // Neither belongs in a page path — window.location.pathname carries neither — and either
+      // would swallow the `osw-comment` parameter the studio appends when linking to one comment.
+      '/page.html?a=b',
+      '/page.html#frag',
+      '/page.html\r',
+      ' /index.html',
+      '\\windows\\path',
+      '/dir\\..\\..\\secret',
+    ]) {
+      const result = validateCommentInput({ ...base, page_path: pagePath });
+      expect(result.ok, `expected ${JSON.stringify(pagePath)} to be rejected`).toBe(false);
+    }
+  });
+
   it('caps the selector length', () => {
     const ok = validateCommentInput({ ...base, selector: 'a'.repeat(MAX_SELECTOR) });
     expect(ok.ok).toBe(true);
 
     const tooLong = validateCommentInput({ ...base, selector: 'a'.repeat(MAX_SELECTOR + 1) });
     expect(tooLong.ok).toBe(false);
+  });
+
+  it('rejects a selector carrying a control character', () => {
+    // The selector is handed to querySelector in the widget and stored for the life of the round;
+    // a newline in one is never something the overlay produced.
+    expect(validateCommentInput({ ...base, selector: 'body > p\u0000' }).ok).toBe(false);
+    expect(validateCommentInput({ ...base, selector: 'body\n> p' }).ok).toBe(false);
+    expect(validateCommentInput({ ...base, selector: '   ' }).ok).toBe(false);
+
+    // Control: the shape the overlay does produce still passes.
+    expect(validateCommentInput({ ...base, selector: 'body > div:nth-child(2) > #hero' }).ok).toBe(true);
   });
 
   it('never carries is_team or author_name out of the body', () => {
@@ -114,10 +160,29 @@ describe('resolveCommentAuthorship', () => {
     expect(asParticipant.isTeam).toBe(false);
 
     const asTeam = resolveCommentAuthorship(
-      { kind: 'team', participantId: 'user:u-9', userId: 'u-9' },
+      { kind: 'team', participantId: 'user:u-9', userId: 'u-9', canModerate: true },
       { ...stored, id: 'user:u-9', displayName: 'Otto', isTeam: false }
     );
     expect(asTeam).toEqual({ participantId: 'user:u-9', authorName: 'Otto', isTeam: true });
+  });
+
+  it('withholds the team badge from a workspace member who may only view', () => {
+    // A viewer is read-only everywhere else in the app. Commenting is still legitimate for them,
+    // but a comment badged as the team reads to the client as the agency answering, and a viewer
+    // has no authority to answer on the agency's behalf.
+    const viewer = resolveCommentAuthorship(
+      { kind: 'team', participantId: 'user:u-3', userId: 'u-3', canModerate: false },
+      { ...stored, id: 'user:u-3', displayName: 'Sam' }
+    );
+
+    expect(viewer).toEqual({ participantId: 'user:u-3', authorName: 'Sam', isTeam: false });
+
+    // Control: the same call from an editor is badged, so the refusal above is the role.
+    const editor = resolveCommentAuthorship(
+      { kind: 'team', participantId: 'user:u-3', userId: 'u-3', canModerate: true },
+      { ...stored, id: 'user:u-3', displayName: 'Sam' }
+    );
+    expect(editor.isTeam).toBe(true);
   });
 
   it('attributes to the verified participant id even when the stored row is a different one', () => {
@@ -136,7 +201,10 @@ describe('resolveCommentAuthorship', () => {
     expect(anonymous.authorName).toBeTruthy();
     expect(anonymous.isTeam).toBe(false);
 
-    const team = resolveCommentAuthorship({ kind: 'team', participantId: 'user:u-1', userId: 'u-1' }, null);
+    const team = resolveCommentAuthorship(
+      { kind: 'team', participantId: 'user:u-1', userId: 'u-1', canModerate: true },
+      null
+    );
     expect(team.authorName).toBeTruthy();
     expect(team.isTeam).toBe(true);
   });

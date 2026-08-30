@@ -1,5 +1,5 @@
 /**
- * The rate gate on review writes — comments, replies, and a participant renaming themselves.
+ * The rate gate on review writes, comments, replies, and a participant renaming themselves.
  *
  * Keyed on the caller *and* the deployment together, for the same reason the password gate is: a
  * flooder working through one agency's review copy must not be able to silence a different
@@ -7,7 +7,7 @@
  * everyone in it.
  *
  * Comments and profile edits share one budget deliberately. They are the same act from the
- * server's point of view — an anonymous caller writing a row into a tenant's database — and
+ * server's point of view, an anonymous caller writing a row into a tenant's database, and
  * splitting them would just hand a flooder two budgets to spend.
  */
 

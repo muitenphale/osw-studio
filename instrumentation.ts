@@ -7,9 +7,17 @@ export async function register() {
 
       const { Scheduler } = await import('@/lib/scheduler');
       const { createDeploymentSchedulerTask } = await import('@/lib/scheduler/deployment-scheduler');
+      const { createReviewNotificationTask } = await import('@/lib/scheduler/review-notifications');
+      const { createEmailDeliveryTask } = await import('@/lib/scheduler/email-delivery');
 
       const scheduler = new Scheduler({ pollIntervalMs: 30000 });
       scheduler.registerTask(createDeploymentSchedulerTask());
+      // Composition only: it fills the outbox and stops. Registering it on an instance with no mail
+      // transport is harmless — the queue accumulates and drains once one is configured.
+      scheduler.registerTask(createReviewNotificationTask());
+      // The other half. Also harmless unconfigured: with no transport it holds the queue untouched
+      // rather than spending attempts against a server that does not exist yet.
+      scheduler.registerTask(createEmailDeliveryTask());
       scheduler.start();
     } catch (err) {
       // Browser mode or SQLite not available — skip

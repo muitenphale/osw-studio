@@ -26,6 +26,12 @@ type DeploymentAccessResult =
  * Authenticate the caller, resolve the deployment, and verify workspace access.
  *
  * @param requiredRole 'viewer' to read, 'editor' to mutate or export.
+ * @param options.probe The caller is asking whether this level is available to them, having
+ *   already been authorised at a lower one — review mode asks at 'viewer' to admit someone and
+ *   again at 'editor' to decide whether they may act as the team. A refusal is then the answer to
+ *   a question rather than someone reaching for a deployment they have no claim to, so it is not
+ *   logged as one; left unset, a read-only member browsing a review copy would file a denial
+ *   warning for every asset on every page.
  *
  * A deployment with no routing row resolves from the default database with workspaceId null. That
  * is the legacy single-user layout, where any authenticated user is already the owner, so it is
@@ -33,7 +39,8 @@ type DeploymentAccessResult =
  */
 export async function requireDeploymentAccess(
   deploymentId: string,
-  requiredRole: 'owner' | 'editor' | 'viewer' = 'viewer'
+  requiredRole: 'owner' | 'editor' | 'viewer' = 'viewer',
+  options: { probe?: boolean } = {}
 ): Promise<DeploymentAccessResult> {
   const session = await getSession();
   if (!session) {
@@ -51,7 +58,9 @@ export async function requireDeploymentAccess(
     } catch (error) {
       // Deliberately 404, not 403: a caller with no claim to this deployment should not learn
       // that it exists.
-      logger.warn(`[DeploymentAccess] Denied ${session.userId} on deployment ${deploymentId}:`, error);
+      if (!options.probe) {
+        logger.warn(`[DeploymentAccess] Denied ${session.userId} on deployment ${deploymentId}:`, error);
+      }
       return { ok: false, response: NextResponse.json({ error: 'Deployment not found' }, { status: 404 }) };
     }
   }

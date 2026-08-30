@@ -1,8 +1,8 @@
 /**
  * The password gate on a review copy.
  *
- * Guessing has to cost something. The URL is not a secret — it is pasted into an email thread and
- * forwarded around an agency's client — so the password is the whole gate, and an unauthenticated
+ * Guessing has to cost something. The URL is not a secret, it is pasted into an email thread and
+ * forwarded around an agency's client, so the password is the whole gate, and an unauthenticated
  * caller can otherwise submit against it as fast as the server will hash.
  *
  * The limit is keyed on the caller *and* the deployment together. Keying on the caller alone would
@@ -22,7 +22,7 @@ export { reviewPasswordRateLimiter };
 /**
  * Compare a submitted password against the stored bcrypt hash.
  *
- * Anything unusable — no password, no hash, a hash bcrypt will not parse — is a failure, never a
+ * Anything unusable, no password, no hash, a hash bcrypt will not parse, is a failure, never a
  * pass. A review with no password never reaches here; if it somehow did, an empty hash must not
  * read as "everyone is welcome".
  */

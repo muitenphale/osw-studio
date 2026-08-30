@@ -16,8 +16,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 
+import { RATE_LIMIT_CONFIG } from '@/lib/analytics/rate-limiter';
 import { deploymentReviewDir } from '@/lib/compiler/deployment-review-dir';
 import { resolveReviewAccess } from '@/lib/review/access';
+import { consumeReviewAssetAttempt } from '@/lib/review/read-gate';
 import { resolveReviewFilePath, reviewMimeType } from '@/lib/review/serve-path';
 import { logger } from '@/lib/utils';
 
@@ -37,6 +39,21 @@ export async function GET(
   const { deploymentId, path: pathSegments = [] } = await params;
 
   try {
+    // Before the access check, so a flood costs a map lookup rather than a deployment resolve and a
+    // file read. The limit is set for a browser loading a page — see RATE_LIMIT_CONFIG.reviewAsset.
+    const gate = consumeReviewAssetAttempt(request, deploymentId);
+    if (!gate.allowed) {
+      return new NextResponse('Too many requests', {
+        status: 429,
+        headers: {
+          ...PRIVATE_HEADERS,
+          'Retry-After': gate.retryAfterSeconds.toString(),
+          'X-RateLimit-Limit': RATE_LIMIT_CONFIG.reviewAsset.limit.toString(),
+          'X-RateLimit-Remaining': '0',
+        },
+      });
+    }
+
     const access = await resolveReviewAccess(deploymentId, request);
     if (access.kind === 'denied') return notFound();
 

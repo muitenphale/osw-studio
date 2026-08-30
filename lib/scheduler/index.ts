@@ -5,6 +5,7 @@ let handlersRegistered = false;
 export class Scheduler {
   private tasks: SchedulerTask[] = [];
   private running = false;
+  private polling = false;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
   private pollIntervalMs: number;
@@ -50,7 +51,20 @@ export class Scheduler {
 
   private async poll(): Promise<void> {
     if (!this.running) return;
+    // A pass that outruns the interval would otherwise be joined by the next one, and the tasks are
+    // not written to overlap with themselves. Skipping the tick is right rather than queueing it:
+    // these are sweeps over current state, so a missed one is subsumed by the pass already running.
+    if (this.polling) return;
+    this.polling = true;
 
+    try {
+      await this.runTasks();
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  private async runTasks(): Promise<void> {
     for (const task of this.tasks) {
       if (!task.enabled) continue;
       try {

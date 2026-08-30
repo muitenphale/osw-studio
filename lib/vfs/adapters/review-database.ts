@@ -31,7 +31,7 @@ const ISO_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
  * Reduce a timestamp to the stored format so it can be compared as text.
  *
  * Callers reach for `new Date().toISOString()`, which carries milliseconds that stored values do
- * not have. Left alone, '...:00.000Z' sorts *below* the stored '...:00Z' — '.' before 'Z' — so a
+ * not have. Left alone, '...:00.000Z' sorts *below* the stored '...:00Z', '.' before 'Z', so a
  * comment exactly on the watermark would come back as new every time. Truncating rather than
  * rounding keeps the error on the side of re-sending a comment rather than dropping one.
  */
@@ -90,6 +90,8 @@ export interface CreateReviewCommentData {
 export interface ReviewCommentFilter {
   pagePath?: string;
   status?: ReviewCommentStatus;
+  /** Keep at most this many, the most recent ones. Absent means every match. */
+  limit?: number;
 }
 
 export interface ReviewNotificationState {
@@ -97,6 +99,15 @@ export interface ReviewNotificationState {
   recipientId: string;
   lastNotifiedAt: string | null;
   lastNotifiedCommentId: string | null;
+  /**
+   * Whether this recipient has asked for silence on this deployment.
+   *
+   * Kept apart from the watermark because the two mean different things. Muting by jumping the
+   * watermark to now only hides the backlog, the next comment written sits after it and the
+   * digest resumes. Composition skips a muted recipient without moving their watermark, so
+   * unmuting shows them what they missed instead of a hole.
+   */
+  muted: boolean;
 }
 
 function mapParticipant(row: Record<string, unknown>): ReviewParticipant {
@@ -182,9 +193,26 @@ export class ReviewDatabase {
         recipient_id TEXT NOT NULL,
         last_notified_at TEXT,
         last_notified_comment_id TEXT,
+        muted INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (recipient_kind, recipient_id)
       )
     `);
+
+    // Installs that already have a notification_state table never re-run the CREATE above, so the
+    // column has to be added to them explicitly or every digest run throws on the first recipient
+    // it reads. The PRAGMA guard is what makes that safe to reach on every init: a plain ALTER
+    // would throw the second time, and this runs on each ReviewDatabase constructed over the file.
+    //
+    // Done inline rather than through the versioned migration list in sqlite-adapter.ts: that list
+    // belongs to the workspace database and is keyed by a ledger table this database does not have.
+    // Introducing one here to carry a single additive column would put schema for the review
+    // database in two places.
+    const notificationColumns = this.db
+      .prepare(`PRAGMA table_info(notification_state)`)
+      .all() as Array<{ name: string }>;
+    if (!notificationColumns.some((c) => c.name === 'muted')) {
+      this.db.exec(`ALTER TABLE notification_state ADD COLUMN muted INTEGER NOT NULL DEFAULT 0`);
+    }
 
     this.initialized = true;
   }
@@ -268,7 +296,7 @@ export class ReviewDatabase {
 
   listComments(filter: ReviewCommentFilter = {}): ReviewComment[] {
     let query = 'SELECT * FROM comments WHERE 1=1';
-    const params: string[] = [];
+    const params: Array<string | number> = [];
 
     if (filter.pagePath) {
       query += ' AND page_path = ?';
@@ -279,10 +307,26 @@ export class ReviewDatabase {
       params.push(filter.status);
     }
 
+    if (filter.limit !== undefined) {
+      // Newest first with a LIMIT, then flipped back to oldest-first for the caller. A capped read
+      // has to keep the *recent* comments, and slicing an ascending result would keep the oldest
+      // ones after reading every row, the cost the cap exists to avoid.
+      query += ' ORDER BY created_at DESC, rowid DESC LIMIT ?';
+      params.push(filter.limit);
+      const capped = this.db.prepare(query).all(...params) as Array<Record<string, unknown>>;
+      return capped.map(mapComment).reverse();
+    }
+
     query += ' ORDER BY created_at ASC, rowid ASC';
 
     const rows = this.db.prepare(query).all(...params) as Array<Record<string, unknown>>;
     return rows.map(mapComment);
+  }
+
+  /** How many comments exist, so a capped list can report what it left out. */
+  countComments(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS total FROM comments').get() as { total: number };
+    return row.total;
   }
 
   setCommentStatus(id: string, status: ReviewCommentStatus, resolvedBy?: string): void {
@@ -330,28 +374,49 @@ export class ReviewDatabase {
       recipientId: row.recipient_id as string,
       lastNotifiedAt: (row.last_notified_at as string | null) ?? null,
       lastNotifiedCommentId: (row.last_notified_comment_id as string | null) ?? null,
+      muted: Boolean(row.muted),
     };
   }
 
   setNotificationState(
     recipientKind: ReviewRecipientKind,
     recipientId: string,
-    state: { lastNotifiedAt: string | null; lastNotifiedCommentId: string | null }
+    state: { lastNotifiedAt: string | null; lastNotifiedCommentId: string | null; muted?: boolean }
   ): void {
     this.db.prepare(`
       INSERT INTO notification_state (
-        recipient_kind, recipient_id, last_notified_at, last_notified_comment_id
-      ) VALUES (?, ?, ?, ?)
+        recipient_kind, recipient_id, last_notified_at, last_notified_comment_id, muted
+      ) VALUES (@recipientKind, @recipientId, @lastNotifiedAt, @lastNotifiedCommentId, COALESCE(@muted, 0))
       ON CONFLICT(recipient_kind, recipient_id) DO UPDATE SET
         last_notified_at = excluded.last_notified_at,
-        last_notified_comment_id = excluded.last_notified_comment_id
-    `).run(
+        last_notified_comment_id = excluded.last_notified_comment_id,
+        -- Only written when the caller says so. Composition advances watermarks on every run and
+        -- says nothing about muting; if that write reset the flag, one digest cycle would unmute
+        -- everyone who had asked for silence.
+        muted = COALESCE(@muted, notification_state.muted)
+    `).run({
       recipientKind,
       recipientId,
       // This value comes back out as the watermark for listCommentsSince, so it is stored in the
       // same format the comments carry rather than whatever the caller happened to hold.
-      state.lastNotifiedAt === null ? null : toStoredTimestamp(state.lastNotifiedAt),
-      state.lastNotifiedCommentId
-    );
+      lastNotifiedAt: state.lastNotifiedAt === null ? null : toStoredTimestamp(state.lastNotifiedAt),
+      lastNotifiedCommentId: state.lastNotifiedCommentId,
+      muted: state.muted === undefined ? null : state.muted ? 1 : 0,
+    });
+  }
+
+  /**
+   * Mute or unmute a recipient, leaving their watermark where it is.
+   *
+   * Creates the row when there is none: the mute link sits in the digest footer, but a recipient
+   * can also be muted before any digest has gone out, and a row invented here must carry no
+   * watermark or unmuting would hide everything written before the mute.
+   */
+  setMuted(recipientKind: ReviewRecipientKind, recipientId: string, muted: boolean): void {
+    this.db.prepare(`
+      INSERT INTO notification_state (recipient_kind, recipient_id, muted)
+      VALUES (?, ?, ?)
+      ON CONFLICT(recipient_kind, recipient_id) DO UPDATE SET muted = excluded.muted
+    `).run(recipientKind, recipientId, muted ? 1 : 0);
   }
 }

@@ -9,6 +9,7 @@ import { SkillsView } from './skills-view';
 import { InterviewsView } from './interviews-view';
 import { DeploymentsView } from './deployments-view';
 import { UsersView } from './users-view';
+import { MailView } from './mail-view';
 import { WorkspacesView } from './workspaces-view';
 import { SettingsView } from './settings-view';
 import { DocsView } from './docs-view';
@@ -66,6 +67,8 @@ export function ContentArea({
       return <DeploymentsView onProjectSelect={onProjectSelect} workspaceId={workspaceId} />;
     case 'users':
       return <UsersView />;
+    case 'mail':
+      return <MailView workspaceId={workspaceId} />;
     case 'workspaces':
       return <WorkspacesView />;
     case 'templates':
