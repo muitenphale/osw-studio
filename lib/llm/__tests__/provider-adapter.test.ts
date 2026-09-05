@@ -23,6 +23,7 @@ vi.mock('../pricing-cache', () => ({
   registerPricingFromProviderModels: vi.fn(),
 }));
 
+import { apiFetch } from '@/lib/api/backend-status';
 import { ensureModelsDevPricing } from '../models-dev';
 import { fetchAvailableModels } from '../models-api';
 import { registerOpenRouterPricingFromApi, registerPricingFromProviderModels } from '../pricing-cache';
@@ -88,6 +89,45 @@ describe('OswsProviderAdapter request snapshot capture', () => {
 // ---------------------------------------------------------------------------
 // ensurePricing — exercised indirectly via call()
 // ---------------------------------------------------------------------------
+
+describe('OswsProviderAdapter custom headers in the request body', () => {
+  function adapterWith(customHeaders?: Record<string, string>): OswsProviderAdapter {
+    const config: ProviderAdapterConfig = {
+      getProviderConfig: () => ({
+        provider: 'my-cloud', apiKey: 'k', model: 'gpt-test',
+        baseUrl: 'https://api.example.com/v1',
+        ...(customHeaders ? { customHeaders } : {}),
+      }),
+      getApiUrl: () => 'http://localhost/api/generate',
+      getReasoningEnabled: () => false,
+      getDebugStreamEnabled: () => false,
+      getModelPricing: () => ({ input: 1, output: 1 }),
+      getCachedModels: () => null,
+      progress: { onEvent: vi.fn() },
+    };
+    return new OswsProviderAdapter(config);
+  }
+
+  function sentBody(): Record<string, unknown> {
+    const call = vi.mocked(apiFetch).mock.calls[0];
+    return JSON.parse((call[1] as { body: string }).body);
+  }
+
+  beforeEach(() => vi.mocked(apiFetch).mockClear());
+
+  it('carries a custom provider’s headers to the server', async () => {
+    // A custom provider only exists in the client's localStorage, so the server cannot look these
+    // up. They ride in the body like baseUrl does, and nothing else puts them there.
+    await adapterWith({ 'X-Tenant': 'acme' }).call({ messages });
+    expect(sentBody().customHeaders).toEqual({ 'X-Tenant': 'acme' });
+    expect(sentBody().baseUrl).toBe('https://api.example.com/v1');
+  });
+
+  it('leaves the field off when the provider has none', async () => {
+    await adapterWith().call({ messages });
+    expect(sentBody()).not.toHaveProperty('customHeaders');
+  });
+});
 
 describe('ensurePricing paths', () => {
   function makeAdapterWith(overrides: Partial<ProviderAdapterConfig>): OswsProviderAdapter {

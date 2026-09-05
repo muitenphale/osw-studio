@@ -30,6 +30,8 @@ import {
   MoreVertical,
   Trash2,
   Download,
+  Plus,
+  Eye,
 } from 'lucide-react';
 import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +40,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -52,6 +55,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { COMPACT_ROW_WIDTH } from '@/lib/constants/layout';
+import { useNarrowContainer } from '@/lib/hooks/use-narrow-container';
 
 interface TemplateManagerProps {
   onProjectCreated?: (projectId: string, hasBackendFeatures: boolean) => void;
@@ -358,6 +363,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
   });
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const [compactRows, measureRowsRef] = useNarrowContainer(COMPACT_ROW_WIDTH);
 
   if (loading || creating) {
     return (
@@ -492,7 +498,7 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
               </div>
             )}
             {viewMode === 'table' ? (
-              <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto border rounded-lg">
+              <div ref={(el) => { contentScrollRef.current = el; measureRowsRef(el); }} className="@container flex-1 min-h-0 overflow-auto border rounded-lg">
                 <table className="w-full table-auto border-collapse">
                   <thead className="sticky top-0 z-10">
                     <tr>
@@ -500,8 +506,8 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Type</th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Runtime</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Author</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">License</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Author</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">License</th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Updated</th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
                     </tr>
@@ -542,10 +548,10 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
                           <td className="p-[4px_10px] align-middle whitespace-nowrap">
                             {runtime && <Badge className={`text-[11px] px-[7px] py-[1px] h-auto rounded-full ${runtime.className}`}>{runtime.label}</Badge>}
                           </td>
-                          <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
+                          <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
                             {author || '—'}
                           </td>
-                          <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
+                          <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">
                             {license || '—'}
                           </td>
                           <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap overflow-hidden text-ellipsis">
@@ -553,22 +559,42 @@ export function TemplateManager({ onProjectCreated }: TemplateManagerProps) {
                           </td>
                           <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1">
-                              <Button variant="outline" size="xs" onClick={() => handleCreateProject(template)}>Use</Button>
+                              <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleCreateProject(template)}>Use</Button>
                               {templatePreviewTarget(template) && (
-                                <Button variant="outline" size="xs" onClick={() => handlePreviewTemplate(template)}>Preview</Button>
+                                <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handlePreviewTemplate(template)}>Preview</Button>
                               )}
-                              {!isBuiltIn && (
+                              {/* The menu is no longer custom-only. Use and Preview hide at
+                                  COMPACT_ROW_WIDTH, and a built-in template had no menu to move them
+                                  into, so a narrow row would have offered no action at all. */}
+                              {(!isBuiltIn || compactRows) && (
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => handleExportTemplate(template as CustomTemplate)}>
-                                      <Download className="w-4 h-4 mr-2" />Export
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleDeleteTemplate((template as CustomTemplate).id)} className="text-destructive focus:text-destructive">
-                                      <Trash2 className="w-4 h-4 mr-2" />Delete
-                                    </DropdownMenuItem>
+                                    {compactRows && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => handleCreateProject(template)}>
+                                          <Plus className="w-4 h-4 mr-2" />Use
+                                        </DropdownMenuItem>
+                                        {templatePreviewTarget(template) && (
+                                          <DropdownMenuItem onClick={() => handlePreviewTemplate(template)}>
+                                            <Eye className="w-4 h-4 mr-2" />Preview
+                                          </DropdownMenuItem>
+                                        )}
+                                        {!isBuiltIn && <DropdownMenuSeparator />}
+                                      </>
+                                    )}
+                                    {!isBuiltIn && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => handleExportTemplate(template as CustomTemplate)}>
+                                          <Download className="w-4 h-4 mr-2" />Export
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleDeleteTemplate((template as CustomTemplate).id)} className="text-destructive focus:text-destructive">
+                                          <Trash2 className="w-4 h-4 mr-2" />Delete
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               )}

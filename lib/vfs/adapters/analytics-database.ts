@@ -12,6 +12,7 @@
 import type { Database } from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { getAnalyticsDatabaseConnection, closeAnalyticsDatabase } from './sqlite-connection';
+import { toSqliteTimestamp } from '@/lib/sqlite-timestamp';
 
 // Analytics types
 export interface PageviewData {
@@ -236,7 +237,7 @@ export class AnalyticsDatabase {
   getStats(days: number = 30): AnalyticsStats {
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - days);
-    const dateLimitStr = dateLimit.toISOString();
+    const dateLimitStr = toSqliteTimestamp(dateLimit);
 
     const totalPageviews = (this.db.prepare(`
       SELECT COUNT(*) as count FROM pageviews WHERE timestamp >= ?
@@ -294,7 +295,7 @@ export class AnalyticsDatabase {
       GROUP BY page_path
       ORDER BY views DESC
       LIMIT ?
-    `).all(dateLimit.toISOString(), limit) as Array<{ path: string; views: number }>;
+    `).all(toSqliteTimestamp(dateLimit), limit) as Array<{ path: string; views: number }>;
   }
 
   getTopReferrers(days: number = 30, limit: number = 10): Array<{ referrer: string; count: number }> {
@@ -307,7 +308,7 @@ export class AnalyticsDatabase {
       GROUP BY referrer
       ORDER BY count DESC
       LIMIT ?
-    `).all(dateLimit.toISOString(), limit) as Array<{ referrer: string; count: number }>;
+    `).all(toSqliteTimestamp(dateLimit), limit) as Array<{ referrer: string; count: number }>;
   }
 
   getPageviewsOverTime(days: number = 30): Array<{ date: string; views: number }> {
@@ -319,7 +320,7 @@ export class AnalyticsDatabase {
       FROM pageviews WHERE timestamp >= ?
       GROUP BY DATE(timestamp)
       ORDER BY date
-    `).all(dateLimit.toISOString()) as Array<{ date: string; views: number }>;
+    `).all(toSqliteTimestamp(dateLimit)) as Array<{ date: string; views: number }>;
   }
 
   getHeatmapData(pagePath: string, interactionType: string = 'click'): Array<{
@@ -358,11 +359,11 @@ export class AnalyticsDatabase {
 
     if (dateFrom) {
       query += ' AND timestamp >= ?';
-      params.push(dateFrom);
+      params.push(toSqliteTimestamp(dateFrom));
     }
     if (dateTo) {
       query += ' AND timestamp <= ?';
-      params.push(dateTo);
+      params.push(toSqliteTimestamp(dateTo));
     }
 
     query += ' ORDER BY timestamp DESC LIMIT ?';
@@ -389,11 +390,11 @@ export class AnalyticsDatabase {
 
     if (dateFrom) {
       query += ' AND timestamp >= ?';
-      params.push(dateFrom);
+      params.push(toSqliteTimestamp(dateFrom));
     }
     if (dateTo) {
       query += ' AND timestamp <= ?';
-      params.push(dateTo);
+      params.push(toSqliteTimestamp(dateTo));
     }
 
     query += ' ORDER BY timestamp DESC LIMIT ?';
@@ -485,7 +486,7 @@ export class AnalyticsDatabase {
   } {
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - days);
-    const dateLimitStr = dateLimit.toISOString();
+    const dateLimitStr = toSqliteTimestamp(dateLimit);
 
     const avgTime = (this.db.prepare(`
       SELECT AVG(time_on_page) as avg
@@ -538,7 +539,7 @@ export class AnalyticsDatabase {
   } {
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - days);
-    const dateLimitStr = dateLimit.toISOString();
+    const dateLimitStr = toSqliteTimestamp(dateLimit);
 
     const stats = this.getStats(days);
 
@@ -599,7 +600,7 @@ export class AnalyticsDatabase {
     for (const table of tables) {
       if (beforeDate) {
         this.db.prepare(`DELETE FROM ${table} WHERE timestamp < ? OR created_at < ?`)
-          .run(beforeDate.toISOString(), beforeDate.toISOString());
+          .run(toSqliteTimestamp(beforeDate), toSqliteTimestamp(beforeDate));
       } else {
         this.db.prepare(`DELETE FROM ${table}`).run();
       }

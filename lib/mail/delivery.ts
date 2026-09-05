@@ -23,6 +23,7 @@ import {
   type OutboundEmail,
 } from './outbox';
 import { resolveTransport, type ResolvedTransport } from './transport';
+import { parseSqliteTimestamp } from '@/lib/sqlite-timestamp';
 
 /**
  * Seconds to wait before attempt n+1, indexed by attempts already made.
@@ -43,16 +44,6 @@ export interface DeliveryResult {
   held: number;
 }
 
-/**
- * SQLite's `datetime('now')` is UTC, written with a space and no zone marker. `new Date` reads that
- * as local time, which would shift every backoff by the host's offset, hours of extra delay west
- * of UTC and, east of it, a backoff that has already expired the moment it is written.
- */
-function parseTimestamp(value: string): number {
-  const sqliteShape = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value);
-  return new Date(sqliteShape ? `${value.replace(' ', 'T')}Z` : value).getTime();
-}
-
 export function shouldDeliver(
   email: Pick<OutboundEmail, 'attempts' | 'last_attempted_at'>,
   now: number = Date.now()
@@ -61,7 +52,7 @@ export function shouldDeliver(
   if (!email.last_attempted_at) return true;
 
   const waitSeconds = BACKOFF_SCHEDULE[Math.min(email.attempts - 1, BACKOFF_SCHEDULE.length - 1)];
-  return now >= parseTimestamp(email.last_attempted_at) + waitSeconds * 1000;
+  return now >= parseSqliteTimestamp(email.last_attempted_at) + waitSeconds * 1000;
 }
 
 /** Groups a batch by the transport that should carry it. A null workspace is instance mail. */

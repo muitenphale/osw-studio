@@ -61,6 +61,8 @@ interface SidebarItem {
     label: string;
     icon: React.ElementType;
     file?: string; // For docs
+    /** Hidden in browser mode, like the top-level flag of the same name. */
+    serverModeOnly?: boolean;
   }[];
 }
 
@@ -72,7 +74,6 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'skills', label: 'Skills', icon: Sparkles, path: 'skills' },
   { id: 'interviews', label: 'Interviews', icon: ClipboardList, path: 'interviews' },
   { id: 'users', label: 'Users', icon: Users, path: 'users', serverModeOnly: true, adminOnly: true },
-  { id: 'mail', label: 'Mail', icon: Mail, path: 'mail', serverModeOnly: true },
   {
     id: 'docs',
     label: 'Docs',
@@ -98,6 +99,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
       { id: 'costs', label: 'Cost Tracking', icon: DollarSign },
       { id: 'permissions', label: 'Permissions', icon: Shield },
       { id: 'data', label: 'Data', icon: Database },
+      { id: 'mail', label: 'Mail', icon: Mail, serverModeOnly: true },
     ]
   },
   { id: 'tour', label: 'Guided Tour', icon: Info, action: 'start-tour' },
@@ -185,7 +187,7 @@ function SidebarFlyout({
           <div className="px-3 py-1.5 text-xs text-muted-foreground">No recent projects</div>
         )
       ) : item.subItems ? (
-        item.subItems.map(subItem => {
+        item.subItems.filter(si => !si.serverModeOnly || process.env.NEXT_PUBLIC_SERVER_MODE === 'true').map(subItem => {
           const SubIcon = subItem.icon;
           return (
             <button
@@ -609,7 +611,11 @@ function SidebarContent({
       )}
 
       {/* Main Navigation - Single scrollable container */}
-      <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
+      {/* Padding is split between this and the per-item wrapper below so the two together match the
+          sections underneath, which get 8px from p-2 and 4px between rows from space-y-1: 6+2 = 8px
+          to the first button, and 2+2 = 4px between them. The wrapper cannot give up its vertical
+          padding to simplify this, since that padding is what stops a row jumping when it expands. */}
+      <nav className="flex-1 px-1 py-1.5 overflow-y-auto">
         {visibleSidebarItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentView === item.id;
@@ -620,7 +626,7 @@ function SidebarContent({
             <div key={item.id}>
               {/* Wrap parent + children in container - always has padding to prevent layout shift */}
               <div className={cn(
-                'p-1',
+                'px-1 py-0.5',
                 isExpanded && hasSubItems && 'bg-muted rounded-2xl'
               )}>
                 <div
@@ -641,6 +647,7 @@ function SidebarContent({
                 >
                   <Button
                     variant="ghost"
+                    size="sm"
                     style={isActive && !hasSubItems ? { backgroundColor: 'var(--sidebar-active-surface)' } : undefined}
                     className={cn(
                       'w-full',
@@ -738,7 +745,7 @@ function SidebarContent({
                   "mt-1 space-y-1",
                   collapsed ? "flex flex-col items-center" : "ml-4"
                 )}>
-                  {item.subItems.map((subItem) => {
+                  {item.subItems.filter(si => !si.serverModeOnly || isServerMode).map((subItem) => {
                     const SubIcon = subItem.icon;
                     // For docs, check currentDocId. For settings, check URL param or path
                     const wsBase = workspaceId ? `/w/${workspaceId}` : '/admin';

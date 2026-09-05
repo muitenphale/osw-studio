@@ -323,6 +323,19 @@ export class ReviewDatabase {
     return rows.map(mapComment);
   }
 
+  /**
+   * How many threads are still open, for the badge on the deployments listing.
+   *
+   * Roots only: a reply is not separately resolvable, and counting replies would report a busy
+   * conversation as a pile of outstanding work.
+   */
+  countOpenThreads(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS total FROM comments WHERE status = 'open' AND parent_id IS NULL")
+      .get() as { total: number };
+    return row.total;
+  }
+
   /** How many comments exist, so a capped list can report what it left out. */
   countComments(): number {
     const row = this.db.prepare('SELECT COUNT(*) AS total FROM comments').get() as { total: number };

@@ -402,15 +402,15 @@ export function WorkspacesView() {
                 )}
               </div>
             ) : (
-              <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
+              <div className="@container flex-1 min-h-0 overflow-auto border rounded-lg">
                 <table className="w-full table-auto border-collapse">
                   <thead className="sticky top-0 z-10">
                     <tr>
                       <th className="bg-muted p-[6px_10px] border-b select-none"></th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Workspace</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Members</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Projects</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Deployments</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Members</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Projects</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Deployments</th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Created</th>
                       <th className="bg-muted p-[6px_10px] border-b select-none"></th>
                     </tr>
@@ -433,9 +433,9 @@ export function WorkspacesView() {
                                 {ws.ownerEmail && <span className="block text-[11px] text-muted-foreground truncate">Owner: {ws.ownerEmail}</span>}
                               </div>
                             </td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.memberCount}</td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.projectCount}</td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.deploymentCount}</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.memberCount}</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.projectCount}</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{ws.deploymentCount}</td>
                             <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">{formatDate(ws.createdAt)}</td>
                             <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                               <DropdownMenu>
@@ -464,6 +464,13 @@ export function WorkspacesView() {
                             <tr className="bg-muted/30 border-b border-border/50">
                               <td></td>
                               <td colSpan={6} className="p-[4px_10px] pb-4 align-top">
+                          {/* The counts the row drops at narrow widths, shown only there so the panel
+                              does not repeat columns already on screen. */}
+                          <div className="@5xl:hidden mb-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-muted-foreground">
+                            <span>Members <span className="text-foreground tabular-nums">{ws.memberCount}</span></span>
+                            <span>Projects <span className="text-foreground tabular-nums">{ws.projectCount}</span></span>
+                            <span>Deployments <span className="text-foreground tabular-nums">{ws.deploymentCount}</span></span>
+                          </div>
                           {loadingDetail ? (
                             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
                               <Spinner size={16} color="#f97316" />

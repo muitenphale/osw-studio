@@ -40,6 +40,15 @@ import type {
 } from '@/components/database-manager/data-providers';
 import { SchemaEditor } from './schema-editor';
 import { getProjectSchema } from '@/lib/vfs/project-schema';
+import { InfoTip } from '@/components/ui/info-tip';
+import { matchesPathPattern } from '@/lib/vfs/suggestion-paths';
+import {
+  pageDirectories,
+  patternToRule,
+  ruleToPattern,
+  type PathRule,
+} from '@/lib/vfs/suggestion-path-rules';
+import { useWorkspaceStore } from '@/lib/stores/workspace';
 
 interface ProjectSettingsPanelProps {
   project: Project;
@@ -352,7 +361,9 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
         </p>
       </div>
 
-      <PromptSuggestionsEditor project={project} onProjectUpdate={onProjectUpdate} />
+      <div id="project-settings-suggestions" className="scroll-mt-4">
+        <PromptSuggestionsEditor project={project} onProjectUpdate={onProjectUpdate} />
+      </div>
 
       <Dialog open={!!promptOverwriteConfirm} onOpenChange={(open) => !open && setPromptOverwriteConfirm(null)}>
         <DialogContent className="sm:max-w-md">
@@ -387,6 +398,43 @@ function GeneralTab({ project, onProjectUpdate }: { project: Project; onProjectU
  * the first three appear on the row and the rest go behind the overflow menu, which is why there
  * are move controls rather than an alphabetical list.
  */
+const SCOPE_HELP =
+  'Off, this suggestion shows on every page. On, it only shows when the preview is on a page one ' +
+  'of the rules covers. Page picks a single page, Directory covers everything inside one including ' +
+  'its subdirectories, and Pattern takes a glob: * matches inside one path segment, ** across them.';
+
+/** A rule as edited. The id is for React and for editing; only the compiled glob is stored. */
+interface PathRuleRow extends PathRule {
+  id: string;
+}
+
+const RULE_KIND_LABELS: Record<PathRule['kind'], string> = {
+  page: 'Page',
+  directory: 'Directory',
+  pattern: 'Pattern',
+};
+
+/**
+ * A picked value that is no longer in the project still has to be selectable, or opening the editor
+ * would silently swap it for the first page in the list.
+ */
+function withCurrent(options: string[], current: string): string[] {
+  return current !== '' && !options.includes(current) ? [...options, current] : options;
+}
+
+/** Silent until there is a pattern to count, so an empty field does not read as "matches nothing". */
+function PatternMatchCount({ patterns, pagePaths }: { patterns: string[]; pagePaths: string[] }) {
+  const usable = patterns.map((p) => p.trim()).filter((p) => p !== '');
+  if (usable.length === 0 || pagePaths.length === 0) return null;
+
+  const matched = pagePaths.filter((page) => usable.some((p) => matchesPathPattern(p, page))).length;
+  return (
+    <p className="text-[11px] text-muted-foreground">
+      Matches {matched} of {pagePaths.length} {pagePaths.length === 1 ? 'page' : 'pages'} in this project
+    </p>
+  );
+}
+
 function PromptSuggestionsEditor({
   project,
   onProjectUpdate,
@@ -398,9 +446,58 @@ function PromptSuggestionsEditor({
     () => project.settings?.promptSuggestions ?? []
   );
   const [saving, setSaving] = useState(false);
+  // The rows as edited, kept while the toggle is off so turning it back on restores them.
+  const [ruleRows, setRuleRows] = useState<Record<string, PathRuleRow[]>>({});
+  const [pagePaths, setPagePaths] = useState<string[]>([]);
 
   const stored = JSON.stringify(project.settings?.promptSuggestions ?? []);
   const dirty = JSON.stringify(usablePromptSuggestions(draft)) !== stored;
+
+  // The draft initializer only runs on mount. Without this, a panel that stays mounted while the
+  // project reloads keeps showing the draft it started with, so a saved suggestion looks lost.
+  useEffect(() => {
+    setDraft(project.settings?.promptSuggestions ?? []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, stored]);
+
+  useEffect(() => {
+    // Cancelled on a project change so a slow answer for the previous one cannot land after a
+    // newer one and describe the wrong project's pages.
+    let cancelled = false;
+
+    vfs.listFiles(project.id)
+      .then((files) => {
+        if (cancelled) return;
+        setPagePaths(files.filter((f) => f.path.endsWith('.html')).map((f) => f.path));
+      })
+      .catch(() => {
+        // The match count is supplementary; with no pages it renders nothing rather than a wrong
+        // number.
+        if (!cancelled) setPagePaths([]);
+      });
+
+    return () => { cancelled = true; };
+  }, [project.id]);
+
+  const pagesKey = pagePaths.join('|');
+  const directories = useMemo(() => pageDirectories(pagePaths), [pagesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Each rule's kind is worked out from its stored glob, so this has to run again when the page
+  // list arrives as well as when the project changes: until it lands, a stored page path cannot be
+  // told apart from a typed one. Not keyed on `draft`, since re-seeding on every keystroke would
+  // discard the row being edited.
+  useEffect(() => {
+    const seeded: Record<string, PathRuleRow[]> = {};
+    for (const suggestion of project.settings?.promptSuggestions ?? []) {
+      if (!suggestion.paths) continue;
+      seeded[suggestion.id] = suggestion.paths.map((pattern) => ({
+        id: crypto.randomUUID(),
+        ...patternToRule(pattern, pagePaths),
+      }));
+    }
+    setRuleRows(seeded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, stored, pagesKey]);
 
   const update = (id: string, patch: Partial<PromptSuggestion>) =>
     setDraft(rows => rows.map(row => (row.id === id ? { ...row, ...patch } : row)));
@@ -414,6 +511,23 @@ function PromptSuggestionsEditor({
       return next;
     });
 
+  const blankRule = (): PathRuleRow => ({
+    id: crypto.randomUUID(),
+    kind: pagePaths.length > 0 ? 'page' : 'pattern',
+    value: '',
+  });
+
+  const setRules = (suggestionId: string, rows: PathRuleRow[]) => {
+    setRuleRows((all) => ({ ...all, [suggestionId]: rows }));
+    update(suggestionId, { paths: rows.map(ruleToPattern) });
+  };
+
+  const editRule = (suggestionId: string, rowId: string, patch: Partial<PathRuleRow>) =>
+    setRules(
+      suggestionId,
+      (ruleRows[suggestionId] ?? []).map((row) => (row.id === rowId ? { ...row, ...patch } : row))
+    );
+
   const save = async () => {
     setSaving(true);
     try {
@@ -424,6 +538,10 @@ function PromptSuggestionsEditor({
       proj.settings = { ...proj.settings, promptSuggestions: cleaned };
       await vfs.updateProject(proj);
       vfs.scheduleAutoSync(proj.id);
+      // The chat panel reads these from the workspace store, which is loaded once when the project
+      // opens. Without this the save reaches storage but not the row above the composer, so an
+      // edited suggestion only appeared after reopening the project.
+      useWorkspaceStore.getState().updateProjectSettings({ promptSuggestions: cleaned });
       onProjectUpdate(proj);
       setDraft(cleaned);
       toast.success(cleaned.length === 0 ? 'Suggestions cleared' : 'Suggestions saved');
@@ -483,6 +601,129 @@ function PromptSuggestionsEditor({
               rows={3}
               className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm resize-y"
             />
+
+            <div className="border-t border-border/60 pt-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor={`scoped-${suggestion.id}`} className="text-xs font-normal">
+                  Only on certain pages
+                </Label>
+                <InfoTip>{SCOPE_HELP}</InfoTip>
+                <Switch
+                  id={`scoped-${suggestion.id}`}
+                  className="ml-auto"
+                  checked={suggestion.paths !== undefined}
+                  onCheckedChange={(on) => {
+                    // Turning it off keeps the rows rather than clearing them, so a mis-click is
+                    // not destructive. `usablePromptSuggestions` writes `paths` only while the
+                    // toggle is on, so an off row saves as unscoped either way.
+                    if (!on) {
+                      update(suggestion.id, { paths: undefined });
+                      return;
+                    }
+                    const kept = ruleRows[suggestion.id] ?? [];
+                    setRules(suggestion.id, kept.length > 0 ? kept : [blankRule()]);
+                  }}
+                />
+              </div>
+
+              {suggestion.paths !== undefined && (
+                <div className="border-l-2 border-primary/40 pl-3 space-y-1.5">
+                  {(ruleRows[suggestion.id] ?? []).map((row, ruleIndex) => (
+                    <div key={row.id} className="flex items-center gap-1.5">
+                      <Select
+                        value={row.kind}
+                        onValueChange={(kind) =>
+                          editRule(suggestion.id, row.id, {
+                            kind: kind as PathRule['kind'],
+                            // Moving to Pattern keeps the glob the picker built, so nothing chosen
+                            // is lost. The other direction has nothing to map to, so it clears.
+                            value: kind === 'pattern' ? ruleToPattern(row) : '',
+                          })
+                        }
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="w-[112px] shrink-0"
+                          aria-label={`Suggestion ${index + 1} rule ${ruleIndex + 1} type`}
+                        >
+                          <span className="text-xs">{RULE_KIND_LABELS[row.kind]}</span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="page" disabled={pagePaths.length === 0}>Page</SelectItem>
+                          <SelectItem value="directory" disabled={directories.length === 0}>Directory</SelectItem>
+                          <SelectItem value="pattern">Pattern</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      {row.kind === 'pattern' ? (
+                        <Input
+                          value={row.value}
+                          onChange={(e) => editRule(suggestion.id, row.id, { value: e.target.value })}
+                          placeholder="/articles/*.html"
+                          aria-label={`Suggestion ${index + 1} rule ${ruleIndex + 1} pattern`}
+                          className="flex-1 min-w-0 h-8 text-xs font-mono"
+                        />
+                      ) : (
+                        <Select
+                          value={row.value}
+                          onValueChange={(value) => editRule(suggestion.id, row.id, { value })}
+                        >
+                          <SelectTrigger
+                            size="sm"
+                            className="flex-1 min-w-0"
+                            aria-label={`Suggestion ${index + 1} rule ${ruleIndex + 1} ${row.kind === 'page' ? 'page' : 'directory'}`}
+                          >
+                            {row.value === '' ? (
+                              <span className="text-xs text-muted-foreground">
+                                {row.kind === 'page' ? 'Choose a page' : 'Choose a directory'}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-mono truncate">{row.value}</span>
+                            )}
+                          </SelectTrigger>
+                          <SelectContent>
+                            {withCurrent(row.kind === 'page' ? pagePaths : directories, row.value).map((option) => (
+                              <SelectItem key={option} value={option} className="text-xs font-mono">
+                                {option}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+
+                      <Button
+                        variant="ghost" size="sm"
+                        aria-label={`Remove suggestion ${index + 1} rule ${ruleIndex + 1}`}
+                        onClick={() =>
+                          setRules(suggestion.id, (ruleRows[suggestion.id] ?? []).filter((r) => r.id !== row.id))
+                        }
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost" size="sm" className="text-xs"
+                      onClick={() =>
+                        setRules(suggestion.id, [...(ruleRows[suggestion.id] ?? []), blankRule()])
+                      }
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add page rule
+                    </Button>
+                    {pagePaths.length === 0 && (
+                      <span className="text-[11px] text-muted-foreground">
+                        No pages in this project yet, so only Pattern is available
+                      </span>
+                    )}
+                  </div>
+
+                  <PatternMatchCount patterns={suggestion.paths ?? []} pagePaths={pagePaths} />
+                </div>
+              )}
+            </div>
           </div>
         ))}
 
@@ -733,6 +974,18 @@ interface ProjectSettingsModalProps {
 export function ProjectSettingsModal({ project, isOpen, onClose, onProjectUpdate, enabled, onToggleEnabled, workspaceId }: ProjectSettingsModalProps) {
   const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const requestedSection = useWorkspaceStore(s => s.projectSettingsSection);
+
+  // Runs after the dialog has painted, since the target does not exist until then. The request is
+  // cleared once used, so opening the dialog from anywhere else does not jump to it again.
+  useEffect(() => {
+    if (!isOpen || !requestedSection) return;
+    const id = requestAnimationFrame(() => {
+      document.getElementById(requestedSection)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      useWorkspaceStore.getState().clearProjectSettingsSection();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isOpen, requestedSection]);
 
   return (
     <>

@@ -821,9 +821,10 @@ class ConfigManager {
     id: string,
     name: string,
     baseUrl: string,
-    apiKeyRequired: boolean
+    apiKeyRequired: boolean,
+    customHeaders?: Record<string, string>
   ): ProviderConfig {
-    return buildCustomProviderConfigHelper(id, name, baseUrl, apiKeyRequired);
+    return buildCustomProviderConfigHelper(id, name, baseUrl, apiKeyRequired, customHeaders);
   }
 }
 

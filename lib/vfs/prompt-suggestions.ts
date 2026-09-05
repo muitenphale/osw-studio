@@ -1,3 +1,4 @@
+import { normalizePathPattern } from './suggestion-paths';
 import type { PromptSuggestion } from './types';
 
 /**
@@ -14,10 +15,13 @@ export function seedPromptSuggestions(
   declared: PromptSuggestion[] | undefined
 ): PromptSuggestion[] | undefined {
   if (!declared || declared.length === 0) return undefined;
+  // Rebuilt field by field rather than spread, so a template cannot smuggle anything else onto a
+  // project. Every field of PromptSuggestion has to be listed here, including new ones.
   return declared.map((suggestion) => ({
     id: suggestion.id,
     label: suggestion.label,
     prompt: suggestion.prompt,
+    ...(suggestion.paths?.length ? { paths: [...suggestion.paths] } : {}),
   }));
 }
 
@@ -35,6 +39,16 @@ export function newPromptSuggestion(): PromptSuggestion {
  */
 export function usablePromptSuggestions(suggestions: PromptSuggestion[]): PromptSuggestion[] {
   return suggestions
-    .map((s) => ({ id: s.id, label: s.label.trim(), prompt: s.prompt.trim() }))
+    .map((s) => {
+      // Blank patterns are dropped, and the field with them. `paths: []` would read as unscoped but
+      // differ on the wire, so a toggle turned on and then emptied must not persist as one.
+      const paths = (s.paths ?? []).map(normalizePathPattern).filter((p) => p !== '');
+      return {
+        id: s.id,
+        label: s.label.trim(),
+        prompt: s.prompt.trim(),
+        ...(paths.length ? { paths } : {}),
+      };
+    })
     .filter((s) => s.label !== '' && s.prompt !== '');
 }

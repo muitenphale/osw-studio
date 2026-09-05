@@ -1,5 +1,6 @@
 import type { ProviderConfig, ProviderId } from '@/lib/llm/providers/types';
 import type { WireFormat } from '@/lib/llm/providers/wire-format';
+import { sanitizeCustomHeaders } from '@/lib/llm/providers/custom-headers';
 
 /** Resolve the upstream endpoint for a request, by wire format. */
 export function getApiEndpoint(
@@ -30,6 +31,7 @@ export function buildHeaders(
   referer: string | null,
   config: ProviderConfig,
   wireFormat?: WireFormat,
+  overrideHeaders?: Record<string, string>,
 ): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (wireFormat === 'anthropic') {
@@ -47,6 +49,11 @@ export function buildHeaders(
       headers['X-Title'] = 'OSW-Studio';
     }
   }
+  // A custom provider's config lives in the client's localStorage, so `config` is a stub here and
+  // the headers arrive in the request body, the same route `baseUrl` takes. Sanitised again on this
+  // side because a client is not a trust boundary, and merged last but unable to reach Authorization
+  // or Content-Type, which sanitizeCustomHeaders refuses.
+  Object.assign(headers, sanitizeCustomHeaders(overrideHeaders).headers);
   return headers;
 }
 

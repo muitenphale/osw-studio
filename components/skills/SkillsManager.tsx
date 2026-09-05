@@ -61,6 +61,8 @@ import { SkillEditor } from './SkillEditor';
 import { usePagination } from '@/lib/hooks/use-pagination';
 import { Pagination, PaginationRange } from '@/components/ui/pagination';
 import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
+import { COMPACT_ROW_WIDTH } from '@/lib/constants/layout';
+import { useNarrowContainer } from '@/lib/hooks/use-narrow-container';
 
 export function SkillsManager() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -380,6 +382,7 @@ export function SkillsManager() {
   });
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const [compactRows, measureRowsRef] = useNarrowContainer(COMPACT_ROW_WIDTH);
 
   if (loading) {
     return (
@@ -595,7 +598,7 @@ export function SkillsManager() {
                       </div>
                     )}
                     {viewMode === 'table' ? (
-                      <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto">
+                      <div ref={(el) => { contentScrollRef.current = el; measureRowsRef(el); }} className="@container flex-1 min-h-0 overflow-auto">
                         <table className="w-full table-auto border-collapse">
                           <thead className="sticky top-0 z-10">
                             <tr>
@@ -630,21 +633,48 @@ export function SkillsManager() {
                                   </td>
                                   <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
                                     <div className="flex items-center justify-end gap-1">
-                                      <Button variant="outline" size="xs" onClick={() => handleEdit(skill)}>
+                                      <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleEdit(skill)}>
                                         <Edit className="w-3 h-3" />Edit
                                       </Button>
                                       <Button
                                         variant={enabledSkills.has(skill.id) ? 'outline' : 'ghost'}
                                         size="xs"
+                                        className="@max-3xl:hidden"
                                         onClick={() => handleSkillToggle(skill.id, !enabledSkills.has(skill.id))}
                                         disabled={!globalEnabled}
                                       >
                                         {enabledSkills.has(skill.id) ? 'On' : 'Off'}
                                       </Button>
                                       {!skill.isBuiltIn && (
-                                        <Button variant="ghost" size="xs" onClick={() => handleDelete(skill)}>
+                                        <Button variant="ghost" size="xs" className="@max-3xl:hidden" onClick={() => handleDelete(skill)}>
                                           <Trash2 className="w-3 h-3" />
                                         </Button>
+                                      )}
+                                      {/* This row had no overflow menu, so one appears with the
+                                          actions in it once they hide. */}
+                                      {compactRows && (
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => handleEdit(skill)}>
+                                              <Edit className="w-4 h-4 mr-2" />Edit
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => handleSkillToggle(skill.id, !enabledSkills.has(skill.id))}
+                                              disabled={!globalEnabled}
+                                            >
+                                              <Sparkles className="w-4 h-4 mr-2" />
+                                              {enabledSkills.has(skill.id) ? 'Disable' : 'Enable'}
+                                            </DropdownMenuItem>
+                                            {!skill.isBuiltIn && (
+                                              <DropdownMenuItem onClick={() => handleDelete(skill)} className="text-destructive focus:text-destructive">
+                                                <Trash2 className="w-4 h-4 mr-2" />Delete
+                                              </DropdownMenuItem>
+                                            )}
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
                                       )}
                                     </div>
                                   </td>

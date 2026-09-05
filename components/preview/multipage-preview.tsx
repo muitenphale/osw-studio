@@ -77,6 +77,14 @@ interface MultipagePreviewProps {
    * be a worse answer than the entry point.
    */
   initialPath?: string;
+  /**
+   * The file the preview is showing, reported whenever it changes.
+   *
+   * A file path rather than the requested one, so "/" and "/index.html" are one page and a rule
+   * naming either matches both. `getActivePath()` on the ref handle reports the requested path and
+   * stays for the three callers that read it imperatively and do not want a re-render.
+   */
+  onPathChange?: (path: string) => void;
   refreshTrigger?: number;
   onFocusSelection?: (selection: FocusContextPayload | null) => void;
   hasFocusTarget?: boolean;
@@ -1206,6 +1214,7 @@ export function crosshairHintClass(input: {
 const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePreviewProps>(({
   projectId,
   initialPath,
+  onPathChange,
   refreshTrigger,
   onFocusSelection,
   hasFocusTarget = false,
@@ -1938,6 +1947,11 @@ const MultipagePreviewComponent = forwardRef<MultipagePreviewHandle, MultipagePr
     iframeRef.current.srcdoc = processedHtml;
     setActivePath(normalizedPath);
     activePathRef.current = normalizedPath;
+    // The resolved file, not the requested path. A link to "/" and one to "/index.html" are the
+    // same page, and a scoped chat suggestion has to treat them as one: every built-in template
+    // links home as href="/", so a rule naming /index.html would stop matching the moment someone
+    // clicked Home. `activePath` stays as requested, for the callers that reload from it.
+    onPathChange?.(filePath);
   };
 
   // Keep a ref to the latest loadPage so stable callbacks (escape timer, message handler) can call it.

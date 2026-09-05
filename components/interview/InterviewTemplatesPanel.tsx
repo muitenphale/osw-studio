@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { InterviewTemplate } from '@/lib/interview/types';
 import { interviewTemplatesService } from '@/lib/interview/templates-service';
 import { track } from '@/lib/telemetry';
@@ -25,6 +25,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { InterviewTemplateEditor } from './InterviewTemplateEditor';
+import { COMPACT_ROW_WIDTH } from '@/lib/constants/layout';
+import { useNarrowContainer } from '@/lib/hooks/use-narrow-container';
 
 interface InterviewTemplatesPanelProps {
   initialMode?: 'list' | 'create';
@@ -42,6 +44,8 @@ export function InterviewTemplatesPanel({
   onChanged,
 }: InterviewTemplatesPanelProps) {
   const [templates, setTemplates] = useState<InterviewTemplate[]>([]);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const [compactRows, measureRowsRef] = useNarrowContainer(COMPACT_ROW_WIDTH);
   const [view, setView] = useState<View>(initialMode === 'create' ? { mode: 'create' } : 'list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showBuiltIn, setShowBuiltIn] = useState(true);
@@ -193,14 +197,14 @@ export function InterviewTemplatesPanel({
               )}
             </div>
           ) : viewMode === 'table' ? (
-            <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
+            <div ref={(el) => { listScrollRef.current = el; measureRowsRef(el); }} className="@container flex-1 min-h-0 overflow-auto border rounded-lg">
               <table className="w-full table-auto border-collapse">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Title</th>
                     <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Type</th>
                     <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Items</th>
-                    <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Artifact</th>
+                    <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Artifact</th>
                     <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
                   </tr>
                 </thead>
@@ -219,33 +223,53 @@ export function InterviewTemplatesPanel({
                         </Badge>
                       </td>
                       <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{t.items.length}</td>
-                      <td className="p-[4px_10px] text-[11px] text-muted-foreground align-middle whitespace-nowrap font-mono overflow-hidden text-ellipsis" style={{ maxWidth: 260 }}>
+                      <td className="@max-5xl:hidden p-[4px_10px] text-[11px] text-muted-foreground align-middle whitespace-nowrap font-mono overflow-hidden text-ellipsis" style={{ maxWidth: 260 }}>
                         {t.artifacts[0]?.path ?? '—'}
                       </td>
                       <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           {t.isBuiltIn ? (
                             <>
-                              <Button variant="outline" size="xs" onClick={() => setView({ mode: 'view', template: t })}>View</Button>
-                              <Button variant="outline" size="xs" onClick={() => handleDuplicate(t)}>Duplicate</Button>
+                              <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => setView({ mode: 'view', template: t })}>View</Button>
+                              <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleDuplicate(t)}>Duplicate</Button>
                             </>
                           ) : (
                             <>
-                              <Button variant="outline" size="xs" onClick={() => setView({ mode: 'edit', template: t })}>
+                              <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => setView({ mode: 'edit', template: t })}>
                                 <Edit className="w-3 h-3" />Edit
                               </Button>
-                              <Button variant="outline" size="xs" onClick={() => handleDuplicate(t)}>Duplicate</Button>
+                              <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleDuplicate(t)}>Duplicate</Button>
                             </>
                           )}
-                          {!t.isBuiltIn && (
+                          {/* The menu was custom-only, so a built-in row would have been left with
+                              nothing once View and Duplicate hide. */}
+                          {(!t.isBuiltIn || compactRows) && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => setTemplateToDelete(t)} className="text-destructive focus:text-destructive">
-                                  <Trash2 className="w-4 h-4 mr-2" />Delete
-                                </DropdownMenuItem>
+                                {compactRows && (
+                                  <>
+                                    {t.isBuiltIn ? (
+                                      <DropdownMenuItem onClick={() => setView({ mode: 'view', template: t })}>
+                                        <Eye className="w-4 h-4 mr-2" />View
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      <DropdownMenuItem onClick={() => setView({ mode: 'edit', template: t })}>
+                                        <Edit className="w-4 h-4 mr-2" />Edit
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem onClick={() => handleDuplicate(t)}>
+                                      <Copy className="w-4 h-4 mr-2" />Duplicate
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                                {!t.isBuiltIn && (
+                                  <DropdownMenuItem onClick={() => setTemplateToDelete(t)} className="text-destructive focus:text-destructive">
+                                    <Trash2 className="w-4 h-4 mr-2" />Delete
+                                  </DropdownMenuItem>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           )}

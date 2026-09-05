@@ -51,7 +51,12 @@ export function normalizeModelEntry(entry: ModelEntry, defaultContextLength: num
   };
 }
 
-export async function getAvailableModels(apiKey?: string, provider?: ProviderId, baseUrl?: string): Promise<ModelEntry[]> {
+export async function getAvailableModels(
+  apiKey?: string,
+  provider?: ProviderId,
+  baseUrl?: string,
+  customHeaders?: Record<string, string>,
+): Promise<ModelEntry[]> {
   const currentProvider = provider || configManager.getSelectedProvider() || 'openrouter';
   const providerConfig = getProvider(currentProvider);
   let key = apiKey || configManager.getProviderApiKey(currentProvider);
@@ -66,11 +71,12 @@ export async function getAvailableModels(apiKey?: string, provider?: ProviderId,
       key = await ensureValidCodexToken();
     }
 
-    const body: Record<string, string | null> = {
+    const body: Record<string, unknown> = {
       apiKey: key,
       provider: currentProvider
     };
     if (baseUrl) body.baseUrl = baseUrl;
+    if (customHeaders) body.customHeaders = customHeaders;
     const response = await apiFetch('/api/models', {
       method: 'POST',
       headers: {

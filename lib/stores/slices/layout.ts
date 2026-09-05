@@ -15,6 +15,13 @@ export interface LayoutSlice {
   showDebugPanel: boolean;
   showElements: boolean;
   showProjectSettingsModal: boolean;
+  /**
+   * A section of the project settings dialog to bring into view once it opens, or null.
+   *
+   * Cleared by the dialog after it scrolls, so opening the dialog again by any other route does not
+   * jump to whatever was last requested.
+   */
+  projectSettingsSection: string | null;
   fullscreenPreview: boolean;
   panelOrder: string[];
   draggingPanel: string | null;
@@ -44,7 +51,8 @@ export interface LayoutSlice {
   endDrag: () => void;
   setDropTarget: (target: number | null) => void;
   setFullscreenPreview: (v: boolean) => void;
-  setShowProjectSettingsModal: (v: boolean) => void;
+  setShowProjectSettingsModal: (v: boolean, section?: string) => void;
+  clearProjectSettingsSection: () => void;
   setHasUnreadConsole: (v: boolean) => void;
   setPaletteOpen: (v: boolean) => void;
   setMobileOverflowOpen: (v: boolean) => void;
@@ -143,6 +151,7 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
     showDebugPanel: saved?.debug ?? false,
     showElements: saved?.elements ?? false,
     showProjectSettingsModal: false,
+    projectSettingsSection: null,
     fullscreenPreview: false,
     panelOrder: loadPanelOrder(),
     draggingPanel: null,
@@ -219,7 +228,9 @@ export const createLayoutSlice: StateCreator<LayoutSlice> = (set, get) => {
     endDrag: () => set({ draggingPanel: null, dropTarget: null }),
     setDropTarget: (target) => set({ dropTarget: target }),
     setFullscreenPreview: (v) => set({ fullscreenPreview: v }),
-    setShowProjectSettingsModal: (v) => set({ showProjectSettingsModal: v }),
+    setShowProjectSettingsModal: (v, section) =>
+      set({ showProjectSettingsModal: v, projectSettingsSection: v ? section ?? null : null }),
+    clearProjectSettingsSection: () => set({ projectSettingsSection: null }),
     setHasUnreadConsole: (v) => set({ hasUnreadConsole: v }),
     setPaletteOpen: (v) => set({ paletteOpen: v }),
     setMobileOverflowOpen: (v) => set({ mobileOverflowOpen: v }),

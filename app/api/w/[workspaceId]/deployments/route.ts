@@ -13,6 +13,7 @@ import { Deployment } from '@/lib/vfs/types';
 import { withPublicUrl } from '@/lib/api/deployment-url';
 import { toPublicDeployment } from '@/lib/api/deployment-public';
 import { v4 as uuidv4 } from 'uuid';
+import { openThreadCounts } from '@/lib/review/open-thread-counts';
 
 export async function GET(
   _request: NextRequest,
@@ -23,7 +24,16 @@ export async function GET(
 
     const deployments = await adapter.listDeployments?.() || [];
 
-    return NextResponse.json(deployments.map(d => toPublicDeployment(withPublicUrl(d))));
+    // Attached here rather than fetched separately: it is one indexed count per review-enabled
+    // deployment, and a second round trip per row would cost more than the counts do.
+    const openThreads = openThreadCounts(deployments);
+
+    return NextResponse.json(
+      deployments.map(d => ({
+        ...toPublicDeployment(withPublicUrl(d)),
+        openReviewThreads: openThreads[d.id],
+      }))
+    );
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

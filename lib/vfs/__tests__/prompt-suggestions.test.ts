@@ -89,3 +89,48 @@ describe('newPromptSuggestion', () => {
     expect(newPromptSuggestion().id).not.toBe(newPromptSuggestion().id);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Page scoping
+// ---------------------------------------------------------------------------
+
+describe('paths', () => {
+  /**
+   * Both functions rebuild each entry field by field rather than spreading, which is deliberate but
+   * means a new field is dropped unless it is listed. That is silent: the suggestion still works, it
+   * just stops being page-scoped.
+   */
+  it('survives seeding from a template', () => {
+    const seeded = seedPromptSuggestions([
+      { id: 'a', label: 'Add an article', prompt: 'Add one', paths: ['/articles/*.html'] },
+    ]);
+    expect(seeded?.[0].paths).toEqual(['/articles/*.html']);
+  });
+
+  it('is copied on seed, not shared with the template', () => {
+    const declared = [{ id: 'a', label: 'A', prompt: 'A', paths: ['/one.html'] }];
+    const seeded = seedPromptSuggestions(declared)!;
+    seeded[0].paths!.push('/two.html');
+    expect(declared[0].paths).toEqual(['/one.html']);
+  });
+
+  it('normalises patterns on save', () => {
+    const [saved] = usablePromptSuggestions([
+      { id: 'a', label: 'A', prompt: 'A', paths: ['  articles/*.html  ', '', '   '] },
+    ]);
+    expect(saved.paths).toEqual(['/articles/*.html']);
+  });
+
+  it('drops the field when nothing survives, rather than writing an empty array', () => {
+    // `paths: []` reads as unscoped but differs on the wire, so an emptied toggle must not persist.
+    const [saved] = usablePromptSuggestions([
+      { id: 'a', label: 'A', prompt: 'A', paths: ['   ', ''] },
+    ]);
+    expect('paths' in saved).toBe(false);
+  });
+
+  it('leaves an unscoped suggestion without the field', () => {
+    const [saved] = usablePromptSuggestions([{ id: 'a', label: 'A', prompt: 'A' }]);
+    expect('paths' in saved).toBe(false);
+  });
+});

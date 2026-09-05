@@ -69,6 +69,8 @@ import { supportsDirectEditing } from '@/lib/runtimes/registry';
 interface WorkspaceProps {
   project: Project;
   onBack: () => void;
+  /** Names the page Back returns to, which is whichever one the project was opened over. */
+  backLabel?: string;
   workspaceId?: string;
   /**
    * The page the preview should open on, when the caller opened this project to look at something
@@ -205,7 +207,10 @@ export function focusMessageContext<T extends { domPath: string }>(
   return { promptBlock: formatBlock(focus), generationFocus: focus };
 }
 
-export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: WorkspaceProps) {
+export function Workspace({ project, onBack, backLabel, workspaceId, initialPreviewPath }: WorkspaceProps) {
+  // The page the preview is on, for suggestions that are scoped to particular pages. Null until the
+  // preview reports one, which selectPromptSuggestions reads as "offer everything".
+  const [previewPath, setPreviewPath] = useState<string | null>(initialPreviewPath ?? null);
   const refreshTrigger = useWorkspaceStore(s => s.refreshTrigger);
   const generating = useWorkspaceStore(s => s.generating);
   const debugEvents = useWorkspaceStore(s => s.debugEvents);
@@ -1891,7 +1896,7 @@ export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: 
   const headerActions: HeaderAction[] = [
     {
       id: 'back',
-      label: 'Back to projects',
+      label: backLabel ?? 'Back to projects',
       icon: ArrowLeft,
       onClick: guardedBack,
       variant: 'outline'
@@ -2412,6 +2417,7 @@ export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: 
 
               if (showChat) panelMap['chat'] = { minSize: 15, content: (
                 <ChatPanel
+                  previewPath={previewPath}
                   events={debugEvents}
                   onRestore={handleRestoreCheckpoint}
                   onRetry={handleRetry}
@@ -2491,6 +2497,7 @@ export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: 
                     ref={attachDesktopPreview}
                     projectId={project.id}
                     initialPath={initialPreviewPath}
+                    onPathChange={setPreviewPath}
                     refreshTrigger={refreshTrigger}
                     onFocusSelection={handleDesktopFocusSelection}
                     hasFocusTarget={Boolean(focusContext)}
@@ -2689,6 +2696,7 @@ export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: 
           <div className="flex-1 pb-12 overflow-hidden">
             {activeMobilePanel === 'chat' && (
               <ChatPanel
+                previewPath={previewPath}
                 events={debugEvents}
                 onRestore={handleRestoreCheckpoint}
                 onRetry={handleRetry}
@@ -2750,6 +2758,7 @@ export function Workspace({ project, onBack, workspaceId, initialPreviewPath }: 
                   ref={previewRef}
                   projectId={project.id}
                   initialPath={initialPreviewPath}
+                  onPathChange={setPreviewPath}
                   refreshTrigger={refreshTrigger}
                   onFocusSelection={handleMobileFocusSelection}
                   hasFocusTarget={Boolean(focusContext)}

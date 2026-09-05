@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.100.0 - 2026-09-05
+
+### Review Mode
+- **The deployments listing shows a count of unresolved review comments**: `openThreadCounts` (`lib/review/open-thread-counts.ts`) attaches `openReviewThreads` to each deployment from `GET /api/w/{id}/deployments`, counted by the new `ReviewDatabase.countOpenThreads` over open comments with no parent. Only deployments with `review.enabled` and an existing `review.sqlite` are opened, since `getReviewDatabaseConnection` creates the file. Nothing open leaves the field absent rather than zero.
+- **A review count opens the deployment on its Review tab**: new `ReviewBadge` (`components/ui/review-badge.tsx`) in the table row and the card's status overlay, passing the new `initialSection` prop to `DeploymentDetail`.
+
+### UI
+- **A deployment's URL copies when clicked**: the address in the listing was inert, so a click reached the row and opened the detail view. It now calls the same `copyDeploymentUrl` as the button beside it.
+- **The deployment URL column no longer takes width from Name and the row actions**: the address takes `flex-1` with a 220px cap on the inner element rather than the `td`, which `table-auto` may ignore.
+- **Listings drop their lower-priority columns as they narrow**: each table's scroll box is a query container and secondary columns carry `@max-5xl:hidden`, so they answer to the table's width rather than the viewport's. Projects drops Files and Cost, Templates Author and License, Interviews Artifact, Deployments the URL, Users Projects, Storage, Workspaces and Active, Workspaces Members, Projects and Deployments. The Users and Workspaces figures reappear in the row's expanded panel under `@5xl:hidden`.
+- **Row actions move into the overflow menu as a listing narrows**: below 48rem of table width Projects, Templates, Skills, Interviews and Deployments hide their inline row buttons and carry the same actions in the menu, Deployments adding an Open link item. Skills had no menu and gets one; Templates and Interviews had menus only for custom entries, leaving a built-in row with no actions at all.
+- **`useNarrowContainer` measures a listing a container query cannot reach**: new `lib/hooks/use-narrow-container.ts` returns a boolean and a callback ref, for cases where Radix portals menu content out of the container a `@max-*` variant resolves against. `COMPACT_ROW_WIDTH` (`lib/constants/layout.ts`) is the width shared by it and the `@max-3xl` variants.
+- **Mail settings are a pane in Settings**: `settings?settings=mail` replaces the sidebar entry and the `/w/{id}/mail` page, which now redirects there. `UnifiedSettings`, `SettingsView` and `SettingsNav` take a `workspaceId`, and `visiblePanes` hides the pane without one. Sidebar sub-items gained `serverModeOnly`.
+- **Deployment settings collapse their side nav into a dropdown**: below `md` the 192px rail is replaced by a Select above the content, built from the same `DEPLOYMENT_NAV` and `BACKEND_NAV` groups the rail renders.
+- **The open project is in the URL in server mode too**: `?project={id}` is written on open and cleared on close by `page-wrapper.tsx`, and read back on mount. This existed only in the browser-mode shell (`studio-app.tsx`). The Dashboard's recent-project link emitted `?open={id}`, which nothing read, and now uses the same parameter; the unread `?open=` on its deployment link is gone.
+- **A link carrying `?project=` renders a placeholder until the project resolves**: both shells previously rendered the view they landed on and replaced it. The sidebar is suppressed for that moment too.
+- **The workspace Back control shows which page it returns to**: new `backLabel` on `Workspace`, read by the Back control and the logo beside the project name. The Dashboard's recent-project link opens over the dashboard rather than the projects list.
+
+- **The in-workspace settings dialog is non-modal again**: `UnifiedSettingsModal` lost `modal={false}`, its own backdrop and its focus guards when v1.97.0 moved the dialog out of `chat-panel.tsx`. The connections drawer is portaled to `<body>`, so a modal dialog's focus trap pulled focus straight back out of its fields, which took a click but no typing, and react-remove-scroll cancelled wheel events over it. Adding a custom provider from inside a project was affected; the Settings page has no dialog and was not.
+
+### AI Providers
+- **A custom provider sends extra headers with every request**: `ProviderConfig.customHeaders` was declared and read by nothing. `buildCustomProviderConfig` now takes them, the Connect drawer collects name/value pairs with masked values, and they travel in the request body to both routes the way `baseUrl` already does, since `getCustomProviders` is localStorage-backed and server-side `getProvider` only ever returns a stub for a custom id. Merged by `buildHeaders` (`lib/llm/request-builder.ts`) for chat and in the default branch of `app/api/models/route.ts` for discovery.
+- **Both provider drawers share one header editor**: new `CustomHeadersEditor` (`components/providers-models/custom-headers-editor.tsx`) with `headerRowsFrom`, `headersFromRows` and `unusableHeaderNames`, used by the add and edit bodies of `connections-pane.tsx`. `EditConfigBody` seeds its rows from the stored config and passes them back, since `handleSaveCustom` rebuilds the whole config on every save.
+- **`sanitizeCustomHeaders` filters what a custom endpoint may be sent**: new `lib/llm/providers/custom-headers.ts` drops `host`, `content-length`, `content-type`, `cookie`, the RFC 9110 hop-by-hop set and any `proxy-*`, plus names that are not HTTP tokens and values carrying CR, LF or NUL, which `Headers.set` rejects mid-request. A second name differing only in case is dropped too, since `fetch` lowercases them. Run when storing and again on each route, a client not being a trust boundary.
+- **A non-object `customHeaders` is refused whole**: the value arrives from a request body, and `Object.entries` on a string or array yields index keys that pass the field-name check, so `"ab"` would otherwise become the headers `0` and `1`.
+- **The API token owns the `Authorization` header**: `authorization` is on the refusal list, so a custom header cannot set it and the two can never disagree. That is the precedence rule; a non-Bearer scheme is not reachable.
+- **Model discovery on a custom endpoint has a deadline**: the `/models` fetch had no timeout or abort signal, so an endpoint that accepted the connection and never answered held the route open. It now carries `AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)`, 15 seconds. The chat route already passed `request.signal`.
+
+### Security
+- **A workspace URL is refused to someone not in that workspace**: new `app/w/[workspaceId]/layout.tsx` calls `verifyWorkspaceAccess` for every page beneath it and sends a refused caller to their own default workspace. The middleware guards these paths but runs on the Edge runtime, where the access tables are unreachable, so it could only establish that the session was valid: any signed-in user could load another workspace's URL and get the shell. No data was exposed, but the page rendered.
+
+### AI Orchestration
+- **A chat suggestion can be scoped to the preview paths it applies to**: `PromptSuggestion` gains an optional `paths` glob list (`lib/vfs/types.ts`), matched by `matchesPathPattern` and ordered by `selectPromptSuggestions` (`lib/vfs/suggestion-paths.ts`), which puts scoped matches ahead of unscoped ones before the chat panel's inline and overflow split. `*` stays inside one path segment, `**` crosses folders. Turn-0 only, as before.
+- **A suggestion's pages are built from typed rules rather than typed globs**: each rule in `PromptSuggestionsEditor` is a kind and a value. Page picks from the project's `.html` files, Directory picks one and compiles to `{dir}/**`, Pattern takes a glob. `lib/vfs/suggestion-path-rules.ts` holds `pageDirectories`, `ruleToPattern` and `patternToRule`; only the compiled glob is stored, and the kind is read back off it when the editor opens. A picked value no longer in the project stays selectable rather than being swapped for the first page in the list.
+- **The preview reports its current file to the chat panel**: `MultipagePreview` gains `onPathChange`, held in workspace state and passed to `ChatPanel` as `previewPath`. It reports the resolved `filePath`, not the requested path, so a link to `/` and one to `/index.html` are one page to a scoped suggestion. `getActivePath()` on the ref still reports the requested path for the three imperative callers.
+- **`seedPromptSuggestions` and `usablePromptSuggestions` carry `paths`**: both rebuild each entry field by field, so a new field is dropped unless they are updated. `usablePromptSuggestions` normalises each pattern to a leading slash and drops the field when nothing survives.
+- **The chat suggestion row waits for the project's own suggestions**: the store's `promptSuggestions` starts empty, which read identically to "this project has none", so the generic starters rendered and were replaced once the project loaded. The row now waits for `projectId`, set in the same `initProject` update and cleared by `resetProject`.
+- **The chat suggestion menu is always present and links to the editor**: the `…` button was gated on something overflowing and now renders regardless, with Manage suggestions as its last item. `setShowProjectSettingsModal` takes an optional section id, held as `projectSettingsSection` and cleared by the dialog once used. The "Try one of these:" heading shows only when there are pills.
+- **Saving chat suggestions takes effect without reopening the project**: `PromptSuggestionsEditor` wrote to the VFS but never called `updateProjectSettings`, so the row above the composer kept the list loaded when the project opened. Its draft now follows the stored value instead of what it read on mount.
+
+### Fixes
+- **Retry deadlines read SQLite timestamps as UTC**: columns defaulted to `datetime('now')` hold `YYYY-MM-DD HH:MM:SS` with no zone marker, which `new Date` read as local time, displacing webhook retries by the host's offset. New `lib/sqlite-timestamp.ts` exports `parseSqliteTimestamp`, used by `lib/webhooks/delivery.ts` and `lib/mail/delivery.ts`. Invisible on a UTC host.
+- **Analytics ranges are bound in SQLite's timestamp format**: an ISO cutoff sorts above a stored `YYYY-MM-DD HH:MM:SS` row of the same date, so `getStats`, the `dateFrom`/`dateTo` filters and `clearAnalytics` were wrong on the cutoff day, the last deleting rows it should have kept. `lib/vfs/adapters/analytics-database.ts` passes every bound range value through `toSqliteTimestamp`.
+
+### Tests
+- **Coverage for the new scoping, guard and timestamp paths**: glob matching and ordering (`suggestion-paths.test.ts`), rule building and read-back (`suggestion-path-rules.test.ts`), the workspace layout guard (`workspace-access-guard.test.ts`), review counts (`open-thread-counts.test.ts`), the webhook backoff deadline across four host timezones (`delivery-backoff.test.ts`) and `AnalyticsDatabase.getStats` on the cutoff day (`analytics-timestamp-range.test.ts`). Header sanitising, forwarding, precedence and survival across an edit extend `custom-headers.test.ts`, `custom-headers-editor.test.ts`, `request-builder.test.ts` and `app/api/models/__tests__/route.test.ts`.
+- **`useNarrowContainer` needs `clientWidth` stubbed**: jsdom performs no layout and reports 0, so an unstubbed test passes against a hook that never fires (`lib/hooks/__tests__/use-narrow-container.test.tsx`).
+
 ## v1.99.0 - 2026-08-30
 
 ### Review Mode
@@ -2103,7 +2151,7 @@ Major architectural restructure: backend features are now **project-scoped** and
 - Updated demo template and GitHub repository links
 - Updated theme storage and cost settings event naming
 
-## v1.11.0 - 2025-02-03
+## v1.11.0 - 2025-10-03
 - Enhanced evaluation tool with goal-oriented progress tracking (progress_summary, remaining_work, blockers)
 - Improved orchestrator loop to properly enforce evaluation after meaningful work (3+ steps)
 - Fixed evaluation state handling: now correctly respects should_continue flag
@@ -2111,21 +2159,21 @@ Major architectural restructure: backend features are now **project-scoped** and
 - Unified error message format across shell, json_patch, and evaluation tools
 - Added file creation guidelines to system prompt for cleaner project structure
 
-## v1.10.0 - 2025-02-02
+## v1.10.0 - 2025-10-02
 - Added token-efficient shell commands: `rg` (ripgrep), `head`, `tail`, `tree`, `touch`, and `echo >` redirection
 - Removed redundant commands: `sed`, `nl`, `rmdir`
 - Enhanced system prompt to discourage `cat` usage with decision flowchart and token cost warnings
 
-## v1.9.1 - 2025-01-30
+## v1.9.1 - 2025-09-30
 - Fixed Handlebars navigation links being converted to blob URLs instead of remaining as routes
 
-## v1.9.0 - 2025-01-29
+## v1.9.0 - 2025-09-29
 - Added complete data backup and restore functionality
 - Export all projects, conversations, and checkpoints to .dstudio file
 - Import data with merge or replace options
 - Fixed changelog versioning to follow semantic versioning (major.minor.patch)
 
-## v1.8.0 - 2025-01-28
+## v1.8.0 - 2025-09-28
 - Enhanced system prompt with directory tree structure and file sizes
 - Major VFS improvements: Added comprehensive image loading interceptor for dynamic content
 - VFS now transparently handles JavaScript-generated images and assets via blob URLs
@@ -2133,46 +2181,46 @@ Major architectural restructure: backend features are now **project-scoped** and
 - Refactored template system with self-contained asset definitions
 - Unified createProjectFromTemplate function with optional assets parameter
 
-## v1.7.0 - 2025-01-27
+## v1.7.0 - 2025-09-27
 - Modularized the monolithic template file
 - Removed Handlebars template
 - Added step counter to guided tour overlay
 
-## v1.6.0 - 2025-01-27
+## v1.6.0 - 2025-09-27
 - Fixed binary file persistence in checkpoint system
 - Images and other binary files now properly persist across page reloads
 - Added base64 encoding/decoding for binary content in checkpoints
 - Updated VFS updateFile to support ArrayBuffer content
 
-## v1.5.0 - 2025-01-26
+## v1.5.0 - 2025-09-26
 - Fixed TypeScript compilation error with shell tool oneOf parameter support  
 - Enhanced Handlebars error handling with detection of invalid LLM-generated syntax
 - Added helpful error messages for common Handlebars pattern mistakes
 
-## v1.4.0 - 2025-01-26
+## v1.4.0 - 2025-09-26
 - Improved LLM shell tool compatibility with natural command format support
 - Shell tool now accepts both string ("ls -la /") and array (["ls", "-la", "/"]) formats
 - Fixed system prompt confusion about model tool-calling capabilities
 - Added automatic string-to-array conversion for better first-call success rates
 
-## v1.3.0 - 2025-01-26
+## v1.3.0 - 2025-09-26
 - Enhanced demo project with Handlebars templating for navigation and footer
 - Added minimal Handlebars component to barebones template
 - Improved template organization and maintainability
 
-## v1.2.0 - 2025-01-26
+## v1.2.0 - 2025-09-26
 - Fixed mobile streaming disconnection issue in workspace chat panel
 - Mobile now properly displays real-time AI responses with tool calls
 - Added missing scroll management for mobile chat during streaming
 - Aligned mobile and desktop chat rendering behavior
 
-## v1.1.0 - 2025-01-24
+## v1.1.0 - 2025-09-24
 - Added Handlebars templating support (.hbs/.handlebars files)
 - Templates automatically compile to static HTML on export
 - LLM can now create reusable components with partials
 - Improved code generation capabilities
 
-## v1.0.0 - 2025-01-23
+## v1.0.0 - 2025-09-23
 - Initial public release
 - Multi-provider AI support (8 providers)
 - Browser-based development environment

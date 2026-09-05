@@ -524,7 +524,8 @@ function RecentProjectsCard({
           {projects.slice(0, 3).map((project) => (
             <Link
               key={project.id}
-              href={isServerMode ? `/admin/projects?open=${project.id}` : '#'}
+              // Opened over the dashboard rather than over the projects list, so Back returns here.
+              href={isServerMode ? `/admin/dashboard?project=${project.id}` : '#'}
               onClick={(e) => handleProjectClick(e, project.id)}
               className="flex items-center justify-between text-xs py-1.5 px-2 bg-muted/50 rounded hover:bg-muted transition-colors"
             >
@@ -567,7 +568,7 @@ function RecentDeploymentsCard({ deployments }: { deployments: DashboardData['re
           {deployments.slice(0, 3).map((deployment) => (
             <Link
               key={deployment.id}
-              href={`/admin/deployments?open=${deployment.id}`}
+              href={'/admin/deployments'}
               className="flex items-center justify-between text-xs py-1.5 px-2 bg-muted/50 rounded hover:bg-muted transition-colors"
             >
               <div className="flex items-center gap-2 min-w-0 flex-1">

@@ -1,4 +1,5 @@
 import type { ProviderConfig } from './types';
+import { sanitizeCustomHeaders } from './custom-headers';
 
 const STORAGE_KEY = 'osw-studio-custom-providers';
 
@@ -57,9 +58,11 @@ export function buildCustomProviderConfig(
   id: string,
   name: string,
   baseUrl: string,
-  apiKeyRequired: boolean
+  apiKeyRequired: boolean,
+  customHeaders?: Record<string, string>
 ): ProviderConfig {
   const normalizedUrl = baseUrl.replace(/\/$/, '');
+  const safeHeaders = sanitizeCustomHeaders(customHeaders).headers;
   return {
     id,
     name: name.trim() || id,
@@ -69,5 +72,6 @@ export function buildCustomProviderConfig(
     supportsModelDiscovery: true,
     supportsFunctions: true,
     supportsStreaming: true,
+    ...(Object.keys(safeHeaders).length ? { customHeaders: safeHeaders } : {}),
   };
 }

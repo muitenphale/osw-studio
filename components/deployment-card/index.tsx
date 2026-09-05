@@ -32,12 +32,13 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { ThumbnailArea } from '@/components/ui/thumbnail-area';
 import { captureDeploymentScreenshot } from '@/lib/utils/deployment-thumbnail';
+import { ReviewBadge } from '@/components/ui/review-badge';
 
 interface DeploymentCardProps {
   deployment: Deployment;
   project?: Project;
   isPublishing?: boolean;
-  onClick?: (deployment: Deployment) => void;
+  onClick?: (deployment: Deployment, section?: string) => void;
   onViewAnalytics: (deployment: Deployment) => void;
   onEditProject: (deployment: Deployment) => void;
   onPublish: (deploymentId: string) => void;
@@ -118,6 +119,11 @@ export function DeploymentCard({
               Pending Changes
             </Badge>
           )}
+          <ReviewBadge
+            count={deployment.openReviewThreads ?? 0}
+            className="bg-amber-100 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400"
+            onClick={onClick ? (e) => { e.stopPropagation(); onClick(deployment, 'review'); } : undefined}
+          />
         </div>
       </div>
 

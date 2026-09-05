@@ -2,6 +2,7 @@ import { createHmac } from 'crypto';
 import { getPendingEvents, markDelivered, markFailed, pruneDelivered, isWebhookEnabled } from './outbox';
 import { logger } from '@/lib/utils';
 import type { WebhookEvent } from './types';
+import { parseSqliteTimestamp } from '@/lib/sqlite-timestamp';
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
@@ -14,11 +15,16 @@ function signPayload(body: string): string | null {
   return createHmac('sha256', WEBHOOK_SECRET).update(body).digest('hex');
 }
 
-function shouldDeliver(event: WebhookEvent): boolean {
+/**
+ * Whether a failed event is due another attempt. Exported for its tests: `last_attempted_at` is
+ * written by SQLite's datetime('now'), and reading it as local time displaced every retry by the
+ * host's offset.
+ */
+export function shouldDeliver(event: WebhookEvent): boolean {
   if (event.attempts === 0) return true;
   if (!event.last_attempted_at) return true;
   const backoffSeconds = BACKOFF_SCHEDULE[Math.min(event.attempts - 1, BACKOFF_SCHEDULE.length - 1)];
-  const nextAttempt = new Date(event.last_attempted_at).getTime() + backoffSeconds * 1000;
+  const nextAttempt = parseSqliteTimestamp(event.last_attempted_at) + backoffSeconds * 1000;
   return Date.now() >= nextAttempt;
 }
 

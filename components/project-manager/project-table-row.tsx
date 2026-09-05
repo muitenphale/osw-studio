@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Trash2, Download, FileArchive, Copy, Settings, FileBox, Pencil } from 'lucide-react';
+import { MoreVertical, Trash2, Download, FileArchive, Copy, Settings, FileBox, Pencil, Eye } from 'lucide-react';
 import { ThumbnailArea } from '@/components/ui/thumbnail-area';
 import { captureProjectScreenshot } from '@/lib/utils/project-thumbnail';
 import { logger, formatCompactAge } from '@/lib/utils';
@@ -29,6 +29,8 @@ interface ProjectTableRowProps {
   onExportAsTemplate?: (project: Project) => void;
   onBackend?: (project: Project) => void;
   onUpdate: (project: Project) => void;
+  /** True when the row hid its inline actions, so the menu offers them instead. */
+  compactRows?: boolean;
 }
 
 interface ProjectStats {
@@ -48,6 +50,7 @@ export const ProjectTableRow = React.memo(function ProjectTableRow({
   onExportAsTemplate,
   onBackend,
   onUpdate,
+  compactRows,
 }: ProjectTableRowProps) {
   const [stats, setStats] = useState<ProjectStats | null>(null);
 
@@ -83,13 +86,13 @@ export const ProjectTableRow = React.memo(function ProjectTableRow({
       <td className="p-[4px_10px] align-middle whitespace-nowrap">
         <Badge className={`text-[11px] px-[7px] py-[1px] h-auto rounded-full ${runtimeBadge.className}`}>{runtimeBadge.label}</Badge>
       </td>
-      <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap font-mono tabular-nums">
+      <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap font-mono tabular-nums">
         {stats?.fileCount ?? '—'}
       </td>
       <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap font-mono tabular-nums">
         {stats?.formattedSize ?? '—'}
       </td>
-      <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap font-mono tabular-nums">
+      <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap font-mono tabular-nums">
         {formattedCost ?? '—'}
       </td>
       <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap overflow-hidden text-ellipsis">
@@ -97,15 +100,27 @@ export const ProjectTableRow = React.memo(function ProjectTableRow({
       </td>
       <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-1">
-          <Button variant="outline" size="xs" onClick={() => onSelect(project)}>
+          <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => onSelect(project)}>
             <Pencil className="w-3 h-3" />Edit
           </Button>
-          <Button variant="outline" size="xs" onClick={() => onPreview(project)}>Preview</Button>
+          <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => onPreview(project)}>Preview</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {/* Edit and Preview hide from the row at COMPACT_ROW_WIDTH and appear here instead. */}
+              {compactRows && (
+                <>
+                  <DropdownMenuItem onClick={() => onSelect(project)}>
+                    <Pencil className="w-4 h-4 mr-2" />Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onPreview(project)}>
+                    <Eye className="w-4 h-4 mr-2" />Preview
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={() => onExportZip(project)}>
                 <FileArchive className="w-4 h-4 mr-2" />Export ZIP
               </DropdownMenuItem>

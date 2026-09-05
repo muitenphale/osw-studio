@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Deployment, Project } from '@/lib/vfs/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,7 @@ import {
   ExternalLink,
   MessagesSquare,
 } from 'lucide-react';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from '@/components/ui/select';
 
 type NavSection = 'deployment' | 'backend';
 
@@ -97,6 +98,13 @@ interface DeploymentDetailProps {
   onSave: (settings: DeploymentSettingsUpdate) => Promise<void>;
   onPublish: (deploymentId: string) => void;
   workspaceId?: string;
+  /**
+   * Which side-nav item to open on, so the unresolved-comments badge can land on Review. Defaults to
+   * General. Read once, as the initial nav state: DeploymentsView returns early on
+   * `selectedDeployment`, so this component unmounts on Back and remounts per deployment. Keeping it
+   * mounted would make this prop stop working with nothing to show for it.
+   */
+  initialSection?: string;
 }
 
 export function DeploymentDetail({
@@ -107,8 +115,20 @@ export function DeploymentDetail({
   onSave,
   onPublish,
   workspaceId,
+  initialSection,
 }: DeploymentDetailProps) {
-  const [activeNav, setActiveNav] = useState('general');
+  const [activeNav, setActiveNav] = useState(initialSection ?? 'general');
+
+  // The same grouping the rail renders, reused by the narrow-screen dropdown so the two cannot
+  // list different items.
+  const navSections = useMemo(
+    () => [
+      { label: 'Deployment', items: DEPLOYMENT_NAV },
+      ...(deployment.databaseEnabled ? [{ label: 'Backend', items: BACKEND_NAV }] : []),
+    ],
+    [deployment.databaseEnabled]
+  );
+  const activeNavItem = navSections.flatMap((section) => section.items).find((i) => i.id === activeNav);
 
   // ── Settings state (mirrored from deployment for dirty tracking) ──
   const [projectId, setProjectId] = useState(deployment.projectId);
@@ -295,9 +315,9 @@ export function DeploymentDetail({
       </div>
 
       {/* Body: side nav + content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Side navigation */}
-        <nav className="w-48 shrink-0 border-r bg-muted/30 overflow-y-auto py-2">
+        <nav className="hidden md:block w-48 shrink-0 border-r bg-muted/30 overflow-y-auto py-2">
           <div className="px-3 py-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Deployment
@@ -344,6 +364,34 @@ export function DeploymentDetail({
             </>
           )}
         </nav>
+
+        {/* Narrow screens: the side nav as a dropdown, matching the settings panes. A 192px rail
+            beside the content leaves too little room for a form on a phone. */}
+        <div className="md:hidden p-3 border-b border-border/60 shrink-0">
+          <Select value={activeNav} onValueChange={setActiveNav}>
+            <SelectTrigger className="w-full">
+              <span className="flex items-center gap-1.5 text-xs">
+                {activeNavItem?.icon && <activeNavItem.icon className="h-3 w-3" />}
+                {activeNavItem?.label ?? 'Settings'}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {navSections.map(section => (
+                <SelectGroup key={section.label}>
+                  <SelectLabel>{section.label}</SelectLabel>
+                  {section.items.map(item => (
+                    <SelectItem key={item.id} value={item.id}>
+                      <span className="flex items-center gap-2">
+                        <item.icon className="h-3.5 w-3.5" />
+                        {item.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         {/* Content area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">

@@ -265,6 +265,53 @@ describe('layout slice', () => {
     });
   });
 
+  describe('projectSettingsSection', () => {
+    it('starts null, since nothing has asked for a section', () => {
+      expect(store.getState().projectSettingsSection).toBeNull();
+    });
+
+    it('holds the section the opener asked for', () => {
+      store.getState().setShowProjectSettingsModal(true, 'suggestions');
+      expect(store.getState().showProjectSettingsModal).toBe(true);
+      expect(store.getState().projectSettingsSection).toBe('suggestions');
+    });
+
+    it('opens with no section when none was asked for', () => {
+      store.getState().setShowProjectSettingsModal(true);
+      expect(store.getState().projectSettingsSection).toBeNull();
+    });
+
+    it('does not carry a section into the next open by another route', () => {
+      // The whole point of the field: a later open must not jump to what was last requested.
+      store.getState().setShowProjectSettingsModal(true, 'suggestions');
+      store.getState().setShowProjectSettingsModal(false);
+      store.getState().setShowProjectSettingsModal(true);
+      expect(store.getState().projectSettingsSection).toBeNull();
+    });
+
+    it('is cleared when the dialog closes', () => {
+      store.getState().setShowProjectSettingsModal(true, 'suggestions');
+      store.getState().setShowProjectSettingsModal(false);
+      expect(store.getState().projectSettingsSection).toBeNull();
+    });
+
+    it('is cleared on close even when a section is passed with it', () => {
+      // Closing owns the field regardless of arguments, so a stale section cannot outlive the
+      // dialog by any call shape.
+      store.getState().setShowProjectSettingsModal(true, 'suggestions');
+      store.getState().setShowProjectSettingsModal(false, 'suggestions');
+      expect(store.getState().projectSettingsSection).toBeNull();
+    });
+
+    it('is cleared by clearProjectSettingsSection while the dialog stays open', () => {
+      // The dialog calls this once it has scrolled, so a re-render does not scroll again.
+      store.getState().setShowProjectSettingsModal(true, 'suggestions');
+      store.getState().clearProjectSettingsSection();
+      expect(store.getState().projectSettingsSection).toBeNull();
+      expect(store.getState().showProjectSettingsModal).toBe(true);
+    });
+  });
+
   describe('visiblePanelKeys', () => {
     it('lists open panels in panel order', () => {
       store.setState({ panelOrder: ['debug', 'preview', 'chat', 'files', 'elements'] });

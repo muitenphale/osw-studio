@@ -23,6 +23,7 @@ import { useProviderAutoAssign } from '@/lib/hooks/use-provider-auto-assign';
 import { useModelConfigSignal } from '@/lib/hooks/use-model-config-signal';
 import { createProjectFromTemplate } from '@/lib/vfs/templates/utils';
 import { BAREBONES_PROJECT_TEMPLATE } from '@/lib/vfs/templates/barebones';
+import { Spinner } from '@/components/ui/spinner';
 
 // Module-level guard: prevents double token exchange when React strict mode
 // re-runs the effect, or if the component remounts before URL cleanup.
@@ -38,6 +39,8 @@ function StudioInner() {
   const projectParam = searchParams.get('project');
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  /** True while a `?project=` link resolves, so the view it landed on does not render first. */
+  const [restoringProject, setRestoringProject] = useState(() => !!projectParam);
   const [currentView, setCurrentView] = useState<'dashboard' | 'projects' | 'deployments' | 'templates' | 'skills' | 'interviews' | 'docs' | 'settings'>('dashboard');
   const [autoCreateProject, setAutoCreateProject] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
@@ -200,9 +203,14 @@ function StudioInner() {
     let cancelled = false;
     if (!projectParam) {
       if (selectedProject) setSelectedProject(null); // honor browser Back
+      setRestoringProject(false);
       return;
     }
-    if (selectedProject?.id === projectParam) return;
+    if (selectedProject?.id === projectParam) {
+      setRestoringProject(false);
+      return;
+    }
+    setRestoringProject(true);
     (async () => {
       try {
         await vfs.init();
@@ -211,6 +219,7 @@ function StudioInner() {
         if (project) setSelectedProject(project);
         else clearProjectParam();
       } catch { if (!cancelled) clearProjectParam(); }
+      finally { if (!cancelled) setRestoringProject(false); }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -331,11 +340,19 @@ function StudioInner() {
   }, [handleProjectOpen]);
 
   const content = useMemo(() => {
+    if (restoringProject && !selectedProject) {
+      return (
+        <div className="h-full flex items-center justify-center">
+          <Spinner size={48} color="#f97316" className="mx-auto" />
+        </div>
+      );
+    }
     if (selectedProject) {
       return (
         <Workspace
           project={selectedProject}
           onBack={() => { setSelectedProject(null); clearProjectParam(); }}
+          backLabel={`Back to ${currentView}`}
         />
       );
     }
@@ -351,7 +368,7 @@ function StudioInner() {
         autoCreateProject={autoCreateProject}
       />
     );
-  }, [selectedProject, currentView, handleNavigate, handleStartTour, autoCreateProject, handleProjectOpen]);
+  }, [restoringProject, selectedProject, currentView, handleNavigate, handleStartTour, autoCreateProject, handleProjectOpen]);
 
   return (
     <>

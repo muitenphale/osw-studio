@@ -42,6 +42,49 @@ describe('buildHeaders', () => {
   });
 });
 
+describe('buildHeaders custom headers', () => {
+  const custom = getProvider('some-unregistered-custom-id');
+
+  it('forwards a configured header alongside the Bearer token', () => {
+    const headers = buildHeaders('some-unregistered-custom-id', 'sk-x', null, custom, 'openai', { 'X-Tenant': 'acme' });
+    expect(headers['Authorization']).toBe('Bearer sk-x');
+    expect(headers['X-Tenant']).toBe('acme');
+  });
+
+  it('sends nothing extra when none are configured (the existing Bearer-only path)', () => {
+    const headers = buildHeaders('some-unregistered-custom-id', 'sk-x', null, custom, 'openai');
+    expect(headers).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer sk-x' });
+  });
+
+  it('keeps the API key when a configured header also claims Authorization', () => {
+    // Precedence: the token field owns the header, so a second source cannot displace it.
+    const headers = buildHeaders('some-unregistered-custom-id', 'sk-x', null, custom, 'openai', {
+      Authorization: 'Bearer other',
+      'X-Tenant': 'acme',
+    });
+    expect(headers['Authorization']).toBe('Bearer sk-x');
+    expect(headers['X-Tenant']).toBe('acme');
+  });
+
+  it('does not let a configured header replace Content-Type', () => {
+    const headers = buildHeaders('some-unregistered-custom-id', 'sk-x', null, custom, 'openai', {
+      'Content-Type': 'text/plain',
+    });
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
+  it('drops a rejected name rather than passing it to fetch', () => {
+    const headers = buildHeaders('some-unregistered-custom-id', undefined, null, custom, 'openai', {
+      Host: 'evil.example',
+      Connection: 'keep-alive',
+      'X-Tenant': 'acme',
+    });
+    expect(headers['Host']).toBeUndefined();
+    expect(headers['Connection']).toBeUndefined();
+    expect(headers['X-Tenant']).toBe('acme');
+  });
+});
+
 describe('resolveTemperature', () => {
   it('opencode-go + kimi- model → 1', () => {
     expect(resolveTemperature('opencode-go', 'kimi-k2.7-code')).toBe(1);

@@ -913,7 +913,7 @@ export class MultiAgentOrchestrator {
     });
   }
 
-  private getProviderConfig(): { provider: string; apiKey: string; model: string; baseUrl: string } {
+  private getProviderConfig(): { provider: string; apiKey: string; model: string; baseUrl: string; customHeaders?: Record<string, string> } {
     if (this.serverContext) {
       const cfg = this.getConfig();
       const provider = cfg.getSelectedProvider();
@@ -927,7 +927,13 @@ export class MultiAgentOrchestrator {
     if (providerConfig.apiKeyRequired && !apiKey && !providerConfig.usesOAuth) {
       throw new Error(`API key not configured for provider: ${provider}`);
     }
-    return { provider, apiKey: apiKey || '', model: model || 'default-model', baseUrl: providerConfig.baseUrl || '' };
+    return {
+      provider,
+      apiKey: apiKey || '',
+      model: model || 'default-model',
+      baseUrl: providerConfig.baseUrl || '',
+      ...(providerConfig.customHeaders ? { customHeaders: providerConfig.customHeaders } : {}),
+    };
   }
 
   private resolveCompactionLimit(): number {

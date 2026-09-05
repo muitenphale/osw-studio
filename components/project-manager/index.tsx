@@ -88,6 +88,8 @@ import { DescribeMode } from '@/components/describe-mode';
 import { track } from '@/lib/telemetry';
 import { usePagination } from '@/lib/hooks/use-pagination';
 import { Pagination, PaginationRange } from '@/components/ui/pagination';
+import { COMPACT_ROW_WIDTH } from '@/lib/constants/layout';
+import { useNarrowContainer } from '@/lib/hooks/use-narrow-container';
 
 interface ProjectManagerProps {
   onProjectSelect: (project: Project) => void;
@@ -178,6 +180,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
   const demoCreationRef = useRef(false);
   const listScrollRef = useRef<HTMLElement | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const [compactRows, measureRowsRef] = useNarrowContainer(COMPACT_ROW_WIDTH);
 
   // Derive backend enabled state from localStorage
   const backendProjectEnabled = backendProject ? migrateBackendKey(backendProject.id) : true;
@@ -830,16 +833,16 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                       </div>
                     )}
                     {viewMode === 'table' ? (
-                      <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto border rounded-lg" data-tour-id="projects-list">
+                      <div ref={(el) => { contentScrollRef.current = el; measureRowsRef(el); }} className="@container flex-1 min-h-0 overflow-auto border rounded-lg" data-tour-id="projects-list">
                         <table className="w-full table-auto border-collapse">
                           <thead className="sticky top-0 z-10">
                             <tr>
                               <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
                               <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
                               <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Runtime</th>
-                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Files</th>
+                              <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Files</th>
                               <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Size</th>
-                              <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Cost</th>
+                              <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Cost</th>
                               <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Updated</th>
                               <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
                             </tr>
@@ -849,6 +852,7 @@ export function ProjectManager({ onProjectSelect, hideHeader = false, hideFooter
                               if (typeof project !== 'object' || !project.id || !project.name) return null;
                               return (
                                 <ProjectTableRow
+                                  compactRows={compactRows}
                                   key={project.id}
                                   project={project}
                                   onSelect={onProjectSelect}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo, useCallback, DragEvent, ClipboardEvent } from 'react';
-import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, Brain, Image as ImageIcon, Type, Mic, Square, Plus, FileText, LogIn } from 'lucide-react';
+import { MessageSquare, Loader2, CheckCircle, XCircle, ChevronRight, FileCode, ClipboardList, Bot, RotateCcw, RefreshCw, Send, ChevronUp, ChevronDown, Code, Trash2, Brain, Image as ImageIcon, Type, Mic, Square, Plus, FileText, LogIn, Settings2 } from 'lucide-react';
 import type { WorkspaceMode, ActiveInterview } from '@/lib/stores/slices/project';
 import { InterviewPicker } from './interview-picker';
 import { InterviewTemplatesManager } from '@/components/interview/InterviewTemplatesManager';
@@ -32,7 +32,7 @@ import { PendingImage, PendingAudio, PendingFile } from '@/lib/llm/multi-agent-o
 import { useAudioRecorder } from '@/lib/audio/use-audio-recorder';
 import { useSpeechRecognition } from '@/lib/audio/use-speech-recognition';
 import { AudioSpectrogram } from './audio-spectrogram';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContentBlock } from '@/lib/llm/types';
 import type { PlacedBlock } from '@/lib/semantic-blocks/types';
 import { MessageContext } from '@/components/message-context';
@@ -42,6 +42,7 @@ import { track } from '@/lib/telemetry';
 import { toast } from 'sonner';
 import { useWorkspaceStore } from '@/lib/stores/workspace';
 import { resolveActiveAssignment } from '@/lib/llm/models/template-store';
+import { selectPromptSuggestions } from '@/lib/vfs/suggestion-paths';
 
 type FocusTarget = FocusContextPayload & { timestamp: number };
 
@@ -98,6 +99,11 @@ function UserMessageContent({ content, hideImages, hideAudio }: { content: strin
 
 interface ChatPanelProps {
   events: DebugEvent[];
+  /**
+   * The page the preview is on, so suggestions scoped to particular pages can be offered first.
+   * Null before the preview reports one, which selectPromptSuggestions reads as "offer everything".
+   */
+  previewPath?: string | null;
   onRestore?: (checkpointId: string) => void;
   onRetry?: (checkpointId: string) => void;
   // Input functionality
@@ -178,6 +184,7 @@ const statusIcons: Record<string, React.ReactNode> = {
 
 export function ChatPanel({
   events,
+  previewPath,
   onRestore,
   onRetry,
   generating,
@@ -301,7 +308,17 @@ export function ChatPanel({
 
   /** Project-specific suggestions replace the generic set; blank projects fall back to generic. */
   const projectSuggestions = useWorkspaceStore(s => s.promptSuggestions);
-  const suggestions = projectSuggestions.length > 0 ? projectSuggestions : SUGGESTION_PILLS;
+  // `initProject` sets the id and the suggestions in one update, so an id means the list below is
+  // the project's own. Before that it is the slice's empty default, which reads identically to "this
+  // project has none" and would show the generic starters for a moment and then swap them out.
+  const suggestionsLoaded = useWorkspaceStore(s => s.projectId) !== '';
+  const allSuggestions = projectSuggestions.length > 0 ? projectSuggestions : SUGGESTION_PILLS;
+  // Ordered before the inline/overflow split, so a suggestion scoped to this page takes one of the
+  // three inline slots ahead of the general ones.
+  const suggestions = useMemo(
+    () => selectPromptSuggestions(allSuggestions, previewPath ?? null),
+    [allSuggestions, previewPath]
+  );
   const inlineSuggestions = suggestions.slice(0, INLINE_SUGGESTION_COUNT);
   const overflowSuggestions = suggestions.slice(INLINE_SUGGESTION_COUNT);
 
@@ -842,9 +859,11 @@ export function ChatPanel({
         {/* Quick-start suggestions live in the context area above the input. Adding context
             (focus, images, files) grows MessageContext below and bumps these up. Shown only for
             a fresh, connected, idle composer (not interview or recording). */}
-        {((providerReady || hasAnyConnectedProvider()) && turns.length === 0 && !generating && mode !== 'interview' && !isRecording && !speech.isListening) && (
+        {((providerReady || hasAnyConnectedProvider()) && turns.length === 0 && !generating && mode !== 'interview' && !isRecording && !speech.isListening && suggestionsLoaded) && (
           <div>
-            <div className="text-xs text-muted-foreground mb-1.5">Try one of these:</div>
+            {inlineSuggestions.length > 0 && (
+              <div className="text-xs text-muted-foreground mb-1.5">Try one of these:</div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {inlineSuggestions.map((pill) => (
                 <button
@@ -856,30 +875,46 @@ export function ChatPanel({
                   {pill.label}
                 </button>
               ))}
-              {overflowSuggestions.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={`${overflowSuggestions.length} more suggestions`}
-                      className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 cursor-pointer transition-all"
+              {/* Always rendered, even with nothing overflowing: it is the only route from the
+                  composer to where these are edited. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={
+                      overflowSuggestions.length > 0
+                        ? `${overflowSuggestions.length} more suggestions, and manage them`
+                        : 'Manage suggestions'
+                    }
+                    className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 cursor-pointer transition-all"
+                  >
+                    …
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-w-xs">
+                  {overflowSuggestions.map((pill) => (
+                    <DropdownMenuItem
+                      key={pill.id}
+                      onClick={() => applyPromptSuggestion(pill.prompt)}
+                      className="text-xs"
                     >
-                      …
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-w-xs">
-                    {overflowSuggestions.map((pill) => (
-                      <DropdownMenuItem
-                        key={pill.id}
-                        onClick={() => applyPromptSuggestion(pill.prompt)}
-                        className="text-xs"
-                      >
-                        {pill.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+                      {pill.label}
+                    </DropdownMenuItem>
+                  ))}
+                  {overflowSuggestions.length > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuItem
+                    className="text-xs"
+                    onClick={() =>
+                      useWorkspaceStore
+                        .getState()
+                        .setShowProjectSettingsModal(true, 'project-settings-suggestions')
+                    }
+                  >
+                    <Settings2 className="h-3.5 w-3.5 mr-2" />
+                    Manage suggestions
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         )}
@@ -1172,11 +1207,8 @@ export function ChatPanel({
                 </Dialog>
               )}
 
-              {/* Full "Providers & models" manager, opened in-workspace from the per-project panel.
-                  Non-modal so the body-portaled model picker / save-as drawer can scroll: Radix's
-                  modal scroll-lock (react-remove-scroll) only whitelists the dialog content, and
-                  cancels wheel events anywhere else — including the drawer. We render our own
-                  backdrop since non-modal dialogs don't get Radix's overlay. */}
+              {/* Full settings manager, opened in-workspace from the per-project panel. It is
+                  non-modal so the body-portaled drawer stays usable; see UnifiedSettingsModal. */}
               <UnifiedSettingsModal
                 open={showSettingsManage}
                 onOpenChange={setShowSettingsManage}

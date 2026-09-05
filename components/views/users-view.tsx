@@ -455,16 +455,16 @@ export function UsersView() {
                 )}
               </div>
             ) : (
-              <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
+              <div className="@container flex-1 min-h-0 overflow-auto border rounded-lg">
                 <table className="w-full table-auto border-collapse">
                   <thead className="sticky top-0 z-10">
                     <tr>
                       <th className="bg-muted p-[6px_10px] border-b select-none"></th>
                       <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">User</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Projects</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Storage</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Workspaces</th>
-                      <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Active</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Projects</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Storage</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Workspaces</th>
+                      <th className="@max-5xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Active</th>
                       <th className="bg-muted p-[6px_10px] border-b select-none"></th>
                     </tr>
                   </thead>
@@ -490,10 +490,10 @@ export function UsersView() {
                                 {user.displayName && <span className="block text-[11px] text-muted-foreground truncate">{user.displayName}</span>}
                               </div>
                             </td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.projectCount}</td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.storageMb} MB</td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.workspaces.length}</td>
-                            <td className="p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">{user.lastActive ? formatDate(user.lastActive) : formatDate(user.createdAt)}</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.projectCount}</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.storageMb} MB</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap tabular-nums">{user.workspaces.length}</td>
+                            <td className="@max-5xl:hidden p-[4px_10px] text-[13px] text-muted-foreground align-middle whitespace-nowrap">{user.lastActive ? formatDate(user.lastActive) : formatDate(user.createdAt)}</td>
                             <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -534,6 +534,16 @@ export function UsersView() {
                             <tr className="bg-muted/30 border-b border-border/50">
                               <td></td>
                               <td colSpan={6} className="p-[4px_10px] pb-4 align-top">
+                                {/* The stats the row drops at narrow widths. Shown only there, so the
+                                    expanded panel does not repeat columns that are already on screen,
+                                    and the figures stay reachable rather than disappearing with the
+                                    columns. */}
+                                <div className="@5xl:hidden mb-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-muted-foreground">
+                                  <span>Projects <span className="text-foreground tabular-nums">{user.projectCount}</span></span>
+                                  <span>Storage <span className="text-foreground tabular-nums">{user.storageMb} MB</span></span>
+                                  <span>Workspaces <span className="text-foreground tabular-nums">{user.workspaces.length}</span></span>
+                                  <span>Active <span className="text-foreground">{user.lastActive ? formatDate(user.lastActive) : formatDate(user.createdAt)}</span></span>
+                                </div>
                                 {user.workspaces.length > 0 ? (
                                   <div className="space-y-2">
                                     <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">

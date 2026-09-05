@@ -168,7 +168,7 @@ export async function loadProviderModels(provider: ProviderId): Promise<Provider
         registerPricingFromProviderModels('huggingface', loadedModels);
       }
     } else if (providerConfig.supportsModelDiscovery) {
-      const modelEntries = await getAvailableModels(apiKey || undefined, provider, providerConfig.baseUrl);
+      const modelEntries = await getAvailableModels(apiKey || undefined, provider, providerConfig.baseUrl, providerConfig.customHeaders);
       loadedModels = modelEntries.map((entry) => normalizeModelEntry(entry, 128000));
     } else {
       const devModels = await loadModelsFromModelsDev(provider);

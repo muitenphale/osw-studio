@@ -113,6 +113,46 @@ describe('/api/models SSRF guard wiring', () => {
   });
 });
 
+describe('/api/models custom header forwarding', () => {
+  const sent = () => fetchMock.mock.calls[0][1].headers as Record<string, string>;
+
+  it('forwards a configured header on the discovery request', async () => {
+    await POST(makeReq({
+      provider: 'my-cloud', apiKey: 'sk-x', baseUrl: 'https://api.example.com/v1',
+      customHeaders: { 'X-Tenant': 'acme' },
+    }));
+    expect(sent()['X-Tenant']).toBe('acme');
+    expect(sent()['Authorization']).toBe('Bearer sk-x');
+  });
+
+  it('sends only the Bearer header when none are configured', async () => {
+    await POST(makeReq({ provider: 'my-cloud', apiKey: 'sk-x', baseUrl: 'https://api.example.com/v1' }));
+    expect(sent()).toEqual({ Authorization: 'Bearer sk-x' });
+  });
+
+  it('keeps the API key when a configured header also claims Authorization', async () => {
+    await POST(makeReq({
+      provider: 'my-cloud', apiKey: 'sk-x', baseUrl: 'https://api.example.com/v1',
+      customHeaders: { Authorization: 'Bearer other' },
+    }));
+    expect(sent()['Authorization']).toBe('Bearer sk-x');
+  });
+
+  it('drops reserved and hop-by-hop names supplied by the client', async () => {
+    await POST(makeReq({
+      provider: 'my-cloud', apiKey: 'sk-x', baseUrl: 'https://api.example.com/v1',
+      customHeaders: { Host: 'evil.example', Connection: 'keep-alive', Cookie: 'a=b', 'X-Tenant': 'acme' },
+    }));
+    expect(sent()).toEqual({ Authorization: 'Bearer sk-x', 'X-Tenant': 'acme' });
+  });
+
+  it('gives the discovery request an abort signal', async () => {
+    // A custom endpoint that never answers must not hold the route open indefinitely.
+    await POST(makeReq({ provider: 'my-cloud', apiKey: 'sk-x', baseUrl: 'https://api.example.com/v1' }));
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
 describe('/api/models openai-codex discovery', () => {
   it('fetches the account catalog and preserves its model metadata', async () => {
     const token = codexToken();

@@ -38,6 +38,9 @@ import { usePagination } from '@/lib/hooks/use-pagination';
 import { Pagination, PaginationRange } from '@/components/ui/pagination';
 import { ThumbnailArea } from '@/components/ui/thumbnail-area';
 import { captureDeploymentScreenshot } from '@/lib/utils/deployment-thumbnail';
+import { ReviewBadge } from '@/components/ui/review-badge';
+import { useNarrowContainer } from '@/lib/hooks/use-narrow-container';
+import { COMPACT_ROW_WIDTH } from '@/lib/constants/layout';
 
 type SortOption = 'updated' | 'created' | 'name' | 'published';
 
@@ -47,9 +50,16 @@ interface DeploymentsViewProps {
   workspaceId?: string;
 }
 
+/** Shared by the URL text and the copy button beside it, so the two cannot behave differently. */
+function copyDeploymentUrl(url: string): void {
+  navigator.clipboard.writeText(url);
+  toast.success('URL copied');
+}
+
 export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsViewProps) {
   const apiBase = workspaceId ? `/api/w/${workspaceId}` : '/api';
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [detailSection, setDetailSection] = useState<string | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [publishingStates, setPublishingStates] = useState<Record<string, boolean>>({});
@@ -183,8 +193,9 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     );
   };
 
-  const handleOpenDetail = (deployment: Deployment) => {
+  const handleOpenDetail = (deployment: Deployment, section?: string) => {
     setSelectedDeployment(deployment);
+    setDetailSection(section);
     void fetchProjects();
   };
 
@@ -688,6 +699,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
   });
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const [compactRows, measureRowsRef] = useNarrowContainer(COMPACT_ROW_WIDTH);
 
   if (!isServerMode) {
     return (
@@ -718,6 +730,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
           deployment={selectedDeployment}
           projects={projects}
           isPublishing={publishingStates[selectedDeployment.id] || false}
+          initialSection={detailSection}
           onBack={() => setSelectedDeployment(null)}
           onSave={handleSaveSettings}
           onPublish={handlePublish}
@@ -846,13 +859,17 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                   </div>
                 )}
                 {viewMode === 'table' ? (
-                  <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-auto border rounded-lg">
+                  <div ref={(el) => { contentScrollRef.current = el; measureRowsRef(el); }} className="@container flex-1 min-h-0 overflow-auto border rounded-lg">
+                    {/* @container so the columns answer to the table's own width rather than the
+                        viewport's. The sidebar is 240px pinned and 56px collapsed, so one viewport
+                        width leaves the table nearly 200px apart, and a media query would drop the
+                        URL while there was still room for it. */}
                     <table className="w-full table-auto border-collapse">
                       <thead className="sticky top-0 z-10">
                         <tr>
                           <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
                           <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none w-full">Name</th>
-                          <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">URL</th>
+                          <th className="@max-3xl:hidden bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">URL</th>
                           <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Ver.</th>
                           <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none">Published</th>
                           <th className="bg-muted text-[11px] font-medium text-muted-foreground text-left p-[6px_10px] border-b whitespace-nowrap select-none"></th>
@@ -875,21 +892,49 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                 />
                               </td>
                               <td className="w-full p-[4px_10px] text-[13px] align-middle overflow-hidden" style={{ maxWidth: 0 }}>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="font-medium text-foreground text-[13px] truncate">{deployment.name}</span>
-                                    {!deployment.enabled && <Badge variant="outline" className="text-[10px] shrink-0">Disabled</Badge>}
+                                {/* The badge sits beside the whole name block rather than inside the
+                                    title row, so it centres against both lines and stays at the
+                                    cell's right edge whatever the name's length. */}
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="font-medium text-foreground text-[13px] truncate">{deployment.name}</span>
+                                      {!deployment.enabled && <Badge variant="outline" className="text-[10px] shrink-0">Disabled</Badge>}
+                                    </div>
+                                    <span className="block text-[11px] text-muted-foreground truncate">{deployment.slug || project?.name || ''}</span>
                                   </div>
-                                  <span className="block text-[11px] text-muted-foreground truncate">{deployment.slug || project?.name || ''}</span>
+                                  <ReviewBadge
+                                    count={deployment.openReviewThreads ?? 0}
+                                    onClick={(e) => { e.stopPropagation(); handleOpenDetail(deployment, 'review'); }}
+                                  />
                                 </div>
                               </td>
-                              <td className="p-[4px_10px] text-[11px] text-muted-foreground align-middle" style={{ maxWidth: 320 }}>
+                              <td className="@max-3xl:hidden p-[4px_10px] text-[11px] text-muted-foreground align-middle">
                                 {deployment.enabled ? (
-                                  <div className="flex items-center gap-1 min-w-0">
-                                    <span className="font-mono truncate">{publicUrl.replace(/^https?:\/\//, '')}</span>
+                                  // Capped on the div, not the td: under `table-auto` a cell's
+                                  // max-width is a hint the layout algorithm may ignore, and this
+                                  // column was taking width from the name and the actions, which are
+                                  // what the row is actually for. A normal block box honours it.
+                                  <div className="flex items-center gap-1 min-w-0 max-w-[220px]">
+                                    {/* flex-1 so the buttons sit at the cell's right edge rather than
+                                        against the text. `truncate` carries overflow-hidden, which
+                                        drops the flex item's automatic minimum size to zero, so the
+                                        URL ellipsises instead of pushing them out of the cell.
+
+                                        Clicking the text copies rather than opening the row's detail
+                                        view: the row is one big click target, and the URL is the one
+                                        part of it a person points at meaning to take the address. The
+                                        copy button beside it stays the keyboard-reachable path. */}
+                                    <span
+                                      onClick={(e) => { e.stopPropagation(); copyDeploymentUrl(publicUrl); }}
+                                      title="Copy URL"
+                                      className="@max-5xl:hidden flex-1 min-w-0 font-mono truncate cursor-copy hover:text-foreground transition-colors"
+                                    >
+                                      {publicUrl.replace(/^https?:\/\//, '')}
+                                    </span>
                                     <button
                                       type="button"
-                                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(publicUrl); toast.success('URL copied'); }}
+                                      onClick={(e) => { e.stopPropagation(); copyDeploymentUrl(publicUrl); }}
                                       className="shrink-0 h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted-foreground/15 transition-colors"
                                       title="Copy URL"
                                     >
@@ -916,13 +961,14 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                               </td>
                               <td className="p-[4px_10px] align-middle whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
                                 <div className="flex items-center justify-end gap-1">
-                                  <Button variant="outline" size="xs" onClick={() => handleOpenDetail(deployment)}>
+                                  <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleOpenDetail(deployment)}>
                                     <Settings className="w-3 h-3" />Edit
                                   </Button>
                                   {deployment.enabled ? (
                                     <Button
                                       variant={hasPendingChanges ? 'outline' : 'ghost'}
                                       size="xs"
+                                      className="@max-3xl:hidden"
                                       onClick={() => handlePublish(deployment.id)}
                                       disabled={publishingStates[deployment.id]}
                                     >
@@ -930,19 +976,51 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                       {isPublished ? 'Republish' : 'Publish'}
                                     </Button>
                                   ) : (
-                                    <Button variant="outline" size="xs" onClick={() => handleEnable(deployment.id)}>Enable</Button>
+                                    <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleEnable(deployment.id)}>Enable</Button>
                                   )}
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
+                                      {/* What the row hides at COMPACT_ROW_WIDTH reappears here. The
+                                          menu is portaled out of the table, so this is driven by the
+                                          measured width rather than the same container query the
+                                          cells use. */}
+                                      {compactRows && (
+                                        <>
+                                          <DropdownMenuItem onClick={() => handleOpenDetail(deployment)}>
+                                            <Settings className="w-4 h-4 mr-2" />Edit
+                                          </DropdownMenuItem>
+                                          {deployment.enabled ? (
+                                            <DropdownMenuItem
+                                              onClick={() => handlePublish(deployment.id)}
+                                              disabled={publishingStates[deployment.id]}
+                                            >
+                                              <RefreshCw className="w-4 h-4 mr-2" />
+                                              {isPublished ? 'Republish' : 'Publish'}
+                                            </DropdownMenuItem>
+                                          ) : (
+                                            <DropdownMenuItem onClick={() => handleEnable(deployment.id)}>
+                                              <Eye className="w-4 h-4 mr-2" />Enable
+                                            </DropdownMenuItem>
+                                          )}
+                                          {deployment.enabled && (
+                                            <DropdownMenuItem asChild>
+                                              <a href={publicUrl} target="_blank" rel="noopener noreferrer">
+                                                <ExternalLink className="w-4 h-4 mr-2" />Open link
+                                              </a>
+                                            </DropdownMenuItem>
+                                          )}
+                                          <DropdownMenuSeparator />
+                                        </>
+                                      )}
                                       <DropdownMenuItem onClick={() => handleEditProject(deployment)}>
                                         <Pencil className="w-4 h-4 mr-2" />Edit Project
                                       </DropdownMenuItem>
                                       <DropdownMenuSeparator />
                                       {deployment.enabled && (
-                                        <DropdownMenuItem onClick={() => navigator.clipboard.writeText(publicUrl)}>
+                                        <DropdownMenuItem onClick={() => copyDeploymentUrl(publicUrl)}>
                                           <Copy className="w-4 h-4 mr-2" />Copy URL
                                         </DropdownMenuItem>
                                       )}

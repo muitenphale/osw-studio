@@ -91,6 +91,12 @@ export interface Deployment {
   // Review mode (private commentable copy)
   review?: ReviewConfig;
 
+  /**
+   * Open review threads, attached by the deployments list endpoint for its badge. Server-derived and
+   * never stored: absent means none, or that review is off, or that no review copy has been built.
+   */
+  openReviewThreads?: number;
+
   // Preview
   previewImage?: string; // base64 data URL of deployment screenshot
   previewUpdatedAt?: Date;
@@ -483,6 +489,11 @@ export interface PromptSuggestion {
   label: string;
   /** What lands in the composer. Written as an instruction, not a topic. */
   prompt: string;
+  /**
+   * Preview paths this suggestion is offered on, as globs. Absent or empty means every page.
+   * Presence of the field is what the editor's toggle reflects.
+   */
+  paths?: string[];
 }
 
 export interface CustomTemplate {

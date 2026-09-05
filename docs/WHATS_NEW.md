@@ -6,6 +6,33 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.100.0 - Contextual Chat Suggestions and Project Links (2026-09-05)
+
+A chat suggestion can now be limited to the pages it applies to, so the prompts above the chat box follow the preview: "Update the hero" on the front page, "Add a new article" on an article. You pick the pages per suggestion in project settings, and unscoped suggestions fill the remaining slots so a general action stays reachable everywhere. They still only appear on the first message of a conversation.
+
+In Server Mode a project also has its own link now, and deployment lists show how many review comments are still open.
+
+### Chat suggestions
+- **Pages per suggestion**: pick a page or a directory from the project, or write a pattern by hand
+- **The suggestions menu is always there**: the `…` button stays even when nothing is hidden behind it, and Manage suggestions goes straight to the editor
+
+### Deployments
+- **Open review comments show on the list**: a count against each deployment, and clicking it opens that deployment's Review tab
+
+### Getting around
+- **A project has its own link in Server Mode**: reload or share the address to land back in the project, and Back returns to the page you came from
+- **Lists stay usable in a narrow window**: columns fold away by priority, and a row's buttons move into its menu instead of vanishing
+
+### Providers
+- **Custom endpoints can send extra headers**: name/value pairs for gateways that need a tenant or routing header, sent with both chat and model discovery
+
+### Fixes
+- **Provider fields accept typing inside a project again**: adding a custom provider from the workspace gave you fields you could click but not type into
+- **A workspace address is refused to anyone not in that workspace**: any signed-in user could load another workspace's page and get the empty shell
+- **Retries and analytics dates on a non-UTC server**: webhook retries ran at the wrong time, and analytics ranges lost the boundary day
+
+---
+
 ## v1.99.0 - Review Mode (2026-08-30)
 
 You can now send someone a private link to a published site and have them comment on it directly, with no account and nothing to install. They walk the site and leave comments on the things they mean, and you read, reply and resolve from the deployment's Review tab. Turning review mode on is what makes publishing write that second, private copy; the live site is untouched and never carries the comment widget.

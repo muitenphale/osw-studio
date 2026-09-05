@@ -39,7 +39,7 @@ export class PausableApiError extends Error {
 // ---------------------------------------------------------------------------
 
 export interface ProviderAdapterConfig {
-  getProviderConfig: () => { provider: string; apiKey: string; model: string; baseUrl?: string };
+  getProviderConfig: () => { provider: string; apiKey: string; model: string; baseUrl?: string; customHeaders?: Record<string, string> };
   getApiUrl: () => string;
   getReasoningEnabled: (model: string) => boolean;
   getDebugStreamEnabled: () => boolean;
@@ -103,6 +103,7 @@ export class OswsProviderAdapter implements ProviderAdapter {
       ...(modelSupportsTools && params.tools?.length && { tool_choice: 'auto' }),
       ...(reasoningEnabled && { reasoning: { enabled: true } }),
       ...(providerConfig.baseUrl ? { baseUrl: providerConfig.baseUrl } : {}),
+      ...(providerConfig.customHeaders ? { customHeaders: providerConfig.customHeaders } : {}),
     };
 
     // Debug capture of the exact outgoing history (no-op unless enabled in the

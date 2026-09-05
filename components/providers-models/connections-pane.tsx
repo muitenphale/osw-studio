@@ -24,6 +24,13 @@ import { SearchConnectionsSection } from './search-connections';
 import type { ProviderId } from '@/lib/llm/providers/types';
 import { disconnectCodex } from '@/lib/auth/codex-auth';
 import { cn, logger } from '@/lib/utils';
+import {
+  CustomHeadersEditor,
+  headerRowsFrom,
+  headersFromRows,
+  unusableHeaderNames,
+  type HeaderRow,
+} from './custom-headers-editor';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -292,6 +299,7 @@ function ConnectCustomBody({ onConnected, onBack }: ConnectCustomBodyProps) {
   const [currentApiKey, setCurrentApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [requireApiKey, setRequireApiKey] = useState(true);
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([]);
   const [testing, setTesting] = useState(false);
 
   const dispatchApiKeyEvent = useCallback((provider: string, hasKey: boolean) => {
@@ -323,11 +331,18 @@ function ConnectCustomBody({ onConnected, onBack }: ConnectCustomBodyProps) {
     }
 
     const id = configManager.generateCustomProviderId(trimmedName);
+    const badNames = unusableHeaderNames(headerRows);
+    if (badNames.length > 0) {
+      toast.error(`Remove these headers first, they can't all be sent: ${badNames.join(', ')}`);
+      return;
+    }
+
     const cfg = configManager.buildCustomProviderConfig(
       id,
       trimmedName,
       trimmedUrl,
-      requireApiKey
+      requireApiKey,
+      headersFromRows(headerRows)
     );
 
     const key = currentApiKey.trim();
@@ -415,6 +430,13 @@ function ConnectCustomBody({ onConnected, onBack }: ConnectCustomBodyProps) {
           </div>
         </div>
       </div>
+
+      <CustomHeadersEditor
+        rows={headerRows}
+        onChange={setHeaderRows}
+        disabled={testing}
+        idPrefix="custom"
+      />
 
       <div className="flex items-center justify-between">
         <Label htmlFor="custom-require-key" className="text-sm font-normal cursor-pointer">
@@ -652,6 +674,9 @@ function EditConfigBody({ providerId, onDone, onDisconnected }: EditConfigBodyPr
   const [customKey, setCustomKey] = useState(() => configManager.getProviderApiKey(providerId) || '');
   const [showCustomKey, setShowCustomKey] = useState(false);
   const [customRequireKey, setCustomRequireKey] = useState(isCustom ? providerConfig.apiKeyRequired : true);
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>(
+    () => (isCustom ? headerRowsFrom(providerConfig.customHeaders) : [])
+  );
   const [savingCustom, setSavingCustom] = useState(false);
 
   const dispatchApiKeyEvent = useCallback((hasKey: boolean) => {
@@ -699,13 +724,21 @@ function EditConfigBody({ providerId, onDone, onDisconnected }: EditConfigBodyPr
       toast.error('Only external (public) endpoints are supported. Local or private addresses aren’t allowed for custom providers.');
       return;
     }
+    const badNames = unusableHeaderNames(headerRows);
+    if (badNames.length > 0) {
+      toast.error(`Remove these headers first, they can't all be sent: ${badNames.join(', ')}`);
+      return;
+    }
     setSavingCustom(true);
     try {
+      // Passed on every save. Without them an edit to any other field would rebuild the config
+      // without its headers and drop them.
       const cfg = configManager.buildCustomProviderConfig(
         providerId,
         name,
         url,
-        customRequireKey
+        customRequireKey,
+        headersFromRows(headerRows)
       );
       configManager.saveCustomProvider(providerId, cfg);
       configManager.setProviderApiKey(providerId, customKey.trim());
@@ -811,6 +844,13 @@ function EditConfigBody({ providerId, onDone, onDisconnected }: EditConfigBodyPr
             </div>
           </div>
         </div>
+
+        <CustomHeadersEditor
+          rows={headerRows}
+          onChange={setHeaderRows}
+          disabled={savingCustom}
+          idPrefix="edit-custom"
+        />
 
         <div className="flex items-center justify-between">
           <Label htmlFor="edit-custom-require-key" className="text-sm font-normal cursor-pointer">

@@ -160,7 +160,7 @@ function extractOllamaImages(messages: LLMMessage[]): { processedMessages: LLMMe
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey: clientApiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning, stream: requestStream, baseUrl: requestBaseUrl } = await request.json();
+    const { prompt, apiKey: clientApiKey, model, tools, context, messages, tool_choice, provider, max_tokens, reasoning, stream: requestStream, baseUrl: requestBaseUrl, customHeaders: requestCustomHeaders } = await request.json();
 
     const selectedProvider: ProviderId = provider || 'openrouter';
     const providerConfig = getProvider(selectedProvider);
@@ -257,7 +257,7 @@ Habits:
       });
     }
 
-    const headers = buildHeaders(selectedProvider, apiKey, request.headers.get('referer'), providerConfig, wireFormat);
+    const headers = buildHeaders(selectedProvider, apiKey, request.headers.get('referer'), providerConfig, wireFormat, requestCustomHeaders);
     
     let processedMessages = chatMessages;
     let anthropicSystemPrompt = '';

@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutGrid, FileText, Layers, Palette, DollarSign,
-  Shield, Database, Settings as SettingsIcon,
-} from 'lucide-react';
+  Shield, Database, Settings as SettingsIcon, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { configManager } from '@/lib/config/storage';
 import { hasAnyConnectedProvider } from '@/lib/llm/providers/connection-status';
@@ -23,6 +23,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
+import { MailView } from '@/components/views/mail-view';
 
 // ---------------------------------------------------------------------------
 // Pane registry
@@ -35,12 +36,15 @@ export type SettingsPane =
   | 'appearance'
   | 'costs'
   | 'permissions'
-  | 'data';
+  | 'data'
+  | 'mail';
 
 interface PaneDef {
   id: SettingsPane;
   label: string;
   icon: React.ReactNode;
+  /** Mail needs an instance behind it, and a workspace to scope the settings to. */
+  serverModeOnly?: boolean;
 }
 
 const PANES: PaneDef[] = [
@@ -51,13 +55,26 @@ const PANES: PaneDef[] = [
   { id: 'costs',       label: 'Cost Tracking', icon: <DollarSign className="size-4 shrink-0" /> },
   { id: 'permissions', label: 'Permissions',   icon: <Shield className="size-4 shrink-0" /> },
   { id: 'data',        label: 'Data',          icon: <Database className="size-4 shrink-0" /> },
+  { id: 'mail',        label: 'Mail',          icon: <Mail className="size-4 shrink-0" />, serverModeOnly: true },
 ];
+
+/**
+ * The panes this install can actually show.
+ *
+ * Mail is workspace-scoped: it reads and writes `/api/w/{id}/mail`, and an admin additionally gets
+ * the instance tier inside the same view. Without a workspace there is nothing for it to edit, so it
+ * is hidden rather than shown empty.
+ */
+function visiblePanes(workspaceId: string | undefined): PaneDef[] {
+  const serverMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
+  return PANES.filter((p) => !p.serverModeOnly || (serverMode && !!workspaceId));
+}
 
 // ---------------------------------------------------------------------------
 // Pane content
 // ---------------------------------------------------------------------------
 
-function PaneContent({ pane }: { pane: SettingsPane }) {
+function PaneContent({ pane, workspaceId }: { pane: SettingsPane; workspaceId?: string }) {
   switch (pane) {
     case 'connections': return <ConnectionsPane />;
     case 'models':      return <ModelsPane />;
@@ -66,6 +83,7 @@ function PaneContent({ pane }: { pane: SettingsPane }) {
     case 'costs':       return <CostTrackingPane />;
     case 'permissions': return <PermissionsPane />;
     case 'data':        return <DataPane />;
+    case 'mail':        return <MailView workspaceId={workspaceId} />;
   }
 }
 
@@ -76,10 +94,13 @@ function PaneContent({ pane }: { pane: SettingsPane }) {
 function SettingsNav({
   activePane,
   onChange,
+  workspaceId,
 }: {
   activePane: SettingsPane;
   onChange: (pane: SettingsPane) => void;
+  workspaceId?: string;
 }) {
+  const panes = visiblePanes(workspaceId);
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -97,7 +118,7 @@ function SettingsNav({
     return () => ro.disconnect();
   }, []);
 
-  const active = PANES.find((p) => p.id === activePane) ?? PANES[0];
+  const active = panes.find((p) => p.id === activePane) ?? panes[0];
 
   return (
     <nav ref={containerRef} className="shrink-0 md:flex md:flex-col md:gap-0.5 md:border-r border-border/60 md:py-6 md:pl-6 md:pr-3 md:w-48">
@@ -107,7 +128,7 @@ function SettingsNav({
         aria-hidden
         className="pointer-events-none invisible absolute left-0 top-0 flex whitespace-nowrap md:hidden"
       >
-        {PANES.map((item) => (
+        {panes.map((item) => (
           <span key={item.id} className="flex items-center gap-2.5 px-3 py-2 text-[13px]">
             {item.icon}
             {item.label}
@@ -126,7 +147,7 @@ function SettingsNav({
               </span>
             </SelectTrigger>
             <SelectContent>
-              {PANES.map((item) => (
+              {panes.map((item) => (
                 <SelectItem key={item.id} value={item.id}>
                   <span className="flex items-center gap-2">
                     {item.icon}
@@ -138,7 +159,7 @@ function SettingsNav({
           </Select>
         ) : (
           <div className="flex gap-1.5 overflow-x-auto">
-            {PANES.map((item) => (
+            {panes.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -161,7 +182,7 @@ function SettingsNav({
 
       {/* Desktop: sidebar buttons */}
       <div className="hidden md:flex md:flex-col md:gap-0.5">
-        {PANES.map((item) => (
+        {panes.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -194,12 +215,15 @@ export interface UnifiedSettingsProps {
   showSidebar?: boolean;
   /** Controlled active pane from external navigation (sidebar sub-items). */
   activePane?: SettingsPane;
+  /** Scopes the workspace-only panes. Without it those panes are not offered. */
+  workspaceId?: string;
 }
 
 export function UnifiedSettings({
   initialPane,
   showSidebar = false,
   activePane: controlledPane,
+  workspaceId,
 }: UnifiedSettingsProps) {
   const defaultPane = initialPane ?? (hasAnyConnectedProvider() ? 'models' : 'connections');
   const [internalPane, setInternalPane] = useState<SettingsPane>(defaultPane);
@@ -220,7 +244,7 @@ export function UnifiedSettings({
       <div className="flex flex-col md:flex-row h-full min-h-0">
         <SettingsNav activePane={currentPane} onChange={setInternalPane} />
         <div className="flex-1 min-w-0 min-h-0 overflow-y-auto p-4 md:p-6">
-          <PaneContent pane={currentPane} />
+          <PaneContent pane={currentPane} workspaceId={workspaceId} />
         </div>
       </div>
     );
@@ -234,7 +258,7 @@ export function UnifiedSettings({
         <span className="text-lg font-normal text-muted-foreground">· {activeLabel}</span>
       </PageHeader>
       <PageBody maxWidth="max-w-4xl">
-        <PaneContent pane={currentPane} />
+        <PaneContent pane={currentPane} workspaceId={workspaceId} />
       </PageBody>
     </PageShell>
   );
@@ -258,10 +282,33 @@ export function UnifiedSettingsModal({
   const handleOpenChange = useCallback((v: boolean) => onOpenChange(v), [onOpenChange]);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <>
+      {/* Our own backdrop: a non-modal dialog gets no Radix overlay. */}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={() => handleOpenChange(false)}
+        />,
+        document.body
+      )}
+    <Dialog open={open} onOpenChange={handleOpenChange} modal={false}>
       <DialogContent
         className="sm:max-w-4xl w-[calc(100vw-1.5rem)] max-w-none sm:w-auto p-0 gap-0 overflow-hidden"
         style={{ display: 'flex', flexDirection: 'column', height: 'min(90vh, calc(100dvh - 3rem))' }}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onFocusOutside={(e) => {
+          // Non-modal on purpose. The connections drawer is portaled to <body>, so a modal
+          // dialog's focus trap pulls focus straight back out of its inputs (they take a click
+          // but no typing) and react-remove-scroll cancels wheel events over it. Closing is
+          // handled by the backdrop and Escape instead.
+          e.preventDefault();
+        }}
+        onInteractOutside={(e) => {
+          // The drawer is a separate fixed layer; interacting with it is not an outside click.
+          const original = (e as unknown as { detail?: { originalEvent?: Event } }).detail?.originalEvent;
+          const target = (original?.target ?? e.target) as Element | null;
+          if (target?.closest?.('[data-models-drawer]')) e.preventDefault();
+        }}
       >
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <div className="flex items-center gap-2 px-6 py-4 border-b shrink-0">
@@ -273,6 +320,7 @@ export function UnifiedSettingsModal({
         </div>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 

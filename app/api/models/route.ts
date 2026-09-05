@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ProviderId, InputModality } from '@/lib/llm/providers/types';
 import { getProvider } from '@/lib/llm/providers/registry';
 import { assertPublicHttpUrl } from '@/lib/llm/providers/url-safety';
+import { sanitizeCustomHeaders } from '@/lib/llm/providers/custom-headers';
 import { CODEX_BASE_URL, createCodexHeaders, getCodexAccountId } from '@/lib/llm/codex-utils';
 import { logger } from '@/lib/utils';
 import pkg from '@/package.json';
@@ -21,9 +22,12 @@ interface CodexCatalogModel {
 
 const CODEX_DEFAULT_MODALITIES: InputModality[] = ['text', 'image'];
 
+/** Ceiling for a user-supplied endpoint's model list. Long enough for a cold gateway. */
+const DISCOVERY_TIMEOUT_MS = 15_000;
+
 export async function POST(request: NextRequest) {
   try {
-    const { apiKey, provider, baseUrl: requestBaseUrl } = await request.json();
+    const { apiKey, provider, baseUrl: requestBaseUrl, customHeaders: requestCustomHeaders } = await request.json();
     
     if (!provider) {
       return NextResponse.json(
@@ -264,7 +268,13 @@ export async function POST(request: NextRequest) {
             if (apiKey) {
               headers['Authorization'] = `Bearer ${apiKey}`;
             }
-            const defaultResponse = await fetch(`${effectiveBaseUrl}/models`, { headers });
+            // Merged after the token and unable to reach Authorization, which
+            // sanitizeCustomHeaders refuses so the two can never disagree.
+            Object.assign(headers, sanitizeCustomHeaders(requestCustomHeaders).headers);
+            const defaultResponse = await fetch(`${effectiveBaseUrl}/models`, {
+              headers,
+              signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+            });
             const responseText = await defaultResponse.text();
             if (defaultResponse.ok) {
               try {
