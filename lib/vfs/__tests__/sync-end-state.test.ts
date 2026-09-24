@@ -51,6 +51,7 @@ import {
   invalidateSyncStatusCache,
   reconcileProjectsToServer,
   setAutoSyncWorkspaceId,
+  autoSyncProject,
 } from '../auto-sync';
 
 const WORKSPACE = 'w1';
@@ -165,6 +166,46 @@ describe('a freshly pushed project', () => {
     const id = await createAndPush('Fresh');
 
     expect(await serverSyncSays(id)).toBe('synced');
+  });
+
+  it('stores a numeric revision so the next Save is not a 409 against ourselves', async () => {
+    const id = await createAndPush('Ack');
+    const local = (await vfs.getProject(id))!;
+    expect(typeof local.revision).toBe('number');
+    expect(local.revision).toBeGreaterThanOrEqual(1);
+
+    vi.setSystemTime(EDITED_AT);
+    await vfs.updateFile(id, '/index.html', '<h1>again</h1>');
+    saveManager.markClean(id);
+    await reconcileProjectsToServer(WORKSPACE);
+    expect(await serverSyncSays(id)).toBe('synced');
+  });
+
+  it('does not delete a one-commit second writer on Save', async () => {
+    const id = await createAndPush('SecondWriter');
+    const onServer = (await adapter.getProject(id))!;
+    await adapter.createFile({
+      id: 'from-second',
+      projectId: id,
+      path: '/from-second.txt',
+      name: 'from-second.txt',
+      type: 'text',
+      content: 'agent',
+      mimeType: 'text/plain',
+      size: 5,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as never);
+    adapter.bumpRevision(id, onServer.revision ?? 0);
+
+    vi.setSystemTime(EDITED_AT);
+    await vfs.createFile(id, '/from-t1.txt', 'local');
+    saveManager.markClean(id);
+    await autoSyncProject(id);
+
+    const paths = (await adapter.listFiles(id)).map((f) => f.path);
+    expect(paths).toContain('/from-second.txt');
+    expect(await serverSyncSays(id)).not.toBe('synced');
   });
 });
 
@@ -281,6 +322,7 @@ describe('a project both sides have changed', () => {
       name: `${name} (server)`,
       updatedAt: new Date('2026-07-31T10:00:15.000Z'),
     } as never);
+    adapter.bumpRevision(id, onServer!.revision ?? 0);
 
     return id;
   }
@@ -308,14 +350,17 @@ describe('a project both sides have changed', () => {
     const files = await vfs.listFiles(id);
 
     // Exactly what components/project-manager/sync-tabs/projects-tab.tsx does on Push.
-    const result = await getSyncManager(WORKSPACE).pushSingleProject(id, project!, files, {
-      force: true,
-    });
+    const latest = await adapter.getProject(id);
+    project!.revision = latest!.revision;
+    const result = await getSyncManager(WORKSPACE).pushSingleProject(id, project!, files);
     expect(result.success).toBe(true);
     project!.lastSyncedAt = new Date();
     project!.serverUpdatedAt = result.project?.updatedAt
       ? new Date(result.project.updatedAt)
       : new Date();
+    if (typeof result.project?.revision === 'number') {
+      project!.revision = result.project.revision;
+    }
     await vfs.updateProject(project!, { preserveUpdatedAt: true });
 
     expect(await serverSyncSays(id)).toBe('synced');

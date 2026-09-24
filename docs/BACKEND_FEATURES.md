@@ -19,10 +19,11 @@ Server Mode unlocks powerful backend capabilities for your published deployments
 
 Backend features are **project-scoped** — they belong to the project, not to a specific deployment. When you publish the project, its backend features are extracted into the deployment's runtime database. The same project can be published multiple times; each deployment gets a snapshot of the project's backend features at publish time.
 
-You can manage backend features in two places:
+You can manage backend features in three places:
 
 1. **Project Settings** (primary, in the workspace): Click **Project Settings** in the workspace header to open a modal with Schema, Functions, Helpers, Secrets, and Schedules tabs. Changes take effect in the project and will be included in the next publish.
 2. **Deployment Server Settings** (for an already-published deployment): Open the deployment in the Admin Dashboard to inspect and tweak the runtime copy of its backend. This is useful for rotating secrets or debugging a published deployment without re-publishing from the project.
+3. **MCP connector**: An outside agent with `projects:write` can list, create, replace and delete functions, schedules and secrets on the project (`backend_list`, `backend_upsert`, `backend_delete`). Secret values can be set and are never returned. SQL against a deployment's live tables is `deployments_sql` (the `deploy` scope). See [MCP Server](?doc=mcp-server).
 
 ## Prerequisites
 
@@ -923,8 +924,8 @@ When a deployment is selected, a hidden `/.server/` folder appears in the file e
 | `db/schema.sql` | Database schema |
 
 These files reflect the project's backend feature state:
-- **Schema** (`db/schema.sql`) is read-only — edit schema by running SQL in Project Settings or via the AI's `sqlite3` shell command
-- **Functions, helpers, secrets, and schedules** can be created and edited by the AI using shell commands. Changes update the corresponding records in the project's database
+- **Schema** (`db/schema.sql`) is read-only — edit schema by running SQL in Project Settings or via the AI's `sqlite3` bash command
+- **Functions, helpers, secrets, and schedules** can be created and edited by the AI using bash commands. Changes update the corresponding records in the project's database
 
 Files are transient in the sense that they're regenerated from the project's backend state — you don't commit them manually.
 
@@ -966,4 +967,4 @@ To see the `/.server/` folder:
 2. Select **Show Hidden Files**
 3. Look for the folder with the orange server icon
 
-See also: **[Server Mode > Server Context Integration](?doc=server-mode#server-context-integration)**
+See also: **[Server Mode > Server Context Integration](?doc=server-mode#server-context-integration)** · **[MCP Server](?doc=mcp-server)**

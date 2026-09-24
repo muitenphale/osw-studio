@@ -33,6 +33,7 @@ import {
   Shield,
   Database,
   Mail,
+  Plug,
 } from 'lucide-react';
 import { DiscordIcon } from '@/components/ui/discord-icon';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
@@ -107,6 +108,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
       { id: 'costs', label: 'Cost Tracking', icon: DollarSign },
       { id: 'permissions', label: 'Permissions', icon: Shield, studioOnly: true },
       { id: 'data', label: 'Data', icon: Database },
+      { id: 'mcp', label: 'MCP', icon: Plug, serverModeOnly: true, studioOnly: true },
       { id: 'mail', label: 'Mail', icon: Mail, serverModeOnly: true, studioOnly: true },
       { id: 'users', label: 'Users', icon: Users, serverModeOnly: true, ownerOnly: true },
     ]

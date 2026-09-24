@@ -50,3 +50,50 @@ describe('verifyWorkspaceAccess', () => {
     expect(() => verifyWorkspaceAccess(admin, workspace, 'viewer')).not.toThrow();
   });
 });
+
+describe('verifyWorkspaceAccess and deactivated accounts', () => {
+  it('refuses a member whose account has been deactivated', async () => {
+    const { createUser, createWorkspace, grantWorkspaceAccess, verifyWorkspaceAccess, deactivateUser } =
+      await import('@/lib/auth/system-database');
+
+    const owner = createUser('owner3@a.test', 'x');
+    const member = createUser('member@a.test', 'x');
+    const workspace = createWorkspace('Ours', owner);
+    grantWorkspaceAccess(member, workspace, 'editor');
+
+    expect(() => verifyWorkspaceAccess(member, workspace, 'editor')).not.toThrow();
+
+    // The access row survives deactivation, so a check that reads only that row still passes.
+    deactivateUser(member);
+    expect(() => verifyWorkspaceAccess(member, workspace, 'editor')).toThrow(/access denied/i);
+  });
+
+  it('refuses a deactivated instance admin who still holds an access row', async () => {
+    const { createUser, createWorkspace, grantWorkspaceAccess, verifyWorkspaceAccess, updateUser } =
+      await import('@/lib/auth/system-database');
+
+    const owner = createUser('owner4@a.test', 'x');
+    const admin = createUser('admin4@a.test', 'x');
+    updateUser(admin, { is_admin: 1 });
+    const workspace = createWorkspace('Theirs', owner);
+    // The access row matters: without one a deactivated admin is refused for the wrong reason,
+    // by failing the membership check rather than the account check.
+    grantWorkspaceAccess(admin, workspace, 'owner');
+
+    expect(() => verifyWorkspaceAccess(admin, workspace, 'viewer')).not.toThrow();
+    updateUser(admin, { active: 0 });
+    expect(() => verifyWorkspaceAccess(admin, workspace, 'viewer')).toThrow(/access denied/i);
+  });
+
+  it('still lets the legacy principals through, which have no users row', async () => {
+    const { createUser, createWorkspace, verifyWorkspaceAccess } =
+      await import('@/lib/auth/system-database');
+
+    const owner = createUser('owner5@a.test', 'x');
+    const workspace = createWorkspace('Theirs', owner);
+
+    for (const principal of ['admin', 'desktop', 'instance-api']) {
+      expect(() => verifyWorkspaceAccess(principal, workspace, 'owner')).not.toThrow();
+    }
+  });
+});

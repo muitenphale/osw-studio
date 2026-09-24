@@ -43,6 +43,11 @@ async function processDeployment(deploymentId: string): Promise<void> {
   const resolved = await resolveDeployment(deploymentId);
   if (!resolved) return;
 
+  // Unpublished means off traffic, schedules included. This one matters more than the request
+  // path: a cron function needs no caller, so an unpublished deployment would otherwise keep
+  // running code on its own timetable.
+  if (!resolved.deployment.publishedAt) return;
+
   const deploymentDb = resolved.adapter.getDeploymentDatabaseForAnalytics(deploymentId);
   if (!deploymentDb) return;
 

@@ -39,6 +39,7 @@ import {
 import { checkpointManager, isEmptyPreview, type BackendRestorePreview } from '@/lib/vfs/checkpoint';
 import { RestoreSecretsDialog } from '@/components/restore-secrets-dialog';
 import { saveManager } from '@/lib/vfs/save-manager';
+import { flushEditorToVfs } from '@/lib/vfs/flush-editor';
 import { GuidedTourOverlay } from '@/components/guided-tour/overlay';
 import { useGuidedTour } from '@/components/guided-tour/context';
 import { GuidedTourTranscriptEvent } from '@/components/guided-tour/types';
@@ -227,6 +228,15 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
   const projectCost = useWorkspaceStore(s => s.projectCost);
   const addDebugEvent = useWorkspaceStore(s => s.addDebugEvent);
   const isDirty = useWorkspaceStore(s => s.isDirty);
+
+  useEffect(() => {
+    const onNeedsRetry = (event: Event) => {
+      const id = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (id === project.id) useWorkspaceStore.getState().markDirty();
+    };
+    window.addEventListener('osw-sync-needs-retry', onNeedsRetry);
+    return () => window.removeEventListener('osw-sync-needs-retry', onNeedsRetry);
+  }, [project.id]);
   const saveInProgress = useWorkspaceStore(s => s.saveInProgress);
   const entryPoint = useWorkspaceStore(s => s.entryPoint);
   const projectRuntime = useWorkspaceStore(s => s.projectRuntime);
@@ -1338,36 +1348,37 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
           }
         }
 
-        // Skip checkpoint restore if an orchestrator session is active
-        // (generation ran or is running while the workspace was unmounted)
-        if (!useWorkspaceStore.getState().isProjectGenerating(project.id)) {
-          await saveManager.syncProjectSaveState(project.id);
-          const savedCheckpointId = saveManager.getSavedCheckpointId(project.id);
-
-          if (savedCheckpointId) {
-            const exists = await checkpointManager.checkpointExists(savedCheckpointId);
-            if (exists) {
-              const restored = await saveManager.restoreLastSaved(project.id);
-              if (restored) {
-                if (!isMounted) return;
-                useWorkspaceStore.setState({ initialCheckpointId: savedCheckpointId });
-              }
-            } else {
-              // Stale reference — checkpoint was pruned or deleted.
-              // preserveUpdatedAt: checkpoint bookkeeping is local-only and is not pushed, so
-              // bumping updatedAt would leave the project permanently reading as "Local newer".
-              const proj = await vfs.getProject(project.id);
-              proj.lastSavedCheckpointId = null;
-              await vfs.updateProject(proj, { preserveUpdatedAt: true });
-            }
+        // Discard uses lastSavedCheckpointId. Do not restore files on open: that discarded
+        // unsaved work (and any server files just pulled) under a document-editor rule that
+        // fights two-store sync.
+        await saveManager.syncProjectSaveState(project.id);
+        const savedCheckpointId = saveManager.getSavedCheckpointId(project.id);
+        if (savedCheckpointId) {
+          const exists = await checkpointManager.checkpointExists(savedCheckpointId);
+          if (exists) {
+            useWorkspaceStore.setState({ initialCheckpointId: savedCheckpointId });
+          } else {
+            // Stale reference — checkpoint was pruned or deleted.
+            // preserveUpdatedAt: checkpoint bookkeeping is local-only and is not pushed, so
+            // bumping updatedAt would leave the project permanently reading as "Local newer".
+            const proj = await vfs.getProject(project.id);
+            proj.lastSavedCheckpointId = null;
+            await vfs.updateProject(proj, { preserveUpdatedAt: true });
           }
-
-          if (!isMounted) return;
         }
+
+        if (!isMounted) return;
 
         const latestProject = await vfs.getProject(project.id);
         if (!isMounted) return;
         useWorkspaceStore.getState().initProject(latestProject);
+        const savedAt = latestProject.lastSavedAt ? new Date(latestProject.lastSavedAt).getTime() : NaN;
+        const syncedAt = latestProject.lastSyncedAt ? new Date(latestProject.lastSyncedAt).getTime() : NaN;
+        const updatedAt = latestProject.updatedAt ? new Date(latestProject.updatedAt).getTime() : NaN;
+        const baseline = Number.isFinite(savedAt) ? savedAt : syncedAt;
+        if (Number.isFinite(baseline) && Number.isFinite(updatedAt) && updatedAt > baseline) {
+          saveManager.markDirty(project.id);
+        }
         if (saveManager.isDirty(project.id)) useWorkspaceStore.getState().markDirty();
 
         // Ensure a starting-point checkpoint exists so the user can always roll back.
@@ -1378,6 +1389,7 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
           try {
             const cp = await checkpointManager.createCheckpoint(project.id, 'Project opened', { kind: 'auto' });
             latestProject.lastSavedCheckpointId = cp.id;
+            latestProject.lastSavedAt = latestProject.updatedAt;
             await vfs.updateProject(latestProject, { preserveUpdatedAt: true });
             useWorkspaceStore.setState({ initialCheckpointId: cp.id });
           } catch { /* non-fatal */ }
@@ -1611,8 +1623,9 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
       }
       useWorkspaceStore.getState().resetLayout();
 
-      // Flush any pending sync for this project before leaving
-      vfs.flushSyncTimeout(projectId);
+      // Cleanup cannot be async. Flush buffers then the pending sync, same fire-and-forget
+      // as the previous flushSyncTimeout-only path.
+      void flushEditorToVfs().then(() => vfs.flushSyncTimeout(projectId));
 
       // Unmount backend context when leaving workspace
       vfs.unmountBackendContext();
@@ -1697,10 +1710,14 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
 
     useWorkspaceStore.setState({ saveInProgress: true });
     try {
+      await flushEditorToVfs();
       const checkpoint = await saveManager.save(project.id);
       const latestProject = await vfs.getProject(project.id);
 
-      useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? new Date(checkpoint.timestamp) });
+      useWorkspaceStore.setState({
+        lastSavedAt: latestProject.lastSavedAt ?? new Date(checkpoint.timestamp),
+        initialCheckpointId: checkpoint.id,
+      });
       useWorkspaceStore.getState().incrementCheckpointRefresh();
       toast.success('Project saved');
     } catch (error) {
@@ -1782,18 +1799,22 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
   const handleRestoreCheckpoint = useCallback(async (checkpointId: string, description?: string, options?: { isDiscard?: boolean }) => {
     if (refuseWhileGenerating()) return;
     try {
-      // First check if checkpoint exists
-      const exists = await checkpointManager.checkpointExists(checkpointId);
+      const targetId = options?.isDiscard
+        ? (saveManager.getSavedCheckpointId(project.id) ?? checkpointId)
+        : checkpointId;
+      const exists = await checkpointManager.checkpointExists(targetId);
       if (!exists) {
         toast.error('Checkpoint no longer exists - it may have been cleaned up');
-        logger.warn(`[Workspace] Checkpoint ${checkpointId} no longer exists`);
+        logger.warn(`[Workspace] Checkpoint ${targetId} no longer exists`);
         return;
       }
 
-      await runRestore(checkpointId, description, async () => {
-        const success = await saveManager.runWithSuppressedDirty(project.id, () =>
-          checkpointManager.restoreCheckpoint(checkpointId)
-        );
+      await runRestore(targetId, description, async () => {
+        const success = options?.isDiscard
+          ? await saveManager.restoreLastSaved(project.id)
+          : await saveManager.runWithSuppressedDirty(project.id, () =>
+              checkpointManager.restoreCheckpoint(targetId)
+            );
         if (success) {
           setUndoCursor(checkpointId);
           await remountBackendContext();
@@ -1802,7 +1823,7 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
           handleFilesChange();
 
           const savedId = saveManager.getSavedCheckpointId(project.id);
-          if (savedId && savedId === checkpointId) {
+          if (savedId && savedId === targetId) {
             saveManager.markClean(project.id);
             const latestProject = await vfs.getProject(project.id);
             useWorkspaceStore.setState({ lastSavedAt: latestProject.lastSavedAt ?? null });
@@ -2104,16 +2125,18 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
     disabled: !isDirty || saveInProgress
   });
 
-  if (initialCheckpointId && quick) {
+  const discardCheckpointId = saveManager.getSavedCheckpointId(project.id) ?? initialCheckpointId;
+
+  if (discardCheckpointId && quick) {
     headerActions.push({
       id: 'discard',
       label: 'Discard Changes',
       icon: RotateCcw,
-      onClick: () => handleRestoreCheckpoint(initialCheckpointId, 'Last saved state', { isDiscard: true }),
+      onClick: () => handleRestoreCheckpoint(discardCheckpointId, 'Last saved state', { isDiscard: true }),
       variant: 'outline',
       disabled: saveInProgress || !isDirty,
     });
-  } else if (initialCheckpointId) {
+  } else if (discardCheckpointId) {
     const discardDisabled = saveInProgress || !isDirty;
     headerActions.push({
       id: 'discard',
@@ -2124,7 +2147,7 @@ export function Workspace({ project, onBack, backLabel, workspaceId, initialPrev
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleRestoreCheckpoint(initialCheckpointId, 'Last saved state', { isDiscard: true })}
+            onClick={() => handleRestoreCheckpoint(discardCheckpointId, 'Last saved state', { isDiscard: true })}
             disabled={discardDisabled}
             className="rounded-r-none border-r-0"
           >

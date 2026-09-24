@@ -104,7 +104,7 @@ async function addFile(filePath: string, content: string | ArrayBuffer, type: st
 /** Create the deployment with the given review settings and run a real publish. */
 async function publish(review: ReviewConfig) {
   await adapter.createDeployment({
-    id: deploymentId, projectId: 'p1', name: 'Reviewed', enabled: true, review,
+    id: deploymentId, projectId: 'p1', name: 'Reviewed', review,
     createdAt: new Date(), updatedAt: new Date(),
   } as Deployment);
 

@@ -190,6 +190,10 @@ const MIGRATIONS: Migration[] = [
           project_id TEXT NOT NULL,
           name TEXT NOT NULL,
           slug TEXT,
+          -- Vestigial: nothing reads or writes this. A deployment is live when its built files
+          -- exist, so publish/unpublish replaced the flag. Left in place because dropping it
+          -- also means dropping site_info.enabled from every deployment's runtime.sqlite, which
+          -- has no migration tracking yet. See TODO.md.
           enabled INTEGER DEFAULT 1,
           under_construction INTEGER DEFAULT 0,
           custom_domain TEXT,
@@ -466,6 +470,15 @@ const MIGRATIONS: Migration[] = [
       const cols = db.prepare(`PRAGMA table_info(deployments)`).all() as Array<{ name: string }>;
       if (cols.length > 0 && !cols.some((c) => c.name === 'review')) {
         db.exec(`ALTER TABLE deployments ADD COLUMN review TEXT DEFAULT '{}'`);
+      }
+    }
+  },
+  {
+    id: 'add_project_revision_v12',
+    up: (db) => {
+      const cols = db.prepare(`PRAGMA table_info(projects)`).all() as Array<{ name: string }>;
+      if (cols.length > 0 && !cols.some((c) => c.name === 'revision')) {
+        db.exec(`ALTER TABLE projects ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`);
       }
     }
   },
@@ -949,8 +962,8 @@ export class SQLiteAdapter implements StorageAdapter {
       INSERT INTO projects (
         id, name, description, created_at, updated_at,
         last_saved_at, last_saved_checkpoint_id, settings,
-        cost_tracking, preview_image, last_synced_at, server_updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        cost_tracking, preview_image, last_synced_at, server_updated_at, revision
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -967,17 +980,18 @@ export class SQLiteAdapter implements StorageAdapter {
       JSON.stringify(project.costTracking ?? {}),
       project.previewImage ?? null,
       toISOString(project.lastSyncedAt),
-      toISOString(project.serverUpdatedAt)
+      toISOString(project.serverUpdatedAt),
+      project.revision ?? 0
     );
   }
 
+  getProjectSync(id: string): Project | null {
+    const row = this.getDB().prepare('SELECT * FROM projects WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    return row ? this.rowToProject(row) : null;
+  }
+
   async getProject(id: string): Promise<Project | null> {
-    const db = this.getDB();
-    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-
-    if (!row) return null;
-
-    return this.rowToProject(row);
+    return this.getProjectSync(id);
   }
 
   async updateProject(project: Project): Promise<void> {
@@ -1039,9 +1053,28 @@ export class SQLiteAdapter implements StorageAdapter {
     return rows.map(row => this.rowToProject(row));
   }
 
-  listProjectSummaries(): Array<{ id: string; name: string; updatedAt: string }> {
+  /**
+   * Projects without their thumbnails.
+   *
+   * `preview_image` holds a base64 screenshot per project and dwarfs everything else in the row:
+   * on a real workspace, 2.0MB of thumbnails against 8.4KB of metadata across 237 projects. Any
+   * caller that only wants to name and order projects should come here rather than to
+   * `listProjects`, which selects every column.
+   *
+   * `runtime` is resolved through the same normalisation `rowToProject` uses, so a settings blob
+   * that arrived double-stringified from a client reads the same either way.
+   */
+  listProjectSummaries(): Array<{ id: string; name: string; updatedAt: string; runtime?: string }> {
     const db = this.getDB();
-    return db.prepare('SELECT id, name, updated_at as updatedAt FROM projects').all() as Array<{ id: string; name: string; updatedAt: string }>;
+    const rows = db.prepare(
+      'SELECT id, name, updated_at as updatedAt, settings FROM projects ORDER BY updated_at DESC'
+    ).all() as Array<{ id: string; name: string; updatedAt: string; settings: unknown }>;
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      updatedAt: row.updatedAt,
+      runtime: normalizeProjectSettings(row.settings)?.runtime,
+    }));
   }
 
   listSkillSummaries(): Array<{ id: string; name: string; updatedAt: string }> {
@@ -1080,7 +1113,27 @@ export class SQLiteAdapter implements StorageAdapter {
       previewImage: row.preview_image as string | undefined,
       lastSyncedAt: row.last_synced_at ? parseDate(row.last_synced_at as string) : undefined,
       serverUpdatedAt: row.server_updated_at ? parseDate(row.server_updated_at as string) : undefined,
+      revision: typeof row.revision === 'number' ? row.revision : Number(row.revision ?? 0) || 0,
     };
+  }
+
+  /**
+   * Advance revision only if the caller still holds `expected`. Returns the new
+   * revision, or null if the row is gone or the expected base no longer matches.
+   */
+  bumpRevision(projectId: string, expected: number): number | null {
+    const db = this.getDB();
+    const result = db.prepare(
+      'UPDATE projects SET revision = revision + 1 WHERE id = ? AND revision = ?'
+    ).run(projectId, expected);
+    if (result.changes !== 1) return null;
+    const row = db.prepare('SELECT revision FROM projects WHERE id = ?').get(projectId) as { revision: number } | undefined;
+    return row?.revision ?? null;
+  }
+
+  /** Same-connection transaction. Callbacks must not await. */
+  runTransaction<T>(fn: () => T): T {
+    return this.getDB().transaction(fn)();
   }
 
   // ============================================
@@ -1117,14 +1170,15 @@ export class SQLiteAdapter implements StorageAdapter {
     );
   }
 
-  async getFile(projectId: string, path: string): Promise<VirtualFile | null> {
-    const db = this.getDB();
-    const row = db.prepare(
+  getFileSync(projectId: string, path: string): VirtualFile | null {
+    const row = this.getDB().prepare(
       'SELECT * FROM files WHERE project_id = ? AND path = ?'
     ).get(projectId, path) as Record<string, unknown> | undefined;
+    return row ? this.rowToFile(row, projectId) : null;
+  }
 
-    if (!row) return null;
-    return this.rowToFile(row, projectId);
+  async getFile(projectId: string, path: string): Promise<VirtualFile | null> {
+    return this.getFileSync(projectId, path);
   }
 
   async updateFile(file: VirtualFile): Promise<void> {
@@ -1160,13 +1214,15 @@ export class SQLiteAdapter implements StorageAdapter {
     db.prepare('DELETE FROM files WHERE project_id = ? AND path = ?').run(projectId, path);
   }
 
-  async listFiles(projectId: string): Promise<VirtualFile[]> {
-    const db = this.getDB();
-    const rows = db.prepare(
+  listFilesSync(projectId: string): VirtualFile[] {
+    const rows = this.getDB().prepare(
       'SELECT * FROM files WHERE project_id = ? ORDER BY path'
     ).all(projectId) as Record<string, unknown>[];
-
     return rows.map(row => this.rowToFile(row, projectId));
+  }
+
+  async listFiles(projectId: string): Promise<VirtualFile[]> {
+    return this.listFilesSync(projectId);
   }
 
   async deleteProjectFiles(projectId: string): Promise<void> {
@@ -1694,12 +1750,12 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.getDB();
     const stmt = db.prepare(`
       INSERT INTO deployments (
-        id, project_id, name, slug, enabled, under_construction,
+        id, project_id, name, slug, under_construction,
         custom_domain, head_scripts, body_scripts, cdn_links,
         analytics, seo, compliance, review, settings_version,
         last_published_version, preview_image, preview_updated_at,
         database_enabled, created_at, updated_at, published_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -1707,7 +1763,6 @@ export class SQLiteAdapter implements StorageAdapter {
       deployment.projectId,
       deployment.name,
       deployment.slug ?? null,
-      deployment.enabled ? 1 : 0,
       deployment.underConstruction ? 1 : 0,
       deployment.customDomain ?? null,
       JSON.stringify(deployment.headScripts ?? []),
@@ -1762,7 +1817,7 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.getDB();
     const stmt = db.prepare(`
       UPDATE deployments SET
-        project_id = ?, name = ?, slug = ?, enabled = ?, under_construction = ?,
+        project_id = ?, name = ?, slug = ?, under_construction = ?,
         custom_domain = ?, head_scripts = ?, body_scripts = ?, cdn_links = ?,
         analytics = ?, seo = ?, compliance = ?, review = ?, settings_version = ?,
         last_published_version = ?, preview_image = ?, preview_updated_at = ?,
@@ -1774,7 +1829,6 @@ export class SQLiteAdapter implements StorageAdapter {
       deployment.projectId,
       deployment.name,
       deployment.slug ?? null,
-      deployment.enabled ? 1 : 0,
       deployment.underConstruction ? 1 : 0,
       deployment.customDomain ?? null,
       JSON.stringify(deployment.headScripts ?? []),
@@ -1817,7 +1871,6 @@ export class SQLiteAdapter implements StorageAdapter {
       projectId: row.project_id as string,
       name: row.name as string,
       slug: row.slug as string | undefined,
-      enabled: Boolean(row.enabled),
       underConstruction: Boolean(row.under_construction),
       customDomain: row.custom_domain as string | undefined,
       headScripts: parseJSON(row.head_scripts as string, []),

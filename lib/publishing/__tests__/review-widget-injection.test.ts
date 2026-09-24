@@ -8,7 +8,6 @@ const HTML = '<html><head><title>x</title></head><body><h1>Hi</h1></body></html>
 
 function publishSettings(): PublishSettings {
   return {
-    enabled: true,
     underConstruction: false,
     headScripts: [],
     bodyScripts: [],

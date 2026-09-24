@@ -202,13 +202,19 @@ Right-click any deployment card for actions:
 | **View Source** | Open source project |
 | **Analytics** | View deployment analytics dashboard |
 | **Capture Thumbnail** | Update preview image |
-| **Unpublish** | Disable deployment (keeps settings) |
+| **Unpublish** | Take the site off traffic, keeping the deployment and its data |
 | **Delete** | Permanently remove deployment |
 
 ### Unpublish vs Delete
 
-- **Unpublish**: Disables the deployment but preserves all settings. You can re-publish later.
-- **Delete**: Permanently removes the deployment and all its settings.
+- **Unpublish**: Removes the published files, so the site stops answering. Its edge functions stop
+  answering too, and its scheduled functions stop running. The deployment keeps its settings, its
+  database and its analytics, and it keeps its address, so publishing again puts the same site back
+  at the same URL.
+  Pages are served with an hour of cache, so a visitor who loaded the site recently may still see it
+  from their own browser cache for up to that long.
+- **Delete**: Permanently removes the deployment, its settings, its database and its analytics. The
+  address is released, so a later deployment of the same project gets a different one.
 
 ### Version Tracking
 
@@ -267,5 +273,6 @@ See troubleshooting section in [Custom Domains Guide](CUSTOM_DOMAINS.md#troubles
 ## Next Steps
 
 - **[Backend](?doc=backend-features)** - Database, edge functions, secrets
+- **[MCP Server](?doc=mcp-server)** - Create, publish and unpublish deployments from an outside agent
 - **[Server Mode](?doc=server-mode)** - Setup and deployment
 - **[Troubleshooting](?doc=troubleshooting)** - Fix common issues

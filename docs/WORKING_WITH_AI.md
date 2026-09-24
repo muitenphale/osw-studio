@@ -14,7 +14,7 @@ OSW Studio has two modes that control what AI can do to your project:
 
 **Use when you want to explore without making changes.**
 
-In Chat mode, the AI is limited to read-only shell commands. It can read files and analyze your project structure, but cannot write, edit, or delete anything.
+In Chat mode, the AI is limited to read-only bash commands. It can read files and analyze your project structure, but cannot write, edit, or delete anything.
 
 AI can:
 - Answer questions about your code
@@ -53,7 +53,7 @@ Can you explain this JavaScript function?
 
 **Use when you want AI to build and modify your project.**
 
-In Code mode, the AI has full access to all shell commands. It can create, edit, delete, and restructure files as needed.
+In Code mode, the AI has full access to all bash commands. It can create, edit, delete, and restructure files as needed.
 
 AI can:
 - Create new files and folders
@@ -258,35 +258,35 @@ Change all instances of "Company" to "Studio"
 
 ### Tool Execution
 
-When AI works in Code Mode, all file operations run through a single `shell` tool. You'll see commands like:
+When AI works in Code Mode, all file operations run through a single `bash` tool. You'll see commands like:
 
 **Creating files:**
 ```
-🔧 shell: cat > index.html << 'EOF' ...
+🔧 write: cat > index.html << 'EOF' ...
 ✅ Created index.html
 ```
 
 **Editing files:**
 ```
-🔧 shell: sed -i 's/old/new/' styles.css
+🔧 write: sed -i 's/old/new/' styles.css
 ✅ Updated styles.css
 ```
 or for larger edits:
 ```
-🔧 shell: ss /styles.css << 'EOF'
+🔧 write: ss /styles.css << 'EOF'
 search===replace
 EOF
 ```
 
 **Reading files:**
 ```
-🔧 shell: cat index.html
+🔧 bash: cat index.html
 📄 Read file contents
 ```
 
 **Checking compilation:**
 ```
-🔧 shell: build
+🔧 status: build
 ✅ Build successful — 0 errors
 ```
 
@@ -556,4 +556,5 @@ Undo the last change you made to the CSS
 
 - **[Templates](?doc=templates)** - Start faster with templates
 - **[Skills](?doc=skills)** - Teach AI your preferences
+- **[MCP Server](?doc=mcp-server)** - Let Claude Code or another client drive the same agent
 - **[FAQ](?doc=faq)** - Common questions answered

@@ -69,7 +69,7 @@ export function SyncItemRow({
             disabled={disabled || syncing}
             className="h-7 text-xs"
           >
-            Resolve
+            Keep both
           </Button>
         ) : (
           <>

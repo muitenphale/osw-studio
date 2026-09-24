@@ -6,6 +6,26 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.103.0 - Built-in MCP Server (2026-09-24)
+
+Claude Code, Claude Desktop and anything else that speaks MCP can now work inside one of your workspaces: create projects, read and write their files, run OSW Studio's own agent and follow what it does, publish and unpublish deployments, and read their analytics. OSW Studio runs the MCP server itself, with nothing to install: you connect a client by signing in and approving what it may do, with no key to paste. This needs Server Mode or the desktop app, and whoever runs the instance has to switch it on; browser mode has no server to connect to.
+
+### The connector
+- **You approve it in the app**: sign in, pick one workspace, and choose what it may do from what your role allows
+- **Running the agent needs a tab open**: OSW Studio's own agent runs in your browser, so a task asked for through the connector needs OSW Studio open on that workspace and signed in to the same account
+- **What it cannot do**: delete a project, add or remove people, or read back a secret's value or your provider keys
+- **You can cut it off**: Settings lists every connected client with when it was last used, and Disconnect ends it. Losing access to that workspace, or having the account deactivated, ends it too
+- **Its work appears as it happens**: a project it creates or changes shows up in an open tab without a reload, with a banner saying which client is working
+
+### Deployments
+- **Unpublish**: takes a site off the internet, removes the files it was serving, and stops its functions and scheduled jobs. The Published toggle never did this, so a deployment switched off in settings kept serving
+
+### Syncing and saving
+- **Keep both**: when a project has changed on the server and on this device, you can copy yours to "{name} (local draft)" and pull the server's, instead of losing one of them
+- **Opening a project leaves it as you left it**: it used to restore the last save when you opened it, which could throw away work done since. Discard still restores it, when you ask
+
+---
+
 ## v1.102.0 - Images from a ChatGPT Subscription (2026-09-15)
 
 If you have a ChatGPT subscription, the agent can now generate images with it: pick a GPT Image 2 quality under Image generation in Models and it works like any other image model, with no separate key. The rest of this release is about a task ending honestly instead of leaving you with a button that does nothing: an expired HuggingFace sign-in says so and asks you to sign in again, an error the provider will always refuse ends the task with Retry rather than pausing, and Continue only appears where it can resume something.

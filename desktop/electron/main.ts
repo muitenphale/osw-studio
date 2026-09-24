@@ -13,6 +13,7 @@
 import { app, BrowserWindow, Menu, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { migrateLegacyDir } from './migrate-legacy';
+import { choosePort, movedPortWarning } from './server-port';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -50,8 +51,12 @@ function logToFile(message: string): void {
 // ---------------------------------------------------------------------------
 
 async function startNextServer(host: string = 'localhost'): Promise<number> {
-  const { getPort } = await import('get-port-please');
-  const port = await getPort({ portRange: [30011, 50000] });
+  // A fixed port, so a URL that reaches this app keeps reaching it: an MCP connector is
+  // registered against one. See server-port.ts for why 30011 and why the fallback stays low.
+  const { checkPort } = await import('get-port-please');
+  const choice = await choosePort(async (candidate) => (await checkPort(candidate, host)) !== false);
+  const port = choice.port;
+  if (choice.movedFromPreferred) logToFile(movedPortWarning(choice));
 
   process.env.PORT = String(port);
   process.env.HOSTNAME = host;

@@ -312,11 +312,55 @@ export function getUserCount(): number {
 }
 
 /**
+ * Revoking the MCP grants that an access change has just invalidated.
+ *
+ * A grant records the user and workspace it was consented for, and nothing about it changes when
+ * that access goes away: the bearer token stays valid, the connector keeps answering `initialize`,
+ * and its refresh token keeps rotating. Tool calls do refuse — every tool re-checks access on each
+ * call — but the client is left holding a live connection where everything errors, and restoring
+ * access later silently resurrects it without a new consent screen.
+ *
+ * Written as SQL here rather than calling into lib/mcp/store: that module imports this one, so an
+ * import in this direction is a cycle. The tables are created lazily by initMcpSchema, so they may
+ * not exist yet on an instance where the connector has never been enabled.
+ *
+ * @param workspaceId Limits it to one workspace's grants; omitted, every grant the user holds goes,
+ *   which is what deactivating an account means.
+ */
+function revokeMcpGrantsFor(userId: string, workspaceId?: string): void {
+  const db = getSystemDatabase();
+  const present = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'mcp_grants'"
+  ).get();
+  if (!present) return;
+
+  const where = workspaceId ? 'user_id = ? AND workspace_id = ?' : 'user_id = ?';
+  const params = workspaceId ? [userId, workspaceId] : [userId];
+
+  const doomed = db.prepare(`SELECT id FROM mcp_grants WHERE ${where} AND revoked = 0`)
+    .all(...params) as { id: string }[];
+  if (doomed.length === 0) return;
+
+  // Both, because `revoked` is what every later check reads, and dropping the tokens stops a
+  // client holding one from being told anything about a grant that is no longer its business.
+  const revoke = db.prepare("UPDATE mcp_grants SET revoked = 1 WHERE id = ?");
+  const dropTokens = db.prepare('DELETE FROM mcp_tokens WHERE grant_id = ?');
+  const drop = db.transaction((ids: string[]) => {
+    for (const id of ids) {
+      revoke.run(id);
+      dropTokens.run(id);
+    }
+  });
+  drop(doomed.map(g => g.id));
+}
+
+/**
  * Deactivate a user (soft delete)
  */
 export function deactivateUser(id: string): void {
   const db = getSystemDatabase();
   db.prepare("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+  revokeMcpGrantsFor(id);
   enqueueEvent('user.deactivated', { userId: id });
 }
 
@@ -348,6 +392,10 @@ export function updateUser(id: string, updates: { display_name?: string; active?
 
   values.push(id);
   db.prepare(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+  // The admin UI deactivates through here rather than through deactivateUser, so the grants have
+  // to go from here too.
+  if (updates.active === 0) revokeMcpGrantsFor(id);
 
   const updated = getUserById(id);
   if (updated) {
@@ -478,6 +526,7 @@ export function revokeWorkspaceAccess(userId: string, workspaceId: string): void
   const revokedUser = getUserById(userId);
   db.prepare('DELETE FROM workspace_access WHERE user_id = ? AND workspace_id = ?')
     .run(userId, workspaceId);
+  revokeMcpGrantsFor(userId, workspaceId);
 
   if (revokedUser) {
     enqueueEvent('workspace.access_revoked', { workspaceId, email: revokedUser.email });
@@ -541,12 +590,17 @@ export function verifyWorkspaceAccess(
   workspaceId: string,
   requiredRole: 'owner' | 'editor' | 'viewer' = 'viewer'
 ): void {
-  // Admin users always have access
-  const user = getUserById(userId);
-  if (user?.is_admin) return;
-
-  // Also allow legacy admin and desktop users
+  // Legacy admin and desktop principals first: they are ids without a users row, so the account
+  // lookup below would refuse them.
   if (userId === 'admin' || userId === 'desktop' || userId === 'instance-api') return;
+
+  // A deactivated account keeps every workspace_access row it had, so checking only those rows let
+  // a deactivated user keep working. That was survivable for a browser session, which dies with the
+  // cookie, but an MCP grant refreshes itself indefinitely with nobody present: offboarding someone
+  // left their connector with full access to the workspace. getUserById filters on active.
+  const user = getUserById(userId);
+  if (!user) throw new Error('Workspace access denied');
+  if (user.is_admin) return;
 
   const access = getWorkspaceAccess(userId, workspaceId);
   if (!access) throw new Error('Workspace access denied');

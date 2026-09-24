@@ -83,6 +83,8 @@ type StoredCheckpointAny = StoredCheckpoint | StoredCheckpointCompressed;
 interface CreateCheckpointOptions {
   kind?: CheckpointKind;
   baseRevisionId?: string | null;
+  /** Set at create so prune cannot eat a user save before a later pin. */
+  pinned?: boolean;
 }
 
 const MAX_UNPINNED_PER_PROJECT = 5;
@@ -374,6 +376,8 @@ class CheckpointManager {
       }
     }
 
+    const pinned = options.pinned === true;
+
     const checkpoint: Checkpoint = {
       id: `cp_${Date.now()}_${cpCounter++}`,
       timestamp: new Date().toISOString(),
@@ -382,6 +386,7 @@ class CheckpointManager {
       directories,
       projectId,
       kind: options.kind || 'auto',
+      pinned,
       baseRevisionId: options.baseRevisionId ?? null,
       backend: await captureBackend(activeVFS, projectId)
     };
@@ -392,7 +397,7 @@ class CheckpointManager {
       description: checkpoint.description,
       projectId: checkpoint.projectId,
       kind: checkpoint.kind,
-      pinned: false,
+      pinned,
       baseRevisionId: checkpoint.baseRevisionId
     };
     this.checkpointMetadata.set(checkpoint.id, metadata);
@@ -489,9 +494,8 @@ class CheckpointManager {
   /**
    * Restore project to a checkpoint.
    *
-   * `options.backend` opts out of restoring backend records and settings. The one caller that
-   * does is `saveManager.restoreLastSaved`, which runs on every project open rather than on a
-   * user asking to go back — see the comment there.
+   * `options.backend` opts out of restoring backend records and settings. Discard
+   * (`saveManager.restoreLastSaved`) uses that so gallery backend edits are not rolled back.
    */
   async restoreCheckpoint(
     checkpointId: string,

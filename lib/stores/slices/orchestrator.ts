@@ -10,6 +10,7 @@ import { vfs } from '@/lib/vfs';
 import type { Project, ProjectRuntime } from '@/lib/vfs/types';
 import type { WorkspaceMode } from './project';
 import { normalizeProjectSettings } from '@/lib/vfs/project-settings';
+import { markMcpActivity, clearMcpActivity } from '@/lib/api/mcp-activity';
 import { debugEventsState } from '@/lib/llm/debug-events-state';
 import { drainRuntimeErrors } from '@/lib/preview/runtime-errors';
 import { logger } from '@/lib/utils';
@@ -20,6 +21,8 @@ import { handleSearchRequested } from '@/lib/server-generate/search-delegation-h
 import { playTaskCompleteSound, playTaskCompleteSoundSubtle } from '@/lib/utils/task-complete-sound';
 import { checkpointManager } from '@/lib/vfs/checkpoint';
 import { saveManager } from '@/lib/vfs/save-manager';
+import { localHasUnackedEdits, markSyncNeedsRetry } from '@/lib/vfs/auto-sync';
+import { notifyServerProjectsChanged, notifyServerDeploymentsChanged } from '@/lib/vfs/sync-events';
 import { getProjectAssignment } from '@/lib/llm/models/project-assignment';
 import type { InterviewTemplate } from '@/lib/interview/types';
 import type { ApprovalRequest, ApprovalOutcome } from '@/lib/llm/permissions';
@@ -61,10 +64,8 @@ async function pullAndCheckpointServerFiles(
   // back: that response carries ISO strings, and a string lastSyncedAt makes every later status
   // comparison read 'synced' regardless of how far the copies have drifted.
   const serverProject = pullResult.project;
+  const serverFiles = pullResult.files;
   const serverUpdatedAt = serverProject.updatedAt ? new Date(serverProject.updatedAt) : new Date();
-  // getProject throws when the record is gone — the project can be deleted while a server
-  // generation is still running. Fall back to the server's copy so the pulled files still land
-  // somewhere instead of the whole sync being skipped.
   let target: Project;
   try {
     target = await vfs.getProject(projectId);
@@ -74,33 +75,61 @@ async function pullAndCheckpointServerFiles(
       createdAt: serverProject.createdAt ? new Date(serverProject.createdAt) : serverUpdatedAt,
     };
   }
-  target.name = serverProject.name;
-  target.description = serverProject.description;
-  // Straight from a JSON response; normalized for the same reason the pull path does it.
-  if (serverProject.settings) target.settings = normalizeProjectSettings(serverProject.settings);
-  target.updatedAt = serverUpdatedAt;
-  target.lastSyncedAt = new Date();
-  target.serverUpdatedAt = serverUpdatedAt;
-  target.syncStatus = 'synced';
-  await vfs.updateProject(target, { preserveUpdatedAt: true });
   const existingFiles = await vfs.getAllFilesAndDirectories(projectId);
   const existingFilePaths = new Set(
     existingFiles
       .filter((f): f is import('@/lib/vfs/types').VirtualFile => !('type' in f && f.type === 'directory'))
       .map(f => f.path)
   );
-  for (const file of pullResult.files) {
-    if (existingFilePaths.has(file.path)) {
-      await vfs.updateFile(projectId, file.path, file.content, { silent: true });
-    } else {
-      await vfs.createFile(projectId, file.path, file.content, { silent: true });
+  // A record with no files that has never been saved holds nothing to protect, which is what a
+  // project the connector has just created looks like: `createProject` seeds a root node and no
+  // files, and leaves `lastSyncedAt` unset — which `localHasUnackedEdits` reads as local edits, so
+  // such a project was reported as edited on another device and left at `syncStatus: 'error'`.
+  // Asked of the record rather than of whoever created it, because every tab receives the event and
+  // only one of them wins the race to seed it.
+  const nothingToProtect = existingFilePaths.size === 0 && !target.lastSavedAt;
+  const unacked = nothingToProtect ? false : localHasUnackedEdits(target);
+  await saveManager.runWithSuppressedDirty(projectId, async () => {
+    for (const file of serverFiles) {
+      if (existingFilePaths.has(file.path)) {
+        if (!unacked) {
+          await vfs.updateFile(projectId, file.path, file.content, { silent: true });
+        }
+      } else {
+        await vfs.createFile(projectId, file.path, file.content, { silent: true });
+      }
     }
+    if (!unacked) {
+      const serverPaths = new Set(serverFiles.map(f => f.path));
+      for (const p of existingFilePaths) {
+        if (!serverPaths.has(p)) {
+          try { await vfs.deleteFile(projectId, p, { silent: true }); } catch {}
+        }
+      }
+    }
+  });
+  if (unacked) {
+    await markSyncNeedsRetry(projectId, target.name || serverProject.name, { reason: 'conflict' });
+    return;
   }
-  const serverPaths = new Set(pullResult.files.map(f => f.path));
-  for (const p of existingFilePaths) {
-    if (!serverPaths.has(p)) {
-      try { await vfs.deleteFile(projectId, p, { silent: true }); } catch {}
-    }
+  target.name = serverProject.name;
+  target.description = serverProject.description;
+  if (serverProject.settings) target.settings = normalizeProjectSettings(serverProject.settings);
+  target.updatedAt = serverUpdatedAt;
+  target.serverUpdatedAt = serverUpdatedAt;
+  target.lastSyncedAt = new Date();
+  target.syncStatus = 'synced';
+  if (typeof serverProject.revision === 'number') {
+    target.revision = serverProject.revision;
+  }
+  await vfs.updateProject(target, { preserveUpdatedAt: true });
+  // Files are one store; edge/server functions, schedules and secrets are another. An MCP
+  // backend_upsert writes the latter, and without this pull a later UI publish would push the
+  // tab's stale IndexedDB copy and wipe the connector's work.
+  try {
+    await syncMgr.pullBackendFeatures?.(projectId);
+  } catch (err) {
+    logger.warn('[ServerGen] Backend features pull failed:', err);
   }
   try {
     const cp = await checkpointManager.createCheckpoint(projectId, 'After server generation', { kind: 'auto' });
@@ -944,11 +973,15 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
   clearChat: async (projectId: string) => {
     const newTasks = new Map(get().generationTasks);
     const task = newTasks.get(projectId);
-    if (task) {
-      newTasks.set(projectId, { ...task, persistedInstance: null });
-      set({ debugEvents: [], generationTasks: newTasks });
+    if (task) newTasks.set(projectId, { ...task, persistedInstance: null });
+    // `debugEvents` is the viewed project's conversation. Clearing it for any other project would
+    // wipe the chat in front of the person to start a run somewhere else, so a background project
+    // clears its own buffer instead.
+    if (get().projectId === projectId) {
+      set(task ? { debugEvents: [], generationTasks: newTasks } : { debugEvents: [] });
     } else {
-      set({ debugEvents: [] });
+      backgroundEventsMap.set(projectId, []);
+      if (task) set({ generationTasks: newTasks });
     }
     try {
       await debugEventsState.clearEvents(projectId);
@@ -974,6 +1007,102 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
   connectSSE: () => {
     if (get().sseClient) return;
 
+    /** Bring a project an MCP client created or edited into this tab's copy. */
+    const handleMcpProjectChanged = async (data: { projectId: string; projectName: string; created: boolean; clientLabel?: string }) => {
+      markMcpActivity({
+        kind: 'edit',
+        projectId: data.projectId,
+        projectName: data.projectName,
+        clientLabel: data.clientLabel || 'An MCP client',
+      });
+      try {
+        // pullAndCheckpointServerFiles merges and checkpoints but does not create; a project made
+        // through the connector has no local record yet, so seed one with the server's id first.
+        try {
+          await vfs.getProject(data.projectId);
+        } catch {
+          try {
+            await vfs.createProject(data.projectName, '', data.projectId);
+          } catch {
+            // Every tab on this account gets this event, and the projects store is shared between
+            // them, so each one finds the project missing and tries to seed it. `createProject`
+            // uses `add`, which rejects a duplicate key, and the tab that lost the race threw out
+            // of the whole handler: no pull, no refresh, and a gallery that only caught up on the
+            // next page load. Losing the race is the normal outcome for one of them, not a fault.
+          }
+        }
+        await pullAndCheckpointServerFiles(data.projectId, get);
+        if (get().projectId === data.projectId) {
+          get().markDirty();
+        }
+        get().bumpRefreshTrigger();
+      } catch (error) {
+        logger.warn('[MCP] Could not pull a project an MCP client changed:', error);
+      } finally {
+        // `refreshTrigger` only reaches the open editor. The gallery and the deployments view
+        // re-read on `serverProjectsChanged`, which the Server Sync dialog and the background
+        // reconcile already fire; without it here, a project made through the connector showed up
+        // only after a page reload.
+        //
+        // In `finally` because a partial pull still changes what is on disk, and the listeners
+        // answer with a plain re-read. Leaving it on the success path meant one failure put the
+        // gallery out of date until someone reloaded the page.
+        notifyServerProjectsChanged();
+      }
+    };
+
+    /** Start a task an MCP client asked for, and post the outcome back to the server. */
+    const handleMcpRunRequested = async (data: { requestId: string; projectId: string; prompt: string; chatMode: boolean; clientLabel?: string }) => {
+      // Every tab this account has open receives the request. Only the one that takes it runs the
+      // task; without this each tab started its own on the same project.
+      try {
+        const claim = await fetch('/api/mcp/agent-claim', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: data.requestId }),
+        });
+        if (!claim.ok || !(await claim.json()).granted) return;
+      } catch {
+        return;
+      }
+
+      let body: { requestId: string; ok: boolean; taskId?: string; error?: string };
+      try {
+        // Only projects registered here are written to IndexedDB; the rest live in an in-memory
+        // buffer that a reload discards. A tab can be asked to run a project it has never opened,
+        // and without this the whole conversation was lost the moment the page reloaded.
+        get().initPersistence(data.projectId);
+        // The name is for the banner only, so a project this tab has no local copy of still runs.
+        let projectName = 'a project';
+        try { projectName = (await vfs.getProject(data.projectId))?.name || projectName; } catch {}
+        markMcpActivity({
+          kind: 'run',
+          projectId: data.projectId,
+          projectName,
+          clientLabel: data.clientLabel || 'An MCP client',
+        });
+        // The run continues whatever conversation the project already has. It used to clear it
+        // first, which was an unrecoverable delete of the person's own chat (`clearEvents` writes
+        // an empty list) triggered by an outside client. A connector may add to the record here;
+        // it may not erase it. Only events from the task it started are replayed back to it.
+        const started = await get().startServerGeneration(data.projectId, data.prompt, Boolean(data.chatMode));
+        const taskId = get().generationTasks.get(data.projectId)?.serverTaskId;
+        body = started
+          ? { requestId: data.requestId, ok: true, taskId }
+          : { requestId: data.requestId, ok: false, error: 'This tab could not start the task. Its provider connection or model may not be set.' };
+      } catch (error) {
+        body = { requestId: data.requestId, ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      }
+      // The notice belongs to a running task; if none started there is nothing to announce.
+      if (!body.ok) clearMcpActivity(data.projectId);
+      try {
+        await fetch('/api/mcp/agent-result', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+      } catch {
+        // The server times the request out on its own; nothing useful to do here.
+      }
+    };
+
     const client = new SSEClient({
       // A restarted server has no in-memory event buffer. Re-checking status on
       // each successful connection turns a recovered terminal task into UI state.
@@ -997,8 +1126,35 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
           handleSearchRequested(data as any);
           return;
         }
+        if (event === 'mcp_deployment_changed') {
+          // Nothing to pull: deployments live on the server only. The page just has to re-read.
+          const d = data as { deploymentName?: string; action?: string; clientLabel?: string };
+          markMcpActivity({
+            kind: 'deploy',
+            projectId: `deployment:${String((data as { deploymentId?: string }).deploymentId ?? '')}`,
+            projectName: d.deploymentName ?? 'a deployment',
+            clientLabel: d.clientLabel || 'An MCP client',
+            action: d.action,
+          });
+          notifyServerDeploymentsChanged();
+          return;
+        }
+        if (event === 'mcp_project_changed') {
+          // An MCP client changed the workspace database. Pull it into this tab so the project
+          // does not sit in Server Sync as "server only" or "server has updates".
+          handleMcpProjectChanged(data as { projectId: string; projectName: string; created: boolean });
+          return;
+        }
+        if (event === 'mcp_run_requested') {
+          // An MCP client asked for a task. The provider key is here, not on the server, so this
+          // tab starts it and reports the task id back.
+          handleMcpRunRequested(data as { requestId: string; projectId: string; prompt: string; chatMode: boolean; clientLabel?: string });
+          return;
+        }
         if (event === 'task_complete') {
           cancelPendingFileSync();
+          // A run the connector asked for is over, so stop saying it is happening.
+          clearMcpActivity(projectId);
 
           // awaiting_user is a pause (e.g. a gated command awaiting the user's Allow/Deny), not a
           // finish — the approval prompt is already in the chat. Don't celebrate or pull files.
@@ -1047,24 +1203,39 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
           const role = (data as any).message?.role;
           if (role === 'system') return; // System prompt is internal, client doesn't render it
           if (role === 'user') {
-            const localIdx = get().debugEvents.findLastIndex(
-              (e) => e.event === 'conversation_message' && e.data?.message?.role === 'user'
-            );
+            /**
+             * Merge into the message this tab posted for this run, and nothing else.
+             *
+             * `debugEvents` holds the viewed project's conversation, so for any other project the
+             * last user message in it belongs to a different chat. Matching on "the last user
+             * message" alone therefore swallowed the server's copy: a run started from the MCP
+             * connector landed on a tab that was not viewing the project, the server's user
+             * message merged into an unrelated older one, and the prompt never appeared in the
+             * chat at all. `awaitingServerEcho` marks the one local message still expecting this.
+             */
+            const localIdx = get().projectId === projectId
+              ? get().debugEvents.findLastIndex(
+                  (e) => e.event === 'conversation_message'
+                    && e.data?.message?.role === 'user'
+                    && e.data?.message?.ui_metadata?.awaitingServerEcho,
+                )
+              : -1;
             if (localIdx >= 0) {
               const serverMeta = (data as any).message?.ui_metadata;
-              if (serverMeta?.projectContext) {
-                set((state) => {
-                  const events = [...state.debugEvents];
-                  const existing = { ...events[localIdx] };
-                  existing.data = {
-                    ...existing.data,
-                    message: { ...existing.data.message, ui_metadata: { ...existing.data.message?.ui_metadata, ...serverMeta } },
-                  };
-                  existing.version = (existing.version ?? 1) + 1;
-                  events[localIdx] = existing;
-                  return { debugEvents: events };
-                });
-              }
+              set((state) => {
+                const events = [...state.debugEvents];
+                const existing = { ...events[localIdx] };
+                const merged = { ...existing.data.message?.ui_metadata, ...(serverMeta ?? {}) };
+                // The echo has arrived, so this message is no longer the one to merge into.
+                delete merged.awaitingServerEcho;
+                existing.data = {
+                  ...existing.data,
+                  message: { ...existing.data.message, ui_metadata: merged },
+                };
+                existing.version = (existing.version ?? 1) + 1;
+                events[localIdx] = existing;
+                return { debugEvents: events };
+              });
               return;
             }
           }
@@ -1187,7 +1358,7 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
     // `conversationHistory` is built from the events further down, so it still includes this one.
     // Build ui_metadata for the local user message (mirrors what the orchestrator produces)
     const displayPrompt = options?.displayPrompt ?? prompt;
-    const uiMeta: Record<string, any> = { displayContent: displayPrompt };
+    const uiMeta: Record<string, any> = { displayContent: displayPrompt, awaitingServerEcho: true };
     if (options?.focusContext) uiMeta.focusContext = { domPath: options.focusContext.domPath, snippet: options.focusContext.outerHTML };
     if (options?.placedBlocks?.length) uiMeta.semanticBlocks = options.placedBlocks.map((b: any) => ({ name: b.name, domPath: b.domPath, position: b.position, description: b.description }));
 
@@ -1367,7 +1538,6 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
 
       const { tasks: serverTasks } = await response.json();
       const generationTasks = new Map(get().generationTasks);
-      let needSSE = false;
 
       const serverProjectIds = new Set<string>();
 
@@ -1386,7 +1556,6 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
       for (const [, serverTask] of latestByProject) {
 
         if (serverTask.status === 'running' || serverTask.status === 'paused') {
-          needSSE = true;
           generationTasks.set(serverTask.projectId, {
             projectId: serverTask.projectId,
             projectName: serverTask.projectName || '',
@@ -1406,7 +1575,6 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
           if (existing && existing.result !== null) continue;
 
           const result = serverTask.status === 'completed' ? 'completed' as const : 'failed' as const;
-          needSSE = true;
 
           generationTasks.set(serverTask.projectId, {
             projectId: serverTask.projectId,
@@ -1453,18 +1621,14 @@ export const createOrchestratorSlice: StateCreator<CombinedState, [], [], Orches
         }
       }
 
-      const hasRunning = [...generationTasks.values()].some(t => t.result === null);
       set({ generationTasks, ...deriveScalarFields(generationTasks, get().projectId) });
-      if (needSSE) {
-        get().connectSSE();
-        // If no tasks are actively running, disconnect after replay completes
-        if (!hasRunning) {
-          setTimeout(() => {
-            const stillRunning = [...get().generationTasks.values()].some(t => t.result === null);
-            if (!stillRunning) get().disconnectSSE();
-          }, 5000);
-        }
-      }
+      // Hold the channel open for as long as the tab is, rather than only while a task runs.
+      // The server uses it to ask this tab for things it cannot do itself: run an agent task with
+      // the provider key that lives here, or pull a project an MCP client just changed. It used to
+      // connect only when there was a task to reattach and drop five seconds later if none were
+      // running, so those requests arrived at nobody and the caller was told no tab was open.
+      // `connectSSE` returns early when already connected.
+      get().connectSSE();
     } catch {
       // Non-critical — tasks will be picked up on next page load
     } finally {

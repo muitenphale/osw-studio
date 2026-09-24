@@ -111,6 +111,10 @@ The application itself is **free and open source** (MIT license). However:
 - Download models
 - No internet needed for AI
 
+### Can I connect Claude Code or another MCP client?
+
+**Yes, in Server Mode.** Set `MCP_ENABLED=true`, then add the instance's `/api/mcp` URL from **Settings → MCP**. The connector can edit files, backend functions and tables, publish and unpublish deployments, and read analytics. It cannot delete a project or a deployment, manage members, or change API keys. See **[MCP Server](?doc=mcp-server)**.
+
 ### Can I collaborate with others?
 
 **Yes, in Server Mode.** Workspaces support multiple users. An agency can build a site and invite the client to make updates via the AI. See **[Multitenancy](?doc=multitenancy)**.

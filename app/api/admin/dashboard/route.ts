@@ -201,11 +201,11 @@ export async function GET() {
 
     // Get recent deployments (last 5 by updated_at)
     const recentDeployments = db.prepare(`
-      SELECT id, name, slug, enabled, published_at as publishedAt, updated_at as updatedAt
+      SELECT id, name, slug, published_at as publishedAt, updated_at as updatedAt
       FROM deployments
       ORDER BY updated_at DESC
       LIMIT 5
-    `).all() as Array<{ id: string; name: string; slug: string; enabled: number; publishedAt: string | null; updatedAt: string }>;
+    `).all() as Array<{ id: string; name: string; slug: string; publishedAt: string | null; updatedAt: string }>;
 
     // System info
     const memoryUsage = process.memoryUsage();
@@ -252,10 +252,7 @@ export async function GET() {
       },
       whatsNew,
       recentProjects,
-      recentDeployments: recentDeployments.map(deployment => ({
-        ...deployment,
-        enabled: Boolean(deployment.enabled),
-      })),
+      recentDeployments,
     });
 
   } catch (error) {

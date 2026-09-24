@@ -18,11 +18,13 @@ interface GeneralTabProps {
   deploymentId: string;
   /** Resolved by the server; the client must not derive it from slug + hostname. */
   publicUrl?: string;
+  /** Whether built files are currently served. Publishing state is not a setting, so it is read-only here. */
+  published?: boolean;
   projects?: Project[];
   onProjectChange?: (projectId: string) => void;
 }
 
-export function GeneralTab({ settings, onChange, projectId, deploymentId, publicUrl: resolvedUrl, projects, onProjectChange }: GeneralTabProps) {
+export function GeneralTab({ settings, onChange, projectId, deploymentId, publicUrl: resolvedUrl, published, projects, onProjectChange }: GeneralTabProps) {
   const [originalProjectId] = useState(projectId);
   const handleChange = (field: keyof PublishSettings, value: PublishSettings[keyof PublishSettings]) => {
     onChange({
@@ -45,14 +47,7 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, public
       <Section>
         <SectionHeader icon={Globe} title="Publishing status" />
         <SectionBody className="px-4 py-1">
-          <SettingRow title="Published" description="Make this deployment publicly accessible">
-            <Switch
-              id="enabled"
-              checked={settings.enabled}
-              onCheckedChange={(checked) => handleChange('enabled', checked)}
-            />
-          </SettingRow>
-          <SettingRow title="Under construction" description="Show maintenance overlay on live deployment">
+          <SettingRow title="Under construction" description="Show a maintenance page instead of the site, from the next publish">
             <Switch
               id="under-construction"
               checked={settings.underConstruction}
@@ -107,8 +102,8 @@ export function GeneralTab({ settings, onChange, projectId, deploymentId, public
             <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
               <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
               <code className="text-sm flex-1 break-all">{publicUrl}</code>
-              <Badge variant={settings.enabled ? 'default' : 'secondary'} className="ml-2 shrink-0">
-                {settings.enabled ? 'Live' : 'Not Published'}
+              <Badge variant={published ? 'default' : 'secondary'} className="ml-2 shrink-0">
+                {published ? 'Live' : 'Not Published'}
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">

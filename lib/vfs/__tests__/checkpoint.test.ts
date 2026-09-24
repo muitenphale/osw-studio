@@ -377,6 +377,21 @@ describe('CheckpointManager', () => {
       expect(cps[4].description).toBe('CP3');
     });
 
+    it('does not prune a checkpoint pinned at create, so a user save survives later autos', async () => {
+      setProjectFiles([{ path: '/a.txt', content: 'a' }]);
+
+      const saved = await checkpointManager.createCheckpoint('proj1', 'Manual save', { kind: 'manual', pinned: true });
+
+      for (let i = 0; i < 6; i++) {
+        await new Promise(r => setTimeout(r, 5));
+        await checkpointManager.createCheckpoint('proj1', `CP${i}`);
+      }
+
+      const cps = await checkpointManager.getCheckpoints('proj1');
+      expect(cps.find(c => c.id === saved.id)?.pinned).toBe(true);
+      expect(cps.find(c => c.description === 'Manual save')).toBeDefined();
+    });
+
     it('does not prune pinned checkpoints', async () => {
       setProjectFiles([{ path: '/a.txt', content: 'a' }]);
 

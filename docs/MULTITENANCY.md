@@ -72,7 +72,7 @@ API routes follow the same pattern:
 ```
 /api/w/{workspaceId}/sync/projects
 /api/w/{workspaceId}/deployments
-/api/w/{workspaceId}/shell/execute
+/api/w/{workspaceId}/bash/execute
 ```
 
 System-wide admin pages (no workspace context):

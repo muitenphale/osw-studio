@@ -77,7 +77,7 @@ See **[Server Mode → Server Context Integration](?doc=server-mode#server-conte
 Talk to AI to build and modify your project. The chat panel has two modes:
 
 **Chat Mode** (read-only):
-- AI uses read-only shell commands
+- AI uses read-only bash commands
 - Explore and discuss without making changes
 - See how the AI understands your project
 - Perfect for planning before building

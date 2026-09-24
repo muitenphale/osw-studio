@@ -71,6 +71,13 @@ export async function POST(
 
     // Wrap delete+create in a SQLite transaction to prevent data loss on failure
     const db = adapter.getCoreDB();
+    // GET never returns secret values, so a round-trip push would otherwise write null over
+    // values set on the server (including by MCP). Keep the stored value when the payload omits it.
+    const existingSecrets = db.prepare(
+      'SELECT id, name, value FROM project_secrets WHERE project_id = ?'
+    ).all(projectId) as { id: string; name: string; value: string | null }[];
+    const valueById = new Map(existingSecrets.filter(s => s.value).map(s => [s.id, s.value as string]));
+    const valueByName = new Map(existingSecrets.filter(s => s.value).map(s => [s.name, s.value as string]));
     const syncTransaction = db.transaction(() => {
       // Delete existing project backend features
       db.prepare('DELETE FROM project_edge_functions WHERE project_id = ?').run(projectId);
@@ -101,10 +108,11 @@ export async function POST(
 
       if (body.secrets) {
         for (const secret of body.secrets) {
+          const value = secret.value || valueById.get(secret.id) || valueByName.get(secret.name) || null;
           db.prepare(`
             INSERT INTO project_secrets (id, project_id, name, description, value, has_value, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(secret.id, projectId, secret.name, secret.description || null, secret.value || null, secret.hasValue ? 1 : 0, secret.createdAt?.toString() || new Date().toISOString(), secret.updatedAt?.toString() || new Date().toISOString());
+          `).run(secret.id, projectId, secret.name, secret.description || null, value, secret.hasValue || Boolean(value) ? 1 : 0, secret.createdAt?.toString() || new Date().toISOString(), secret.updatedAt?.toString() || new Date().toISOString());
           secretCount++;
         }
       }

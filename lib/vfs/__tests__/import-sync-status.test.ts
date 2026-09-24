@@ -102,6 +102,33 @@ describe('imported project sync status', () => {
 
   // The other half of the contract: a write that is NOT local-only bookkeeping must still be
   // reported as drift, otherwise real edits would silently never sync.
+  it('does not stamp updatedAt when dirty is suppressed (a pull, not an edit)', async () => {
+    const { saveManager } = await import('../save-manager');
+    const before = await vfs.getProject(projectId);
+    const stamp = before.updatedAt.getTime();
+    vi.setSystemTime(LATER);
+    await saveManager.runWithSuppressedDirty(projectId, () =>
+      vfs.updateFile(projectId, '/index.html', '<h1>from server</h1>'),
+    );
+    const after = await vfs.getProject(projectId);
+    expect(after.updatedAt.getTime()).toBe(stamp);
+    expect(calculateItemSyncStatus(after.updatedAt, serverUpdatedAtFor(before.updatedAt), after.lastSyncedAt)).toBe(
+      'synced',
+    );
+  });
+
+  it('reports conflict when a file edit and the server both moved', async () => {
+    const before = await vfs.getProject(projectId);
+    const lastSynced = before.lastSyncedAt!;
+    vi.setSystemTime(LATER);
+    await vfs.updateFile(projectId, '/index.html', '<h1>draft</h1>');
+
+    const after = await vfs.getProject(projectId);
+    expect(after.updatedAt.getTime()).toBeGreaterThan(lastSynced.getTime());
+    const serverMoved = new Date('2026-07-30T10:00:12.000Z');
+    expect(calculateItemSyncStatus(after.updatedAt, serverMoved, after.lastSyncedAt)).toBe('conflict');
+  });
+
   it('reports local-newer when a write does not preserve updatedAt', async () => {
     const before = await vfs.getProject(projectId);
     const serverUpdatedAt = serverUpdatedAtFor(before.updatedAt);

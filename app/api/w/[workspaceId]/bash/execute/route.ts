@@ -1,7 +1,11 @@
 /**
- * Workspace-Scoped Shell Execute API Route
+ * Workspace-Scoped Bash Execute API Route
  *
- * POST - Execute a server-side shell command
+ * POST - Run the one command the `bash` tool cannot run in the browser.
+ *
+ * The agent has a single tool, `bash`, and it runs against the VFS in the browser. `sqlite3` is
+ * the exception: it reads a deployment's analytics database, which only exists on the server, so
+ * the tool posts that one command here. Nothing else is accepted.
  */
 
 import { logger } from '@/lib/utils';
@@ -51,7 +55,7 @@ export async function POST(
     // Unknown server command
     return NextResponse.json({
       stdout: '',
-      stderr: `${command}: not supported on server`,
+      stderr: `${command}: not supported on the server (only sqlite3 runs here; every other bash command runs against the project's files)`,
       exitCode: 1
     });
 
@@ -71,7 +75,7 @@ export async function POST(
       }, { status: 403 });
     }
 
-    logger.error('[Shell Execute API] Error:', error);
+    logger.error('[Bash Execute API] Error:', error);
     return NextResponse.json({
       stdout: '',
       stderr: error instanceof Error ? error.message : 'Server error',
@@ -173,7 +177,7 @@ async function handleSqlite3(
     });
 
   } catch (error) {
-    logger.error('[Shell Execute API] sqlite3 error:', error);
+    logger.error('[Bash Execute API] sqlite3 error:', error);
     return NextResponse.json({
       stdout: '',
       stderr: `sqlite3: ${error instanceof Error ? error.message : 'execution failed'}`,

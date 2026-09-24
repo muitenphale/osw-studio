@@ -6,7 +6,7 @@ import { vfs } from '@/lib/vfs';
 import { getLoginUrl } from '@/lib/config/storage';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { createSyncProgressToast } from '@/lib/vfs/sync-progress-toast';
-import { SERVER_PROJECTS_CHANGED } from '@/lib/vfs/sync-events';
+import { SERVER_PROJECTS_CHANGED, SERVER_DEPLOYMENTS_CHANGED } from '@/lib/vfs/sync-events';
 import { DeploymentCard } from '../deployment-card';
 import { DeploymentDetail, type DeploymentSettingsUpdate } from '../deployment-detail';
 import type { ReviewDraft } from '../publish-settings/review-tab';
@@ -16,9 +16,8 @@ import { AnalyticsDashboard } from '../analytics-dashboard';
 import { TemplateExportDialog } from '../templates/template-export-dialog';
 import { ProjectSwapDialog } from '../project-swap-dialog';
 import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
-import { Globe, Plus, Search, ArrowUpDown, MoreVertical, Settings, RefreshCw, Eye, EyeOff, Trash2, Copy, Pencil, ExternalLink } from 'lucide-react';
+import { Globe, Plus, Search, ArrowUpDown, MoreVertical, Settings, RefreshCw, EyeOff, Trash2, Copy, Pencil, ExternalLink } from 'lucide-react';
 import { ViewModeToggle, useViewMode } from '@/components/ui/view-mode-toggle';
-import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -183,6 +182,20 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     window.addEventListener(SERVER_PROJECTS_CHANGED, handler);
     return () => window.removeEventListener(SERVER_PROJECTS_CHANGED, handler);
   }, [isServerMode, fetchProjects]);
+
+  // A deployment an MCP client created, published or unpublished. The projects signal above
+  // refreshes only the picker, which says nothing about the deployment list this page is for.
+  //
+  // Held in a ref so the listener is attached once: `loadData` is redefined on every render, and
+  // depending on it directly would tear the subscription down and rebuild it each time.
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
+  useEffect(() => {
+    if (!isServerMode) return;
+    const handler = () => { void loadDataRef.current(); };
+    window.addEventListener(SERVER_DEPLOYMENTS_CHANGED, handler);
+    return () => window.removeEventListener(SERVER_DEPLOYMENTS_CHANGED, handler);
+  }, [isServerMode]);
 
   // Helper function to update a single deployment in state (optimistic updates)
   const updateDeploymentInState = (deploymentId: string, updates: Partial<Deployment>) => {
@@ -390,9 +403,8 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     const deployment = deployments.find(s => s.id === deploymentId);
     if (!deployment) return;
 
-    if (!confirm('Publish this deployment with the current settings?')) {
-      return;
-    }
+    // Native confirm() blocks the renderer; an automated client that never accepts
+    // the dialog never issues a publish request. The publishing spinner is the signal.
 
     // Set publishing state
     setPublishingStates(prev => ({ ...prev, [deploymentId]: true }));
@@ -418,7 +430,14 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         throw new Error(`${getRuntimeConfig(runtime).label} projects cannot be published as static sites. Use ZIP export instead.`);
       }
 
+      const { flushEditorToVfs } = await import('@/lib/vfs/flush-editor');
+      await flushEditorToVfs();
+      await vfs.flushSyncTimeout(deployment.projectId);
+
       let files = await vfs.listFiles(deployment.projectId);
+      if (files.length === 0) {
+        throw new Error('This project has no files in the browser to publish. Open it, confirm the files are there, Save, then publish again.');
+      }
 
       if (runtime && isRuntimeBundled(runtime)) {
         // Always compile fresh — generated files may be stale or absent
@@ -436,7 +455,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
         }
       }
 
-      const syncManager = getSyncManager();
+      const syncManager = getSyncManager(workspaceId);
 
       // Push project and files to server. A project too large for one request body goes in
       // batches, which is many sequential requests over however slow the link is, so it reports
@@ -448,6 +467,16 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
       if (!syncResult.success) {
         uploadProgress.dismiss();
         throw new Error(syncResult.error || 'Failed to sync files to server');
+      }
+      if (syncResult.project) {
+        const { persistAcknowledgedRevision } = await import('@/lib/vfs/auto-sync');
+        await persistAcknowledgedRevision(deployment.projectId, syncResult.project.revision, {
+          lastSyncedAt: new Date(),
+          serverUpdatedAt: syncResult.project.updatedAt
+            ? new Date(syncResult.project.updatedAt)
+            : new Date(),
+          syncStatus: 'synced',
+        });
       }
       uploadProgress.dismiss();
 
@@ -537,69 +566,35 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
     }
   };
 
-  const handleDisable = async (deploymentId: string) => {
+  const handleUnpublish = async (deploymentId: string) => {
     const deployment = deployments.find(s => s.id === deploymentId);
     if (!deployment) return;
 
-    if (!confirm('Disable this deployment? It will no longer be publicly accessible.')) {
+    if (!confirm(`Unpublish "${deployment.name}"? The site stops being served. The deployment, its settings and its data are kept, and publishing again restores it at the same URL.`)) {
       return;
     }
 
     try {
-      const response = await fetch(`${apiBase}/deployments/${deploymentId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          enabled: false,
-        }),
+      const response = await fetch(`${apiBase}/deployments/${deploymentId}/publish`, {
+        method: 'DELETE',
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to disable deployment');
+        throw new Error(error.error || 'Failed to unpublish deployment');
       }
 
-      // Update state optimistically (no full reload)
+      // Both fields drive the published badges, so clearing them here keeps the row honest
+      // without a full reload.
       updateDeploymentInState(deploymentId, {
-        enabled: false,
+        publishedAt: undefined,
+        lastPublishedVersion: undefined,
         updatedAt: new Date(),
       });
+      toast.success(`Unpublished "${deployment.name}"`);
     } catch (error) {
-      logger.error('Failed to disable deployment:', error);
-      alert('Failed to disable deployment. Please try again.');
-    }
-  };
-
-  const handleEnable = async (deploymentId: string) => {
-    const deployment = deployments.find(s => s.id === deploymentId);
-    if (!deployment) return;
-
-    try {
-      const response = await fetch(`${apiBase}/deployments/${deploymentId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          enabled: true,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to enable deployment');
-      }
-
-      // Update state optimistically (no full reload)
-      updateDeploymentInState(deploymentId, {
-        enabled: true,
-        updatedAt: new Date(),
-      });
-    } catch (error) {
-      logger.error('Failed to enable deployment:', error);
-      alert('Failed to enable deployment. Please try again.');
+      logger.error('Failed to unpublish deployment:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to unpublish deployment');
     }
   };
 
@@ -899,7 +894,6 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 min-w-0">
                                       <span className="font-medium text-foreground text-[13px] truncate">{deployment.name}</span>
-                                      {!deployment.enabled && <Badge variant="outline" className="text-[10px] shrink-0">Disabled</Badge>}
                                     </div>
                                     <span className="block text-[11px] text-muted-foreground truncate">{deployment.slug || project?.name || ''}</span>
                                   </div>
@@ -910,7 +904,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                 </div>
                               </td>
                               <td className="@max-3xl:hidden p-[4px_10px] text-[11px] text-muted-foreground align-middle">
-                                {deployment.enabled ? (
+                                {isPublished ? (
                                   // Capped on the div, not the td: under `table-auto` a cell's
                                   // max-width is a hint the layout algorithm may ignore, and this
                                   // column was taking width from the name and the actions, which are
@@ -964,20 +958,16 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                   <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleOpenDetail(deployment)}>
                                     <Settings className="w-3 h-3" />Edit
                                   </Button>
-                                  {deployment.enabled ? (
-                                    <Button
-                                      variant={hasPendingChanges ? 'outline' : 'ghost'}
-                                      size="xs"
-                                      className="@max-3xl:hidden"
-                                      onClick={() => handlePublish(deployment.id)}
-                                      disabled={publishingStates[deployment.id]}
-                                    >
-                                      <RefreshCw className={`w-3 h-3 ${publishingStates[deployment.id] ? 'animate-spin' : ''}`} />
-                                      {isPublished ? 'Republish' : 'Publish'}
-                                    </Button>
-                                  ) : (
-                                    <Button variant="outline" size="xs" className="@max-3xl:hidden" onClick={() => handleEnable(deployment.id)}>Enable</Button>
-                                  )}
+                                  <Button
+                                    variant={hasPendingChanges ? 'outline' : 'ghost'}
+                                    size="xs"
+                                    className="@max-3xl:hidden"
+                                    onClick={() => handlePublish(deployment.id)}
+                                    disabled={publishingStates[deployment.id]}
+                                  >
+                                    <RefreshCw className={`w-3 h-3 ${publishingStates[deployment.id] ? 'animate-spin' : ''}`} />
+                                    {isPublished ? 'Republish' : 'Publish'}
+                                  </Button>
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button variant="ghost" size="xs" className="px-1"><MoreVertical className="w-3.5 h-3.5" /></Button>
@@ -992,20 +982,14 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                           <DropdownMenuItem onClick={() => handleOpenDetail(deployment)}>
                                             <Settings className="w-4 h-4 mr-2" />Edit
                                           </DropdownMenuItem>
-                                          {deployment.enabled ? (
-                                            <DropdownMenuItem
-                                              onClick={() => handlePublish(deployment.id)}
-                                              disabled={publishingStates[deployment.id]}
-                                            >
-                                              <RefreshCw className="w-4 h-4 mr-2" />
-                                              {isPublished ? 'Republish' : 'Publish'}
-                                            </DropdownMenuItem>
-                                          ) : (
-                                            <DropdownMenuItem onClick={() => handleEnable(deployment.id)}>
-                                              <Eye className="w-4 h-4 mr-2" />Enable
-                                            </DropdownMenuItem>
-                                          )}
-                                          {deployment.enabled && (
+                                          <DropdownMenuItem
+                                            onClick={() => handlePublish(deployment.id)}
+                                            disabled={publishingStates[deployment.id]}
+                                          >
+                                            <RefreshCw className="w-4 h-4 mr-2" />
+                                            {isPublished ? 'Republish' : 'Publish'}
+                                          </DropdownMenuItem>
+                                          {isPublished && (
                                             <DropdownMenuItem asChild>
                                               <a href={publicUrl} target="_blank" rel="noopener noreferrer">
                                                 <ExternalLink className="w-4 h-4 mr-2" />Open link
@@ -1019,18 +1003,14 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                                         <Pencil className="w-4 h-4 mr-2" />Edit Project
                                       </DropdownMenuItem>
                                       <DropdownMenuSeparator />
-                                      {deployment.enabled && (
+                                      {isPublished && (
                                         <DropdownMenuItem onClick={() => copyDeploymentUrl(publicUrl)}>
                                           <Copy className="w-4 h-4 mr-2" />Copy URL
                                         </DropdownMenuItem>
                                       )}
-                                      {deployment.enabled ? (
-                                        <DropdownMenuItem onClick={() => handleDisable(deployment.id)}>
-                                          <EyeOff className="w-4 h-4 mr-2" />Disable
-                                        </DropdownMenuItem>
-                                      ) : (
-                                        <DropdownMenuItem onClick={() => handleEnable(deployment.id)}>
-                                          <Eye className="w-4 h-4 mr-2" />Enable
+                                      {isPublished && (
+                                        <DropdownMenuItem onClick={() => handleUnpublish(deployment.id)}>
+                                          <EyeOff className="w-4 h-4 mr-2" />Unpublish
                                         </DropdownMenuItem>
                                       )}
                                       <DropdownMenuItem onClick={() => handleDelete(deployment.id)} className="text-destructive focus:text-destructive">
@@ -1061,8 +1041,7 @@ export function DeploymentsView({ onProjectSelect, workspaceId }: DeploymentsVie
                           onViewAnalytics={handleViewAnalytics}
                           onEditProject={handleEditProject}
                           onPublish={handlePublish}
-                          onDisable={handleDisable}
-                          onEnable={handleEnable}
+                          onUnpublish={handleUnpublish}
                           onDelete={handleDelete}
                           onExportAsTemplate={handleExportAsTemplate}
                           onThumbnailChange={handleDeploymentThumbnailChange}

@@ -77,6 +77,12 @@ export class SSEEventBus {
     set.add(listener);
   }
 
+  /** Whether a client is attached for this account, so a request to it has somewhere to land. */
+  hasListener(sessionId: string): boolean {
+    const set = this.listeners.get(sessionId);
+    return set !== undefined && set.size > 0;
+  }
+
   removeListener(sessionId: string, listener: SSEListener): void {
     this.listeners.get(sessionId)?.delete(listener);
   }

@@ -18,7 +18,6 @@ import {
   Copy,
   RefreshCw,
   EyeOff,
-  Eye,
   Trash2,
   MoreVertical,
   AlertCircle,
@@ -42,8 +41,7 @@ interface DeploymentCardProps {
   onViewAnalytics: (deployment: Deployment) => void;
   onEditProject: (deployment: Deployment) => void;
   onPublish: (deploymentId: string) => void;
-  onDisable: (deploymentId: string) => void;
-  onEnable: (deploymentId: string) => void;
+  onUnpublish: (deploymentId: string) => void;
   onDelete: (deploymentId: string) => void;
   onExportAsTemplate?: (deployment: Deployment) => void;
   onThumbnailChange?: (deploymentId: string, image: string | undefined) => void;
@@ -57,8 +55,7 @@ export function DeploymentCard({
   onViewAnalytics,
   onEditProject,
   onPublish,
-  onDisable,
-  onEnable,
+  onUnpublish,
   onDelete,
   onExportAsTemplate,
   onThumbnailChange,
@@ -101,19 +98,13 @@ export function DeploymentCard({
 
         {/* Status Badge Overlay */}
         <div className="absolute top-2 right-2 flex gap-2">
-          {!deployment.enabled && (
-            <Badge variant="outline" className="bg-gray-100 dark:bg-gray-950 border-gray-300 dark:border-gray-800">
-              <EyeOff className="h-3 w-3 mr-1" />
-              Disabled
-            </Badge>
-          )}
-          {deployment.underConstruction && deployment.enabled && (
+          {deployment.underConstruction && isPublished && (
             <Badge variant="outline" className="bg-orange-100 dark:bg-orange-950 border-orange-300 dark:border-orange-800">
               <Construction className="h-3 w-3 mr-1" />
               Under Construction
             </Badge>
           )}
-          {hasPendingChanges && deployment.enabled && (
+          {hasPendingChanges && (
             <Badge variant="outline" className="bg-yellow-100 dark:bg-yellow-950 border-yellow-300 dark:border-yellow-800">
               <AlertCircle className="h-3 w-3 mr-1" />
               Pending Changes
@@ -141,7 +132,7 @@ export function DeploymentCard({
         </div>
 
         {/* URL */}
-        {deployment.enabled && (
+        {isPublished && (
           <div className="flex items-center gap-2 mb-3 p-2 bg-muted rounded-md text-xs">
             <Globe className="h-3 w-3 text-muted-foreground flex-shrink-0" />
             <span className="flex-1 truncate">{publicUrl}</span>
@@ -230,36 +221,24 @@ export function DeploymentCard({
             Edit Deployment
           </Button>
 
-          {deployment.enabled ? (
-            <Button
-              variant={hasPendingChanges ? undefined : 'outline'}
-              size="sm"
-              className="min-w-0 flex-1"
-              onClick={() => onPublish(deployment.id)}
-              disabled={isPublishing}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 shrink-0 ${isPublishing ? 'animate-spin' : ''}`} />
-              <span className="truncate">
-                {isPublishing
-                  ? 'Publishing...'
-                  : hasPendingChanges
-                    ? 'Publish Changes'
-                    : isPublished
-                      ? 'Republish'
-                      : 'Publish'}
-              </span>
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={() => onEnable(deployment.id)}
-            >
-              <Eye className="h-4 w-4 mr-2" />
-              Enable
-            </Button>
-          )}
+          <Button
+            variant={hasPendingChanges || !isPublished ? undefined : 'outline'}
+            size="sm"
+            className="min-w-0 flex-1"
+            onClick={() => onPublish(deployment.id)}
+            disabled={isPublishing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 shrink-0 ${isPublishing ? 'animate-spin' : ''}`} />
+            <span className="truncate">
+              {isPublishing
+                ? 'Publishing...'
+                : hasPendingChanges
+                  ? 'Publish Changes'
+                  : isPublished
+                    ? 'Republish'
+                    : 'Publish'}
+            </span>
+          </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -279,7 +258,7 @@ export function DeploymentCard({
                   View Analytics
                 </DropdownMenuItem>
               )}
-              {deployment.enabled && (
+              {isPublished && (
                 <DropdownMenuItem onClick={handleCopyUrl}>
                   <Copy className="h-4 w-4 mr-2" />
                   Copy URL
@@ -292,15 +271,10 @@ export function DeploymentCard({
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
-              {deployment.enabled ? (
-                <DropdownMenuItem onClick={() => onDisable(deployment.id)}>
+              {isPublished && (
+                <DropdownMenuItem onClick={() => onUnpublish(deployment.id)}>
                   <EyeOff className="h-4 w-4 mr-2" />
-                  Disable Deployment
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem onClick={() => onEnable(deployment.id)}>
-                  <Eye className="h-4 w-4 mr-2" />
-                  Enable Deployment
+                  Unpublish
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem

@@ -401,11 +401,9 @@ describe('checkpoint backend coverage', () => {
     });
 
     it('opening a project does not roll its backend back to the last save', async () => {
-      // restoreLastSaved runs on every project open, not when someone asks to go back, and the
-      // backend panel is reachable from the project gallery where there is no Save button. If it
-      // restored backend records too, an edge function added since the last save would be deleted
-      // on the next open, and a secret created since would lose its value with it — silently, and
-      // with no way for the user to have committed either.
+      // Discard (restoreLastSaved) is files-only: the backend panel is reachable from the
+      // gallery where there is no Save button. Restoring backend records would delete an
+      // edge function added since the last save, and drop a secret created since.
       const saved = await checkpointManager.createCheckpoint(PROJECT_ID, 'Save', { kind: 'manual' });
       project = { ...project, lastSavedCheckpointId: saved.id };
 

@@ -45,31 +45,39 @@ export async function pushProjectToServer(
       ? await syncManager.pushProjectDelta(projectId, project, files, { onProgress })
       : await syncManager.pushSingleProject(projectId, project, files, { onProgress });
 
+    const { persistAcknowledgedRevision } = await import('./auto-sync');
+    const ack = result.project?.revision;
+
     if (!result.success) {
+      if (typeof ack === 'number') {
+        await persistAcknowledgedRevision(projectId, ack);
+      }
       logger.error('[pushProjectToServer] Failed to push project to server:', result.error);
-      // A background reconcile stays quiet: it retries on its own, and 'conflict' is a state the
-      // user resolves in Server Sync, not an error to interrupt them with.
-      progress.error('Saved locally, but syncing to the server failed. Use Server Sync to retry.');
+      const { markSyncNeedsRetry } = await import('./auto-sync');
+      await markSyncNeedsRetry(projectId, project.name, {
+        silent: options?.silent,
+        reason: result.error === 'conflict' ? 'conflict' : 'error',
+      });
+      progress.dismiss();
       return;
     }
 
-    if (result.project) {
-      // Record sync metadata so a later refresh doesn't flag a false conflict. Only reached when
-      // the final batch landed: a push that died part way has to keep reading as un-synced, so the
-      // retry is a delta that resends the remainder rather than a no-op.
-      project.lastSyncedAt = new Date();
-      project.serverUpdatedAt = result.project.updatedAt
+    await persistAcknowledgedRevision(projectId, ack, {
+      lastSyncedAt: new Date(),
+      serverUpdatedAt: result.project?.updatedAt
         ? new Date(result.project.updatedAt)
-        : new Date();
-      await vfs.updateProject(project, { preserveUpdatedAt: true });
-    }
+        : new Date(),
+      syncStatus: 'synced',
+    });
     // No success toast: every caller that shows this one announces the result itself, and a push
     // that needed no progress toast never raised one to resolve.
     progress.dismiss();
   } catch (error) {
-    // Every exit resolves the toast. A loading toast is not dismissible, so leaving one behind
-    // pins a spinner to the corner of the app for the rest of the session.
     logger.error('[pushProjectToServer] Failed to push project to server:', error);
-    progress.error('Saved locally, but syncing to the server failed. Use Server Sync to retry.');
+    try {
+      const { markSyncNeedsRetry } = await import('./auto-sync');
+      await markSyncNeedsRetry(projectId, project.name, { silent: options?.silent, reason: 'error' });
+    } catch { /* already logged */ }
+    progress.dismiss();
   }
 }

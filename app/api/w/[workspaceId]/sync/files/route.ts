@@ -64,12 +64,14 @@ export async function POST(
      * `replace` clears the project's files before writing, which is what a push of the whole file
      * set means. A push too large for one request body arrives as a sequence of them, and only
      * the first carries it: clearing on every batch would delete what the batch before it wrote.
-     * Defaults to true so a caller that sends the whole set in one request is unchanged.
+     * Defaults to false: omitting the flag must not wipe the project. Callers that mean a
+     * whole-set replace (publish's first batch) pass `replace: true` explicitly.
      */
-    const { projectId, files, replace = true } = body as {
+    const { projectId, files, replace = false, baseRevision } = body as {
       projectId: string;
       files: (VirtualFile & { _isBinaryBase64?: boolean })[];
       replace?: boolean;
+      baseRevision?: number;
     };
 
     if (!projectId || !Array.isArray(files)) {
@@ -109,23 +111,61 @@ export async function POST(
       }
     }
 
-    if (replace) {
-      await adapter.deleteProjectFiles(projectId);
+    if (replace && files.length === 0) {
+      return NextResponse.json(
+        { error: 'Invalid request: a replace push must include the files that replace the project' },
+        { status: 400 }
+      );
     }
 
-    for (const fileData of deserializeFilesFromRequest(files)) {
-      // Nothing survives the clear, so the batch carrying it creates outright. A later batch has
-      // to upsert, since the path may already be there from a push that was retried.
-      if (replace) {
-        await adapter.createFile(fileData);
-        continue;
+    const incoming = deserializeFilesFromRequest(files);
+    const base = typeof baseRevision === 'number' ? baseRevision : 0;
+    let revision: number | undefined;
+    try {
+      revision = adapter.runTransaction(() => {
+        const existing = adapter.getProjectSync(projectId);
+        const currentRev = existing?.revision ?? 0;
+        if (existing && base !== currentRev) {
+          const err = new Error('stale-revision') as Error & { revision: number; serverUpdatedAt: Date };
+          err.revision = currentRev;
+          err.serverUpdatedAt = existing.updatedAt;
+          throw err;
+        }
+
+        if (replace) {
+          void adapter.deleteProjectFiles(projectId);
+        }
+        for (const fileData of incoming) {
+          if (replace) {
+            void adapter.createFile(fileData);
+            continue;
+          }
+          if (adapter.getFileSync(projectId, fileData.path)) void adapter.updateFile(fileData);
+          else void adapter.createFile(fileData);
+        }
+
+        if (!existing) return currentRev;
+        const next = adapter.bumpRevision(projectId, currentRev);
+        if (next == null) {
+          const err = new Error('stale-revision') as Error & { revision: number; serverUpdatedAt: Date };
+          err.revision = currentRev;
+          err.serverUpdatedAt = existing.updatedAt;
+          throw err;
+        }
+        return next;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'stale-revision') {
+        const stale = error as Error & { revision: number; serverUpdatedAt: Date };
+        return NextResponse.json(
+          { error: 'conflict', reason: 'stale', revision: stale.revision, serverUpdatedAt: stale.serverUpdatedAt },
+          { status: 409 }
+        );
       }
-      const existing = await adapter.getFile(projectId, fileData.path);
-      if (existing) await adapter.updateFile(fileData);
-      else await adapter.createFile(fileData);
+      throw error;
     }
 
-    return NextResponse.json({ success: true, count: files.length });
+    return NextResponse.json({ success: true, count: files.length, revision });
   } catch (error) {
     logger.error('[API /api/w/[workspaceId]/sync/files POST] Error:', error);
 

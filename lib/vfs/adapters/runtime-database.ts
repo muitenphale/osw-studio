@@ -243,13 +243,13 @@ export class RuntimeDatabase {
   createDeploymentInfo(deployment: Deployment): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO site_info (
-        id, project_id, name, slug, enabled, under_construction,
+        id, project_id, name, slug, under_construction,
         custom_domain, head_scripts, body_scripts, cdn_links,
         analytics, seo, compliance, settings_version,
         last_published_version, preview_image, preview_updated_at,
         created_at, updated_at, published_at
       ) VALUES (
-        'main', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        'main', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -257,7 +257,6 @@ export class RuntimeDatabase {
       deployment.projectId,
       deployment.name,
       deployment.slug ?? null,
-      deployment.enabled ? 1 : 0,
       deployment.underConstruction ? 1 : 0,
       deployment.customDomain ?? null,
       JSON.stringify(deployment.headScripts ?? []),
@@ -286,7 +285,6 @@ export class RuntimeDatabase {
       projectId: row.project_id as string,
       name: row.name as string,
       slug: row.slug as string | undefined,
-      enabled: Boolean(row.enabled),
       underConstruction: Boolean(row.under_construction),
       customDomain: row.custom_domain as string | undefined,
       headScripts: parseJSON(row.head_scripts as string, []),
@@ -311,7 +309,6 @@ export class RuntimeDatabase {
 
     if (deployment.name !== undefined) { updates.push('name = ?'); values.push(deployment.name); }
     if (deployment.slug !== undefined) { updates.push('slug = ?'); values.push(deployment.slug); }
-    if (deployment.enabled !== undefined) { updates.push('enabled = ?'); values.push(deployment.enabled ? 1 : 0); }
     if (deployment.underConstruction !== undefined) { updates.push('under_construction = ?'); values.push(deployment.underConstruction ? 1 : 0); }
     if (deployment.customDomain !== undefined) { updates.push('custom_domain = ?'); values.push(deployment.customDomain); }
     if (deployment.headScripts !== undefined) { updates.push('head_scripts = ?'); values.push(JSON.stringify(deployment.headScripts)); }
@@ -904,10 +901,20 @@ export class RuntimeDatabase {
 
   private static readonly BLOCKED_PATTERNS = /^\s*(ATTACH|DETACH|PRAGMA|VACUUM)\b/i;
 
+  /**
+   * The most rows one user statement hands back. `better-sqlite3` is synchronous and offers no
+   * interrupt, so a statement cannot be stopped part way through from this thread; what can be
+   * bounded is how much it returns, which is the memory and the response size.
+   */
+  private static readonly MAX_RESULT_ROWS = 5000;
+
+  private static readonly TRIGGER_PATTERN = /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP\s+|TEMPORARY\s+)?TRIGGER\b/i;
+
   executeRawSQL(sql: string, params?: unknown[]): {
     columns: string[];
     rows: unknown[][];
     rowsAffected: number;
+    truncated?: boolean;
   } {
     if (RuntimeDatabase.BLOCKED_PATTERNS.test(sql)) {
       throw new Error('Statement type not allowed');
@@ -919,16 +926,32 @@ export class RuntimeDatabase {
 
     if (isSelect) {
       const stmt = this.db.prepare(sql);
-      const rows = params ? stmt.all(...params) : stmt.all();
+      // Pulled one row at a time and stopped at the cap, rather than `all()`, so the rows past it
+      // are never materialised. The caller writes the query, so without this the size of the
+      // answer is their choice: a whole table arriving in one response is both the memory it takes
+      // here and the payload it becomes.
+      const rows: unknown[][] = [];
+      let columns: string[] = [];
+      let truncated = false;
+      const iterator = params ? stmt.iterate(...params) : stmt.iterate();
+      for (const row of iterator) {
+        if (columns.length === 0) columns = Object.keys(row as Record<string, unknown>);
+        if (rows.length >= RuntimeDatabase.MAX_RESULT_ROWS) {
+          truncated = true;
+          // Releases the statement; without it the unread rows keep the query open.
+          if (typeof (iterator as { return?: () => unknown }).return === 'function') {
+            (iterator as { return: () => unknown }).return();
+          }
+          break;
+        }
+        rows.push(columns.map(col => (row as Record<string, unknown>)[col]));
+      }
 
       if (rows.length === 0) {
         return { columns: [], rows: [], rowsAffected: 0 };
       }
 
-      const columns = Object.keys(rows[0] as Record<string, unknown>);
-      const rowsArray = rows.map(row => columns.map(col => (row as Record<string, unknown>)[col]));
-
-      return { columns, rows: rowsArray, rowsAffected: 0 };
+      return { columns, rows, rowsAffected: 0, ...(truncated ? { truncated } : {}) };
     } else {
       const stmt = this.db.prepare(sql);
       const result = params ? stmt.run(...params) : stmt.run();
@@ -1018,12 +1041,10 @@ export class RuntimeDatabase {
     columns: string[];
     rows: unknown[][];
     rowsAffected: number;
+    truncated?: boolean;
     error?: string;
   } {
-    const trimmedSql = sql.trim();
-    const upperSql = trimmedSql.toUpperCase();
-
-    const systemTableError = this.validateNotSystemTable(upperSql);
+    const systemTableError = this.validateNotSystemTable(sql);
     if (systemTableError) {
       return {
         columns: [],
@@ -1046,37 +1067,112 @@ export class RuntimeDatabase {
     }
   }
 
-  private validateNotSystemTable(upperSql: string): string | null {
-    const ddlMatch = upperSql.match(/^(DROP|ALTER|TRUNCATE)\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i);
-    if (ddlMatch) {
-      const tableName = ddlMatch[2].toLowerCase();
-      if (RuntimeDatabase.SYSTEM_TABLES.includes(tableName)) {
-        return `Cannot modify system table: ${tableName}`;
+  /**
+   * Which tables a statement writes, read from its compiled program rather than its text.
+   *
+   * Matching verb spellings could not hold: `INSERT OR REPLACE`, `REPLACE INTO`, a CTE before the
+   * INSERT, `main.secrets`, `[secrets]` and a bare `DELETE FROM` (which compiles to `Clear`, not
+   * `OpenWrite`) all reach a table without matching a start-anchored `INSERT INTO x`. SQLite has
+   * already resolved every alias, quote and schema prefix by the time it emits opcodes, so the
+   * program is the one description of the statement that cannot be reworded.
+   *
+   * `OpenWrite`/`Destroy` carry the root page in p2 and `Clear` in p1; sqlite_master maps a root
+   * page back to its table, and an index page back to the table it belongs to.
+   */
+  private writtenTables(sql: string): Array<{ table: string; temp: boolean }> {
+    let program: Array<{ opcode: string; p1: number; p2: number; p3: number }>;
+    try {
+      program = this.db.prepare(`EXPLAIN ${sql}`).all() as Array<{ opcode: string; p1: number; p2: number; p3: number }>;
+    } catch {
+      // Not compilable: executing it will raise the real syntax error for the caller.
+      return [];
+    }
+
+    // Keyed by database *and* page. Each attached database numbers its own pages from one, so
+    // `temp` page 2 and `main` page 2 are different tables; looking up a bare page number reported
+    // a caller's own temp table as a write to whichever main table happened to share the number.
+    const owners = new Map<string, string>();
+    const addSchema = (dbIndex: number, source: string) => {
+      try {
+        const rows = this.db.prepare(
+          `SELECT name, tbl_name, rootpage FROM ${source} WHERE rootpage IS NOT NULL AND rootpage > 0`
+        ).all() as Array<{ name: string; tbl_name: string | null; rootpage: number }>;
+        for (const row of rows) {
+          owners.set(`${dbIndex}:${row.rootpage}`, String(row.tbl_name || row.name).toLowerCase());
+        }
+      } catch {
+        // `temp` has no schema table until the connection creates its first temp object.
+      }
+    };
+    addSchema(0, 'main.sqlite_master');
+    addSchema(1, 'temp.sqlite_master');
+
+    // Which operand carries the page and which the database differs per opcode, so each is read
+    // from the field SQLite documents for it: OpenWrite P2/P3, Clear P1/P2, Destroy P1/P3.
+    const written = new Set<string>();
+    for (const op of program) {
+      if (op.opcode === 'OpenWrite') written.add(`${Number(op.p3)}:${Number(op.p2)}`);
+      else if (op.opcode === 'Clear') written.add(`${Number(op.p2)}:${Number(op.p1)}`);
+      else if (op.opcode === 'Destroy') written.add(`${Number(op.p3)}:${Number(op.p1)}`);
+    }
+
+    // Resolved in whichever schema the write landed in, not just `main`. Skipping the other
+    // schemas was the hole: `CREATE TABLE temp.edge_functions` builds a table an unqualified read
+    // resolves to first, so the write was invisible here while the executor picked it up. A temp
+    // table of the caller's own naming still resolves to a name that is not a system table, so it
+    // stays allowed.
+    const names: Array<{ table: string; temp: boolean }> = [];
+    const seen = new Set<string>();
+    for (const key of written) {
+      const owner = owners.get(key);
+      if (!owner || seen.has(owner)) continue;
+      seen.add(owner);
+      names.push({ table: owner, temp: !key.startsWith('0:') });
+    }
+    return names;
+  }
+
+  private validateNotSystemTable(sql: string): string | null {
+    // A trigger body runs later, under whatever statement fires it, so its writes never appear in
+    // the program compiled here. Nothing in the SQL editor needs one.
+    if (RuntimeDatabase.TRIGGER_PATTERN.test(sql)) {
+      return 'Cannot create triggers: a trigger body could write to a system table when it fires';
+    }
+
+    // An unqualified name resolves to `temp` before `main`, and the runtime connection is cached
+    // across requests, so a temp object carrying a system table's name silently replaces what
+    // every later read on that connection sees — including the edge-function executor's, which
+    // looks up `edge_functions` and `secrets` unqualified.
+    const create = sql.match(
+      /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(TEMP\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["'`\[]?(\w+)["'`\]]?\s*\.\s*)?["'`\[]?(\w+)["'`\]]?/i
+    );
+    if (create) {
+      const [, keyword, schema, name] = create;
+      // `CREATE TEMP TABLE x` and `CREATE TABLE temp.x` produce the same object, and an empty one
+      // is already enough to hide the real rows from every unqualified read on this connection.
+      const intoTemp = Boolean(keyword) || (schema ?? '').toLowerCase() === 'temp';
+      if (intoTemp && RuntimeDatabase.SYSTEM_TABLES.includes(name.toLowerCase())) {
+        return `Cannot shadow system table: ${name.toLowerCase()}`;
       }
     }
 
-    const insertMatch = upperSql.match(/^INSERT\s+INTO\s+["'`]?(\w+)["'`]?/i);
-    if (insertMatch) {
-      const tableName = insertMatch[1].toLowerCase();
-      if (RuntimeDatabase.SYSTEM_TABLES.includes(tableName)) {
-        return `Cannot insert into system table: ${tableName}`;
+    // ALTER leaves no root-page trace of its target — it only rewrites the schema — so its name is
+    // read directly, allowing for a schema prefix and any of SQLite's quoting styles.
+    const alterMatch = sql.match(
+      /^\s*(?:DROP|ALTER)\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:["'`\[]?\w+["'`\]]?\s*\.\s*)?["'`\[]?(\w+)["'`\]]?/i
+    );
+    if (alterMatch) {
+      const target = alterMatch[1].toLowerCase();
+      if (RuntimeDatabase.SYSTEM_TABLES.includes(target)) {
+        return `Cannot modify system table: ${target}`;
       }
     }
 
-    const updateMatch = upperSql.match(/^UPDATE\s+["'`]?(\w+)["'`]?/i);
-    if (updateMatch) {
-      const tableName = updateMatch[1].toLowerCase();
-      if (RuntimeDatabase.SYSTEM_TABLES.includes(tableName)) {
-        return `Cannot update system table: ${tableName}`;
-      }
-    }
-
-    const deleteMatch = upperSql.match(/^DELETE\s+FROM\s+["'`]?(\w+)["'`]?/i);
-    if (deleteMatch) {
-      const tableName = deleteMatch[1].toLowerCase();
-      if (RuntimeDatabase.SYSTEM_TABLES.includes(tableName)) {
-        return `Cannot delete from system table: ${tableName}`;
-      }
+    for (const { table, temp } of this.writtenTables(sql)) {
+      if (!RuntimeDatabase.SYSTEM_TABLES.includes(table)) continue;
+      return temp
+        ? `Cannot shadow system table: ${table}`
+        : `Cannot write to system table: ${table}`;
     }
 
     return null;

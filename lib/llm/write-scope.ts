@@ -25,6 +25,22 @@ function isWriteCommand(cmd: string[]): boolean {
   return false;
 }
 
+/**
+ * Whether a command line writes anything, across every stage and chained command in it.
+ *
+ * The MCP `bash` tool picks the scope it demands from this. It used `classifyCommand`, whose own
+ * header calls it a display grouping rather than a description, so a write reached through a pipe
+ * read as a plain command: the call asked only for `projects:read`, and the change notification
+ * that tells an open browser to pull never fired.
+ */
+export function commandLineWrites(command: string): boolean {
+  return command
+    .split(/\n|\||&&|\|\||;/)
+    .map(segment => segment.trim())
+    .filter(Boolean)
+    .some(segment => isWriteCommand(segment.split(/\s+/)));
+}
+
 /** Normalize a raw command-line path token to an absolute VFS path. */
 function toAbsolute(p: string): string {
   let t = p.replace(/^['"]|['"]$/g, '');

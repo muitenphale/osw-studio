@@ -359,7 +359,12 @@ describe('publishing a project too large for one request', () => {
   /** What publish does: the project row first, then its files, which is how the FK is satisfied. */
   async function publishPush(projectId: string, options?: { onProgress?: (p: { batch: number; batches: number }) => void }) {
     const project = await vfs.getProject(projectId);
-    return getSyncManager(WORKSPACE).pushProjectWithFiles(project, await vfs.listFiles(projectId), options);
+    const result = await getSyncManager(WORKSPACE).pushProjectWithFiles(project, await vfs.listFiles(projectId), options);
+    if (typeof result.project?.revision === 'number') {
+      project.revision = result.project.revision;
+      await vfs.updateProject(project, { preserveUpdatedAt: true });
+    }
+    return result;
   }
 
   it('leaves every file on the server, not just the last batch', async () => {

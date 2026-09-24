@@ -137,7 +137,6 @@ function createServerVfs(
  */
 function toPublishSettings(deployment: Deployment): PublishSettings {
   return {
-    enabled: deployment.enabled,
     underConstruction: deployment.underConstruction,
     customDomain: deployment.customDomain,
     headScripts: deployment.headScripts,
@@ -665,22 +664,3 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (m) => map[m]);
 }
 
-/**
- * Get the primary published deployment ID
- * Returns the first enabled deployment
- */
-export async function getPrimaryPublishedDeploymentId(): Promise<string | null> {
-  try {
-    const adapter = await createServerAdapter();
-    await adapter.init();
-
-    const deployments = await adapter.listDeployments?.() || [];
-    // Find the first enabled deployment
-    const enabledDeployment = deployments.find((s: Deployment) => s.enabled === true);
-
-    return enabledDeployment?.id || null;
-  } catch (error) {
-    logger.error('[Static Builder] Error getting published deployment:', error);
-    return null;
-  }
-}

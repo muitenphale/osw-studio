@@ -49,6 +49,9 @@ export class SSEClient {
       // Server generation lifecycle
       'files_changed', 'build_requested', 'search_requested', 'usage_update', 'approval_required',
       'task_complete', 'sync_gap', 'notification', 'runtimeChanged',
+      // Requests from an MCP client, which this tab answers because it holds the provider key
+      // and the local copy of the project.
+      'mcp_run_requested', 'mcp_project_changed', 'mcp_deployment_changed',
     ];
 
     for (const eventType of eventTypes) {

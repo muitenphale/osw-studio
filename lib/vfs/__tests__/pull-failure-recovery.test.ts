@@ -155,6 +155,70 @@ describe('a pull that dies half-way', () => {
   });
 });
 
+describe('a pull whose server snapshot has no files', () => {
+  it('does not delete the local tree', async () => {
+    mocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/sync/status')) {
+        return { ok: true, json: async () => ({ projects: [{ id: projectId, name: 'P', updatedAt: SERVER_MOVED.toISOString() }] }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          project: {
+            id: projectId, name: 'Renamed On Server', description: 'from server',
+            updatedAt: SERVER_MOVED.toISOString(),
+            lastSyncedAt: SERVER_MOVED.toISOString(),
+            serverUpdatedAt: SERVER_MOVED.toISOString(),
+            settings: { runtime: 'static' },
+          },
+          files: [],
+        }),
+      };
+    });
+
+    expect(await pullServerUpdates(projectId, false)).toBe(true);
+    const files = await vfs.listFiles(projectId);
+    expect(files.map((f) => f.path)).toEqual(['/index.html']);
+    expect(await vfs.readFile(projectId, '/index.html').then((f) => f.content)).toBe('<h1>local</h1>');
+  });
+
+  it('does not delete a local-only file when the working copy has unacked edits', async () => {
+    const stored = await vfs.getProject(projectId);
+    stored.updatedAt = SERVER_MOVED;
+    stored.lastSyncedAt = LAST_SYNC;
+    await vfs.updateProject(stored, { preserveUpdatedAt: true });
+    await vfs.createFile(projectId, '/v2-browser.txt', 'V2_BROWSER');
+    saveManager.markClean(projectId);
+
+    mocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/sync/status')) {
+        return { ok: true, json: async () => ({ projects: [{ id: projectId, name: 'P', updatedAt: SERVER_MOVED.toISOString() }] }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          project: {
+            id: projectId, name: 'P', description: '',
+            updatedAt: SERVER_MOVED.toISOString(),
+            settings: { runtime: 'static' },
+          },
+          files: [
+            { path: '/index.html', content: '<h1>server</h1>' },
+            { path: '/v2-mcp.txt', content: 'V2_MCP' },
+          ],
+        }),
+      };
+    });
+
+    expect(await pullServerUpdates(projectId, false)).toBe(false);
+    const paths = (await vfs.listFiles(projectId)).map((f) => f.path).sort();
+    expect(paths).toContain('/v2-browser.txt');
+    expect(await vfs.readFile(projectId, '/v2-browser.txt').then((f) => f.content)).toBe('V2_BROWSER');
+  });
+});
+
 describe('a push that failed', () => {
   // The opposite case, and the one the old flag conflated with the above: the local copy is
   // complete and correct, the server was simply unreachable. The reconcile exists to retry this.

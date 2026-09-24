@@ -41,6 +41,7 @@ export const DOCS_ITEMS: DocItem[] = [
   { id: 'site-publishing', title: 'Deployment Publishing', icon: Upload, file: 'SITE_PUBLISHING.md' },
   { id: 'custom-domains', title: 'Custom Domains', icon: Globe, file: 'CUSTOM_DOMAINS.md' },
   { id: 'backend-features', title: 'Backend', icon: Database, file: 'BACKEND_FEATURES.md' },
+  { id: 'mcp-server', title: 'MCP Server', icon: Code, file: 'MCP_SERVER.md' },
   { id: 'multitenancy', title: 'Multitenancy', icon: Users, file: 'MULTITENANCY.md' },
 
   // Help & Advanced

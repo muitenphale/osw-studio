@@ -218,10 +218,11 @@ describe('a genuine change from another device', () => {
     vi.setSystemTime(new Date('2026-09-12T10:01:00.000Z'));
     const remote = (await adapter.getProject(project.id))!;
     await adapter.updateProject({ ...remote, name: 'Edited elsewhere', updatedAt: new Date() });
+    adapter.bumpRevision(project.id, remote.revision ?? 0);
 
     vi.setSystemTime(new Date('2026-09-12T10:01:10.000Z'));
     await vfs.updateFile(project.id, '/index.html', '<h1>local</h1>');
-    await autoSyncProject(project.id);
+    await autoSyncProject(project.id, false);
 
     expect(conflictWarnings()).toHaveLength(1);
   });

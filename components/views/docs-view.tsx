@@ -9,6 +9,7 @@ import { AlertCircle } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { DOCS_ITEMS } from '@/lib/constants/docs';
 import { PageShell, PageHeader } from '@/components/ui/page-shell';
+import { DocsPageActions } from '@/components/docs-page-actions';
 
 function DocsViewContent() {
   const searchParams = useSearchParams();
@@ -259,9 +260,12 @@ function DocsViewContent() {
             <>
               {/* Document Title */}
               <div className="mb-6 pb-4 border-b">
-                <div className="flex items-center gap-3 mb-2">
-                  <selectedDoc.icon className="h-8 w-8 text-primary" />
-                  <h1 className="text-3xl font-bold">{selectedDoc.title}</h1>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <selectedDoc.icon className="h-8 w-8 text-primary shrink-0" />
+                    <h1 className="text-3xl font-bold">{selectedDoc.title}</h1>
+                  </div>
+                  <DocsPageActions markdown={content} />
                 </div>
               </div>
 

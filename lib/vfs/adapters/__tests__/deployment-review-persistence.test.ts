@@ -24,7 +24,6 @@ const baseDeployment = (id: string): Deployment => ({
   id,
   projectId: 'p1',
   name: 'Site',
-  enabled: true,
   underConstruction: false,
   headScripts: [],
   bodyScripts: [],

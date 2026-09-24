@@ -492,6 +492,26 @@ export async function checkCommandPermission(
   return { allowed: true };
 }
 
+/**
+ * The stages of a pipeline, so each can be checked as the separate command the shell runs it as.
+ * A command with no `|` is a single stage, which is why every caller can use this unconditionally.
+ */
+function pipelineStages(cmdArray: string[]): string[][] {
+  if (!cmdArray.includes('|')) return [cmdArray];
+  const stages: string[][] = [];
+  let current: string[] = [];
+  for (const token of cmdArray) {
+    if (token === '|') {
+      if (current.length > 0) stages.push(current);
+      current = [];
+    } else {
+      current.push(token);
+    }
+  }
+  if (current.length > 0) stages.push(current);
+  return stages;
+}
+
 async function executeShellSegment(
   projectId: string,
   cmdArray: string[],
@@ -501,21 +521,29 @@ async function executeShellSegment(
   const command = cmdArray[0];
   if (!command) return 'Error: empty command';
 
-  const permission = await checkCommandPermission(cmdArray, context);
-  if (!permission.allowed) {
-    return permission.reason;
-  }
+  // A pipeline is one command here and several in the shell, which splits on `|` and runs each
+  // stage. Gating only `cmdArray` read the first stage and let every later one through, so
+  // `ls / | rm /file` wrote under a read-only grant. Each stage is checked as its own command.
+  for (const stage of pipelineStages(cmdArray)) {
+    const stageCommand = stage[0];
+    if (!stageCommand) continue;
 
-  // Block write operations in read-only mode
-  if (context.isReadOnly && isWriteOperation(cmdArray)) {
-    return `Error: Write operations are disabled in read-only mode. "${command}" is not allowed.`;
-  }
+    const permission = await checkCommandPermission(stage, context);
+    if (!permission.allowed) {
+      return permission.reason;
+    }
 
-  // Enforce per-agent write scope (reads unrestricted; writes confined to a directory)
-  if (context.writeScope) {
-    const scopeCheck = checkWriteScope(cmdArray, context.writeScope);
-    if (!scopeCheck.allowed) {
-      return `Error: ${scopeCheck.reason}.`;
+    // Block write operations in read-only mode
+    if (context.isReadOnly && isWriteOperation(stage)) {
+      return `Error: Write operations are disabled in read-only mode. "${stageCommand}" is not allowed.`;
+    }
+
+    // Enforce per-agent write scope (reads unrestricted; writes confined to a directory)
+    if (context.writeScope) {
+      const scopeCheck = checkWriteScope(stage, context.writeScope);
+      if (!scopeCheck.allowed) {
+        return `Error: ${scopeCheck.reason}.`;
+      }
     }
   }
 
@@ -632,8 +660,8 @@ async function executeShellSegment(
       // Use workspace-scoped URL if in server mode with a workspace cookie
       const isServerMode = process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
       const wsMatch = isServerMode && typeof document !== 'undefined' && document.cookie.match(/osw_workspace=([^;]+)/);
-      const shellUrl = wsMatch ? `/api/w/${wsMatch[1]}/shell/execute` : '/api/shell/execute';
-      const response = await fetch(shellUrl, {
+      const bashUrl = wsMatch ? `/api/w/${wsMatch[1]}/bash/execute` : '/api/bash/execute';
+      const response = await fetch(bashUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deploymentId, cmd: cmdArray })

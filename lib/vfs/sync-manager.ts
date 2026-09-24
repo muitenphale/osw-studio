@@ -16,6 +16,7 @@ import { isArrayBuffer } from './is-array-buffer';
 export interface SyncResult {
   success: boolean;
   error?: string;
+  project?: Project;
 }
 
 export interface ProjectSyncResult extends SyncResult {
@@ -24,10 +25,7 @@ export interface ProjectSyncResult extends SyncResult {
 
 export interface FilesSyncResult extends SyncResult {
   count?: number;
-}
-
-export interface ProjectListSyncResult extends SyncResult {
-  projects?: Project[];
+  revision?: number;
 }
 
 export interface FilesListSyncResult extends SyncResult {
@@ -232,7 +230,7 @@ export class SyncManager {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ project }),
+        body: JSON.stringify({ project, baseRevision: project.revision ?? 0 }),
       });
 
       if (!response.ok) {
@@ -244,39 +242,12 @@ export class SyncManager {
       }
 
       const data = await response.json();
+      const revision = data.project?.revision ?? data.revision;
       return {
         success: true,
-        project: data.project,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Network error',
-      };
-    }
-  }
-
-  /**
-   * Pull all projects from server (SQLite -> IndexedDB)
-   */
-  async pullProjects(): Promise<ProjectListSyncResult> {
-    try {
-      const response = await fetch(`${this.baseUrl}${this.getApiUrl('/sync/projects')}`, {
-        method: 'GET',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        return {
-          success: false,
-          error: errorData.error || `HTTP ${response.status}`,
-        };
-      }
-
-      const data = await response.json();
-      return {
-        success: true,
-        projects: data.projects,
+        project: data.project
+          ? { ...data.project, revision: typeof revision === 'number' ? revision : data.project.revision }
+          : { ...project, revision },
       };
     } catch (error) {
       return {
@@ -292,7 +263,7 @@ export class SyncManager {
   async pushFiles(
     projectId: string,
     files: VirtualFile[],
-    options?: { onProgress?: (progress: PushProgress) => void }
+    options?: { onProgress?: (progress: PushProgress) => void; baseRevision?: number }
   ): Promise<FilesSyncResult> {
     try {
       const { batches, oversized } = batchFilesBySize(files.map(serializeFileContent));
@@ -311,7 +282,12 @@ export class SyncManager {
             'Content-Type': 'application/json',
           },
           // Only the first batch clears the project's files; the rest add to what it wrote.
-          body: JSON.stringify({ projectId, files: batches[i], replace: i === 0 }),
+          body: JSON.stringify({
+            projectId,
+            files: batches[i],
+            replace: i === 0,
+            baseRevision: options?.baseRevision ?? 0,
+          }),
         });
 
         if (!response.ok) {
@@ -378,19 +354,9 @@ export class SyncManager {
     files: VirtualFile[],
     options?: { onProgress?: (progress: PushProgress) => void }
   ): Promise<SyncResult> {
-    // Push project metadata first
-    const projectResult = await this.pushProject(project);
-    if (!projectResult.success) {
-      return projectResult;
-    }
-
-    // Then push all files
-    const filesResult = await this.pushFiles(project.id, files, options);
-    if (!filesResult.success) {
-      return filesResult;
-    }
-
-    return { success: true };
+    // Same admitted path as a normal push. A separate metadata POST then /sync/files
+    // rewrite allowed a stale client to reset revision and replace newer files.
+    return this.pushSingleProject(project.id, project, files, options);
   }
 
   /**
@@ -403,37 +369,42 @@ export class SyncManager {
     project?: Project;
     files?: VirtualFile[];
   }> {
-    // Pull all projects and find the one we need
-    const projectsResult = await this.pullProjects();
-    if (!projectsResult.success || !projectsResult.projects) {
+    // One request for the one project. This used to pull every project and pick this one out of
+    // the list, which meant downloading the whole `projects` table: measured at 2.69MB for 237
+    // projects, 74% of it base64 thumbnails nothing here reads. The per-project endpoint returns
+    // the project and its files together, so it also replaces the separate file request.
+    try {
+      const response = await fetch(
+        `${this.baseUrl}${this.getApiUrl(`/sync/projects/${encodeURIComponent(projectId)}`)}`,
+        { method: 'GET' },
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      if (!data.project) {
+        return { success: false, error: `Project ${projectId} not found on server` };
+      }
+
+      return {
+        success: true,
+        project: data.project,
+        // Same decoding the file endpoint used: binary content arrives base64 and has to become
+        // bytes again before it reaches the VFS.
+        files: (data.files || []).map(deserializeFileContent),
+      };
+    } catch (error) {
       return {
         success: false,
-        error: projectsResult.error || 'Failed to pull projects',
+        error: error instanceof Error ? error.message : 'Network error',
       };
     }
-
-    const project = projectsResult.projects.find((p) => p.id === projectId);
-    if (!project) {
-      return {
-        success: false,
-        error: `Project ${projectId} not found on server`,
-      };
-    }
-
-    // Pull files for the project
-    const filesResult = await this.pullFiles(projectId);
-    if (!filesResult.success) {
-      return {
-        success: false,
-        error: filesResult.error || 'Failed to pull files',
-      };
-    }
-
-    return {
-      success: true,
-      project,
-      files: filesResult.files || [],
-    };
   }
 
   /**
@@ -498,6 +469,7 @@ export class SyncManager {
     }
 
     let lastProject: Project | undefined;
+    let base = project.revision ?? 0;
     for (let i = 0; i < batches.length; i++) {
       const isLast = i === batches.length - 1;
       const response = await fetch(`${this.baseUrl}${this.getApiUrl(`/sync/projects/${projectId}`)}`, {
@@ -508,18 +480,26 @@ export class SyncManager {
           files: batches[i],
           deletedPaths: isLast ? deletedPaths : [],
           partial: true,
-          force: options?.force ?? false,
           writeProject: isLast,
+          baseRevision: base,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        return { success: false, error: errorData.error || `HTTP ${response.status}` };
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}`,
+          project: lastProject,
+        };
       }
 
       const data = await response.json();
-      lastProject = data.project;
+      const rev = typeof data.project?.revision === 'number' ? data.project.revision : data.revision;
+      lastProject = data.project
+        ? { ...data.project, ...(typeof rev === 'number' ? { revision: rev } : {}) }
+        : lastProject;
+      if (typeof rev === 'number') base = rev;
       options?.onProgress?.({ batch: i + 1, batches: batches.length });
     }
 

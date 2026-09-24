@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   pushProjectDelta: vi.fn(),
   getSyncManager: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
   toastLoading: vi.fn((_text: string) => 'toast-id'),
   toastSuccess: vi.fn(),
   toastDismiss: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/lib/vfs/sync-manager', () => ({
 vi.mock('sonner', () => ({
   toast: {
     error: mocks.toastError,
+    warning: mocks.toastWarning,
     success: mocks.toastSuccess,
     loading: mocks.toastLoading,
     dismiss: mocks.toastDismiss,
@@ -84,15 +86,15 @@ describe('pushProjectToServer (issue #13)', () => {
     expect(mocks.pushSingleProject).not.toHaveBeenCalled();
   });
 
-  it('shows an error toast and does not update metadata when the push fails', async () => {
-    mocks.getProject.mockResolvedValue({ id: 'p1', settings: {} });
+  it('shows a warning and records error status when the push fails', async () => {
+    mocks.getProject.mockResolvedValue({ id: 'p1', name: 'P', settings: {} });
     mocks.listFiles.mockResolvedValue([]);
     mocks.pushSingleProject.mockResolvedValue({ success: false, error: 'server down' });
 
     await pushProjectToServer('p1');
 
-    expect(mocks.toastError).toHaveBeenCalled();
-    expect(mocks.updateProject).not.toHaveBeenCalled();
+    expect(mocks.toastWarning).toHaveBeenCalled();
+    expect(mocks.updateProject.mock.calls[0][0].syncStatus).toBe('error');
   });
 
   it('returns quietly when the project is not found', async () => {
@@ -142,7 +144,8 @@ describe('pushProjectToServer (issue #13)', () => {
 
     // A background reconcile must not interrupt with a toast; a conflict is resolved in Server Sync.
     expect(mocks.toastError).not.toHaveBeenCalled();
-    expect(mocks.updateProject).not.toHaveBeenCalled();
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
+    expect(mocks.updateProject.mock.calls[0][0].syncStatus).toBe('error');
   });
 
   // Duplicate and import announce their own result right after this returns, so a push that
@@ -188,6 +191,6 @@ describe('pushProjectToServer (issue #13)', () => {
 
     await pushProjectToServer('p1', 'w1');
 
-    expect(mocks.toastError).toHaveBeenCalled();
+    expect(mocks.toastWarning).toHaveBeenCalled();
   });
 });

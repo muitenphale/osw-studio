@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySession, maybeRefreshSession, SESSION_COOKIE_NAME, SESSION_DURATION } from '@/lib/auth/session';
 import type { SessionData } from '@/lib/auth/session';
+import { PENDING_MCP_COOKIE, pendingAuthorizationIsWellFormed } from '@/lib/mcp/pending';
 
 async function nextWithRefreshedSession(session: SessionData): Promise<NextResponse> {
   const response = NextResponse.next();
@@ -63,6 +64,30 @@ export async function middleware(request: NextRequest) {
       }
     }
     return NextResponse.next();
+  }
+
+  // ============================================
+  // A held MCP authorization, resumed after an external login
+  // ============================================
+  // The consent screen parks the request here when a signed-out visitor is sent to the gateway to
+  // log in, because the gateway carries no destination of its own and lands them on a workspace.
+  // The first page they open once signed in spends the cookie and puts them back on consent.
+  if (isServerMode && request.method === 'GET' && !pathname.startsWith('/mcp/') && !pathname.startsWith('/api/')) {
+    const pending = request.cookies.get(PENDING_MCP_COOKIE)?.value;
+    if (pending) {
+      const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+      const resumed = token ? await verifySession(token) : null;
+      // Spent either way once a session exists: a value that fails validation is not going to start
+      // passing, and leaving it would redirect every page view until it expires.
+      if (resumed) {
+        const wellFormed = pendingAuthorizationIsWellFormed(pending);
+        const target = new URL(wellFormed ? '/mcp/authorize' : '/', request.url);
+        if (wellFormed) target.search = `?${pending}`;
+        const response = NextResponse.redirect(target);
+        response.cookies.delete(PENDING_MCP_COOKIE);
+        return response;
+      }
+    }
   }
 
   // ============================================

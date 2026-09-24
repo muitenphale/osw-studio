@@ -18,6 +18,7 @@ Server Mode adds:
 - Project sync between browser and server
 - Server-side generation (AI tasks continue if browser disconnects, reattach on reconnect)
 - Built-in analytics and compliance features
+- An optional MCP connector so an outside agent can work on a workspace (see [MCP Server](?doc=mcp-server))
 
 ---
 
@@ -50,6 +51,7 @@ Server Mode adds:
 - Built-in analytics
 - Project sync (browser <-> server)
 - Server-side generation (close browser, AI keeps working)
+- Optional MCP connector for outside agents
 - Requires persistent file system
 - Requires server hosting
 
@@ -86,6 +88,9 @@ SECRETS_ENCRYPTION_KEY=your_encryption_key_here
 
 # Optional: App URL (for SEO/sitemaps)
 NEXT_PUBLIC_APP_URL=https://your-domain.com
+
+# Optional: MCP connector for outside agents (Claude Code, Cursor, …)
+# MCP_ENABLED=true
 ```
 
 ### 2. Start Server
@@ -125,8 +130,8 @@ When you select a deployment from the **Deployment Selector** dropdown (in the w
 
 This hidden folder contains:
 - **db/schema.sql** - Database schema (read-only, use `sqlite3` for DDL)
-- **edge-functions/*.json** - Edge functions (editable via shell commands)
-- **server-functions/*.json** - Server functions (editable via shell commands)
+- **edge-functions/*.json** - Edge functions (editable via bash commands)
+- **server-functions/*.json** - Server functions (editable via bash commands)
 - **secrets/*.json** - Secret placeholders (editable - AI creates, user sets values in admin UI)
 
 These files are:
@@ -274,6 +279,7 @@ For bulk operations or troubleshooting, use the Sync button in the sidebar. This
 | `NEXT_PUBLIC_REGISTRATION_MODE` | No | Client-side mirror of `REGISTRATION_MODE` |
 | `INSTANCE_API_KEY` | No | Shared secret for machine-to-machine admin API auth |
 | `INSTANCE_ID` | No | Instance identifier for multi-instance setups |
+| `MCP_ENABLED` | No | Set to `true` to expose the MCP connector at `/api/mcp`. See [MCP Server](?doc=mcp-server). |
 
 For multitenancy details, see **[Multitenancy](?doc=multitenancy)**.
 

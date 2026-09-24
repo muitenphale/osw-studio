@@ -815,9 +815,8 @@ export class VirtualFileSystem {
    * In Server Mode, users must manually sync (push) backend features before publishing.
    * The publish pipeline reads from core SQLite, not IndexedDB.
    */
-  private triggerServerFeatureSync(_projectId: string): void {
-    // No-op — automatic sync not yet implemented.
-    // Users must manually push backend features via the sync panel before publishing.
+  private triggerServerFeatureSync(projectId: string): void {
+    void this.noteContentEdit(projectId);
   }
 
   /**
@@ -934,7 +933,7 @@ export class VirtualFileSystem {
     const timeout = setTimeout(async () => {
       try {
         const { autoSyncProject } = await import('./auto-sync');
-        await autoSyncProject(projectId);
+        await autoSyncProject(projectId, false);
       } catch (error) {
         logger.error(`[VFS] Auto-sync failed for project ${projectId}:`, error);
       } finally {
@@ -956,7 +955,7 @@ export class VirtualFileSystem {
       this.syncTimeouts.delete(projectId);
       try {
         const { autoSyncProject } = await import('./auto-sync');
-        await autoSyncProject(projectId);
+        await autoSyncProject(projectId, false);
       } catch (error) {
         logger.error(`[VFS] Flush sync failed for project ${projectId}:`, error);
       }
@@ -1026,7 +1025,7 @@ export class VirtualFileSystem {
       await this.adapter.createFile(file);
 
       await this.updateFileTree(projectId, path, 'create', options?.silent === true);
-      saveManager.markDirty(projectId);
+      await this.noteContentEdit(projectId);
 
       return file;
     } catch (error) {
@@ -1131,7 +1130,7 @@ export class VirtualFileSystem {
       file.updatedAt = new Date();
 
       await this.adapter.updateFile(file);
-      saveManager.markDirty(projectId);
+      await this.noteContentEdit(projectId);
 
       if (!options?.silent && typeof window !== 'undefined') {
         const detail = { projectId, path };
@@ -1151,7 +1150,7 @@ export class VirtualFileSystem {
     try {
       await this.adapter.deleteFile(projectId, path);
       await this.updateFileTree(projectId, path, 'delete', options?.silent === true);
-      saveManager.markDirty(projectId);
+      await this.noteContentEdit(projectId);
     } catch (error) {
       throw error;
     }
@@ -1192,7 +1191,7 @@ export class VirtualFileSystem {
     };
 
       await this.adapter.createTreeNode(node);
-      saveManager.markDirty(projectId);
+      await this.noteContentEdit(projectId);
 
       if (options?.silent !== true && typeof window !== 'undefined') {
         window.dispatchEvent(new Event('filesChanged'));
@@ -1329,7 +1328,7 @@ export class VirtualFileSystem {
     }
 
     await this.adapter.deleteTreeNode(projectId, path);
-    saveManager.markDirty(projectId);
+    await this.noteContentEdit(projectId);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('filesChanged'));
@@ -1353,7 +1352,7 @@ export class VirtualFileSystem {
         children: oldNode.children
       };
       await this.adapter.createTreeNode(newNode);
-      saveManager.markDirty(projectId);
+      await this.noteContentEdit(projectId);
     }
     
     const oldDirPath = oldPath.endsWith('/') ? oldPath : oldPath + '/';
@@ -1479,6 +1478,18 @@ export class VirtualFileSystem {
   }
 
   /**
+   * A user or agent content edit. Marks the project dirty and stamps `updatedAt` so sync can
+   * see a local change. Pull and Discard suppress dirty, and those writes must not stamp —
+   * otherwise a restore looks like a new draft and a pull looks like this tab edited.
+   */
+  private async noteContentEdit(projectId: string): Promise<void> {
+    saveManager.markDirty(projectId);
+    if (saveManager.isDirtySuppressed(projectId)) return;
+    const project = await this.getProject(projectId);
+    await this.updateProject(project);
+  }
+
+  /**
    * Write a project.
    *
    * `preserveUpdatedAt` marks a write as bookkeeping rather than a content edit, and that same
@@ -1503,8 +1514,12 @@ export class VirtualFileSystem {
       project.lastSyncedAt = stored.lastSyncedAt;
       project.serverUpdatedAt = stored.serverUpdatedAt;
       project.syncStatus = stored.syncStatus;
+      project.revision = stored.revision;
     }
     await this.adapter.updateProject(project);
+    if (this.adapter.bumpRevision) {
+      this.adapter.bumpRevision(project.id, stored?.revision ?? project.revision ?? 0);
+    }
   }
 
   async updateProjectCost(
@@ -2065,6 +2080,98 @@ export class VirtualFileSystem {
     });
 
     return newProject;
+  }
+
+  /**
+   * Keep both: copy this project's local files, settings, and IndexedDB backend
+   * records to a new local-only id so a subsequent file-pull can adopt the server
+   * tree into the original. File pull does not drop backend rows on the original;
+   * the copy gets its own rows (scheduled functions remapped to copied edge ids).
+   * Does not clone deployments.
+   */
+  async forkLocalDraft(projectId: string): Promise<Project> {
+    this.ensureInitialized();
+    const adapter = this.adapter;
+    const originalProject = await this.getProject(projectId);
+    const files = await this.adapter.listFiles(projectId);
+    const treeNodes = await this.adapter.getAllTreeNodes(projectId);
+    const newName = `${originalProject.name} (local draft)`.slice(0, 50);
+    const newProject = await this.createProject(newName, originalProject.description);
+
+    try {
+      const carried = normalizeProjectSettings(originalProject.settings);
+      if (Object.keys(carried).length > 0) {
+        newProject.settings = carried;
+        await this.updateProject(newProject);
+      }
+
+      await saveManager.runWithSuppressedDirty(newProject.id, async () => {
+        const dirs = treeNodes
+          .filter((n) => n.type === 'directory' && n.path && n.path !== '/')
+          .sort((a, b) => a.path.length - b.path.length);
+        for (const dir of dirs) {
+          await this.createDirectory(newProject.id, dir.path, { silent: true });
+        }
+        for (const file of files) {
+          await this.createFile(newProject.id, file.path, file.content);
+        }
+      });
+
+      const now = new Date();
+      const edgeIdMap = new Map<string, string>();
+      if (adapter.listEdgeFunctions && adapter.createEdgeFunction) {
+        for (const fn of await adapter.listEdgeFunctions(projectId)) {
+          const id = uuidv4();
+          edgeIdMap.set(fn.id, id);
+          await adapter.createEdgeFunction({ ...fn, id, projectId: newProject.id, createdAt: now, updatedAt: now });
+        }
+      }
+      if (adapter.listServerFunctions && adapter.createServerFunction) {
+        for (const fn of await adapter.listServerFunctions(projectId)) {
+          await adapter.createServerFunction({
+            ...fn,
+            id: uuidv4(),
+            projectId: newProject.id,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      if (adapter.listSecrets && adapter.createSecret) {
+        for (const secret of await adapter.listSecrets(projectId)) {
+          await adapter.createSecret({
+            ...secret,
+            id: uuidv4(),
+            projectId: newProject.id,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      if (adapter.listScheduledFunctions && adapter.createScheduledFunction) {
+        for (const fn of await adapter.listScheduledFunctions(projectId)) {
+          const functionId = edgeIdMap.get(fn.functionId) ?? fn.functionId;
+          await adapter.createScheduledFunction({
+            ...fn,
+            id: uuidv4(),
+            projectId: newProject.id,
+            functionId,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+    } catch (error) {
+      await this.deleteProject(newProject.id);
+      throw error;
+    }
+
+    return newProject;
+  }
+
+  /** File or backend content edit: dirty + stamp `updatedAt` unless a pull/restore suppressed it. */
+  async noteProjectEdit(projectId: string): Promise<void> {
+    await this.noteContentEdit(projectId);
   }
 
   async importProject(data: { project: Project; files: ExportedFile[] }): Promise<Project> {

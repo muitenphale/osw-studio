@@ -1,12 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Logo } from '@/components/ui/logo';
 
+/**
+ * `useSearchParams` opts a client component out of static prerendering, which the production build
+ * refuses at a page boundary. The boundary goes here so the page still prerenders and only the form
+ * waits for the query string.
+ */
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  // Where to land after signing in. Only same-origin paths are honoured, so a crafted link
+  // cannot turn the login page into an open redirect.
+  const nextParam = useSearchParams().get('next');
+  const next = nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : null;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -54,6 +71,13 @@ export default function LoginPage() {
       }
 
       // Login successful - redirect to workspace or admin area
+      if (next) {
+        if (data.defaultWorkspaceId) {
+          document.cookie = `osw_workspace=${data.defaultWorkspaceId};path=/;max-age=${60 * 60 * 24 * 365}`;
+        }
+        router.push(next);
+        return;
+      }
       if (data.defaultWorkspaceId) {
         document.cookie = `osw_workspace=${data.defaultWorkspaceId};path=/;max-age=${60 * 60 * 24 * 365}`;
         if (data.defaultWorkspaceName) localStorage.setItem('osw-workspace-name', data.defaultWorkspaceName);

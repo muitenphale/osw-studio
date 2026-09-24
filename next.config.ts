@@ -65,6 +65,18 @@ const nextConfig: NextConfig = {
           { key: 'Cache-Control', value: 'public, max-age=3600' },
         ],
       },
+      {
+        // The MCP consent screen is where an outside client is granted access to a workspace, so
+        // it must not be loadable inside someone else's page: framed and made transparent over a
+        // decoy, its Connect button is a click the person never knew they made. Published sites
+        // under /deployments are deliberately left framable, and previews use srcdoc rather than
+        // pointing an iframe at these routes, so nothing legitimate frames them.
+        source: '/mcp/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+        ],
+      },
     ];
   },
   async rewrites() {

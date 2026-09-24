@@ -132,7 +132,6 @@ export function DeploymentDetail({
 
   // ── Settings state (mirrored from deployment for dirty tracking) ──
   const [projectId, setProjectId] = useState(deployment.projectId);
-  const [enabled, setEnabled] = useState(deployment.enabled);
   const [underConstruction, setUnderConstruction] = useState(deployment.underConstruction);
   const [customDomain, setCustomDomain] = useState(deployment.customDomain);
   const [headScripts, setHeadScripts] = useState(deployment.headScripts);
@@ -149,7 +148,6 @@ export function DeploymentDetail({
   // Reset local state when the deployment prop changes (e.g. after save)
   useEffect(() => {
     setProjectId(deployment.projectId);
-    setEnabled(deployment.enabled);
     setUnderConstruction(deployment.underConstruction);
     setCustomDomain(deployment.customDomain);
     setHeadScripts(deployment.headScripts);
@@ -166,7 +164,6 @@ export function DeploymentDetail({
   useEffect(() => {
     const hasChanges =
       projectId !== deployment.projectId ||
-      enabled !== deployment.enabled ||
       underConstruction !== deployment.underConstruction ||
       customDomain !== deployment.customDomain ||
       JSON.stringify(headScripts) !== JSON.stringify(deployment.headScripts) ||
@@ -177,14 +174,13 @@ export function DeploymentDetail({
       JSON.stringify(compliance) !== JSON.stringify(deployment.compliance) ||
       JSON.stringify(review) !== JSON.stringify(toReviewDraft(deployment.review));
     setIsDirty(hasChanges);
-  }, [projectId, enabled, underConstruction, customDomain, headScripts, bodyScripts, cdnLinks, analytics, seo, compliance, review, deployment]);
+  }, [projectId, underConstruction, customDomain, headScripts, bodyScripts, cdnLinks, analytics, seo, compliance, review, deployment]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
       await onSave({
         projectId,
-        enabled,
         underConstruction,
         customDomain,
         headScripts,
@@ -215,7 +211,6 @@ export function DeploymentDetail({
   };
 
   const settings = {
-    enabled,
     underConstruction,
     customDomain,
     headScripts,
@@ -229,7 +224,6 @@ export function DeploymentDetail({
   };
 
   const updateSettings = (updates: Partial<typeof settings>) => {
-    if ('enabled' in updates && updates.enabled !== undefined) setEnabled(updates.enabled);
     if ('underConstruction' in updates && updates.underConstruction !== undefined) setUnderConstruction(updates.underConstruction);
     if ('customDomain' in updates) setCustomDomain(updates.customDomain);
     if ('headScripts' in updates && updates.headScripts !== undefined) setHeadScripts(updates.headScripts);
@@ -241,7 +235,6 @@ export function DeploymentDetail({
   };
 
   const handleGeneralChange = (newSettings: any) => {
-    setEnabled(newSettings.enabled);
     setUnderConstruction(newSettings.underConstruction);
     setCustomDomain(newSettings.customDomain);
   };
@@ -270,9 +263,7 @@ export function DeploymentDetail({
 
           <h1 className="text-base font-semibold truncate">{deployment.name}</h1>
 
-          {!deployment.enabled ? (
-            <Badge variant="secondary">Disabled</Badge>
-          ) : deployment.underConstruction ? (
+          {hasBeenPublished && deployment.underConstruction ? (
             <Badge variant="outline" className="border-yellow-600 text-yellow-600">Under Construction</Badge>
           ) : hasBeenPublished && hasPendingChanges ? (
             <Badge variant="outline" className="border-amber-500 text-amber-500">Pending Changes</Badge>
@@ -404,6 +395,7 @@ export function DeploymentDetail({
                 projectId={projectId}
                 deploymentId={deployment.id}
                 publicUrl={deployment.publicUrl}
+                published={hasBeenPublished}
                 projects={projects}
                 onProjectChange={setProjectId}
               />

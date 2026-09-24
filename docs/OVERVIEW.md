@@ -47,7 +47,7 @@ Start from 20 built-in templates or teach AI your preferred workflows
 
 **Browser Mode** (default) -- everything runs in your browser. No server, no account, complete privacy. Export your site as a ZIP and deploy anywhere.
 
-**Server Mode** -- self-host for teams or clients. Adds workspaces (isolated environments with their own projects and deployments), user accounts with role-based access, static site publishing, databases, and an admin dashboard. See **[Server Mode](?doc=server-mode)** and **[Multitenancy](?doc=multitenancy)**.
+**Server Mode** -- self-host for teams or clients. Adds workspaces (isolated environments with their own projects and deployments), user accounts with role-based access, static site publishing, databases, an admin dashboard, and an optional MCP connector for outside agents. See **[Server Mode](?doc=server-mode)**, **[MCP Server](?doc=mcp-server)** and **[Multitenancy](?doc=multitenancy)**.
 
 ## Who Is This For?
 

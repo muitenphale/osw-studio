@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from
 import { createPortal } from 'react-dom';
 import {
   LayoutGrid, FileText, Layers, Palette, DollarSign,
-  Shield, Database, Settings as SettingsIcon, Mail } from 'lucide-react';
+  Shield, Database, Settings as SettingsIcon, Mail, Plug } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { configManager } from '@/lib/config/storage';
 import { hasAnyConnectedProvider } from '@/lib/llm/providers/connection-status';
@@ -16,6 +16,7 @@ import { AppearancePane } from '@/components/settings/appearance-pane';
 import { CostTrackingPane } from '@/components/settings/cost-tracking-pane';
 import { PermissionsPane } from '@/components/settings/permissions-pane';
 import { DataPane } from '@/components/settings/data-pane';
+import { McpPane } from '@/components/settings/mcp-pane';
 import { PageShell, PageHeader, PageBody } from '@/components/ui/page-shell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -40,6 +41,7 @@ export type SettingsPane =
   | 'costs'
   | 'permissions'
   | 'data'
+  | 'mcp'
   | 'mail'
   | 'users';
 
@@ -69,6 +71,7 @@ const PANES: PaneDef[] = [
   { id: 'costs',       label: 'Cost Tracking', icon: <DollarSign className="size-4 shrink-0" /> },
   { id: 'permissions', label: 'Permissions',   icon: <Shield className="size-4 shrink-0" /> },
   { id: 'data',        label: 'Data',          icon: <Database className="size-4 shrink-0" /> },
+  { id: 'mcp', label: 'MCP', icon: <Plug className="size-4 shrink-0" />, serverModeOnly: true, studioOnly: true },
   { id: 'mail',        label: 'Mail',          icon: <Mail className="size-4 shrink-0" />, serverModeOnly: true, studioOnly: true },
   { id: 'users',       label: 'Users',         icon: <UsersIcon className="size-4 shrink-0" />, serverModeOnly: true, ownerOnly: true },
 ];
@@ -113,6 +116,7 @@ function PaneContent({ pane, workspaceId }: { pane: SettingsPane; workspaceId?: 
     case 'costs':       return <CostTrackingPane />;
     case 'permissions': return <PermissionsPane />;
     case 'data':        return <DataPane />;
+    case 'mcp': return <McpPane workspaceId={workspaceId} />;
     case 'mail':        return <MailView workspaceId={workspaceId} />;
     case 'users':       return <UsersView workspaceId={workspaceId} embedded />;
   }

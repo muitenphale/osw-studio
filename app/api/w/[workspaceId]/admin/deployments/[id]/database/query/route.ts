@@ -36,12 +36,21 @@ export async function POST(
     }
 
     try {
-      const result = deploymentDb.executeRawSQL(sql);
+      // The guarded path, not `executeRawSQL`. This route is reachable by an editor, and the raw
+      // one applies no system-table check: `edge_functions` holds the code the invocation route
+      // runs and `secrets` is what the executor decrypts for it, so writing either from the SQL
+      // editor is code execution. Those records are edited through Functions and Secrets, which
+      // validate what they store.
+      const result = deploymentDb.executeUserQuery(sql);
+      if (result.error) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
       return NextResponse.json({
         success: true,
         columns: result.columns,
         rows: result.rows,
         rowsAffected: result.rowsAffected,
+        ...(result.truncated ? { truncated: true } : {}),
       });
     } catch (sqlError) {
       const message = sqlError instanceof Error ? sqlError.message : 'Query failed';

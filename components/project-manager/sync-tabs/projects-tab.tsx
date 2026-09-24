@@ -7,8 +7,11 @@ import { SyncItemRow } from '../sync-item-row';
 import { vfs, Project } from '@/lib/vfs';
 import { getSyncManager } from '@/lib/vfs/sync-manager';
 import { createSyncProgressToast } from '@/lib/vfs/sync-progress-toast';
+import { saveManager } from '@/lib/vfs/save-manager';
 import { logger } from '@/lib/utils';
+import { toast } from 'sonner';
 import { track } from '@/lib/telemetry';
+import { sortSyncItems } from '../sync-item-order';
 
 interface ProjectsTabProps {
   items: SyncableItem[];
@@ -72,19 +75,20 @@ export function ProjectsTab({
       // both sides have changed — the row says Conflict and the tooltip offers exactly this. Only
       // background syncs leave the server's newer copy alone and report the conflict instead.
       const result = await syncManager.pushSingleProject(item.id, project, files, {
-        force: true,
         onProgress: ({ batch, batches }) => progress.update(batch, batches),
       });
 
       if (result.success) {
         // Update local sync metadata to prevent conflict on refresh
         if (result.project) {
-          const serverUpdatedAt = result.project.updatedAt
-            ? new Date(result.project.updatedAt)
-            : new Date();
-          project.lastSyncedAt = new Date();
-          project.serverUpdatedAt = serverUpdatedAt;
-          await vfs.updateProject(project, { preserveUpdatedAt: true });
+          const { persistAcknowledgedRevision } = await import('@/lib/vfs/auto-sync');
+          await persistAcknowledgedRevision(item.id, result.project.revision, {
+            lastSyncedAt: new Date(),
+            serverUpdatedAt: result.project.updatedAt
+              ? new Date(result.project.updatedAt)
+              : new Date(),
+            syncStatus: 'synced',
+          });
         }
         progress.success(`Pushed "${item.name}" to server`);
         if (!opts?.silent) {
@@ -109,7 +113,7 @@ export function ProjectsTab({
     }
   };
 
-  const handlePullSingle = async (item: SyncableItem, opts?: { silent?: boolean }) => {
+  const handlePullSingle = async (item: SyncableItem, opts?: { silent?: boolean }): Promise<boolean> => {
     onSyncingIdsChange((prev: Set<string>) => new Set(prev).add(item.id));
     // The download is one request, but writing the files back is one VFS call each — which is the
     // part that takes visible time on a large project and showed nothing until it finished.
@@ -120,8 +124,9 @@ export function ProjectsTab({
       if (!result.success || !result.project) {
         progress.error(result.error || 'Failed to pull project');
         track('sync_fail', { item_type: 'project', direction: 'pull' });
-        return;
+        return false;
       }
+      const serverProject = result.project;
 
       // Update or create local project
       let existingProject: Project | null = null;
@@ -131,24 +136,23 @@ export function ProjectsTab({
         // Project doesn't exist locally yet
       }
 
-      if (existingProject) {
-        // Delete existing files first
-        const existingFiles = await vfs.listFiles(item.id);
-        for (const file of existingFiles) {
-          await vfs.deleteFile(item.id, file.path);
+      await saveManager.runWithSuppressedDirty(item.id, async () => {
+        if (existingProject) {
+          const existingFiles = await vfs.listFiles(item.id);
+          for (const file of existingFiles) {
+            await vfs.deleteFile(item.id, file.path);
+          }
+        } else {
+          await vfs.createProject(serverProject.name, serverProject.description || '', item.id);
         }
-      } else {
-        // Create project with the server's ID so files are linked correctly
-        await vfs.createProject(result.project.name, result.project.description || '', item.id);
-      }
 
-      // Create all files
-      const pulledFiles = result.files || [];
-      let written = 0;
-      for (const file of pulledFiles) {
-        await vfs.createFile(item.id, file.path, file.content || '');
-        progress.update(++written, pulledFiles.length);
-      }
+        const pulledFiles = result.files || [];
+        let written = 0;
+        for (const file of pulledFiles) {
+          await vfs.createFile(item.id, file.path, file.content || '');
+          progress.update(++written, pulledFiles.length);
+        }
+      });
 
       // Update project with server data and sync metadata
       let pulledProject: Project | null = null;
@@ -166,6 +170,10 @@ export function ProjectsTab({
         pulledProject.updatedAt = serverUpdatedAt; // Match server timestamp
         pulledProject.lastSyncedAt = new Date();
         pulledProject.serverUpdatedAt = serverUpdatedAt;
+        pulledProject.syncStatus = 'synced';
+        if (typeof result.project.revision === 'number') {
+          pulledProject.revision = result.project.revision;
+        }
         await vfs.updateProject(pulledProject, { preserveUpdatedAt: true });
       }
 
@@ -175,16 +183,34 @@ export function ProjectsTab({
       }
       onRefresh();
       onSyncComplete();
+      return true;
     } catch (error) {
       logger.error('Pull error:', error);
       progress.error('Failed to pull project');
       track('sync_fail', { item_type: 'project', direction: 'pull' });
+      return false;
     } finally {
       onSyncingIdsChange((prev: Set<string>) => {
         const next = new Set(prev);
         next.delete(item.id);
         return next;
       });
+    }
+  };
+
+  const handleKeepBoth = async (item: SyncableItem) => {
+    try {
+      const draft = await vfs.forkLocalDraft(item.id);
+      const pulled = await handlePullSingle(item, { silent: true });
+      if (!pulled) {
+        toast.error(`Saved your draft as "${draft.name}" but the pull failed. Use that copy if this project looks wrong.`);
+        return;
+      }
+      toast.success(`Kept your draft as "${draft.name}". This project now matches the server.`);
+      track('sync_manual', { item_type: 'project', direction: 'keep_both', bulk: false, count: 1 });
+    } catch (error) {
+      logger.error('Keep both error:', error);
+      toast.error(error instanceof Error ? error.message : 'Could not keep both copies');
     }
   };
 
@@ -197,7 +223,7 @@ export function ProjectsTab({
       const itemsToPush = currentItems.filter(
         (item) =>
           currentSelectedIds.has(item.id) &&
-          ['local-newer', 'local-only', 'conflict'].includes(item.status)
+          ['local-newer', 'local-only'].includes(item.status)
       );
 
       for (const item of itemsToPush) {
@@ -218,7 +244,7 @@ export function ProjectsTab({
       const itemsToPull = currentItems.filter(
         (item) =>
           currentSelectedIds.has(item.id) &&
-          ['server-newer', 'server-only', 'conflict'].includes(item.status)
+          ['server-newer', 'server-only'].includes(item.status)
       );
 
       for (const item of itemsToPull) {
@@ -255,9 +281,9 @@ export function ProjectsTab({
       {/* Summary */}
       <SummaryBar items={items} />
 
-      {/* Item List - scrollable */}
+      {/* Item List - scrollable. Conflicts first so the summary is not a scavenger hunt. */}
       <div className="mt-3 border rounded-lg divide-y overflow-y-auto max-h-64">
-        {items.map((item) => (
+        {sortSyncItems(items).map((item) => (
           <SyncItemRow
             key={item.id}
             item={item}
@@ -265,6 +291,7 @@ export function ProjectsTab({
             onSelectChange={(selected) => handleSelectChange(item.id, selected)}
             onPush={() => handlePushSingle(item)}
             onPull={() => handlePullSingle(item)}
+            onResolve={item.status === 'conflict' ? () => handleKeepBoth(item) : undefined}
             syncing={syncingIds.has(item.id)}
             disabled={syncingIds.size > 0}
           />

@@ -659,6 +659,7 @@ export class IndexedDBAdapter implements StorageAdapter {
       previewUpdatedAt: project.previewUpdatedAt ? new Date(project.previewUpdatedAt) : undefined,
       lastSyncedAt: project.lastSyncedAt ? new Date(project.lastSyncedAt) : null,
       serverUpdatedAt: project.serverUpdatedAt ? new Date(project.serverUpdatedAt) : null,
+      revision: typeof project.revision === 'number' ? project.revision : undefined,
       // Same reason as the dates above, and the same write-back: a project stored from an API
       // response holds whatever that response held, and for settings that has meant a JSON string.
       // See lib/vfs/project-settings.ts.

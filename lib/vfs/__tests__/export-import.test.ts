@@ -49,4 +49,65 @@ describe('project export/import round-trip', () => {
     const copy = await vfs.duplicateProject(project.id);
     expect(copy.settings.runtime).toBe('static');
   });
+
+  it('forkLocalDraft copies files and settings onto a new id', async () => {
+    const project = await vfs.createProject('Keep Both', 'test');
+    project.settings = { ...project.settings, runtime: 'static' };
+    await vfs.updateProject(project);
+    await vfs.createFile(project.id, '/index.html', '<h1>draft</h1>');
+    await vfs.createDirectory(project.id, '/empty');
+
+    const fork = await vfs.forkLocalDraft(project.id);
+
+    expect(fork.id).not.toBe(project.id);
+    expect(fork.name).toBe('Keep Both (local draft)');
+    expect(fork.settings.runtime).toBe('static');
+    expect((await vfs.readFile(fork.id, '/index.html')).content).toBe('<h1>draft</h1>');
+    expect((await vfs.readFile(project.id, '/index.html')).content).toBe('<h1>draft</h1>');
+    const dirs = (await vfs.getAllFilesAndDirectories(fork.id)).filter(
+      (n) => 'type' in n && n.type === 'directory' && n.path === '/empty',
+    );
+    expect(dirs).toHaveLength(1);
+  });
+
+  it('forkLocalDraft copies edge functions onto the new id and leaves the original', async () => {
+    const project = await vfs.createProject('Has Backend', 'test');
+    await vfs.createFile(project.id, '/index.html', '<h1>x</h1>');
+    const now = new Date();
+    const adapter = vfs.getStorageAdapter();
+    if (!adapter.createEdgeFunction || !adapter.listEdgeFunctions) {
+      throw new Error('expected edge function adapter');
+    }
+    await adapter.createEdgeFunction({
+      id: 'ef1',
+      projectId: project.id,
+      name: 'ping',
+      code: 'return true;',
+      method: 'GET',
+      enabled: true,
+      timeoutMs: 5000,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const fork = await vfs.forkLocalDraft(project.id);
+    const originalFns = await adapter.listEdgeFunctions(project.id);
+    const forkFns = await adapter.listEdgeFunctions(fork.id);
+
+    expect(originalFns).toHaveLength(1);
+    expect(originalFns[0].id).toBe('ef1');
+    expect(forkFns).toHaveLength(1);
+    expect(forkFns[0].id).not.toBe('ef1');
+    expect(forkFns[0].name).toBe('ping');
+    expect((await vfs.readFile(project.id, '/index.html')).content).toBe('<h1>x</h1>');
+  });
+
+  it('noteProjectEdit stamps updatedAt so a backend-only change is a local edit', async () => {
+    const project = await vfs.createProject('Backend Stamp', 'test');
+    const before = project.updatedAt.getTime();
+    await new Promise((r) => setTimeout(r, 5));
+    await vfs.noteProjectEdit(project.id);
+    const after = await vfs.getProject(project.id);
+    expect(after.updatedAt.getTime()).toBeGreaterThan(before);
+  });
 });

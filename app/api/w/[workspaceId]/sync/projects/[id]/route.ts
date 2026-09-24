@@ -19,14 +19,6 @@ interface PushRequestBody {
   deletedPaths?: string[];
   partial?: boolean;
   /**
-   * Push anyway when the server has moved on since this client last synced.
-   *
-   * Only ever set by an explicit push from Server Sync, where the user is looking at the conflict
-   * and choosing to keep the local copy. Background syncs leave it unset so a conflict is still
-   * reported rather than resolved behind the user's back.
-   */
-  force?: boolean;
-  /**
    * Write the project row. Default true; a chunked push sends `false` on every batch but the last.
    *
    * The row is stored with the *client's* `updatedAt` rather than the server's clock, so a batch
@@ -40,6 +32,8 @@ interface PushRequestBody {
    * A project the server does not have yet is created regardless: files carry a foreign key to it.
    */
   writeProject?: boolean;
+  /** Revision this client last observed. Stale or missing-after-upgrade is 409. */
+  baseRevision?: number;
 }
 
 export async function POST(
@@ -50,7 +44,14 @@ export async function POST(
     const { adapter } = await getWorkspaceContext(params);
     const { id } = await params;
     const body: PushRequestBody = await request.json();
-    const { project, files, deletedPaths = [], partial = false, force = false, writeProject = true } = body;
+    const {
+      project,
+      files,
+      deletedPaths = [],
+      partial = false,
+      writeProject = true,
+      baseRevision,
+    } = body;
 
     if (!project || project.id !== id || !Array.isArray(files) || !Array.isArray(deletedPaths)) {
       return NextResponse.json(
@@ -70,74 +71,79 @@ export async function POST(
       );
     }
 
-    // Update sync tracking fields
     const now = new Date();
     const syncedProject: Project = {
       ...project,
       lastSyncedAt: now,
       serverUpdatedAt: project.updatedAt,
-      syncStatus: 'synced'
+      syncStatus: 'synced',
     };
+    const incomingFiles = deserializeFilesFromRequest(files);
+    const base = typeof baseRevision === 'number' ? baseRevision : 0;
 
-    // Check if project exists
-    const existingProject = await adapter.getProject(id);
-    let storedProject = existingProject ?? syncedProject;
+    let storedProject: Project;
+    try {
+      storedProject = adapter.runTransaction(() => {
+        const existingProject = adapter.getProjectSync(id);
+        const currentRev = existingProject?.revision ?? 0;
+        if (existingProject && base !== currentRev) {
+          const err = new Error('stale-revision') as Error & { revision: number; serverUpdatedAt: Date };
+          err.revision = currentRev;
+          err.serverUpdatedAt = existingProject.updatedAt;
+          throw err;
+        }
 
-    if (existingProject) {
-      // Optimistic concurrency: reject if server has newer changes than client last saw, unless the
-      // user has explicitly chosen to keep the local copy.
-      const clientLastSynced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : 0;
-      const serverUpdated = new Date(existingProject.updatedAt).getTime();
-      // The server holding exactly this client's `updatedAt` means it holds *this* push, not
-      // someone else's change: a later batch of a chunked push whose first batch had to create the
-      // row, or a retry of a push that already landed. Treating that as a conflict would make a
-      // push conflict with itself, which is invisible on a first upload (`lastSyncedAt` is unset,
-      // so the check below is skipped) and only surfaces on the re-push weeks later.
-      const serverHoldsThisPush = serverUpdated === new Date(project.updatedAt).getTime();
-      if (!force && !serverHoldsThisPush && clientLastSynced > 0 && serverUpdated > clientLastSynced) {
+        let stored: Project;
+        if (existingProject) {
+          if (writeProject) {
+            void adapter.updateProject(syncedProject);
+            stored = { ...syncedProject, revision: currentRev };
+          } else {
+            stored = existingProject;
+          }
+        } else {
+          const created = writeProject ? syncedProject : { ...syncedProject, updatedAt: new Date(0) };
+          void adapter.createProject(created);
+          stored = { ...created, revision: 0 };
+        }
+
+        if (partial) {
+          for (const filePath of deletedPaths) {
+            void adapter.deleteFile(id, filePath);
+          }
+          for (const file of incomingFiles) {
+            const fileData = { ...file, projectId: id };
+            if (adapter.getFileSync(id, fileData.path)) void adapter.updateFile(fileData);
+            else void adapter.createFile(fileData);
+          }
+        } else {
+          for (const file of adapter.listFilesSync(id)) {
+            void adapter.deleteFile(id, file.path);
+          }
+          for (const file of incomingFiles) {
+            void adapter.createFile({ ...file, projectId: id });
+          }
+        }
+
+        const next = adapter.bumpRevision(id, stored.revision ?? 0);
+        if (next == null) {
+          const err = new Error('stale-revision') as Error & { revision: number; serverUpdatedAt: Date };
+          err.revision = stored.revision ?? 0;
+          err.serverUpdatedAt = stored.updatedAt;
+          throw err;
+        }
+        stored.revision = next;
+        return stored;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'stale-revision') {
+        const stale = error as Error & { revision: number; serverUpdatedAt: Date };
         return NextResponse.json(
-          { error: 'conflict', serverUpdatedAt: existingProject.updatedAt },
+          { error: 'conflict', reason: 'stale', revision: stale.revision, serverUpdatedAt: stale.serverUpdatedAt },
           { status: 409 }
         );
       }
-      if (writeProject) {
-        await adapter.updateProject(syncedProject);
-        storedProject = syncedProject;
-      }
-    } else {
-      // Created even when the batch asked not to write the row: files carry a foreign key to it.
-      //
-      // A row a non-final batch had to create is stamped at the epoch rather than with the
-      // client's `updatedAt`. Sync status compares those two timestamps and reads an equal pair as
-      // 'synced' (`calculateItemSyncStatus`, with no `lastSyncedAt` to go on yet), so a first push
-      // that died after its first batch would describe a project whose files never arrived as
-      // finished. Epoch reads as 'local-newer' instead: push it again. The final batch overwrites
-      // the row with the real timestamp.
-      const created = writeProject ? syncedProject : { ...syncedProject, updatedAt: new Date(0) };
-      await adapter.createProject(created);
-      storedProject = created;
-    }
-
-    if (partial) {
-      for (const filePath of deletedPaths) {
-        await adapter.deleteFile(id, filePath);
-      }
-      for (const file of deserializeFilesFromRequest(files)) {
-        const fileData = { ...file, projectId: id };
-        const existing = await adapter.getFile(id, fileData.path);
-        if (existing) await adapter.updateFile(fileData);
-        else await adapter.createFile(fileData);
-      }
-    } else {
-      // Full sync is retained for the initial import and backward compatibility.
-      const existingFiles = await adapter.listFiles(id);
-      for (const file of existingFiles) {
-        await adapter.deleteFile(id, file.path);
-      }
-
-      for (const file of deserializeFilesFromRequest(files)) {
-        await adapter.createFile({ ...file, projectId: id });
-      }
+      throw error;
     }
 
     logger.debug(`[API /api/w/[workspaceId]/sync/projects/${id}] Project synced successfully`);
@@ -147,6 +153,7 @@ export async function POST(
       // What the server now holds. On a batch that did not write the row this is the existing
       // record, so a client cannot read its own unwritten metadata back as though it had landed.
       project: storedProject,
+      revision: storedProject.revision,
       fileCount: files.length
     });
   } catch (error) {

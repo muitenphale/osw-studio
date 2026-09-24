@@ -18,7 +18,7 @@ export function SummaryBar({ items }: SummaryBarProps) {
   if (synced > 0) parts.push(`${synced} synced`);
   if (localNewer > 0) parts.push(`${localNewer} local newer`);
   if (serverNewer > 0) parts.push(`${serverNewer} server newer`);
-  if (conflicts > 0) parts.push(`${conflicts} conflicts`);
+  if (conflicts > 0) parts.push(`${conflicts} conflict${conflicts === 1 ? '' : 's'} (listed first)`);
   if (localOnly > 0) parts.push(`${localOnly} local only`);
   if (serverOnly > 0) parts.push(`${serverOnly} server only`);
 

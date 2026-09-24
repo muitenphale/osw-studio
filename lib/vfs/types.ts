@@ -28,6 +28,8 @@ export interface Project {
   lastSyncedAt?: Date | null; // Server mode: when project was last synced with server
   serverUpdatedAt?: Date | null; // Server mode: cached server's updatedAt timestamp
   syncStatus?: 'synced' | 'syncing' | 'error' | 'never-synced'; // Server mode: current sync state
+  /** Last server revision this copy has observed. Server-mode only; ignored in browser mode. */
+  revision?: number;
   costTracking?: {
     totalCost: number;
     providerBreakdown: Record<string, {
@@ -62,7 +64,6 @@ export interface Deployment {
   projectId: string;
   name: string;
   slug?: string;
-  enabled: boolean;
 
   // Publishing configuration
   underConstruction: boolean;
@@ -113,7 +114,6 @@ export interface Deployment {
 // Legacy: Publish Settings (kept for backward compatibility)
 export interface PublishSettings {
   // Status
-  enabled: boolean;
   underConstruction: boolean;
   customDomain?: string;
 

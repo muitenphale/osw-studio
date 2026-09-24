@@ -135,6 +135,7 @@ export const reviewCommentRateLimiter = new RateLimiter();
 export const reviewAssetRateLimiter = new RateLimiter();
 export const reviewCommentListRateLimiter = new RateLimiter();
 export const reviewUnsubscribeRateLimiter = new RateLimiter();
+export const mcpOauthRateLimiter = new RateLimiter();
 
 // Predefined configurations
 export const RATE_LIMIT_CONFIG = {
@@ -177,6 +178,34 @@ export const RATE_LIMIT_CONFIG = {
    */
   reviewComment: {
     limit: 60,
+    windowMs: 10 * 60 * 1000
+  },
+  /**
+   * The MCP OAuth endpoints an unauthenticated caller can reach: dynamic client registration and
+   * the token exchange. Registration is open by design, since a client id alone grants nothing
+   * without a person approving it, but it does write a row to the system database on every call,
+   * so without a bound it is an unauthenticated way to grow that file without limit. The token
+   * endpoint is paced for the same reason `reviewPassword` is: an authorization code and a refresh
+   * token are credentials, and this caps how fast one can be guessed.
+   *
+   * Thirty in ten minutes is far beyond a real client, which registers once and then exchanges a
+   * code and refreshes on its own schedule.
+   */
+  mcpOauth: {
+    limit: 30,
+    windowMs: 10 * 60 * 1000
+  },
+  /**
+   * The same endpoints, counted for the whole instance rather than per address.
+   *
+   * `getIdentifier` reads `x-forwarded-for`, which the caller sets. Behind a proxy that overwrites
+   * it the per-address limit is real; on an instance reached directly it can be stepped around by
+   * changing the header on every request, which is no limit at all. This ceiling is what holds in
+   * that case. It is deliberately far above the per-address one so that a busy instance with many
+   * genuine clients never meets it.
+   */
+  mcpOauthTotal: {
+    limit: 200,
     windowMs: 10 * 60 * 1000
   },
   /**

@@ -81,4 +81,9 @@ export async function createProjectFromTemplate(
       }
     }
   });
+  // Template writes suppress dirty, so they never stamp updatedAt. Flush the pending
+  // auto-sync now so the first push can persist revision before the user navigates away.
+  if (typeof vfs.flushSyncTimeout === 'function') {
+    await vfs.flushSyncTimeout(projectId);
+  }
 }

@@ -85,10 +85,12 @@ function createFunctionsProvider(projectId: string): FunctionsDataProvider {
         });
         if (enabled) track('backend_feature_enabled', { kind: 'edge' });
       }
+      await vfs.noteProjectEdit(projectId);
     },
     async remove(id) {
       const adapter = vfs.getStorageAdapter();
       if (adapter.deleteEdgeFunction) await adapter.deleteEdgeFunction(id);
+      await vfs.noteProjectEdit(projectId);
     },
     async toggle(id, enabled) {
       const adapter = vfs.getStorageAdapter();
@@ -99,6 +101,7 @@ function createFunctionsProvider(projectId: string): FunctionsDataProvider {
           if (enabled && !existing.enabled) track('backend_feature_enabled', { kind: 'edge' });
         }
       }
+      await vfs.noteProjectEdit(projectId);
     },
   };
 }
@@ -129,10 +132,12 @@ function createServerFunctionsProvider(projectId: string): ServerFunctionsDataPr
         });
         if (enabled) track('backend_feature_enabled', { kind: 'server_fn' });
       }
+      await vfs.noteProjectEdit(projectId);
     },
     async remove(id) {
       const adapter = vfs.getStorageAdapter();
       if (adapter.deleteServerFunction) await adapter.deleteServerFunction(id);
+      await vfs.noteProjectEdit(projectId);
     },
     async toggle(id, enabled) {
       const adapter = vfs.getStorageAdapter();
@@ -143,6 +148,7 @@ function createServerFunctionsProvider(projectId: string): ServerFunctionsDataPr
           if (enabled && !existing.enabled) track('backend_feature_enabled', { kind: 'server_fn' });
         }
       }
+      await vfs.noteProjectEdit(projectId);
     },
   };
 }
@@ -173,10 +179,12 @@ function createSecretsProvider(projectId: string): SecretsDataProvider {
         });
         track('backend_feature_enabled', { kind: 'secrets' });
       }
+      await vfs.noteProjectEdit(projectId);
     },
     async remove(id) {
       const adapter = vfs.getStorageAdapter();
       if (adapter.deleteSecret) await adapter.deleteSecret(id);
+      await vfs.noteProjectEdit(projectId);
     },
   };
 }
@@ -214,10 +222,12 @@ function createScheduledFunctionsProvider(projectId: string): ScheduledFunctions
         });
         if (enabled) track('backend_feature_enabled', { kind: 'scheduled' });
       }
+      await vfs.noteProjectEdit(projectId);
     },
     async remove(id) {
       const adapter = vfs.getStorageAdapter();
       if (adapter.deleteScheduledFunction) await adapter.deleteScheduledFunction(id);
+      await vfs.noteProjectEdit(projectId);
     },
     async toggle(id, enabled) {
       const adapter = vfs.getStorageAdapter();
@@ -228,6 +238,7 @@ function createScheduledFunctionsProvider(projectId: string): ScheduledFunctions
           if (enabled && !existing.enabled) track('backend_feature_enabled', { kind: 'scheduled' });
         }
       }
+      await vfs.noteProjectEdit(projectId);
     },
   };
 }

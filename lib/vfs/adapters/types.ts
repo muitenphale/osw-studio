@@ -31,6 +31,8 @@ export interface StorageAdapter {
   createProject(project: Project): Promise<void>;
   getProject(id: string): Promise<Project | null>;
   updateProject(project: Project): Promise<void>;
+  /** Server-owned monotonic revision. IndexedDB working copies omit this. */
+  bumpRevision?(projectId: string, expected: number): number | null;
   deleteProject(id: string): Promise<void>;
   listProjects(fields?: string[]): Promise<Project[]>;
   updateProjectPublishSettings?(projectId: string, settings: PublishSettings): Promise<void>;

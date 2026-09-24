@@ -22,3 +22,19 @@ export function notifyServerProjectsChanged(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(SERVER_PROJECTS_CHANGED));
 }
+
+export const SERVER_DEPLOYMENTS_CHANGED = 'serverDeploymentsChanged';
+
+/**
+ * Announce that the deployments on the server may have changed.
+ *
+ * Separate from the projects signal because the two lists are re-read by different calls: the
+ * deployments page answers `serverProjectsChanged` by refreshing only its project picker, which is
+ * right when a project changed and useless when a deployment was published. An MCP client that
+ * created, published or unpublished a deployment left the page showing the state it mounted with
+ * until it was reloaded.
+ */
+export function notifyServerDeploymentsChanged(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(SERVER_DEPLOYMENTS_CHANGED));
+}

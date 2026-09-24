@@ -27,7 +27,6 @@ export async function GET(
     }
 
     const settings = {
-      enabled: deployment.enabled,
       underConstruction: deployment.underConstruction,
       customDomain: deployment.customDomain,
       headScripts: deployment.headScripts,
@@ -82,7 +81,6 @@ export async function PUT(
     // carries the stored block through untouched.
     const updatedDeployment = {
       ...existingDeployment,
-      enabled: body.enabled ?? existingDeployment.enabled,
       underConstruction: body.underConstruction ?? existingDeployment.underConstruction,
       customDomain: body.customDomain ?? existingDeployment.customDomain,
       headScripts: body.headScripts ?? existingDeployment.headScripts,
@@ -100,7 +98,6 @@ export async function PUT(
     }
 
     const settings = {
-      enabled: updatedDeployment.enabled,
       underConstruction: updatedDeployment.underConstruction,
       customDomain: updatedDeployment.customDomain,
       headScripts: updatedDeployment.headScripts,

@@ -5,6 +5,7 @@ import TanstackProvider from "@/components/providers/tanstack-query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import "@/assets/globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import { McpActivityBanner } from '@/components/mcp-activity-banner';
 import { BackendStatusBanner } from "@/components/backend-status-banner";
 
 const inter = Inter({
@@ -76,6 +77,7 @@ export default function RootLayout({
         <ThemeProvider>
           <Toaster richColors position="bottom-center" />
           <BackendStatusBanner />
+          <McpActivityBanner />
           <TanstackProvider>
             {children}
           </TanstackProvider>

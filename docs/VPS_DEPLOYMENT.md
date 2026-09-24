@@ -164,6 +164,8 @@ EOF
 
 > **Note:** `SECURE_COOKIES=false` is required when running HTTP without SSL. Remove this line after adding HTTPS.
 >
+> To let an outside agent (Claude Code, Cursor, and others that speak MCP) work on this instance, add `MCP_ENABLED=true` to `.env` and restart. See [MCP Server](?doc=mcp-server).
+>
 > No `ADMIN_PASSWORD` needed. On first visit to `/admin`, you'll create the admin account interactively.
 
 ### Build & Start

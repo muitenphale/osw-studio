@@ -11,6 +11,7 @@ const VALID_PANES = new Set<SettingsPane>(SETTINGS_PANE_IDS);
 const LEGACY_MAP: Record<string, SettingsPane> = {
   application: 'appearance',
   model: 'models',
+  'connected-agents': 'mcp',
 };
 
 interface SettingsViewProps {

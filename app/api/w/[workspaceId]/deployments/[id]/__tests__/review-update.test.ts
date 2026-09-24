@@ -33,7 +33,6 @@ function deployment(review?: Deployment['review']): Deployment {
     projectId: 'p1',
     name: 'Site',
     slug: 'site',
-    enabled: true,
     underConstruction: false,
     headScripts: [],
     bodyScripts: [],

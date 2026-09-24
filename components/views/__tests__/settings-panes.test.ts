@@ -9,7 +9,7 @@ import { SETTINGS_PANE_IDS } from '@/components/unified-settings';
 describe('settings pane ids', () => {
   it('includes every pane the settings page offers', () => {
     expect([...SETTINGS_PANE_IDS].sort()).toEqual([
-      'appearance', 'connections', 'costs', 'data', 'mail', 'models', 'permissions', 'templates', 'users',
+      'appearance', 'connections', 'costs', 'data', 'mail', 'mcp', 'models', 'permissions', 'templates', 'users',
     ]);
   });
 

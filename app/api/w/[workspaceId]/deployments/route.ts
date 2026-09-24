@@ -81,7 +81,6 @@ export async function POST(
       projectId,
       name,
       slug: slug || undefined,
-      enabled: false,
       underConstruction: false,
       headScripts: [],
       bodyScripts: [],

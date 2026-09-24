@@ -65,17 +65,31 @@ function projectPayload() {
 
 const params = Promise.resolve({ workspaceId: 'default', id: PROJECT_ID });
 
-async function push(files: VirtualFile[]) {
+/**
+ * The revision the next push is based on.
+ *
+ * `postProjectBatches` threads each 200's revision into the following request, and the route
+ * refuses a push whose `baseRevision` does not match the stored one. A helper that always sent 0
+ * could therefore only ever push once, which is what hid the `partial` gap below.
+ */
+let baseRevision = 0;
+
+async function push(files: VirtualFile[], options?: { partial?: boolean }) {
   const request = new NextRequest('http://localhost/api/w/default/sync/projects/p1', {
     method: 'POST',
     body: JSON.stringify({
       project: projectPayload(),
       // Exactly what the client sends.
       files: files.map(serializeFileContent),
+      partial: options?.partial ?? false,
+      baseRevision,
     }),
   });
   const response = await POST(request, { params });
   expect(response.status).toBe(200);
+  const body = await response.json();
+  const next = typeof body.project?.revision === 'number' ? body.project.revision : body.revision;
+  if (typeof next === 'number') baseRevision = next;
 }
 
 async function pull(): Promise<VirtualFile[]> {
@@ -89,6 +103,7 @@ async function pull(): Promise<VirtualFile[]> {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  baseRevision = 0;
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osws-route-'));
   adapter = new SQLiteAdapter(path.join(dir, 'osws.sqlite'));
   await adapter.init();
@@ -145,7 +160,10 @@ describe('sync route file round-trip', () => {
   it('survives a second push over the same files (the partial path)', async () => {
     await push([localFile('/theme.mp3', BINARY['/theme.mp3'].buffer.slice(0) as ArrayBuffer)]);
     const replacement = new Uint8Array([99, 98, 97, 96, 95, 94, 93, 92]);
-    await push([localFile('/theme.mp3', replacement.buffer.slice(0) as ArrayBuffer)]);
+    // `partial: true` is what a batched push sends, and it is the only path that reaches
+    // `updateFile`; without it the route deletes every file and creates them again, so a
+    // broken binary update would go unnoticed here.
+    await push([localFile('/theme.mp3', replacement.buffer.slice(0) as ArrayBuffer)], { partial: true });
 
     const [pulled] = await pull();
 

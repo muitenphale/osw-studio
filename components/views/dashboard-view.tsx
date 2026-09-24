@@ -68,7 +68,6 @@ interface DashboardData {
     id: string;
     name: string;
     slug: string;
-    enabled: boolean;
     publishedAt: string | null;
     updatedAt: string;
   }>;
@@ -574,7 +573,7 @@ function RecentDeploymentsCard({ deployments }: { deployments: DashboardData['re
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <span
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    deployment.enabled ? 'bg-green-500' : 'bg-muted-foreground'
+                    deployment.publishedAt ? 'bg-green-500' : 'bg-muted-foreground'
                   }`}
                 />
                 <span className="text-foreground truncate">{deployment.name}</span>

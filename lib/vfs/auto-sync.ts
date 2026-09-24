@@ -124,6 +124,14 @@ const SYNC_STATUS_MESSAGES: Record<SyncStatus, string> = {
  * Delegates to calculateItemSyncStatus so projects, skills and templates cannot drift apart on
  * how drift is defined — there used to be two copies of this comparison and only one got fixed.
  */
+/** Local content changed since the last acknowledged sync. Used to refuse destructive auto-pulls. */
+export function localHasUnackedEdits(project: Project): boolean {
+  const updated = project.updatedAt ? new Date(project.updatedAt).getTime() : 0;
+  const synced = project.lastSyncedAt ? new Date(project.lastSyncedAt).getTime() : NaN;
+  if (!Number.isFinite(synced)) return true;
+  return updated > synced;
+}
+
 export function calculateSyncStatus(
   localProject: Project,
   serverUpdatedAt?: Date
@@ -202,6 +210,7 @@ async function postProjectBatches(
     throw new Error(`Too large to sync: ${oversized.join(', ')}`);
   }
 
+  let baseRevision = project.revision ?? 0;
   for (let i = 0; i < batches.length; i++) {
     const isLast = i === batches.length - 1;
     // Binary content MUST go through serializeFileContent (done above): JSON.stringify turns an
@@ -218,10 +227,13 @@ async function postProjectBatches(
         deletedPaths: isLast ? deletedPaths : [],
         partial: true,
         writeProject: isLast,
+        baseRevision,
       }),
     });
 
     if (!response.ok || isLast) return response;
+    const data = await response.json();
+    if (typeof data.project?.revision === 'number') baseRevision = data.project.revision;
   }
 
   // batchFilesBySize always returns at least one batch, so the loop always returns.
@@ -252,6 +264,41 @@ export async function autoSyncProject(projectId: string, silent = true): Promise
   } finally {
     if (pushesInFlight.get(projectId) === push) pushesInFlight.delete(projectId);
   }
+}
+
+/** Merge onto a fresh row so a concurrent edit cannot wipe the ack. */
+export async function persistAcknowledgedRevision(
+  projectId: string,
+  revision: number | undefined,
+  extra?: { lastSyncedAt?: Date; serverUpdatedAt?: Date; syncStatus?: Project['syncStatus'] },
+): Promise<void> {
+  const latest = await vfs.getProject(projectId);
+  if (typeof revision === 'number') latest.revision = revision;
+  if (extra?.lastSyncedAt) latest.lastSyncedAt = extra.lastSyncedAt;
+  if (extra?.serverUpdatedAt) latest.serverUpdatedAt = extra.serverUpdatedAt;
+  if (extra?.syncStatus) latest.syncStatus = extra.syncStatus;
+  await vfs.updateProject(latest, { preserveUpdatedAt: true });
+}
+
+export async function markSyncNeedsRetry(
+  projectId: string,
+  name: string,
+  options?: { silent?: boolean; reason?: 'conflict' | 'error' },
+): Promise<void> {
+  const latest = await vfs.getProject(projectId);
+  latest.syncStatus = 'error';
+  await vfs.updateProject(latest, { preserveUpdatedAt: true });
+  saveManager.markDirty(projectId);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('osw-sync-needs-retry', { detail: { projectId } }));
+  }
+  if (!options?.silent) {
+    const message = options?.reason === 'conflict'
+      ? `"${name}" was edited on another device. Your local work is kept — open Server Sync to compare.`
+      : `"${name}" could not sync. Your local work is kept — Save again, or open Server Sync.`;
+    toast.warning(message, { duration: Infinity });
+  }
+  syncRetries.delete(projectId);
 }
 
 async function pushProject(projectId: string, silent: boolean): Promise<void> {
@@ -287,14 +334,10 @@ async function pushProject(projectId: string, silent: boolean): Promise<void> {
     }
 
     if (response.status === 409) {
-      logger.warn(`[AutoSync] Conflict for ${projectId}: server has newer changes`);
-      project.syncStatus = 'error';
-      await vfs.updateProject(project, { preserveUpdatedAt: true });
-      toast.warning(
-        `"${project.name}" was edited on another device. Your local changes are preserved — open Server Sync to compare.`,
-        { duration: Infinity }
-      );
-      syncRetries.delete(projectId);
+      // Do not retry. A one-commit second writer is also local+1; retrying with a fresh
+      // manifest treats their files as deletedPaths and removes them. Lost acks are
+      // handled by persistAcknowledgedRevision on success.
+      await markSyncNeedsRetry(projectId, project.name, { silent, reason: 'conflict' });
       return;
     }
 
@@ -304,12 +347,14 @@ async function pushProject(projectId: string, silent: boolean): Promise<void> {
 
     const data = await response.json();
     const syncedProject = data.project;
-
-    // Update local project with sync metadata (preserve updatedAt)
-    project.lastSyncedAt = new Date(syncedProject.lastSyncedAt);
-    project.serverUpdatedAt = new Date(syncedProject.serverUpdatedAt);
-    project.syncStatus = 'synced';
-    await vfs.updateProject(project, { preserveUpdatedAt: true });
+    const revision = typeof syncedProject?.revision === 'number'
+      ? syncedProject.revision
+      : typeof data.revision === 'number' ? data.revision : undefined;
+    await persistAcknowledgedRevision(projectId, revision, {
+      lastSyncedAt: syncedProject?.lastSyncedAt ? new Date(syncedProject.lastSyncedAt) : new Date(),
+      serverUpdatedAt: syncedProject?.serverUpdatedAt ? new Date(syncedProject.serverUpdatedAt) : new Date(),
+      syncStatus: 'synced',
+    });
 
     syncRetries.delete(projectId);
     invalidateSyncStatusCache();
@@ -331,22 +376,11 @@ async function pushProject(projectId: string, silent: boolean): Promise<void> {
       logger.warn(`[AutoSync] Will retry ${projectId} (${retries + 1}/${MAX_RETRIES})`);
       setTimeout(() => autoSyncProject(projectId), (retries + 1) * 5000);
     } else {
-      syncRetries.delete(projectId);
       try {
-        const project = await vfs.getProject(projectId);
-        if (project) {
-          project.syncStatus = 'error';
-          await vfs.updateProject(project, { preserveUpdatedAt: true });
-        }
+        const failed = await vfs.getProject(projectId);
+        if (failed) await markSyncNeedsRetry(projectId, failed.name, { silent, reason: 'error' });
       } catch (updateError) {
         logger.error(`[AutoSync] Failed to update project status:`, updateError);
-      }
-
-      if (!silent) {
-        toast.error('Sync failed', {
-          duration: 4000,
-          position: 'bottom-right'
-        });
       }
     }
   }
@@ -380,7 +414,9 @@ export async function checkServerUpdates(projectId: string): Promise<boolean> {
 
     const serverUpdatedAt = new Date(serverStatus.updatedAt);
     const status = calculateSyncStatus(localProject, serverUpdatedAt);
-    return status.status === 'server-newer' || status.status === 'conflict';
+    // Conflict is visible, not a pull. Pulling would overwrite a local draft (and then a later
+    // push can delete server-only files the tab never saw).
+    return status.status === 'server-newer';
   } catch (error) {
     logger.error(`[AutoSync] Failed to check server updates for ${projectId}:`, error);
     return false;
@@ -412,6 +448,16 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
     // Captured before any write: vfs.updateProject mutates the object it is handed, so reading
     // serverProject.updatedAt afterwards yields the local clock, not the server's timestamp.
     const serverUpdatedAt = toTime(serverProject.updatedAt);
+
+    try {
+      const existingLocal = await vfs.getProject(projectId);
+      if (existingLocal && localHasUnackedEdits(existingLocal)) {
+        await markSyncNeedsRetry(projectId, existingLocal.name, { reason: 'conflict' });
+        return false;
+      }
+    } catch {
+      // No local project yet — fall through and create from the server copy.
+    }
 
     // The project may not exist locally at all. Create the shell first so files have somewhere to
     // go; if anything below fails it is rolled back, because a shell with no files reads as local
@@ -461,9 +507,14 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
         }
       }
 
-      for (const existing of existingFiles) {
-        if (!serverPaths.has(existing.path)) {
-          await vfs.deleteFile(projectId, existing.path);
+      // An empty server tree is not permission to delete the working copy. That used to be
+      // papered over by restore-on-open putting the last checkpoint back; without it, a
+      // server-newer pull of zero files emptied the project and the next publish built nothing.
+      if (serverFiles.length > 0 || existingFiles.length === 0) {
+        for (const existing of existingFiles) {
+          if (!serverPaths.has(existing.path)) {
+            await vfs.deleteFile(projectId, existing.path);
+          }
         }
       }
 
@@ -482,6 +533,9 @@ export async function pullServerUpdates(projectId: string, showToast = true): Pr
         localProject.lastSyncedAt = new Date();
         localProject.serverUpdatedAt = serverUpdatedAt !== null ? new Date(serverUpdatedAt) : new Date();
         localProject.syncStatus = 'synced';
+        if (typeof serverProject.revision === 'number') {
+          localProject.revision = serverProject.revision;
+        }
         await vfs.updateProject(localProject, { preserveUpdatedAt: true });
       }
     });
@@ -564,6 +618,18 @@ export async function autoPullAllProjects(onProgress?: (current: number, total: 
         continue;
       }
 
+      if (typeof local.revision !== 'number') {
+        try {
+          const res = await apiFetch(getAutoSyncApiUrl(`/sync/projects/${serverStatus.id}`));
+          if (res.ok) {
+            const body = await res.json();
+            const rev = body.project?.revision ?? body.revision;
+            if (typeof rev === 'number') {
+              await persistAcknowledgedRevision(local.id, rev);
+            }
+          }
+        } catch { /* best effort */ }
+      }
       const syncStatus = calculateSyncStatus(local, serverUpdatedAt);
       if (syncStatus.status === 'server-newer') {
         needsPull.push({ id: serverStatus.id });

@@ -41,7 +41,7 @@ class SaveManager {
   }
 
   markDirty(projectId: string): void {
-    if (this.isSuppressed(projectId)) {
+    if (this.isDirtySuppressed(projectId)) {
       return;
     }
     this.setDirty(projectId, true);
@@ -78,7 +78,7 @@ class SaveManager {
     }
   }
 
-  private isSuppressed(projectId: string): boolean {
+  isDirtySuppressed(projectId: string): boolean {
     return (this.suppressionCounts.get(projectId) ?? 0) > 0;
   }
 
@@ -87,14 +87,21 @@ class SaveManager {
     await activeVFS.init();
     const project = await activeVFS.getProject(projectId);
     const fallbackDescription = `Manual save @ ${new Date().toLocaleTimeString()}`;
+    const previousSavedId = project.lastSavedCheckpointId ?? null;
     const checkpoint = await checkpointManager.createCheckpoint(projectId, description || fallbackDescription, {
       kind: 'manual',
-      baseRevisionId: project.lastSavedCheckpointId ?? null
+      pinned: true,
+      baseRevisionId: previousSavedId
     });
 
     project.lastSavedCheckpointId = checkpoint.id;
-    project.lastSavedAt = new Date(checkpoint.timestamp);
     await activeVFS.updateProject(project);
+    project.lastSavedAt = project.updatedAt;
+    await activeVFS.updateProject(project, { preserveUpdatedAt: true });
+
+    if (previousSavedId && previousSavedId !== checkpoint.id) {
+      await checkpointManager.unpinCheckpoint(previousSavedId);
+    }
 
     activeVFS.scheduleAutoSync(projectId);
 
@@ -119,10 +126,9 @@ class SaveManager {
         logger.warn('[SaveManager] Saved checkpoint missing', { projectId, checkpointId });
         return false;
       }
-      // Files only. This runs on every project open, not when someone asks to go back, and
-      // backend features are editable from the project gallery with no Save button in sight —
-      // so rolling them back to the last save here would silently discard an edit the user had
-      // no way to commit, and take any secret value created since it with them.
+      // Files only. Discard is explicit; opening a project no longer calls this. Backend
+      // features are editable from the gallery with no Save button — restoring them here
+      // would drop an edit the user had no way to commit, and any secret created since.
       const success = await checkpointManager.restoreCheckpoint(checkpointId, { backend: false });
       if (!success) {
         logger.error('[SaveManager] Failed to restore saved checkpoint', { projectId, checkpointId });
@@ -131,6 +137,11 @@ class SaveManager {
     });
 
     if (restored) {
+      const after = await activeVFS.getProject(projectId);
+      if (after.lastSavedAt) {
+        after.updatedAt = after.lastSavedAt;
+        await activeVFS.updateProject(after, { preserveUpdatedAt: true });
+      }
       this.markClean(projectId);
     }
     return restored;

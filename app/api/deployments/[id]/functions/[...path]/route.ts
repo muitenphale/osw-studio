@@ -56,6 +56,16 @@ async function handleRequest(
     // Use the actual deployment ID for subsequent lookups (in case we matched by slug)
     const resolvedDeploymentId = deployment.id;
 
+    // An unpublished deployment is off traffic, and that has to include this endpoint. The
+    // published pages are gone but the id stays addressable, so without this check a site taken
+    // down still runs code and writes to its database for anyone holding the URL.
+    if (!deployment.publishedAt) {
+      return NextResponse.json(
+        { error: 'Deployment is not published' },
+        { status: 404 }
+      );
+    }
+
     if (!deployment.databaseEnabled) {
       return NextResponse.json(
         { error: 'Edge functions not enabled for this deployment' },

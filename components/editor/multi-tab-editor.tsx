@@ -268,6 +268,20 @@ export function MultiTabEditor({ projectId, runtime, onClose }: MultiTabEditorPr
     };
   }, [handleKeyDown]);
 
+  useEffect(() => {
+    const flush = (event: Event) => {
+      const waiters = (event as CustomEvent<{ waiters?: Promise<void>[] }>).detail?.waiters;
+      for (const [path, openFile] of openFiles.entries()) {
+        if (openFile.modified) {
+          const done = saveFile(path);
+          waiters?.push(done);
+        }
+      }
+    };
+    window.addEventListener('osw-flush-editor', flush);
+    return () => window.removeEventListener('osw-flush-editor', flush);
+  }, [openFiles, saveFile]);
+
   const getMediaDataUrl = (file: OpenFile): string => {
     const mime = getSpecificMimeType(file.file.path);
     const content = file.file.content ?? file.content;
