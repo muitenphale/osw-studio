@@ -1,6 +1,9 @@
 import 'server-only';
 import { buildStaticDeployment, cleanStaticDeployment } from '@/lib/compiler/static-builder';
 import { checkDeploymentQuota } from '@/lib/publishing/quota';
+import { StorageQuotaError, admitWorkspaceWrite, forgetWorkspaceStorage } from '@/lib/api/storage-quota';
+import { directorySize } from '@/lib/api/directory-size';
+import { deploymentStaticDir } from '@/lib/compiler/deployment-static-dir';
 import { generateUniqueSlug } from '@/lib/publishing/slug-generator';
 import {
   getDeploymentBySlug,
@@ -65,6 +68,22 @@ export async function publishDeployment(
     await adapter.updateDeployment(preBuildDeployment);
   }
 
+  // Storage is admitted before the build, not after: a build writes over whatever the deployment
+  // already serves, so refusing afterwards would mean either leaving the oversized output in place
+  // or clearing a site that was live before the attempt. The incoming figure is the project's own
+  // bytes less what this deployment already occupies, because a republish replaces that output
+  // rather than adding to it, and `measureWorkspaceBytes` is already counting it.
+  const priorOutputBytes = directorySize(deploymentStaticDir(deploymentId));
+  const projectBytes = preBuildDeployment ? adapter.projectContentBytes(preBuildDeployment.projectId) : 0;
+  try {
+    admitWorkspaceWrite(workspaceId, Math.max(0, projectBytes - priorOutputBytes), () =>
+      adapter.listDeploymentIdsSync(),
+    );
+  } catch (error) {
+    if (error instanceof StorageQuotaError) return { ok: false, status: 403, error: error.message };
+    throw error;
+  }
+
   const result = await buildStaticDeployment(deploymentId, workspaceId);
   if (!result.success) {
     return { ok: false, status: 500, error: result.error || 'Failed to build deployment' };
@@ -121,6 +140,7 @@ export type UnpublishOutcome =
 export async function unpublishDeployment(
   adapter: SQLiteAdapter,
   deploymentId: string,
+  workspaceId?: string,
 ): Promise<UnpublishOutcome> {
   const deployment = await adapter.getDeployment?.(deploymentId);
   if (!deployment) return { ok: false, status: 404, error: 'Deployment not found' };
@@ -135,5 +155,10 @@ export async function unpublishDeployment(
     await adapter.updateDeployment(deployment);
   }
 
+  // The measured total is cached for a minute, and removing a site is exactly the case where a
+  // stale reading is felt: the space is free but the next write is still refused against it.
+  if (workspaceId) forgetWorkspaceStorage(workspaceId);
+
   return { ok: true, deploymentId };
 }
+

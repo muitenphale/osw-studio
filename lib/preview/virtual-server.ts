@@ -971,7 +971,7 @@ export class VirtualServer {
   private async processCSS(file: VirtualFile, blobUrls: Map<string, string>): Promise<ProcessedFile> {
     let content = file.content as string;
 
-    content = await this.processUrlReferences(content, blobUrls);
+    content = await this.processUrlReferences(content, blobUrls, file.path);
 
     return {
       path: file.path,
@@ -1058,21 +1058,42 @@ export class VirtualServer {
     return processed;
   }
 
-  private async processUrlReferences(content: string, blobUrls: Map<string, string>): Promise<string> {
+  /**
+   * Points a stylesheet's `url()` references at the files' blob URLs.
+   *
+   * A relative reference resolves against the stylesheet's own folder, as a browser resolves it: a
+   * font's `url("./x.woff2")` in `/assets/fonts/x.css` is `/assets/fonts/x.woff2`. Resolving it from
+   * the root instead found nothing, left the reference relative, and a relative URL inside a blob:
+   * stylesheet leads nowhere, so self-hosted fonts and icon fonts were missing in the preview only.
+   * The root-based lookup stays as a fallback for a reference the correct path doesn't find.
+   */
+  private async processUrlReferences(content: string, blobUrls: Map<string, string>, cssPath = '/'): Promise<string> {
     return content.replace(/url\(['"]?([^'")]+)['"]?\)/g, (match, url) => {
       if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('//') || url.startsWith('blob:')) {
         return match;
       }
 
-      const normalizedPath = this.normalizePath(url);
-      
-      const blobUrl = blobUrls.get(normalizedPath);
+      // `?v=2` and `#iefix` / `#Font` aren't part of the file's path; a fragment is kept on the result.
+      const [, target, , fragment = ''] = url.match(/^([^?#]*)(\?[^#]*)?(#.*)?$/) || [];
+      const blobUrl = blobUrls.get(this.resolveFrom(cssPath, target ?? url)) ?? blobUrls.get(this.normalizePath(url));
       if (blobUrl) {
-        return `url('${blobUrl}')`;
+        return `url('${blobUrl}${fragment}')`;
       }
 
       return match;
     });
+  }
+
+  /** `ref` as a browser resolves it from a file at `fromPath`: relative to its folder, `.` and `..` applied. */
+  private resolveFrom(fromPath: string, ref: string): string {
+    const base = ref.startsWith('/') ? [] : fromPath.split('/').slice(0, -1);
+    const parts = [...base, ...ref.split('/')];
+    const out: string[] = [];
+    for (const part of parts) {
+      if (part === '' || part === '.') continue;
+      if (part === '..') out.pop(); else out.push(part);
+    }
+    return '/' + out.join('/');
   }
 
   private normalizePath(path: string): string {

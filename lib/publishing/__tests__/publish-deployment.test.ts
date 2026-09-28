@@ -21,7 +21,8 @@ const h = vi.hoisted(() => ({
     success: boolean; deploymentId: string; projectId: string; filesWritten: number; outputPath: string; error?: string;
   },
   route: undefined as { workspace_id: string; slug: string } | undefined,
-  workspace: { max_deployments: 10 } as { max_deployments: number } | undefined,
+  workspace: { max_deployments: 10 } as { max_deployments: number; max_storage_mb?: number } | undefined,
+  projectBytes: 0,
   registered: undefined as { deploymentId: string; workspaceId: string; slug: string } | undefined,
   cleanResult: true,
 }));
@@ -44,6 +45,7 @@ vi.mock('@/lib/auth/system-database', () => ({
 }));
 
 import { publishDeployment, unpublishDeployment } from '@/lib/publishing/publish-deployment';
+import { forgetWorkspaceStorage, workspaceStorageMb } from '@/lib/api/storage-quota';
 
 function adapterWith(deployment: Record<string, unknown> | null) {
   const state = deployment ? { ...deployment } : null;
@@ -55,6 +57,8 @@ function adapterWith(deployment: Record<string, unknown> | null) {
       Object.assign(state as object, d);
     },
     enableDeploymentDatabase: async () => { h.order.push('enable-db'); },
+    projectContentBytes: () => h.projectBytes,
+    listDeploymentIdsSync: () => (state ? [String(state.id)] : []),
     state: () => state,
   };
 }
@@ -66,6 +70,8 @@ beforeEach(() => {
   h.registered = undefined;
   h.buildResult = { success: true, deploymentId: 'd1', projectId: 'p1', filesWritten: 4, outputPath: '/deployments/d1' };
   h.cleanResult = true;
+  h.projectBytes = 0;
+  forgetWorkspaceStorage('w1');
 });
 
 describe('publishDeployment', () => {
@@ -192,5 +198,88 @@ describe('unpublishDeployment', () => {
     // is the exact desync this change removes.
     expect(outcome).toMatchObject({ ok: false, status: 500 });
     expect(adapter.state()).toMatchObject({ lastPublishedVersion: 3 });
+  });
+});
+
+/**
+ * Storage, which publishing did not check at all.
+ *
+ * The output a build writes is counted by `measureWorkspaceBytes`, so a publish could push a
+ * workspace past its limit and leave every later file write refused against space the person could
+ * only reclaim by unpublishing. The refusal has to come before the build: a build clears the output
+ * directory first, so refusing afterwards would either leave the oversized site in place or take a
+ * site that was live before the attempt off the air.
+ */
+describe('publishDeployment storage quota', () => {
+  it('refuses a publish that would not fit, before building anything', async () => {
+    h.workspace = { max_deployments: 10, max_storage_mb: 1 };
+    h.projectBytes = 4 * 1024 * 1024;
+    const adapter = adapterWith({ id: 'd1', projectId: 'p1', slug: 'kept', settingsVersion: 3, databaseEnabled: true });
+
+    const outcome = await publishDeployment(adapter as never, 'w1', 'd1');
+
+    expect(outcome).toEqual({ ok: false, status: 403, error: expect.stringContaining('Storage limit reached') });
+    expect(h.order).not.toContain('build');
+  });
+
+  it('publishes when the project fits inside the limit', async () => {
+    h.workspace = { max_deployments: 10, max_storage_mb: 10 };
+    h.projectBytes = 1024;
+    const adapter = adapterWith({ id: 'd1', projectId: 'p1', slug: 'kept', settingsVersion: 3, databaseEnabled: true });
+
+    const outcome = await publishDeployment(adapter as never, 'w1', 'd1');
+
+    expect(outcome.ok).toBe(true);
+    expect(h.order).toContain('build');
+  });
+
+  it('counts the admitted bytes, so two publishes in one cache window cannot each use the whole limit', async () => {
+    h.workspace = { max_deployments: 10, max_storage_mb: 1 };
+    h.projectBytes = 700 * 1024;
+    const adapter = adapterWith({ id: 'd1', projectId: 'p1', slug: 'kept', settingsVersion: 3, databaseEnabled: true });
+
+    const first = await publishDeployment(adapter as never, 'w1', 'd1');
+    const second = await publishDeployment(adapter as never, 'w1', 'd1');
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+  });
+
+  it('lets a workspace with no storage limit publish any size', async () => {
+    h.workspace = { max_deployments: 10 };
+    h.projectBytes = 500 * 1024 * 1024;
+    const adapter = adapterWith({ id: 'd1', projectId: 'p1', slug: 'kept', settingsVersion: 3, databaseEnabled: true });
+
+    expect((await publishDeployment(adapter as never, 'w1', 'd1')).ok).toBe(true);
+  });
+});
+
+/**
+ * Unpublishing frees bytes, and the measurement is cached for a minute. Without dropping the entry
+ * the space is free on disk while the next write is still refused against the old reading.
+ */
+describe('unpublishDeployment storage cache', () => {
+  it('drops the cached measurement when given the workspace', async () => {
+    h.workspace = { max_deployments: 10, max_storage_mb: 1 };
+    const adapter = adapterWith({ id: 'd1', projectId: 'p1', slug: 'kept', settingsVersion: 3, databaseEnabled: true });
+    // Seed the cache with an admitted figure the way a publish would.
+    h.projectBytes = 500 * 1024;
+    await publishDeployment(adapter as never, 'w1', 'd1');
+    expect(workspaceStorageMb('w1', () => [])).toBeGreaterThan(0);
+
+    await unpublishDeployment(adapter as never, 'd1', 'w1');
+
+    expect(workspaceStorageMb('w1', () => [])).toBe(0);
+  });
+
+  it('leaves the cache alone when no workspace is given', async () => {
+    h.workspace = { max_deployments: 10, max_storage_mb: 1 };
+    const adapter = adapterWith({ id: 'd1', projectId: 'p1', slug: 'kept', settingsVersion: 3, databaseEnabled: true });
+    h.projectBytes = 500 * 1024;
+    await publishDeployment(adapter as never, 'w1', 'd1');
+
+    await unpublishDeployment(adapter as never, 'd1');
+
+    expect(workspaceStorageMb('w1', () => [])).toBeGreaterThan(0);
   });
 });

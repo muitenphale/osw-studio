@@ -90,6 +90,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   vi.stubEnv('DATA_DIR', dir);
   vi.stubEnv('MCP_ENABLED', 'true');
+  // The endpoint requires server mode as well as the flag.
+  vi.stubEnv('NEXT_PUBLIC_SERVER_MODE', 'true');
   await seed();
 });
 

@@ -28,9 +28,10 @@ function gateFor(request: NextRequest) {
 // One handler per process; it builds a fresh server per request from the request's principal.
 let handler: ReturnType<typeof createMcpHandler> | undefined;
 let instanceOrigin: string | undefined;
+let instanceBaseUrl: string | undefined;
 function getHandler() {
   handler ??= createMcpHandler(
-    (ctx) => createOswMcpServer(principalOf(ctx.authInfo!), { origin: instanceOrigin }),
+    (ctx) => createOswMcpServer(principalOf(ctx.authInfo!), { origin: instanceOrigin, baseUrl: instanceBaseUrl }),
     { legacy: 'stateless' },
   );
   return handler;
@@ -41,7 +42,9 @@ export async function POST(request: NextRequest) {
   const auth = await gateFor(request)(request);
   if (auth instanceof Response) return auth;
   // The host the client reached, so the server can say which instance it is.
-  instanceOrigin = new URL(issuerFor(request)).host;
+  // The base URL as well, for the upload and download URLs the file tools hand out.
+  instanceBaseUrl = issuerFor(request);
+  instanceOrigin = new URL(instanceBaseUrl).host;
   return getHandler().fetch(request, { authInfo: auth });
 }
 

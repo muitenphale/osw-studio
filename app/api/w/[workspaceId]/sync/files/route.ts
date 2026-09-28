@@ -6,14 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { admitWorkspaceWrite, StorageQuotaError } from '@/lib/api/storage-quota';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
-import { getWorkspaceById } from '@/lib/auth/system-database';
 import { VirtualFile } from '@/lib/vfs/types';
 import { serializeFilesForResponse, deserializeFilesFromRequest } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
-import { combinedDirectorySize } from '@/lib/api/directory-size';
 import { isSafeVirtualPath } from '@/lib/vfs/path-safety';
-import path from 'path';
 
 export async function GET(
   request: NextRequest,
@@ -93,21 +91,18 @@ export async function POST(
       );
     }
 
-    // Check storage quota before writing. Once per push rather than once per batch:
-    // `combinedDirectorySize` walks the whole workspace synchronously, and a chunked push
-    // would repeat that walk per batch. The first batch is the one that carries `replace`.
+    // An early refusal, so a push that cannot fit is turned away before any of it is written. The
+    // binding check is in `SQLiteAdapter`, which every writer reaches; this one only saves the work.
+    // Measured on the batch carrying `replace`, since the walk is per push rather than per batch.
     if (replace) {
-      const workspace = getWorkspaceById(workspaceId);
-      if (workspace) {
-        const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
-        const wsDir = path.join(dataDir, 'workspaces', workspaceId);
-        const usedMb = combinedDirectorySize([wsDir]) / (1024 * 1024);
-        if (usedMb >= workspace.max_storage_mb) {
-          return NextResponse.json(
-            { error: `Storage limit reached (${workspace.max_storage_mb} MB). Free up space or contact your admin.` },
-            { status: 403 }
-          );
+      const deployments = adapter.listDeployments ? await adapter.listDeployments() : [];
+      try {
+        admitWorkspaceWrite(workspaceId, 0, () => deployments.map(d => d.id));
+      } catch (quotaError) {
+        if (quotaError instanceof StorageQuotaError) {
+          return NextResponse.json({ error: quotaError.message }, { status: 403 });
         }
+        throw quotaError;
       }
     }
 

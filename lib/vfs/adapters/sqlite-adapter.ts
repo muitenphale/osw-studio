@@ -14,6 +14,7 @@
  * Analytics data is stored in these optional deployment databases.
  */
 
+import { admitWorkspaceWrite } from '@/lib/api/storage-quota';
 import path from 'path';
 import { BLOB_ENCODING, putBlob, readBlob } from './blob-store';
 import { logger } from '@/lib/utils';
@@ -512,6 +513,19 @@ function encodeFileContent(raw: unknown, baseDir?: string): { content: string; e
   return { content: '', encoding: null };
 }
 
+/**
+ * The bytes a file's content occupies, taken from the content itself.
+ *
+ * Not the length of what `encodeFileContent` returns: binary content goes to the blob store and the
+ * row keeps a hash, so the encoded string is about sixty characters whatever the file's size. The
+ * quota read that string and charged a 10MB image as sixty bytes.
+ */
+function contentByteLength(raw: unknown): number {
+  if (Object.prototype.toString.call(raw) === '[object ArrayBuffer]') return (raw as ArrayBuffer).byteLength;
+  if (typeof raw === 'string') return Buffer.byteLength(raw, 'utf8');
+  return 0;
+}
+
 function parseJSON<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -558,9 +572,16 @@ export class SQLiteAdapter implements StorageAdapter {
   private projectDatabases = new Map<string, ProjectDatabase>();
   private dbPath: string | undefined;
   private baseDir: string | undefined;
+  /**
+   * Set only for a per-workspace database, which is what carries a storage limit. The shared
+   * database behind the legacy `admin`, `desktop` and `instance-api` ids has no workspace row, so
+   * it is left unset and the quota gate stands aside.
+   */
+  private workspaceId: string | undefined;
 
-  constructor(dbPath?: string) {
+  constructor(dbPath?: string, workspaceId?: string) {
     this.dbPath = dbPath;
+    this.workspaceId = workspaceId;
     if (dbPath) {
       this.baseDir = path.dirname(dbPath);
     }
@@ -1140,11 +1161,58 @@ export class SQLiteAdapter implements StorageAdapter {
   // Files (stored in core database)
   // ============================================
 
+  /**
+   * Admits a file write against the workspace's storage limit.
+   *
+   * Here rather than in the routes because every writer reaches this method: the sync routes,
+   * server-mode generation, `bash/execute` and the MCP connector all write through this adapter.
+   * Called before the content is encoded, because encoding a binary file writes its bytes to the
+   * blob store, and a write that is about to be refused should not put them there.
+   */
+  private admitWrite(byteLength: number): void {
+    if (!this.workspaceId) return;
+    const workspaceId = this.workspaceId;
+    admitWorkspaceWrite(workspaceId, byteLength, () => this.listDeploymentIdsSync());
+  }
+
+  /**
+   * This workspace's deployment ids.
+   *
+   * This adapter's database is the workspace's own, so its `deployments` table is already scoped to
+   * it. The instance-wide `listDeploymentIds` would measure every workspace's output instead.
+   */
+  listDeploymentIdsSync(): string[] {
+    try {
+      const rows = this.getDB().prepare('SELECT id FROM deployments').all() as Array<{ id: string }>;
+      return rows.map(r => r.id);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Bytes this project's files occupy, from the stored `size` column.
+   *
+   * Summed in SQL rather than by loading the files, because the publish path asks for this before
+   * a build and a project's content can run to megabytes.
+   */
+  projectContentBytes(projectId: string): number {
+    try {
+      const row = this.getDB()
+        .prepare('SELECT COALESCE(SUM(size), 0) AS total FROM files WHERE project_id = ?')
+        .get(projectId) as { total: number } | undefined;
+      return row?.total ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
   async createFile(file: VirtualFile): Promise<void> {
     const db = this.getDB();
 
     // Handle ArrayBuffer content (binary files)
     // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
+    this.admitWrite(contentByteLength(file.content));
     const { content, encoding } = encodeFileContent(file.content, this.baseDir);
 
     const stmt = db.prepare(`
@@ -1186,6 +1254,7 @@ export class SQLiteAdapter implements StorageAdapter {
 
     // Handle ArrayBuffer content
     // Also handle {} from JSON-serialized ArrayBuffer (becomes empty object during sync)
+    this.admitWrite(contentByteLength(file.content));
     const { content, encoding } = encodeFileContent(file.content, this.baseDir);
 
     const stmt = db.prepare(`

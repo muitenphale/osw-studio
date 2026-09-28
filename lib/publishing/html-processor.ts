@@ -58,8 +58,44 @@ export function processHtml(html: string, options: HtmlProcessingOptions): strin
   return processed;
 }
 
+/** A head tag the SEO settings can set: the title, a <meta> by name or property, or a <link> by rel. */
+type HeadTag = { title: true } | { meta: 'name' | 'property'; key: string } | { link: string };
+
+/** The tag's pattern, whatever the order of its attributes and whichever quotes they use. */
+function headTagPattern(tag: HeadTag): RegExp {
+  if ('title' in tag) return /<title\b[^>]*>[\s\S]*?<\/title>[ \t]*\n?/gi;
+  const [el, attr, value] = 'meta' in tag ? ['meta', tag.meta, tag.key] : ['link', 'rel', tag.link];
+  const v = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`<${el}\\b[^>]*\\s${attr}\\s*=\\s*["']?${v}["']?(?=[\\s/>])[^>]*>[ \\t]*\\n?`, 'gi');
+}
+
+/** Removes these tags from the document's <head>, leaving the body alone. */
+function removeHeadTags(html: string, tags: HeadTag[]): string {
+  const end = html.search(/<\/head>/i);
+  if (end === -1 || tags.length === 0) return html;
+  let head = html.slice(0, end);
+  for (const tag of tags) head = head.replace(headTagPattern(tag), '');
+  return head + html.slice(end);
+}
+
+/** Whether the document's <head> already carries this tag. */
+function headHasTag(html: string, tag: HeadTag): boolean {
+  const end = html.search(/<\/head>/i);
+  return headTagPattern(tag).test(html.slice(0, end === -1 ? html.length : end));
+}
+
 /**
  * Injects SEO meta tags into <head>
+ *
+ * A page's own tag wins over the setting for anything written per page: the title, the description,
+ * keywords, the social image and the canonical URL. The settings are one set for the whole
+ * deployment, so overriding those would give every page in a site the same title and description.
+ * Where the page has no such tag the setting fills it in, and a page that carries one is left with
+ * one rather than two.
+ *
+ * `og:url`, `og:type` and `twitter:card` describe the deployment rather than the page, and
+ * `noindex` / `nofollow` are a deliberate switch over the whole deployment, so those do replace
+ * whatever the page set.
  */
 function injectSeoMetaTags(html: string, settings: PublishSettings, baseUrl: string): string {
   const { seo } = settings;
@@ -68,39 +104,56 @@ function injectSeoMetaTags(html: string, settings: PublishSettings, baseUrl: str
   }
 
   const metaTags: string[] = [];
+  const replaced: HeadTag[] = [];
+
+  /** The setting is a default: used only where the page did not set this tag itself. */
+  const fill = (tag: HeadTag, markup: string) => {
+    if (!headHasTag(html, tag)) metaTags.push(markup);
+  };
+
+  /** The setting is deployment-wide: it replaces the page's tag. */
+  const replace = (tag: HeadTag, markup: string) => {
+    replaced.push(tag);
+    metaTags.push(markup);
+  };
 
   // Basic meta tags
   if (seo.title) {
-    metaTags.push(`<title>${escapeHtml(seo.title)}</title>`);
-    metaTags.push(`<meta property="og:title" content="${escapeHtml(seo.title)}">`);
-    metaTags.push(`<meta name="twitter:title" content="${escapeHtml(seo.title)}">`);
+    fill({ title: true }, `<title>${escapeHtml(seo.title)}</title>`);
   }
-
   if (seo.description) {
-    metaTags.push(`<meta name="description" content="${escapeHtml(seo.description)}">`);
-    metaTags.push(`<meta property="og:description" content="${escapeHtml(seo.description)}">`);
-    metaTags.push(`<meta name="twitter:description" content="${escapeHtml(seo.description)}">`);
+    fill({ meta: 'name', key: 'description' }, `<meta name="description" content="${escapeHtml(seo.description)}">`);
   }
-
   if (seo.keywords && seo.keywords.length > 0) {
-    metaTags.push(`<meta name="keywords" content="${escapeHtml(seo.keywords.join(', '))}">`);
+    fill({ meta: 'name', key: 'keywords' }, `<meta name="keywords" content="${escapeHtml(seo.keywords.join(', '))}">`);
   }
 
-  // Open Graph
+  // Open Graph and Twitter. `ogTitle` / `ogDescription` are the social wording where they are set,
+  // which is what the OG Title and OG Description fields offer; otherwise the page's own meta text
+  // is reused. Twitter reads the same values, so setting one does not leave the other disagreeing.
+  const socialTitle = seo.ogTitle || seo.title;
+  const socialDescription = seo.ogDescription || seo.description;
+
+  if (socialTitle) {
+    fill({ meta: 'property', key: 'og:title' }, `<meta property="og:title" content="${escapeHtml(socialTitle)}">`);
+    fill({ meta: 'name', key: 'twitter:title' }, `<meta name="twitter:title" content="${escapeHtml(socialTitle)}">`);
+  }
+  if (socialDescription) {
+    fill({ meta: 'property', key: 'og:description' }, `<meta property="og:description" content="${escapeHtml(socialDescription)}">`);
+    fill({ meta: 'name', key: 'twitter:description' }, `<meta name="twitter:description" content="${escapeHtml(socialDescription)}">`);
+  }
   if (seo.ogImage) {
-    metaTags.push(`<meta property="og:image" content="${escapeHtml(seo.ogImage)}">`);
-    metaTags.push(`<meta name="twitter:image" content="${escapeHtml(seo.ogImage)}">`);
+    fill({ meta: 'property', key: 'og:image' }, `<meta property="og:image" content="${escapeHtml(seo.ogImage)}">`);
+    fill({ meta: 'name', key: 'twitter:image' }, `<meta name="twitter:image" content="${escapeHtml(seo.ogImage)}">`);
   }
 
-  metaTags.push(`<meta property="og:url" content="${escapeHtml(baseUrl)}">`);
-  metaTags.push(`<meta property="og:type" content="website">`);
-
-  // Twitter Card
-  metaTags.push(`<meta name="twitter:card" content="summary_large_image">`);
+  replace({ meta: 'property', key: 'og:url' }, `<meta property="og:url" content="${escapeHtml(baseUrl)}">`);
+  replace({ meta: 'property', key: 'og:type' }, `<meta property="og:type" content="website">`);
+  replace({ meta: 'name', key: 'twitter:card' }, `<meta name="twitter:card" content="${seo.twitterCard === 'summary' ? 'summary' : 'summary_large_image'}">`);
 
   // Canonical URL
   if (seo.canonical) {
-    metaTags.push(`<link rel="canonical" href="${escapeHtml(seo.canonical)}">`);
+    fill({ link: 'canonical' }, `<link rel="canonical" href="${escapeHtml(seo.canonical)}">`);
   }
 
   // Robots directives
@@ -108,11 +161,10 @@ function injectSeoMetaTags(html: string, settings: PublishSettings, baseUrl: str
   if (seo.noIndex) robotsDirectives.push('noindex');
   if (seo.noFollow) robotsDirectives.push('nofollow');
   if (robotsDirectives.length > 0) {
-    metaTags.push(`<meta name="robots" content="${robotsDirectives.join(', ')}">`);
+    replace({ meta: 'name', key: 'robots' }, `<meta name="robots" content="${robotsDirectives.join(', ')}">`);
   }
 
-  // Inject into <head>
-  return injectIntoHead(html, metaTags.join('\n    '));
+  return injectIntoHead(removeHeadTags(html, replaced), metaTags.join('\n    '));
 }
 
 /**

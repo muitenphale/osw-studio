@@ -12,30 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { getWorkspaceById } from '@/lib/auth/system-database';
 import { logger } from '@/lib/utils';
-import { combinedDirectorySize } from '@/lib/api/directory-size';
-import path from 'path';
-import { deploymentStaticDir } from '@/lib/compiler/deployment-static-dir';
-
-const storageSizeCache = new Map<string, { mb: number; ts: number }>();
-const STORAGE_CACHE_TTL = 60_000;
-
-function getCachedStorageMb(workspaceId: string, deploymentIds: string[]): number {
-  const cached = storageSizeCache.get(workspaceId);
-  if (cached && Date.now() - cached.ts < STORAGE_CACHE_TTL) {
-    return cached.mb;
-  }
-  let totalBytes = 0;
-  try {
-    const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
-    const wsDir = path.join(dataDir, 'workspaces', workspaceId);
-    // Measured as one total so a blob a deployment links to the project is counted once, not
-    // once per deployment serving it.
-    totalBytes = combinedDirectorySize([wsDir, ...deploymentIds.map(deploymentStaticDir)]);
-  } catch {}
-  const mb = Math.round(totalBytes / (1024 * 1024) * 10) / 10;
-  storageSizeCache.set(workspaceId, { mb, ts: Date.now() });
-  return mb;
-}
+import { workspaceStorageMb } from '@/lib/api/storage-quota';
 
 export async function GET(
   _request: NextRequest,
@@ -72,7 +49,7 @@ export async function GET(
       const deploymentIds = adapter.listDeployments
         ? (await adapter.listDeployments()).map(d => d.id)
         : [];
-      const storageMb = getCachedStorageMb(workspaceId, deploymentIds);
+      const storageMb = workspaceStorageMb(workspaceId, () => deploymentIds);
       quota = {
         projects: { used: projects.length, max: workspace.max_projects },
         deployments: { used: deploymentCount, max: workspace.max_deployments },

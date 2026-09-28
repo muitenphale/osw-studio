@@ -166,6 +166,16 @@ Optimize your deployment for search engines:
 - sitemap.xml
 - robots.txt
 
+**A page's own tags come first.** These settings apply to the whole deployment, so they are used as
+defaults: if a page already has its own title, description, keywords, canonical URL or Open Graph
+image in its `<head>`, that is what gets published and the setting is left unused for that page.
+Anything a page does not set is filled in from here. That keeps a multi-page site's per-page titles,
+which is what you want for search results; set the title on the page itself when you want it to
+differ per page.
+
+A few tags are applied to every page regardless, because they describe the deployment rather than
+the page: the Open Graph URL and type, the Twitter card type, and the noindex/nofollow options.
+
 ### Compliance
 
 GDPR/CCPA cookie consent and privacy compliance:

@@ -7,9 +7,13 @@
  */
 
 import { VirtualFileSystem } from '../index';
+import { getFileTypeFromPath, type FileType } from '../types';
 import type { ShellContext, ShellResult } from './types';
 
 const TRUNCATE_CHARS = 100_000;
+
+/** File types whose content is bytes, which a redirect cannot write. */
+const BYTE_FORMATS: ReadonlySet<FileType> = new Set<FileType>(['image', 'video', 'audio', 'font']);
 
 export function truncate(out: string): string {
   if (out.length <= TRUNCATE_CHARS) return out;
@@ -56,6 +60,18 @@ async function writeRedirect(
 ): Promise<ShellResult> {
   const path = normalizePath(redirect.file);
   if (!path) return { stdout: '', stderr: 'redirect: missing file path', exitCode: 2 };
+
+  // Everything a redirect writes is text, so an image, font, audio or video file written this way
+  // is stored as characters and comes out broken, with nothing to say so. Refused instead. Only the
+  // named byte formats: a name with no extension falls back to 'binary' and is usually text.
+  const type = getFileTypeFromPath(path);
+  if (BYTE_FORMATS.has(type)) {
+    return {
+      stdout: '',
+      stderr: `redirect: ${path}: ${type} files hold bytes and the shell writes text, so this would store a broken file. \`curl -o ${path} <url>\` saves a download byte for byte.`,
+      exitCode: 1,
+    };
+  }
 
   try {
     const dirPath = path.split('/').slice(0, -1).join('/') || '/';

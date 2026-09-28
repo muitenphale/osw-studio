@@ -6,6 +6,28 @@ Welcome to OSW Studio! This page highlights the latest features and updates.
 
 ---
 
+## v1.104.0 - Binary Files Over the Connector (2026-09-29)
+
+An agent connected over MCP can now put an image, a font or any other binary file into a project, and read one back out. The connector could only move text before, so an outside agent could write your HTML and CSS but could not add a logo or a self-hosted font; you had to add those yourself in the File Explorer. This needs Server Mode or the desktop app, like the rest of the connector.
+
+### Files over the connector
+- **Small files go inline, large ones by URL**: an agent sends the bytes directly, or takes a one-time URL and moves the file with `curl`
+- **Both directions report a `sha256`**: an agent can check it against the file on its own disk, and text sent under an image's name is refused
+- **Shell commands point at the right tool**: a `cat` or a redirect that cannot handle a binary file now says which tool can
+
+### Preview
+- **Self-hosted fonts appear in the preview**: a stylesheet's `url("./font.woff2")` now resolves from its own folder. These already worked when published
+
+### Publishing
+- **SEO settings fill in what a page is missing**: a page with its own title or description keeps it, and pages without one get the setting. Before, a page could end up with two titles
+- **OG Title, OG Description and the Twitter card type are used**: all three were ignored when publishing, and the card was always the large one
+
+### Storage limits
+- **A limit applies to everything that writes**: where your instance sets one, publishing and every file write count against it, not just a project push
+- **Deleting frees the space at once**: a removed project or deployment stops counting immediately, instead of after a delay
+
+---
+
 ## v1.103.0 - Built-in MCP Server (2026-09-24)
 
 Claude Code, Claude Desktop and anything else that speaks MCP can now work inside one of your workspaces: create projects, read and write their files, run OSW Studio's own agent and follow what it does, publish and unpublish deployments, and read their analytics. OSW Studio runs the MCP server itself, with nothing to install: you connect a client by signing in and approving what it may do, with no key to paste. This needs Server Mode or the desktop app, and whoever runs the instance has to switch it on; browser mode has no server to connect to.

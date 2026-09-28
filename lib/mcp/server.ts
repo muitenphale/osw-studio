@@ -4,10 +4,13 @@ import { z } from 'zod';
 import { getWorkspaceAdapter } from '@/lib/vfs/adapters/server';
 import { recordMcpActivity } from './store';
 import { ensureDeploymentRoute, verifyWorkspaceAccess } from '@/lib/auth/system-database';
+import { isSafeVirtualPath } from '@/lib/vfs/path-safety';
+import { isTextExtension } from '@/lib/vfs/types';
 import { deploymentPublicUrl } from '@/lib/api/deployment-url';
 import type { McpPrincipal } from './auth';
 import { ROLE_FOR_SCOPE, type McpScope } from './scopes';
 import { commandLineWrites } from '@/lib/llm/write-scope';
+import { createTransfer, MAX_UPLOAD_BYTES, TRANSFER_TTL_MS } from './transfers';
 import type { Deployment, EdgeFunction, ScheduledFunction, Secret, ServerFunction } from '@/lib/vfs/types';
 
 /**
@@ -42,6 +45,117 @@ Reading needs projects:read; anything that writes needs projects:write.`;
  */
 
 class ToolRefused extends Error {}
+/**
+ * What a client is told on connect, before it has called anything.
+ *
+ * Nothing else orients one: the server exposes tools and no resources or prompts, so a client that
+ * is not told these things works them out by trial, or misses them. Kept to the four facts that
+ * change what a client does, because this goes into every session's context.
+ */
+const SERVER_INSTRUCTIONS = [
+  'This workspace holds web projects: their files, their backend functions, and the deployments that serve them.',
+  '',
+  'Use `bash` for a project\'s files, with the commands you would expect: `ls`, `tree`, `cat`, `rg`, `sed`, `ss`, pipes, redirects and heredocs. For images, fonts, audio and video, which `bash` cannot carry, `files_upload_url` and `files_download_url` give a one-time URL to move the file with your own `curl`, so its bytes never pass through you; `files_write` and `files_read` carry small files inline as base64 when there is no shell to run `curl`.',
+  '',
+  'A project may carry `/.PROMPT.md`, instructions from whoever set it up about how it is meant to be worked on. Read it before changing anything, and leave the file itself alone.',
+  '',
+  '`curl localhost/` renders a page through the project\'s own compiler, so you can check your work without publishing. Publishing is `deployments_publish`, a separate and deliberate step.',
+].join('\n');
+
+
+/** A base64 body decodes to at most this per call, whatever the type's own limit allows. */
+const MAX_WRITE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * A read answers with at most this much content, and defaults to far less.
+ *
+ * Writing sends bytes the caller already has; reading puts them in the caller's context, where
+ * base64 costs a third more again. So the default is small enough to be safe to call blind, and
+ * `maxBytes` is there for a caller that knows what it is asking for.
+ */
+const MAX_READ_BYTES = 4 * 1024 * 1024;
+const DEFAULT_READ_BYTES = 256 * 1024;
+
+const FILES_READ_DESCRIPTION = [
+  'Read one file from a project.',
+  "Text comes back as encoding 'utf8'; anything binary (images, fonts, audio, video) needs 'base64',",
+  'which `bash cat` refuses outright.',
+  `Answers with the path, type, mimeType and size, and up to ${DEFAULT_READ_BYTES / 1024}KB of content unless maxBytes asks for more,`,
+  'saying so when there is more. For text, `bash` (cat, head, tail, rg) is usually the better tool.',
+  'To save a binary file to disk, use files_download_url: base64 here lands in your context, a third larger than the file.',
+  'Needs projects:read.',
+].join(' ');
+
+const FILES_WRITE_DESCRIPTION = [
+  'Write one file to a project, replacing it if it already exists.',
+  "Text goes as encoding 'utf8'; anything binary (images, fonts, audio, video) as 'base64',",
+  'which `bash` cannot do because every way it writes stores text.',
+  'For a file on your disk, use files_upload_url instead: base64 here has to be written out by you, which is slow and costly beyond a few KB.',
+  `Up to ${MAX_WRITE_BYTES / 1024 / 1024}MB per call, and the project's own per-type limit still applies.`,
+  'Needs projects:write.',
+].join(' ');
+
+const FILES_UPLOAD_URL_DESCRIPTION = [
+  'Get a one-time URL that stores a file from your disk in a project, for images, fonts, audio, video or any file too large to write out.',
+  'This call moves no bytes: run the `command` it returns (curl -T, a PUT) with your local file, and that request stores it.',
+  "The PUT answers with the stored file's path, type, size and sha256: compare the sha256 with your local file's, and no read-back is needed.",
+  `The URL works once, for ${TRANSFER_TTL_MS / 60000} minutes, for this path only; up to ${MAX_UPLOAD_BYTES / 1024 / 1024}MB, and the project's per-type limit still applies.`,
+  'A file already at the path is refused unless overwrite is true.',
+  'Refer to it by its root path (/assets/font.woff2), in CSS url() as well as HTML: publishing rewrites root paths for whatever address the site is served at, while an older preview resolves a relative url() in CSS from the project root and misses the file.',
+  'Needs projects:write.',
+].join(' ');
+
+const FILES_DOWNLOAD_URL_DESCRIPTION = [
+  "Get a one-time URL that answers with a project file's bytes, to save it to your disk with the `command` it returns (curl -o).",
+  "The response carries the file's sha256 in an x-content-sha256 header.",
+  `The URL works once, for ${TRANSFER_TTL_MS / 60000} minutes. Needs projects:read.`,
+].join(' ');
+
+/**
+ * Points a `bash` caller at the file tools when the shell refuses a binary file.
+ *
+ * The shell is shared with the in-app agent, which has no such tools, so its own messages cannot
+ * name them. A model that tries `cat` or `>` on an image first learns from this answer, not from
+ * the descriptions it skimmed.
+ */
+const BINARY_HINTS: Array<[RegExp, string]> = [
+  [/binary or non-text file/, 'To save a binary file to your disk, use files_download_url (or files_read with base64 if you cannot run curl).'],
+  [/files hold bytes and the shell writes text/, 'To store a file from your disk, use files_upload_url (or files_write with base64 if you cannot run curl).'],
+];
+
+function withBinaryHints(output: string): string {
+  const hints = BINARY_HINTS.filter(([pattern]) => pattern.test(output)).map(([, hint]) => hint);
+  return hints.length ? `${output}\n\n${hints.join('\n')}` : output;
+}
+
+/** A shell-quoted string, for the ready-to-run commands the URL tools return. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Decodes base64 to bytes, or returns null rather than guessing.
+ *
+ * `Buffer.from(s, 'base64')` and `atob` both discard characters outside the alphabet, so a mangled
+ * upload decodes to a shorter file that looks like a success and publishes as a corrupt image.
+ * Re-encoding the result and comparing catches that. Base64 cut short on a four-character boundary
+ * is still valid and is not caught here; the size in the answer is how a caller sees it. Line
+ * wrapping is allowed, since a client piping `base64` output sends it wrapped.
+ */
+function decodeBase64Strict(value: string): ArrayBuffer | null {
+  const clean = value.replace(/\s+/g, '');
+  if (clean.length === 0 || clean.length % 4 !== 0) return null;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(clean)) return null;
+
+  const buf = Buffer.from(clean, 'base64');
+  const unpadded = (v: string) => v.replace(/=+$/, '');
+  if (unpadded(buf.toString('base64')) !== unpadded(clean)) return null;
+
+  // Sliced, because a Buffer can be a view into a larger pooled allocation and handing the whole
+  // pool to the VFS would store unrelated memory alongside the file.
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+}
+
 
 /**
  * The events worth handing to an outside agent. The token-by-token deltas are left out: they are
@@ -111,7 +225,7 @@ async function notifyProject(principal: McpPrincipal, projectId: string) {
   });
 }
 
-export function createOswMcpServer(principal: McpPrincipal, instance?: { origin?: string }): McpServer {
+export function createOswMcpServer(principal: McpPrincipal, instance?: { origin?: string; baseUrl?: string }): McpServer {
   // A person may have several OSW Studio instances: the hosted one, server mode on their machine,
   // and the desktop app. All of them answer as `osw-studio`, so the title carries the workspace
   // and host the grant is bound to; without it a client's list shows identical entries and there
@@ -121,7 +235,7 @@ export function createOswMcpServer(principal: McpPrincipal, instance?: { origin?
     name: 'osw-studio',
     version: '0.1.0',
     title: where ? `OSW Studio (${where})` : 'OSW Studio',
-  });
+  }, { instructions: SERVER_INSTRUCTIONS });
 
   /** The grant's workspace, its scopes, and the account's role, checked on every call. */
   async function workspace(workspaceId: string, scope: McpScope) {
@@ -298,7 +412,151 @@ export function createOswMcpServer(principal: McpPrincipal, instance?: { origin?
         created: false, clientLabel: principal.clientLabel,
       });
     }
-    return text(output);
+    return text(withBinaryHints(output));
+  });
+
+  tool('files_write', FILES_WRITE_DESCRIPTION, {
+    workspaceId: ws, projectId: project,
+    path: z.string().describe('Absolute path in the project, e.g. /assets/icon-512.png'),
+    content: z.string().describe('The file body: text, or base64 when encoding is base64'),
+    encoding: z.enum(['utf8', 'base64']).default('utf8').describe("'base64' for any binary file"),
+  }, async ({ workspaceId, projectId, path, content, encoding }) => {
+    const adapter = await workspace(workspaceId, 'projects:write');
+    if (!(await adapter.getProject(projectId))) return refused(`No project ${projectId} in this workspace.`);
+    if (!isSafeVirtualPath(path)) {
+      return refused(`${path} is not a path inside the project. Give an absolute path with no '.' or '..' segment.`);
+    }
+
+    let body: string | ArrayBuffer;
+    if (encoding === 'base64') {
+      const decoded = decodeBase64Strict(content);
+      if (!decoded) return refused('content is not valid base64. Send the bytes base64-encoded and nothing else.');
+      if (decoded.byteLength > MAX_WRITE_BYTES) {
+        return refused(`That decodes to ${Math.round(decoded.byteLength / 1024 / 1024)}MB. This tool takes up to ${MAX_WRITE_BYTES / 1024 / 1024}MB per call.`);
+      }
+      body = decoded;
+    } else {
+      // A binary format written as text is stored verbatim and comes out corrupt when published, so
+      // it is refused here rather than at read time.
+      if (!isTextExtension(path)) {
+        return refused(`${path} is a binary format. Send its bytes with encoding: 'base64'.`);
+      }
+      body = content;
+    }
+
+    const { writeProjectFile } = await import('./files');
+    return text(await writeProjectFile(adapter, principal, projectId, path, body));
+  });
+
+  /** Where a transfer URL points: the instance the client reached, so it resolves from there. */
+  function transferUrl(token: string): string {
+    return `${(instance?.baseUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')}/api/mcp/files/${token}`;
+  }
+
+  tool('files_upload_url', FILES_UPLOAD_URL_DESCRIPTION, {
+    workspaceId: ws, projectId: project,
+    path: z.string().describe('Absolute path in the project to store the file at, e.g. /assets/icon-512.png'),
+    overwrite: z.boolean().default(false).describe('Replace a file already at path'),
+  }, async ({ workspaceId, projectId, path, overwrite }) => {
+    const adapter = await workspace(workspaceId, 'projects:write');
+    if (!(await adapter.getProject(projectId))) return refused(`No project ${projectId} in this workspace.`);
+    if (!isSafeVirtualPath(path)) {
+      return refused(`${path} is not a path inside the project. Give an absolute path with no '.' or '..' segment.`);
+    }
+    // Said now rather than after the upload has been sent.
+    if (!overwrite && await adapter.getFile(projectId, path)) {
+      return refused(`${path} already exists. Call again with overwrite: true to replace it.`);
+    }
+
+    const { token, expiresAt } = createTransfer({
+      kind: 'upload', grantId: principal.grantId, userId: principal.userId, workspaceId, projectId,
+      path, overwrite, clientLabel: principal.clientLabel,
+    });
+    const url = transferUrl(token);
+    return text({
+      url,
+      method: 'PUT',
+      path,
+      expiresAt: new Date(expiresAt).toISOString(),
+      command: `curl -sS --fail-with-body -T <local-file> ${shellQuote(url)}`,
+      note: 'Replace <local-file> with the file on your disk. The URL works once.',
+    });
+  });
+
+  tool('files_download_url', FILES_DOWNLOAD_URL_DESCRIPTION, {
+    workspaceId: ws, projectId: project,
+    path: z.string().describe('Absolute path of the file in the project, e.g. /assets/og.png'),
+  }, async ({ workspaceId, projectId, path }) => {
+    const adapter = await workspace(workspaceId, 'projects:read');
+    if (!(await adapter.getProject(projectId))) return refused(`No project ${projectId} in this workspace.`);
+    if (!isSafeVirtualPath(path)) {
+      return refused(`${path} is not a path inside the project. Give an absolute path with no '.' or '..' segment.`);
+    }
+    const file = await adapter.getFile(projectId, path);
+    if (!file) return refused(`No file at ${path} in this project.`);
+
+    const { token, expiresAt } = createTransfer({
+      kind: 'download', grantId: principal.grantId, userId: principal.userId, workspaceId, projectId,
+      path, overwrite: false, clientLabel: principal.clientLabel,
+    });
+    const url = transferUrl(token);
+    return text({
+      url,
+      method: 'GET',
+      path: file.path,
+      mimeType: file.mimeType,
+      size: file.size,
+      expiresAt: new Date(expiresAt).toISOString(),
+      command: `curl -sS --fail-with-body -o <local-file> ${shellQuote(url)}`,
+      note: 'Replace <local-file> with where to save it. The URL works once.',
+    });
+  });
+
+  tool('files_read', FILES_READ_DESCRIPTION, {
+    workspaceId: ws, projectId: project,
+    path: z.string().describe('Absolute path in the project, e.g. /assets/icon-512.png'),
+    encoding: z.enum(['utf8', 'base64']).default('utf8').describe("'base64' for any binary file"),
+    maxBytes: num.int().min(1).max(MAX_READ_BYTES).default(DEFAULT_READ_BYTES)
+      .describe('Stop after this many bytes of content and say so'),
+  }, async ({ workspaceId, projectId, path, encoding, maxBytes }) => {
+    const adapter = await workspace(workspaceId, 'projects:read');
+    if (!(await adapter.getProject(projectId))) return refused(`No project ${projectId} in this workspace.`);
+    if (!isSafeVirtualPath(path)) {
+      return refused(`${path} is not a path inside the project. Give an absolute path with no '.' or '..' segment.`);
+    }
+
+    const file = await adapter.getFile(projectId, path);
+    if (!file) return refused(`No file at ${path} in this project.`);
+
+    const stored = file.content;
+    const bytes = stored instanceof ArrayBuffer
+      ? new Uint8Array(stored)
+      : new TextEncoder().encode(typeof stored === 'string' ? stored : '');
+
+    if (encoding === 'utf8' && (stored instanceof ArrayBuffer || !isTextExtension(path))) {
+      return refused(`${path} holds bytes, not text. Read it with encoding: 'base64'.`);
+    }
+
+    // The metadata is worth answering on its own: size and type are usually what a caller wants,
+    // and a read lands in its context, where base64 costs a third more than the file.
+    const truncated = bytes.byteLength > maxBytes;
+    const window = truncated ? bytes.subarray(0, maxBytes) : bytes;
+    const content = encoding === 'base64'
+      ? Buffer.from(window).toString('base64')
+      : new TextDecoder().decode(window);
+
+    return text({
+      path: file.path,
+      type: file.type,
+      mimeType: file.mimeType,
+      size: bytes.byteLength,
+      encoding,
+      content,
+      ...(truncated ? {
+        truncated: true,
+        note: `Only the first ${window.byteLength} of ${bytes.byteLength} bytes are here. Raise maxBytes, or read it in the app.`,
+      } : {}),
+    });
   });
 
   // --- agent ---------------------------------------------------------------
@@ -413,7 +671,7 @@ export function createOswMcpServer(principal: McpPrincipal, instance?: { origin?
   }, async ({ workspaceId, deploymentId }) => {
     const adapter = await workspace(workspaceId, 'deploy');
     const { unpublishDeployment } = await import('@/lib/publishing/publish-deployment');
-    const outcome = await unpublishDeployment(adapter, deploymentId);
+    const outcome = await unpublishDeployment(adapter, deploymentId, workspaceId);
     if (!outcome.ok) return refused(outcome.error);
     notifyDeployment(principal, deploymentId, deploymentId, 'unpublished');
     return text({ published: false, deploymentId: outcome.deploymentId });

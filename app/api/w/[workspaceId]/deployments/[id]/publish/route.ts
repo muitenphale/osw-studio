@@ -62,9 +62,9 @@ export async function DELETE(
 ) {
   try {
     const { adapter } = await getWorkspaceContext(params);
-    const { id } = await params;
+    const { workspaceId, id } = await params;
 
-    const outcome = await unpublishDeployment(adapter, id);
+    const outcome = await unpublishDeployment(adapter, id, workspaceId);
     if (!outcome.ok) {
       return NextResponse.json({ error: outcome.error }, { status: outcome.status });
     }

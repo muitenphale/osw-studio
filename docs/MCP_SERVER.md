@@ -9,7 +9,7 @@ OSW Studio can expose its own MCP (Model Context Protocol) server, so a client l
 ## Requirements
 
 - **Server Mode.** The connector works against the workspaces and projects stored on the server. See [Server Mode](?doc=server-mode).
-- **`MCP_ENABLED=true`** in the instance's environment. Without it the endpoint returns 404, as though the route does not exist.
+- **`MCP_ENABLED=true`** in the instance's environment. Without it the endpoint returns 404, as though the route does not exist. The flag does nothing on its own: an instance not in Server Mode returns 404 whether or not it is set.
 - **An account with access to the workspace** you want to connect. What you can grant depends on your role in that workspace.
 
 ---
@@ -95,6 +95,10 @@ These five are the whole list. A scope outside it is ignored rather than granted
 | `projects_get` | `projects:read` | A project's settings and metadata |
 | `projects_create` | `projects:write` | Start a project from a built-in template |
 | `bash` | `projects:read` / `projects:write` | Run a command against a project's files |
+| `files_upload_url` | `projects:write` | A one-time URL to store a file from your disk (`curl -T`) |
+| `files_download_url` | `projects:read` | A one-time URL to save a project file to your disk (`curl -o`) |
+| `files_write` | `projects:write` | Write one file inline, text or base64, replacing it if it exists |
+| `files_read` | `projects:read` | Read one file inline, text or base64, with its type and size |
 | `backend_list` | `projects:read` | Edge functions, server functions, schedules and secret names (values are never returned) |
 | `backend_upsert` | `projects:write` | Create or replace an edge function, server function, schedule or secret |
 | `backend_delete` | `projects:write` | Remove an edge function, server function, schedule or secret by name |
@@ -161,6 +165,56 @@ still limited to public hosts, so a connector cannot reach a private address on 
 | `build`, `python`, `python3`, `lua` | Need the browser runtime (esbuild-wasm, Pyodide, Fengari) |
 | `sqlite3` | Needs a deployment selected in the app; use `deployments_sql` instead |
 | `status` | The in-app agent's task-completion report, which does nothing for an outside client |
+
+### Binary files
+
+`bash` writes text: every way it puts content in a file, from `cat >` to `ss`, stores a string. A
+redirect into an image, font, audio or video file is refused rather than stored broken, and `cat`
+refuses to print one; both answers name the tool to use instead. `curl -o` is the exception: it saves
+a download from the web byte for byte.
+
+**From your disk.** `files_upload_url` returns a URL and a command; running the command sends the
+file:
+
+```json
+{ "path": "/assets/icon-512.png" }
+```
+
+```
+curl -sS --fail-with-body -T icon-512.png 'https://your-instance/api/mcp/files/…'
+```
+
+The upload answers with the stored file's `path`, `type`, `mimeType`, `size`, `created` and
+`sha256`, so there is nothing to read back. `files_download_url` works the same way in the other
+direction (`curl -o`), with the file's sha256 in an `x-content-sha256` header.
+
+The file goes from your disk to the server by `curl` and never passes through the model, which is
+why this is the way to move anything larger than a few KB. Each URL works once, for ten minutes,
+for the one path it was issued for. Uploads take up to 10MB, and text formats and fonts stop at 5MB.
+A file already at the path is refused unless `overwrite: true` was asked for. Revoking the
+connection also stops any URL it was given.
+
+Behind Nginx, uploads over 1MB are refused with `413` before they reach OSW Studio, since that is
+Nginx's default body limit. Raise it in the server block to match: `client_max_body_size 10m;`.
+
+**Without a shell.** A client that cannot run `curl` can send the file's content inline with
+`files_write`:
+
+```json
+{ "path": "/assets/icon-512.png", "content": "iVBORw0KGgo...", "encoding": "base64" }
+```
+
+The model has to write every base64 character out itself, so this is slow and costly beyond a few KB.
+`files_read` is the way back: the same two encodings, plus the file's type, mimeType and size. It
+answers with up to 256KB of content unless `maxBytes` asks for more, and says `truncated: true` with
+the real size when there is more, so a window is not mistaken for the whole file. For text, `bash`
+(`cat`, `head`, `tail`, `rg`) is usually the better tool.
+
+`files_write` takes up to 10MB per call, like an upload, and text formats and fonts stop at 5MB.
+Base64 with characters outside the alphabet or a broken length is refused rather than decoded around.
+Base64 that was cut short on a four-character boundary is still valid, though, and is stored as a
+shorter file, so compare the `size` in the answer with the file's. Sending text for a path that is a
+binary format is refused as well, so an image cannot be corrupted by accident.
 
 ### Backend functions, schedules and secrets
 

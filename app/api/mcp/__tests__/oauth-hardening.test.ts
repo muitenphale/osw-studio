@@ -14,6 +14,8 @@ beforeEach(async () => {
   vi.resetModules();
   vi.stubEnv('DATA_DIR', dir);
   vi.stubEnv('MCP_ENABLED', 'true');
+  // The endpoint requires server mode as well as the flag.
+  vi.stubEnv('NEXT_PUBLIC_SERVER_MODE', 'true');
   const { createUser } = await import('@/lib/auth/system-database');
   userId = createUser('a@b.test', 'h');
 });

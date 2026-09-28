@@ -12,6 +12,7 @@ import { Project, VirtualFile } from '@/lib/vfs/types';
 import { serializeFilesForResponse, deserializeFilesFromRequest } from '@/lib/vfs/sync-utils';
 import { logger } from '@/lib/utils';
 import { isSafeVirtualPath } from '@/lib/vfs/path-safety';
+import { forgetWorkspaceStorage } from '@/lib/api/storage-quota';
 
 interface PushRequestBody {
   project: Project;
@@ -225,7 +226,7 @@ export async function DELETE(
 ) {
   try {
     const { adapter } = await getWorkspaceContext(params);
-    const { id } = await params;
+    const { workspaceId, id } = await params;
 
     const existing = await adapter.getProject(id);
     if (!existing) {
@@ -233,6 +234,7 @@ export async function DELETE(
     }
 
     await adapter.deleteProject(id);
+    forgetWorkspaceStorage(workspaceId);
 
     logger.debug(`[API /api/w/[workspaceId]/sync/projects/${id}] Project deleted from server`);
 

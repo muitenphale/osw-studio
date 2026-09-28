@@ -65,6 +65,12 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
         <SectionHeader title="Basic meta tags" />
         <SectionBody className="space-y-4">
 
+        <p className="text-xs text-muted-foreground">
+          These apply to the whole deployment, so they are used as defaults: where a page already sets
+          one of these tags itself, the page keeps it. Set a tag on the page when it should differ from
+          one page to the next.
+        </p>
+
         <div className="space-y-2">
           <Label htmlFor="seo-title">Meta Title</Label>
           <Input
@@ -228,7 +234,7 @@ export function SeoTab({ settings, onChange }: SeoTabProps) {
         <div className="space-y-2">
           <Label htmlFor="twitter-card">Card Type</Label>
           <Select
-            value={settings.seo.twitterCard || 'summary'}
+            value={settings.seo.twitterCard || 'summary_large_image'}
             onValueChange={(value: 'summary' | 'summary_large_image') =>
               handleSeoChange('twitterCard', value)
             }

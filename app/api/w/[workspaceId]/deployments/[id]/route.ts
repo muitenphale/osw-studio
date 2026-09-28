@@ -19,6 +19,7 @@ import { hashPassword } from '@/lib/auth/passwords';
 import { NextRequest, NextResponse } from 'next/server';
 import { getWorkspaceContext } from '@/lib/api/workspace-context';
 import { cleanStaticDeployment } from '@/lib/compiler/static-builder';
+import { forgetWorkspaceStorage } from '@/lib/api/storage-quota';
 import { removeDeploymentRoute } from '@/lib/auth/system-database';
 import { regenerateInstanceCaddy } from '@/lib/caddy/regenerate';
 
@@ -134,7 +135,7 @@ export async function DELETE(
 ) {
   try {
     const { adapter } = await getWorkspaceContext(params);
-    const { id } = await params;
+    const { workspaceId, id } = await params;
 
     const deployment = await adapter.getDeployment?.(id);
     if (!deployment) {
@@ -151,6 +152,8 @@ export async function DELETE(
     // Clean up static files and deployment routing (frees quota)
     await cleanStaticDeployment(id);
     removeDeploymentRoute(id);
+    // The freed bytes are only free once the cached measurement is dropped.
+    forgetWorkspaceStorage(workspaceId);
 
     if (deployment.customDomain) {
       regenerateInstanceCaddy().catch(() => {});

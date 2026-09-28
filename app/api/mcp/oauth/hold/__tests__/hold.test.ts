@@ -18,6 +18,8 @@ beforeEach(() => {
   vi.resetModules();
   vi.stubEnv('DATA_DIR', path.join(dir, 'data'));
   vi.stubEnv('MCP_ENABLED', 'true');
+  // The endpoint requires server mode as well as the flag.
+  vi.stubEnv('NEXT_PUBLIC_SERVER_MODE', 'true');
   vi.stubEnv('NEXT_PUBLIC_GATEWAY_URL', 'https://gateway.oswstudio.com');
 });
 

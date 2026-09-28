@@ -42,6 +42,8 @@ beforeEach(async () => {
   vi.resetModules();
   vi.stubEnv('DATA_DIR', dir);
   vi.stubEnv('MCP_ENABLED', 'true');
+  // The endpoint requires server mode as well as the flag.
+  vi.stubEnv('NEXT_PUBLIC_SERVER_MODE', 'true');
   vi.stubEnv('MCP_DEV_TOKEN', TOKEN);
   await seed();
   vi.stubEnv('MCP_DEV_USER_ID', userId);

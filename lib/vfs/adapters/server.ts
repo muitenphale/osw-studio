@@ -62,7 +62,7 @@ export function getWorkspaceAdapter(workspaceId: string): SQLiteAdapter {
   }
 
   const dbPath = path.join(getDataDir(), 'workspaces', workspaceId, 'osws.sqlite');
-  const adapter = new SQLiteAdapter(dbPath);
+  const adapter = new SQLiteAdapter(dbPath, workspaceId);
   workspaceAdapters.set(workspaceId, { adapter, lastAccess: Date.now() });
   return adapter;
 }

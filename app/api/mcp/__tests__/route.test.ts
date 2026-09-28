@@ -67,6 +67,8 @@ beforeEach(async () => {
   vi.resetModules();
   vi.stubEnv('DATA_DIR', dir);
   vi.stubEnv('MCP_ENABLED', 'true');
+  // The endpoint requires server mode as well as the flag.
+  vi.stubEnv('NEXT_PUBLIC_SERVER_MODE', 'true');
   vi.stubEnv('MCP_DEV_TOKEN', TOKEN);
   await seed();
   vi.stubEnv('MCP_DEV_USER_ID', userId);
@@ -136,6 +138,10 @@ describe('POST /api/mcp', () => {
       'deployments_create', 'deployments_list', 'deployments_publish',
       'deployments_sql', 'deployments_unpublish', 'deployments_update',
       'deployments_url',
+      'files_download_url',
+      'files_read',
+      'files_upload_url',
+      'files_write',
       'projects_create', 'projects_get', 'projects_list',
     ]);
     // A client that is refused needs to know which scope was missing, so each description says.

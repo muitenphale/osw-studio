@@ -11,8 +11,16 @@ import { ACTIVE_SCOPES, type McpScope } from './scopes';
 
 export { MCP_SCOPES, type McpScope } from './scopes';
 
+/**
+ * Server mode is required as well as the flag.
+ *
+ * The endpoint has nothing to authorize against in browser mode: there are no accounts, no
+ * workspaces and no sessions, so the consent screen cannot run and dynamic client registration
+ * would answer to anyone. The docs have always listed Server Mode as a requirement and the MCP
+ * settings pane is already gated on it; only the route itself took `MCP_ENABLED` on its own.
+ */
 export function mcpEnabled(): boolean {
-  return process.env.MCP_ENABLED === 'true';
+  return process.env.MCP_ENABLED === 'true' && process.env.NEXT_PUBLIC_SERVER_MODE === 'true';
 }
 
 export interface McpPrincipal {
