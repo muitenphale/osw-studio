@@ -1,5 +1,6 @@
 import type { ShellEnv, ShellResult } from '../types';
 import { applyRedirectGuarded, normalizePath, truncate } from '../runtime';
+import { contextWindow, matchingLines, searchableFiles } from './search-shared';
 
 /** `grep` — search file contents. */
 export async function grepCommand(env: ShellEnv): Promise<ShellResult> {
@@ -102,15 +103,9 @@ export async function grepCommand(env: ShellEnv): Promise<ShellResult> {
               if (flags.l) { if (n > 0) lines.push('(standard input)'); }
               else lines.push(String(n));
             } else {
-              const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
-              const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
               const counts: Array<{ path: string; n: number }> = [];
-              for (const entry of entries) {
-                // Both members carry `type`, so the literal check narrows the union on its own.
-                if (entry.type === 'directory') continue;
-                if (!entry.path.startsWith(dirPrefix) && entry.path !== path) continue;
-                if (typeof entry.content !== 'string') continue;
-                counts.push({ path: entry.path, n: countLines(entry.content) });
+              for (const file of await searchableFiles(env, path)) {
+                counts.push({ path: file.path, n: countLines(file.content) });
               }
 
               // A path naming one file reports a bare count, as grep does — including the zero.
@@ -145,20 +140,10 @@ export async function grepCommand(env: ShellEnv): Promise<ShellResult> {
                 }
               }
             } else if (hasContext) {
-              const matchedStdinLines = new Set<number>();
-              for (let i = 0; i < stdinLines.length; i++) {
-                if (regex.test(stdinLines[i])) matchedStdinLines.add(i);
-              }
-              if (matchedStdinLines.size > 0) {
-                const contextStdinLines = new Set<number>();
-                const beforeCtx = flags.C || flags.B;
-                const afterCtx = flags.C || flags.A;
-                for (const ln of matchedStdinLines) {
-                  for (let j = Math.max(0, ln - beforeCtx); j <= Math.min(stdinLines.length - 1, ln + afterCtx); j++) {
-                    contextStdinLines.add(j);
-                  }
-                }
-                for (const ln of Array.from(contextStdinLines).sort((a, b) => a - b)) {
+              const matched = matchingLines(stdinLines, regex);
+              if (matched.length > 0) {
+                const window = contextWindow(matched, stdinLines.length, flags.C || flags.B, flags.C || flags.A);
+                for (const ln of window) {
                   outLines.push(flags.n ? `${ln + 1}:${stdinLines[ln]}` : stdinLines[ln]);
                 }
               }
@@ -170,12 +155,7 @@ export async function grepCommand(env: ShellEnv): Promise<ShellResult> {
               }
             }
           } else {
-            const entries = await vfs.getAllFilesAndDirectories(projectId, { includeTransient: true });
-            const dirPrefix = path === '/' ? '/' : (path.endsWith('/') ? path : path + '/');
-            for (const entry of entries) {
-              if (entry.type === 'directory') continue;
-              if (!entry.path.startsWith(dirPrefix) && entry.path !== path) continue;
-              if (typeof entry.content !== 'string') continue;
+            for (const entry of await searchableFiles(env, path)) {
               const lines = entry.content.split(/\r?\n/);
 
               if (flags.o) {
@@ -186,22 +166,10 @@ export async function grepCommand(env: ShellEnv): Promise<ShellResult> {
                   }
                 }
               } else if (hasContext) {
-                const matchedLines = new Set<number>();
-                for (let i = 0; i < lines.length; i++) {
-                  if (regex.test(lines[i])) matchedLines.add(i);
-                }
-                if (matchedLines.size === 0) continue;
+                const matched = matchingLines(lines, regex);
+                if (matched.length === 0) continue;
 
-                const contextLines = new Set<number>();
-                const beforeContext = flags.C || flags.B;
-                const afterContext = flags.C || flags.A;
-                for (const lineNum of matchedLines) {
-                  for (let j = Math.max(0, lineNum - beforeContext); j <= Math.min(lines.length - 1, lineNum + afterContext); j++) {
-                    contextLines.add(j);
-                  }
-                }
-
-                const sortedLines = Array.from(contextLines).sort((a, b) => a - b);
+                const sortedLines = contextWindow(matched, lines.length, flags.C || flags.B, flags.C || flags.A);
                 if (outLines.length > 0) outLines.push(''); // separator between files
                 for (const lineNum of sortedLines) {
                   outLines.push(`${entry.path}${flags.n ? ':' + (lineNum + 1) : ''}:${lines[lineNum]}`);

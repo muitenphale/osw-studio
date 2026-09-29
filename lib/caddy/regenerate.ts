@@ -15,6 +15,7 @@
  */
 
 import { getAllDomainRoutes, getAllSlugRoutes } from '@/lib/auth/system-database';
+import path from 'path';
 
 const CADDY_ADMIN_API = process.env.CADDY_ADMIN_API || 'http://localhost:2019';
 
@@ -121,13 +122,37 @@ export function generateCaddyfile(config: CaddyConfig): string {
   return lines.join('\n');
 }
 
+/**
+ * The directory Caddy serves published sites from.
+ *
+ * Next's standalone server chdirs into `.next/standalone`, so `process.cwd() + '/public'` points
+ * inside the build directory. A deploy that rebuilds by removing `.next` therefore took every
+ * published site offline for the length of the build, even though their files were untouched:
+ * `STATIC_PROXY=true` means Caddy reads them straight off disk, so the app being up or down makes
+ * no difference to them.
+ *
+ * The deploy leaves `.next/standalone/public` as a symlink to the project's own `public`, so
+ * resolving it gives a path that outlives any one build. Where it is a real directory, which is
+ * what a plain `npm start` install has, `realpath` returns the same path and nothing changes.
+ */
+async function resolvedPublicRoot(): Promise<string> {
+  const literal = path.join(process.cwd(), 'public');
+  try {
+    const { promises: fs } = await import('fs');
+    return await fs.realpath(literal);
+  } catch {
+    // Nothing at that path yet: fall back rather than lose the whole config over it.
+    return literal;
+  }
+}
+
 export async function regenerateInstanceCaddy(): Promise<void> {
   if (process.env.STATIC_PROXY !== 'true') return;
 
   try {
     const domain = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000')
       .replace(/^https?:\/\//, '');
-    const publicRoot = process.cwd() + '/public';
+    const publicRoot = await resolvedPublicRoot();
 
     const config = generateCaddyfile({
       domain,

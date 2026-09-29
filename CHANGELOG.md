@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.104.1 - 2026-09-29
+
+### AI Orchestration
+- **A loop or conditional gets one short answer from `bash`**: `SHELL_KEYWORDS` in `lib/vfs/cli-shell.ts` catches bash control-flow words before the unknown-command path. `for f in a b; do echo $f; done` splits on `;` into three unknown commands, so it answered with three copies of the command list, about 9KB, without saying loops are unsupported. An ordinary unknown command still gets the list.
+- **`grep` and `rg` share their file walk and context expansion**: `lib/vfs/shell/commands/search-shared.ts` holds `searchableFiles`, `contextWindow` and `matchingLines`, which both commands carried their own copies of. The flag parsers stay separate. Neither command's output changes.
+
+### Server Mode
+- **Caddy serves published sites from a path outside the build directory**: `resolvedPublicRoot` in `lib/caddy/regenerate.ts` resolves `process.cwd() + '/public'` with `fs.realpath` before writing it into the Caddyfile. Next's standalone server chdirs into `.next/standalone`, so the root pointed inside `.next` and a deploy that removes that directory took every published site offline for the build's duration. Caddy reads them off disk, so stopping the app does not help. Where `public` is a real directory the path is unchanged.
+
+### Tests
+- **Coverage for the loop refusal, the extracted helpers and the published-site path**: `lib/vfs/__tests__/cli-shell-control-flow.test.ts`, `lib/vfs/__tests__/search-commands.test.ts` and `lib/caddy/__tests__/public-root.test.ts`. `rg` had no test before this.
+- **A path assertion needs the whole line**: `toContain('root * /x/public')` is satisfied by `root * /x/public/deployments`, so a prefix match cannot tell a correct root from one a level deeper. `public-root.test.ts` compares the set of whole `root *` lines.
+
 ## v1.104.0 - 2026-09-29
 
 ### MCP

@@ -288,6 +288,12 @@ const GLOB_EXPAND_COMMANDS = new Set([
   'wc', 'ls', 'cat', 'rm', 'rmdir', 'cp', 'mv', 'touch',
 ]);
 
+const SHELL_KEYWORDS = new Set([
+  'for', 'while', 'until', 'do', 'done',
+  'if', 'then', 'elif', 'else', 'fi',
+  'case', 'esac', 'select', 'function',
+]);
+
 async function vfsShellExecuteSingle(
   vfs: VirtualFileSystem,
   projectId: string,
@@ -306,6 +312,17 @@ async function vfsShellExecuteSingle(
     const handler = getShellHandler(program);
     if (handler) {
       return handler({ vfs, projectId, args, stdin, ctx, redirect });
+    }
+
+    // A loop splits on `;` into several unknown commands, so one `for` line came back as three
+    // `command not found` blocks carrying three copies of the command list: about 9KB that never
+    // says the construct is unsupported.
+    if (SHELL_KEYWORDS.has(program)) {
+      return {
+        stdout: '',
+        stderr: `${program}: the shell has no loops or conditionals. Run the commands one after another, or use a command that takes several paths at once (cat /a /b, rg -n pattern /).`,
+        exitCode: 127,
+      };
     }
 
     {
